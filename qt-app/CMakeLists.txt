@@ -22,6 +22,8 @@ set(PROJECT_SOURCES
     adminwindow.ui
     rfidscandetector.cpp
     rfidscandetector.h
+    rfidkeyboardfilter.cpp
+    rfidkeyboardfilter.h
 )
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
