@@ -34,7 +34,8 @@ a serial device — no `QSerialPort`, no COM-port polling.
 
 - `qt-app/rfidreader.{h,cpp}` is written for a `QSerialPort` reader. It is **dead code**: nothing
   in `mainwindow`/`adminwindow`/`guestwindow` references `RFIDReader`, and `CMakeLists.txt` does not
-  link `Qt::SerialPort` (so the include is an unmet dependency). It will be removed.
+  link `Qt::SerialPort` — the `<QSerialPort>` include is unused and the class is never instantiated,
+  so the linker never needs the serial symbols. Deleting the files removes the ambiguity. It will be removed.
 - Login flow ([`mainwindow.cpp:234`](../../../qt-app/mainwindow.cpp) `MainWindow::handleLogin`):
   reads `ui->username`, and routes **numeric → `student_login.php` (`school_id`)**,
   **non-numeric → `admin_login.php` (`admin_key`)**, triggered on `returnPressed` or the login button.
@@ -67,12 +68,16 @@ std::optional<QString> feedKey(QChar character, qint64 timestampMs);
 void reset();
 ```
 
+Input contract: the filter (§4.2) feeds the detector **only printable characters** (key events with
+non-empty `text()`) plus a single **terminator** signal; the detector itself never inspects Qt
+keycodes, which keeps it pure and platform-agnostic.
+
 Algorithm:
 - On a printable character: if the gap since the previous character exceeds `maxInterKeyGapMs`,
   reset the buffer first (human pace breaks the burst); then append and record the timestamp.
-- On Enter/Return: if the buffer was built as one fast burst (all inter-key gaps ≤ threshold) **and**
-  its length ≥ `minCodeLength`, return the code and reset; otherwise reset and return `nullopt`
-  (manual entry — let the normal path handle it).
+- On the terminator: if the buffer was built as one fast burst (all inter-key gaps ≤ threshold)
+  **and** its length ≥ `minCodeLength`, return the code and reset; otherwise reset and return
+  `nullopt` (manual entry — let the normal path handle it).
 - Overflow guard: if the buffer exceeds `maxBufferLength`, reset.
 
 Config constants (initial values, tunable):
@@ -87,14 +92,25 @@ guarantees scans are never intercepted inside the admin window, protecting the `
 registration flow.
 
 Responsibilities (precise consume contract, to avoid re-injection complexity):
-- On `QKeyEvent` key presses, feed `(text, currentMSecsSinceEpoch)` to the detector. **Printable keys
-  are not consumed** — they propagate normally to the focused widget (so manual typing is unaffected
-  with no re-injection needed). During a scan they momentarily appear in `username`; this is cleared
-  on completion (see below) — a sub-100ms flash, acceptable for a kiosk.
-- The decision is made at the **Enter/Return** key: if the detector returns a completed code, the
-  filter **consumes only that Enter** (returns `true`) so the `QLineEdit`'s `returnPressed` —and thus
+- On each `QKeyEvent` key press, classify it:
+  - **Modifier / non-text keys** (Shift, Ctrl, function keys — `event->text().isEmpty()`) are
+    **ignored** (not fed to the detector, not consumed). This matters because uppercase hex digits
+    (`A`–`F`) arrive as a separate Shift `KeyPress` with empty text; feeding those would pollute the
+    buffer and `minCodeLength` accounting.
+  - **Terminator** = **both** `Qt::Key_Return` *and* `Qt::Key_Enter` (keypad Enter is common on HID
+    readers). The filter must match both; matching only `Key_Return` would let a keypad-Enter scan
+    fall through to `returnPressed` → `handleLogin` → the hex code POSTed to `admin_login.php` (the
+    exact collision this design prevents), silently, for a whole class of hardware.
+  - **Printable keys** (non-empty `text()`) are fed to the detector but **not consumed** — they
+    propagate to the focused widget (so manual typing is unaffected, no re-injection). During a scan
+    they momentarily appear in `username`; cleared on completion — a sub-100ms flash, fine for a kiosk.
+- The decision is made at the terminator: if the detector returns a completed code, the filter
+  **consumes only that terminator** (returns `true`) so the `QLineEdit`'s `returnPressed` —and thus
   `handleLogin`— never fires, then emits `rfidScanned(QString code)`. If the detector returns
-  `nullopt`, the Enter is **not** consumed and the normal manual path runs.
+  `nullopt`, the terminator is **not** consumed and the normal manual path runs.
+- Gap timing uses a **monotonic `QElapsedTimer`** (filter-side), not wall-clock
+  `currentMSecsSinceEpoch()` — wall clock can jump (NTP/DST) and corrupt gap measurement. The
+  detector's `(char, timestampMs)` signature keeps this a filter-side choice and unit tests deterministic.
 - The filter stays decoupled from `MainWindow`'s widgets: it does not touch `username` directly.
   `MainWindow::handleRfidLogin` clears `username` before POSTing.
 
@@ -111,7 +127,10 @@ signals:
 - **Refactor to avoid duplication:** extract the existing reply-handling (parse JSON, download/show
   photo with fade, prepend to `recentLogins`, `refreshRightPanel`) into a shared
   `void displayStudent(const QJsonObject &student)` used by **both** `handleLogin` and
-  `handleRfidLogin`. (Without this, the dry-checker flags duplicated response handling.)
+  `handleRfidLogin`. (Without this, the dry-checker flags duplicated response handling.) `displayStudent`
+  consumes the server-built `photo_url` directly, so the two endpoints' differing default-photo paths
+  (`rfid_login.php` → `loams_api.uploads/default.jpg`, `student_login.php` → `uploads/default.jpg`) are
+  a pre-existing backend detail and harmless to the client.
 
 ## 5. Data Flow
 
@@ -128,12 +147,23 @@ signals:
 
 ## 6. Error Handling / UX
 
-- **Unregistered card** (`"RFID not registered"`): show an on-screen message; the screen stays ready
-  for the next tap; no crash.
-- **Network error**: reuse the existing `QMessageBox::critical` pattern from `handleLogin`.
+- **Kiosk feedback must be non-modal.** The filter is gated on `QApplication::activeWindow() ==`
+  the login window; a modal `QMessageBox` becomes the active window, so the filter goes inactive and
+  the kiosk **ignores all taps until the dialog is dismissed** — unacceptable for an unattended
+  kiosk. So RFID feedback uses a **non-modal, auto-dismissing inline status** (e.g. a status label or
+  transient banner), *not* `QMessageBox`. (Note: `handleLogin` currently uses modal
+  `QMessageBox::critical` at `mainwindow.cpp:262`; the RFID path must not copy that pattern.)
+- **Unregistered card** (`"RFID not registered"`): inline message; the screen stays ready for the
+  next tap; no crash.
+- **Network error / invalid response**: inline error status (non-modal, per above); not treated as
+  success.
 - **Double-tap debounce**: ignore an identical code re-scanned within ~2–3 seconds, so one physical
-  tap logs exactly one visit.
+  tap logs exactly one visit. The last-code/last-timestamp state lives in
+  `MainWindow::handleRfidLogin` (the filter stays thin).
 - **Garbage / overflow**: the detector caps buffer length and resets on overflow.
+- **Mid-typing input (accepted behavior)**: if `username` holds partial manual input when a card is
+  tapped, the scan appends to it and `handleRfidLogin` clears the field — the half-typed entry is
+  discarded. Accepted for a kiosk; documented so it is not mistaken for a bug.
 
 ## 7. Files Changed
 
@@ -172,7 +202,15 @@ Manual QA (GUI — clean build is necessary but not sufficient):
 - A card `code` is student-identifying data: keep it out of persistent logs (minimal `qDebug`), and
   use **synthetic** codes in all tests/fixtures.
 
-## 10. Open / Tunable Items
+## 10. Failure Modes & Tunables
 
-- `maxInterKeyGapMs` (≈50ms) is the scan/human boundary — validate against the real reader during QA.
-- Debounce window (≈2–3s) — adjust to the deployment's tap cadence.
+- **`maxInterKeyGapMs` (≈50ms) is the scan/human boundary and a single point of failure.** A
+  near-miss does **not** degrade gracefully into "manual entry": if a genuine scan's inter-key gaps
+  slightly exceed the threshold, `feedKey` returns `nullopt`, the terminator is not consumed, and the
+  card code (now sitting in `username`) is submitted — and because card codes are typically
+  non-numeric, it routes to `admin_login.php`. The backend rejects it (a failed admin auth, not a
+  security hole), but the tap appears to "do nothing," which is a broken kiosk experience.
+  Mitigation: choose a **generous** default gap so real scans are reliably caught (scanners type far
+  faster than humans, so the safe margin is wide), and validate against the real reader during QA.
+- **Debounce window (≈2–3s)** — adjust to the deployment's tap cadence.
+- Both values are the primary things to confirm during manual QA with the actual hardware.
