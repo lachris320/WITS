@@ -16,12 +16,6 @@
     <height>600</height>
    </size>
   </property>
-  <property name="maximumSize">
-   <size>
-    <width>760</width>
-    <height>600</height>
-   </size>
-  </property>
   <property name="windowTitle">
    <string>Admin Dashboard</string>
   </property>
@@ -128,18 +122,156 @@ QProgressBar::chunk {
 </string>
   </property>
   <widget class="QWidget" name="centralwidget">
-   <widget class="QStackedWidget" name="stackedWidget">
-    <property name="geometry">
-     <rect>
-      <x>123</x>
-      <y>0</y>
-      <width>641</width>
-      <height>601</height>
-     </rect>
-    </property>
-    <property name="currentIndex">
+   <layout class="QHBoxLayout" name="horizontalLayout_main">
+    <property name="spacing">
      <number>0</number>
     </property>
+    <property name="leftMargin">
+     <number>0</number>
+    </property>
+    <property name="topMargin">
+     <number>0</number>
+    </property>
+    <property name="rightMargin">
+     <number>0</number>
+    </property>
+    <property name="bottomMargin">
+     <number>0</number>
+    </property>
+    <item>
+    <widget class="QFrame" name="sidebarFrame">
+     <property name="minimumSize">
+      <size>
+       <width>121</width>
+       <height>0</height>
+      </size>
+     </property>
+     <property name="maximumSize">
+      <size>
+       <width>121</width>
+       <height>16777215</height>
+      </size>
+     </property>
+     <property name="sizePolicy">
+      <sizepolicy hsizetype="Fixed" vsizetype="Expanding">
+       <horstretch>0</horstretch>
+       <verstretch>0</verstretch>
+      </sizepolicy>
+     </property>
+     <property name="frameShape">
+      <enum>QFrame::Shape::StyledPanel</enum>
+     </property>
+     <property name="frameShadow">
+      <enum>QFrame::Shadow::Raised</enum>
+     </property>
+     <layout class="QVBoxLayout" name="verticalLayout">
+     <item>
+      <widget class="QLabel" name="schoolLabelLogo">
+       <property name="maximumSize">
+        <size>
+         <width>16777215</width>
+         <height>100</height>
+        </size>
+       </property>
+       <property name="text">
+        <string>School Logo</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="generalBtn">
+       <property name="font">
+        <font>
+         <family>Segoe UI</family>
+         <pointsize>-1</pointsize>
+        </font>
+       </property>
+       <property name="text">
+        <string>🛠️General</string>
+       </property>
+       <property name="flat">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="databaseBtn">
+       <property name="font">
+        <font>
+         <family>Segoe UI</family>
+         <pointsize>-1</pointsize>
+        </font>
+       </property>
+       <property name="text">
+        <string>🗃️Database </string>
+       </property>
+       <property name="flat">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="reportingBtn">
+       <property name="font">
+        <font>
+         <family>Segoe UI</family>
+         <pointsize>-1</pointsize>
+        </font>
+       </property>
+       <property name="text">
+        <string>📊Reporting</string>
+       </property>
+       <property name="flat">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="studentSearchBtn">
+       <property name="font">
+        <font>
+         <family>Segoe UI</family>
+         <pointsize>-1</pointsize>
+        </font>
+       </property>
+       <property name="text">
+        <string>🔎Search</string>
+       </property>
+       <property name="flat">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="visitorBtn">
+       <property name="font">
+        <font>
+         <family>Segoe UI</family>
+         <pointsize>-1</pointsize>
+        </font>
+       </property>
+       <property name="text">
+        <string>📍VIsit Logs</string>
+       </property>
+       <property name="flat">
+        <bool>true</bool>
+       </property>
+      </widget>
+     </item>
+    </layout>
+    </widget>
+    </item>
+    <item>
+     <widget class="QStackedWidget" name="stackedWidget">
+      <property name="sizePolicy">
+       <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+        <horstretch>1</horstretch>
+        <verstretch>0</verstretch>
+       </sizepolicy>
+      </property>
+      <property name="currentIndex">
+       <number>0</number>
+      </property>
     <widget class="QWidget" name="generalPage">
      <layout class="QGridLayout" name="gridLayout">
       <item row="0" column="1" colspan="2">
@@ -2442,118 +2574,9 @@ QLabel#visitorTotalLabel {
       </layout>
      </widget>
     </widget>
-   </widget>
-   <widget class="QFrame" name="sidebarFrame">
-    <property name="geometry">
-     <rect>
-      <x>0</x>
-      <y>0</y>
-      <width>121</width>
-      <height>601</height>
-     </rect>
-    </property>
-    <property name="frameShape">
-     <enum>QFrame::Shape::StyledPanel</enum>
-    </property>
-    <property name="frameShadow">
-     <enum>QFrame::Shadow::Raised</enum>
-    </property>
-    <layout class="QVBoxLayout" name="verticalLayout">
-     <item>
-      <widget class="QLabel" name="schoolLabelLogo">
-       <property name="maximumSize">
-        <size>
-         <width>16777215</width>
-         <height>100</height>
-        </size>
-       </property>
-       <property name="text">
-        <string>School Logo</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="generalBtn">
-       <property name="font">
-        <font>
-         <family>Segoe UI</family>
-         <pointsize>-1</pointsize>
-        </font>
-       </property>
-       <property name="text">
-        <string>🛠️General</string>
-       </property>
-       <property name="flat">
-        <bool>true</bool>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="databaseBtn">
-       <property name="font">
-        <font>
-         <family>Segoe UI</family>
-         <pointsize>-1</pointsize>
-        </font>
-       </property>
-       <property name="text">
-        <string>🗃️Database </string>
-       </property>
-       <property name="flat">
-        <bool>true</bool>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="reportingBtn">
-       <property name="font">
-        <font>
-         <family>Segoe UI</family>
-         <pointsize>-1</pointsize>
-        </font>
-       </property>
-       <property name="text">
-        <string>📊Reporting</string>
-       </property>
-       <property name="flat">
-        <bool>true</bool>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="studentSearchBtn">
-       <property name="font">
-        <font>
-         <family>Segoe UI</family>
-         <pointsize>-1</pointsize>
-        </font>
-       </property>
-       <property name="text">
-        <string>🔎Search</string>
-       </property>
-       <property name="flat">
-        <bool>true</bool>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="visitorBtn">
-       <property name="font">
-        <font>
-         <family>Segoe UI</family>
-         <pointsize>-1</pointsize>
-        </font>
-       </property>
-       <property name="text">
-        <string>📍VIsit Logs</string>
-       </property>
-       <property name="flat">
-        <bool>true</bool>
-       </property>
-      </widget>
-     </item>
-    </layout>
-   </widget>
+    </widget>
+    </item>
+   </layout>
   </widget>
  </widget>
  <resources/>

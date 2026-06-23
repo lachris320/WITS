@@ -660,12 +660,6 @@ adminWindow::adminWindow(QWidget *parent)
     ui->verticalLayout->setSpacing(15);
     ui->verticalLayout->setContentsMargins(10,10,10,10);
 
-    // --- Frame positions (manual) ---
-    ui->securityFrame->setGeometry(30,30,250,120);
-    ui->adminFrame->setGeometry(310,30,250,120);
-    ui->settingsFrame->setGeometry(30,180,530,120);
-    ui->libraryFrame->setGeometry(30,330,530,220);
-
     // --- Add shadows to frames ---
     auto addShadow = [](QWidget* w){
         auto *shadow = new QGraphicsDropShadowEffect;
