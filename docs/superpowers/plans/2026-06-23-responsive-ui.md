@@ -69,8 +69,10 @@ Create `qt-app/tests/tst_responsive_ui.cpp`:
 #include <QtUiTools/QUiLoader>
 #include <QFile>
 #include <QWidget>
+#include <QLabel>
 #include <QLayout>
 #include <QSizePolicy>
+#include <QString>
 
 #ifndef WITS_UI_DIR
 #define WITS_UI_DIR "."
@@ -87,6 +89,7 @@ private slots:
     void mainWindowSidebarWidthIsBounded();
     void mainWindowContentExpands();
     void mainWindowLoginRowHasLayout();
+    void mainWindowHeaderHasColumns();
     void guestDialogHasLayout();
 };
 
@@ -146,11 +149,26 @@ void TestResponsiveUi::mainWindowLoginRowHasLayout()
     QVERIFY2(row->layout() != nullptr, "login row has no layout manager");
 }
 
+void TestResponsiveUi::mainWindowHeaderHasColumns()
+{
+    QScopedPointer<QWidget> w(loadUi("mainwindow.ui"));
+    QVERIFY(w);
+    QWidget *header = w->findChild<QWidget *>("frame_3");
+    QVERIFY2(header, "header frame_3 not found");
+    QVERIFY2(header->layout() != nullptr, "header frame_3 has no layout manager");
+    // The five column captions must live inside the header strip so they align
+    // with the data rows and the strip does not collapse to zero height.
+    for (const char *name : {"label_10", "label_6", "label_7", "label_8", "label_9"}) {
+        QLabel *cap = header->findChild<QLabel *>(name);
+        QVERIFY2(cap, qPrintable(QString("caption %1 not under frame_3").arg(name)));
+    }
+}
+
 void TestResponsiveUi::guestDialogHasLayout()
 {
     QScopedPointer<QWidget> w(loadUi("guestwindow.ui"));
     QVERIFY2(w, "failed to load guestwindow.ui");
-    QVERIFY2(w->layout() != nullptr, "guest dialog has no layout manager");
+    QVERIFY2(w->layout() != nullptr, "guest dialog has no top-level layout manager");
     QCOMPARE(w->maximumWidth(), QWIDGETSIZE_MAX);
 }
 
@@ -187,7 +205,16 @@ cmake -S qt-app -B qt-app/build -G Ninja -DCMAKE_PREFIX_PATH="C:/Qt/6.11.1/mingw
 cmake --build qt-app/build
 ctest --test-dir qt-app/build --output-on-failure -R tst_responsive_ui
 ```
-Expected: `tst_responsive_ui` FAILS. Specifically `mainWindowHasNoMaximumSizeCap` fails (maximumWidth is 1400, not QWIDGETSIZE_MAX), `mainWindowCentralWidgetHasLayout` fails (no layout), `mainWindowSidebarWidthIsBounded`/`mainWindowContentExpands`/`mainWindowLoginRowHasLayout` fail. `guestDialogHasLayout` may already pass (guest already has a layout) — that is fine.
+Expected: `tst_responsive_ui` FAILS. Specifically `mainWindowHasNoMaximumSizeCap` fails (maximumWidth is 1400, not QWIDGETSIZE_MAX), `mainWindowCentralWidgetHasLayout` fails (no layout), and `mainWindowSidebarWidthIsBounded`/`mainWindowContentExpands`/`mainWindowLoginRowHasLayout`/`mainWindowHeaderHasColumns` fail. **`guestDialogHasLayout` also fails** — the `guestwindow` dialog currently has no top-level layout (only a `QFormLayout` nested inside `formLayoutWidget`); it goes green in Task 4.
+
+**If the build fails at the compile-define** (the source path on this machine contains a space and `.`: `…/OneDrive - usep.edu.ph/…`): CMake normally escapes `target_compile_definitions` correctly (the existing test targets already reference `${CMAKE_SOURCE_DIR}` via `target_include_directories`), but if `WITS_UI_DIR` does not resolve, fall back to copying the `.ui` files next to the test executable at build time and loading by relative name:
+```cmake
+add_custom_command(TARGET tst_responsive_ui POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        ${CMAKE_SOURCE_DIR}/mainwindow.ui ${CMAKE_SOURCE_DIR}/guestwindow.ui
+        $<TARGET_FILE_DIR:tst_responsive_ui>)
+```
+and set `WITS_UI_DIR="."` (ctest runs with the test's working dir at the build tree).
 
 - [ ] **Step 5: Commit**
 
@@ -206,7 +233,7 @@ git commit -m "test(ui): add QUiLoader responsive-contract tests (red)"
 
 **Interfaces:**
 - Consumes: the `tst_responsive_ui` contract from Task 1.
-- Produces: a fully layout-driven `mainwindow.ui` that satisfies every `tst_responsive_ui` assertion. No new object names; none removed except the dropped `line_6`.
+- Produces: a fully layout-driven `mainwindow.ui` that satisfies every `tst_responsive_ui` assertion. No new object names and no renames; the only removals are the separator lines `line_2`, `line_3`, `line_4`, `line_5`, `line_6`.
 
 This task is a structural XML transform. Apply the rules below; the Task-1 tests are the executable spec for "done."
 
@@ -245,8 +272,12 @@ Give `frame` a `QVBoxLayout`. Re-parent its existing children into it, top→bot
 - [ ] **Step 5: Lay out the content area (`frame_2`) and scroll contents**
 
 - Give `frame_2` a `QVBoxLayout` (margins ~6) holding the existing `stdList` `QScrollArea` (keep `widgetResizable=true`), stretch `1`. Remove `stdList`'s absolute `<geometry>`.
-- Give `scrollAreaWidgetContents` a `QVBoxLayout` whose items, in order, are: `widget` (detail card), `frame_3` (header bar), then `widget_2`, `widget_3`, `widget_4`, `widget_5`, `widget_6`, `widget_7`, `widget_8`, `widget_9` (the data rows), then a trailing expanding vertical spacer. Remove each of these widgets' absolute `<geometry>` rects.
-- **Delete `line_6`** (the absolute vertical divider) entirely.
+- `scrollAreaWidgetContents` currently has **16 direct children**, all absolutely placed — account for every one:
+  - `widget` (detail card), `frame_3` (styled header strip), `widget_2`…`widget_9` (8 data rows) → **kept**, re-parented into the new layout.
+  - `label_10` (Name), `label_6` (Course), `label_7` (Year Level), `label_8` (Department), `label_9` (Date and Time) → the real column captions at y≈290 → **moved into `frame_3`** in Step 7 (NOT left as siblings, or they float over the reflowed content).
+  - `line_2` (horizontal, y=310) and `line_3`/`line_4`/`line_5` (vertical column dividers) and `line_6` (vertical divider at x=810) → **deleted** entirely.
+- Give `scrollAreaWidgetContents` a `QVBoxLayout` whose items, in order, are: `widget` (detail card), `frame_3` (header row), then `widget_2`, `widget_3`, `widget_4`, `widget_5`, `widget_6`, `widget_7`, `widget_8`, `widget_9` (the data rows), then a trailing expanding vertical spacer. Remove each kept widget's absolute `<geometry>` rect.
+- Confirm none of `label_6`/`label_7`/`label_8`/`label_9`/`label_10` or `line_2`…`line_6` are referenced in `mainwindow.cpp`/`mainwindow.h` (verified: they are not — only the `_N`-suffixed data-row labels are used by `refreshRightPanel()`), so deleting the lines and re-parenting the captions is compile-safe.
 
 - [ ] **Step 6: Lay out the detail card (`widget`)**
 
@@ -256,17 +287,22 @@ Give `widget` a `QHBoxLayout`: `studentPhoto` (left, `sizePolicy` Fixed/Fixed, k
 
 Remove all these children's `<geometry>` rects. Keep all object names.
 
-- [ ] **Step 7: Lay out the header and each data row with shared column stretches**
+- [ ] **Step 7: Lay out the header and each data row with one shared column mechanism**
 
-Give `frame_3` and each `widget_N` (N = 2,3,4,5,6,7,8,9) a `QHBoxLayout` with left margin ~10. For each `widget_N`, add its five labels in order with these stretch factors:
+Give `frame_3` and each `widget_N` (N = 2,3,4,5,6,7,8,9) a `QHBoxLayout` with left margin ~10, each holding exactly five widgets left→right in column order **name, course, year, dep, time**:
+- `frame_3` (header): `label_10`, `label_6`, `label_7`, `label_8`, `label_9`.
+- `widget_N` (row): `nameLabel_*`, `courseLabel_*`, `yrlevel_label_*`, `depLabel_*`, `timeDate_Label_*` (the row's own suffixed names).
+
+**Use a single alignment mechanism — the layout's `stretch` property — applied identically to the header and every row**, so the columns line up regardless of text. On each of these nine `QHBoxLayout`s set:
+```xml
+<property name="stretch"><string>24,23,9,19,27</string></property>
 ```
-nameLabel_*   -> stretch 24
-courseLabel_* -> stretch 23
-yrlevel_label_* -> stretch 9
-depLabel_*    -> stretch 19
-timeDate_Label_* -> stretch 27
+Do **not** also set per-widget `sizePolicy` horstretch (mixing the two fights itself). To let columns actually divide the full width (rather than snapping to each label's text width), give every one of these labels a shrinkable/growable horizontal size policy and no hard min width:
+```xml
+<property name="sizePolicy"><sizepolicy hsizetype="Preferred" vsizetype="Preferred"><horstretch>0</horstretch><verstretch>0</verstretch></sizepolicy></property>
+<property name="minimumSize"><size><width>0</width><height>0</height></size></property>
 ```
-(Set the stretch via the layout `<item>`'s position; in Designer XML use `<layout>` with `<item>` per label and matching `addStretch`-equivalent column proportions, or set each label's horizontal stretch in its `sizePolicy`.) `frame_3` gets the same five-column proportions (empty header bar is fine — it stays a styled strip). Remove every `<geometry>` rect on these labels. Keep all label object names exactly.
+This matters once `refreshRightPanel()` populates real text — long names must not push columns out of alignment. `frame_3` keeps its `#frame_3` styling and drop shadow and is now non-empty (the captions), so it will not collapse to zero height. Remove every `<geometry>` rect on `frame_3` and on all the labels listed here. Keep all object names exactly.
 
 - [ ] **Step 8: Build + run the responsive tests — verify they PASS**
 
@@ -359,11 +395,17 @@ git commit -m "fix(admin): make AdminWindow resizable and reflow dashboard"
 
 **Interfaces:**
 - Consumes: the `guestDialogHasLayout` assertion from Task 1.
-- Produces: a guest dialog whose content is fully owned by its top-level layout and has no hard size cap.
+- Produces: a guest dialog whose content is fully owned by a new top-level layout and has no hard size cap.
 
-- [ ] **Step 1: Ensure the dialog content is layout-owned**
+- [ ] **Step 1: Build the dialog's top-level layout**
 
-In `qt-app/guestwindow.ui`, confirm the top-level `guestwindow` (`QDialog`) has a top-level layout that owns all visible content (the existing single layout). If any child still carries an absolute `<geometry>` that fights the layout, re-parent it into the layout and remove the rect. Ensure there is **no** `maximumSize` cap on the dialog.
+The `guestwindow` `QDialog` currently has **no top-level layout** — `label_5` (title "VISITORS LOGIN"), `formLayoutWidget` (which wraps the existing `QFormLayout`), `submitBtn`, and `cancelBtn` are all absolutely positioned siblings. In `qt-app/guestwindow.ui`:
+- Add a top-level **`QVBoxLayout`** on `guestwindow` (margins ~12, spacing ~10) with items in order:
+  1. `label_5` (title).
+  2. `formLayoutWidget` (the form) — stretch `1` so it takes the slack.
+  3. a **`QHBoxLayout`** button row: a leading expanding horizontal spacer, then `submitBtn`, then `cancelBtn` (so the buttons stay bottom-right as they look today).
+- Remove the absolute `<geometry>` rects from `label_5`, `formLayoutWidget`, `submitBtn`, and `cancelBtn`. Keep all object names (`onSubmit`/`cancel` slots in `guestwindow.cpp` connect by name).
+- Confirm there is **no** `maximumSize` cap (there is none today — leave it that way).
 
 - [ ] **Step 2: Build + run the responsive test — verify guest assertion PASSES**
 
@@ -413,7 +455,8 @@ Confirm build green, ctest green, manual run good, review APPROVED. The branch i
 
 ## Self-Review
 
-- **Spec coverage:** §1 MainWindow top-level → Task 2 Steps 1–3. §2 sidebar → Task 2 Step 4. §3 content/table (incl. drop `line_6`, 24:23:9:19:27 stretches) → Task 2 Steps 5–7. §4 admin → Task 3. §5 guest → Task 4. §6 tests → Task 1 + Task 3 TDD note. §7 verification → Task 5. All covered.
+- **Spec coverage:** §1 MainWindow top-level → Task 2 Steps 1–3. §2 sidebar → Task 2 Step 4. §3 content/table (header captions `label_10`/`label_6`/`label_7`/`label_8`/`label_9` re-homed into `frame_3`; `line_2`…`line_6` deleted; single `stretch`=24,23,9,19,27 mechanism) → Task 2 Steps 5–7. §4 admin → Task 3. §5 guest (build top-level `QVBoxLayout`) → Task 4. §6 tests → Task 1 + Task 3 TDD note. §7 verification → Task 5. All covered.
 - **Refinement vs. spec:** spec §4 said "replace setGeometry with a QGridLayout"; the `generalPage` grid already exists, so the plan instead **deletes** the setGeometry block and adds the missing `centralwidget` `QHBoxLayout` (sidebar + stacked). Same outcome, less invasive — noted in Task 3.
+- **Claude-review round 1 fixes folded in:** the recent-logins header is the real caption labels (`label_6`…`label_10`), not an empty `frame_3` — they are enumerated and re-homed (Task 2 Steps 5/7), guarded by the new `mainWindowHeaderHasColumns` test; the empty-`frame_3`-collapse risk is resolved by the captions living in it; the guest dialog genuinely lacks a top-level layout, so Task 4 now builds one and Task 1 expects its assertion RED; the column mechanism is pinned to a single `stretch` property; a copy-`.ui`-next-to-exe fallback covers the spaced source path.
 - **Placeholder scan:** no TBD/TODO; every code step shows exact XML/cpp/CMake.
-- **Name consistency:** no object renames; `tst_responsive_ui` slot names, `WITS_UI_DIR` define, and target name are consistent across Tasks 1/2/4.
+- **Name consistency:** no object renames; `tst_responsive_ui` slot names (incl. `mainWindowHeaderHasColumns`), `WITS_UI_DIR` define, and target name are consistent across Tasks 1/2/4.

@@ -18,8 +18,10 @@ The app does not fill the screen and its content does not scale:
 3. **`adminwindow.ui`** is *already* layout-based (26 layouts) but is hard-locked to a
    **fixed 760×600** (`minimumSize` == `maximumSize`). Additionally,
    **`adminwindow.cpp:665-668`** positions four dashboard frames with hard-coded
-   `setGeometry(...)` at construction, overriding the layouts — this is the real
-   reason the admin dashboard does not scale.
+   `setGeometry(...)` at construction, fighting the existing `generalPage`
+   `QGridLayout`. The dominant causes are the fixed window cap and the absolutely
+   positioned `centralwidget` children (`sidebarFrame`, `stackedWidget`); the
+   `setGeometry` block compounds the problem and is cleared as part of the fix.
 4. **`guestwindow.ui`** is a small modal `QDialog`, already laid out; only minor tidy.
 
 ## Goals / Non-goals
@@ -77,11 +79,20 @@ Convert absolute children to a **`QVBoxLayout`**, top→bottom:
   `name:course:year:dept:time = 24:23:9:19:27` (derived from the original column
   widths 241/231/91/191/271, preserving proportions). A small left margin (~10px)
   matches the original `x=10` inset.
-- **`frame_3` header**: gets a `QHBoxLayout` using the **same** `24:23:9:19:27`
-  stretches so the header lines up with the data columns. (It currently has no child
-  header labels; if column captions are desired they can be added later — out of scope.)
-- **`line_6`** (absolute vertical divider at x=810): **dropped** — it does not survive
-  a layout cleanly. This is the one intentional minor visual change.
+- **`frame_3` header**: the styled+shadowed strip becomes the **header row**. The five
+  column captions already exist as absolutely-placed siblings in
+  `scrollAreaWidgetContents` (`label_10` "Name", `label_6` "Course", `label_7` "Year
+  Level", `label_8` "Department", `label_9` "Date and Time", at y≈290) — re-parent them
+  into `frame_3`'s `QHBoxLayout` in column order
+  (`label_10`,`label_6`,`label_7`,`label_8`,`label_9`) using the **same**
+  `24:23:9:19:27` stretches so the header lines up with the data columns. Putting the
+  captions in `frame_3` also stops the (otherwise empty) frame from collapsing to ~0
+  height under a layout. None of these labels are referenced in `mainwindow.cpp`.
+- **Separator lines dropped**: the absolute divider lines in the table —
+  `line_2` (horizontal under the header) and `line_3`/`line_4`/`line_5`/`line_6`
+  (vertical column dividers) — are **deleted**; they do not survive a layout cleanly and
+  the layout provides the structure. This is the one intentional minor visual change.
+  None are referenced in `mainwindow.cpp`.
 
 > Note on row object-name numbering: `refreshRightPanel()` iterates the labels
 > `nameLabel`, `_2`, `_3`, `_5`, `_7`, `_8`, `_9`, `_11`, `_13` (and the parallel
@@ -104,8 +115,13 @@ Convert absolute children to a **`QVBoxLayout`**, top→bottom:
 - Result: admin window resizable + maximizable; dashboard reflows.
 
 ### 5. GuestWindow (`guestwindow.ui`)
-Ensure the dialog's content is fully owned by its layout so it scales with the dialog;
-confirm no hard size cap. Minor effort.
+The `guestwindow` `QDialog` currently has **no top-level layout** — the title `label_5`,
+`submitBtn`, `cancelBtn`, and `formLayoutWidget` are all absolutely positioned (only the
+`QFormLayout` *nested inside* `formLayoutWidget` is laid out). Build a top-level
+`QVBoxLayout` on the dialog and re-parent: `label_5` (title), `formLayoutWidget` (the
+form), and a `QHBoxLayout` button row holding `submitBtn` + `cancelBtn` (right-aligned
+via a leading stretch). Remove the absolute `<geometry>` rects from those widgets. No
+size cap to remove (the dialog has none).
 
 ### 6. Testing (TDD where feasible)
 - New **`tst_responsive_ui`** target in `qt-app/tests/CMakeLists.txt`, following the
@@ -119,7 +135,9 @@ confirm no hard size cap. Minor effort.
     (no cap); `centralwidget`'s layout is non-null; a representative row (`widget_2`)
     has a non-null layout; `frame`'s `maximumWidth()` is bounded (≤ 320) and
     `frame_2`'s horizontal size policy is `Expanding`.
-  - `guestwindow.ui`: loads and top dialog has a non-null layout, no max cap.
+  - `guestwindow.ui`: loads and top dialog has a non-null layout, no max cap. (This is
+    **red now** — the dialog currently has no top-level layout, see §5 — and goes green
+    once the `QVBoxLayout` is added.)
   - These assertions fail against the current `.ui` (red), pass after conversion (green).
 - The `.ui` files are made available to the test at runtime (copy into the test build
   dir via CMake, or compile their path in) — chosen by the implementing task.
