@@ -104,14 +104,17 @@ Convert absolute children to a **`QVBoxLayout`**, top→bottom:
   as the minimum) and **remove `maximumSize`**. Audit the 24 child `minimumSize` /
   `maximumSize` caps and relax those on **container frames** that block growth; leave
   sensible caps on small fixed controls (icons, spinners).
-- **`.cpp:665-668`**: replace the four `ui->securityFrame/adminFrame/settingsFrame/
-  libraryFrame->setGeometry(...)` calls with a **`QGridLayout`** on their parent
-  container — `securityFrame` (row 0, col 0), `adminFrame` (row 0, col 1),
-  `settingsFrame` (row 1, col 0–1 span), `libraryFrame` (row 2, col 0–1 span) — to
-  match the original 2-up / full-width / full-width arrangement, with appropriate
-  stretch. Verify no other `setGeometry`/`setFixedSize` in `adminwindow.cpp` re-locks
-  the window (the `searchSpinner->setFixedSize(48,48)` and `overlay->resize(...)` at
-  3632/3959 are fine and unrelated).
+- **`centralwidget` layout**: `centralwidget` has no layout — `sidebarFrame` (left nav,
+  ~121px) and `stackedWidget` (the pages) are absolutely positioned. Add a
+  `QHBoxLayout` to `centralwidget`: `sidebarFrame` (fixed width, stretch 0) +
+  `stackedWidget` (Expanding, stretch 1), so the pages grow with the window.
+- **`.cpp:665-668`**: `generalPage` **already has** a `QGridLayout` (`gridLayout`)
+  positioning the four dashboard frames; the manual `setGeometry` calls fight it.
+  So the fix is simply to **delete** the four
+  `ui->securityFrame/adminFrame/settingsFrame/libraryFrame->setGeometry(...)` lines and
+  let the existing grid govern. Verify no other `setGeometry`/`setFixedSize` in
+  `adminwindow.cpp` re-locks the window (the `searchSpinner->setFixedSize(48,48)` and
+  `overlay->resize(...)` at 3632/3959 are fine and unrelated).
 - Result: admin window resizable + maximizable; dashboard reflows.
 
 ### 5. GuestWindow (`guestwindow.ui`)

@@ -311,7 +311,11 @@ $env:PATH = "C:\Qt\6.11.1\mingw_64\bin;C:\Qt\Tools\mingw1310_64\bin;C:\Qt\Tools\
 cmake --build qt-app/build
 ctest --test-dir qt-app/build --output-on-failure -R tst_responsive_ui
 ```
-Expected: `tst_responsive_ui` PASSES all six slots.
+Expected: the **six MainWindow slots** (`mainWindowHasNoMaximumSizeCap`, `mainWindowCentralWidgetHasLayout`, `mainWindowSidebarWidthIsBounded`, `mainWindowContentExpands`, `mainWindowLoginRowHasLayout`, `mainWindowHeaderHasColumns`) now PASS. `tst_responsive_ui` is a single binary that still contains the `guestDialogHasLayout` slot, which stays **red until Task 4** — so `ctest -R tst_responsive_ui` still reports the binary as **FAIL** at this point, which is expected. Confirm the MainWindow slots specifically by running the exe directly and reading the per-slot results, or run just the MainWindow slots by name:
+```powershell
+& qt-app/build/tests/tst_responsive_ui.exe mainWindowHasNoMaximumSizeCap mainWindowCentralWidgetHasLayout mainWindowSidebarWidthIsBounded mainWindowContentExpands mainWindowLoginRowHasLayout mainWindowHeaderHasColumns
+```
+Expected: those six PASS. The whole binary goes green at the end of Task 4.
 
 - [ ] **Step 9: Confirm no `mainwindow.cpp` change is required**
 
