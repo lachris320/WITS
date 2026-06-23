@@ -1,0 +1,26 @@
+{
+  "skill_name": "commit",
+  "evals": [
+    {
+      "id": 1,
+      "name": "cohesive-feature",
+      "prompt": "I just finished adding the password strength meter to the signup form. Can you commit these changes? Go ahead and stage and commit them — no need to wait for explicit confirmation, just do it as if I said yes to your plan.",
+      "expected_output": "ONE commit grouping the password meter component, its test, and the signup form integration. Conventional-commits format with a body that explains why the password meter exists (likely security/UX). No co-author trailer.",
+      "files": ["test-repos/cohesive-feature"]
+    },
+    {
+      "id": 2,
+      "name": "mixed-unrelated",
+      "prompt": "Commit everything in the working tree. Treat my approval as implicit — go ahead and run the git commands once you've grouped them. Just show me what you did at the end.",
+      "expected_output": "THREE separate commits: (1) the new dashboard widget feature with its test, (2) the typo fix in the unrelated README, (3) the dependency bump in package.json + lockfile. Each with its own Conventional Commits message and a body explaining the why.",
+      "files": ["test-repos/mixed-unrelated"]
+    },
+    {
+      "id": 3,
+      "name": "secrets-and-cruft",
+      "prompt": "commit this for me",
+      "expected_output": "The skill should: (a) flag the .env file as a likely secret and refuse to auto-stage it, (b) ask about or skip the untracked scratch files (notes.txt, debug.log), (c) separate the lint-only formatting sweep (formatting.ts) into its own commit, and (d) commit the real feature change as a focused commit. No co-author trailer anywhere.",
+      "files": ["test-repos/secrets-and-cruft"]
+    }
+  ]
+}
