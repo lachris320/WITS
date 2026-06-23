@@ -5,6 +5,7 @@
 #include <QNetworkRequest>
 #include <QNetworkReply>
 #include <QMainWindow>
+#include <QJsonObject>
 #include "adminwindow.h"
 #include "guestwindow.h"
 
@@ -40,6 +41,7 @@ private:
     void updateTimeandDate();
     void updateLogo(const QString &logoPath);
     void updatePoster(const QString &posterPath);
+    void displayStudent(const QJsonObject &student);
 };
 
 #endif // MAINWINDOW_H

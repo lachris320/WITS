@@ -275,47 +275,7 @@ void MainWindow::handleLogin() {
         QJsonObject obj = jsonDoc.object();
         if (obj["status"].toString() == "success") {
             if (obj.contains("student")) {
-                QJsonObject student = obj["student"].toObject();
-                QString photoUrl = student["photo_url"].toString();
-
-                // ✅ Download and display the student photo
-                if (!photoUrl.isEmpty()) {
-                    QNetworkAccessManager *photoManager = new QNetworkAccessManager(this);
-                    QNetworkRequest request{QUrl(photoUrl)};
-
-                    connect(photoManager, &QNetworkAccessManager::finished, this, [this](QNetworkReply *photoReply) {
-                        if (photoReply->error() == QNetworkReply::NoError) {
-                            QByteArray imgData = photoReply->readAll();
-                            QPixmap pix;
-                            if (pix.loadFromData(imgData)) {
-                                ui->studentPhoto->setPixmap(pix.scaled(
-                                    ui->studentPhoto->width(),
-                                    ui->studentPhoto->height(),
-                                    Qt::KeepAspectRatio,
-                                    Qt::SmoothTransformation
-                                    ));
-
-                                // 🎬 Fade-in animation
-                                QGraphicsOpacityEffect *fadeEffect = new QGraphicsOpacityEffect();
-                                ui->studentPhoto->setGraphicsEffect(fadeEffect);
-
-                                QPropertyAnimation *fadeAnim = new QPropertyAnimation(fadeEffect, "opacity");
-                                fadeAnim->setDuration(700);       // 0.7 seconds fade
-                                fadeAnim->setStartValue(0.0);
-                                fadeAnim->setEndValue(1.0);
-                                fadeAnim->start(QAbstractAnimation::DeleteWhenStopped);
-                            }
-                        }
-                        photoReply->deleteLater();
-                    });
-                    photoManager->get(request);
-                }
-
-                // ✅ Update right panel
-                recentLogins.prepend(student);
-                while (recentLogins.size() > 9)
-                    recentLogins.removeLast();
-                refreshRightPanel();
+                displayStudent(obj["student"].toObject());
             } else {
                 adminWin->show();
             }
@@ -323,6 +283,46 @@ void MainWindow::handleLogin() {
     });
 }
 
+
+void MainWindow::displayStudent(const QJsonObject &student) {
+    QString photoUrl = student["photo_url"].toString();
+
+    if (!photoUrl.isEmpty()) {
+        QNetworkAccessManager *photoManager = new QNetworkAccessManager(this);
+        QNetworkRequest request{QUrl(photoUrl)};
+
+        connect(photoManager, &QNetworkAccessManager::finished, this, [this](QNetworkReply *photoReply) {
+            if (photoReply->error() == QNetworkReply::NoError) {
+                QByteArray imgData = photoReply->readAll();
+                QPixmap pix;
+                if (pix.loadFromData(imgData)) {
+                    ui->studentPhoto->setPixmap(pix.scaled(
+                        ui->studentPhoto->width(),
+                        ui->studentPhoto->height(),
+                        Qt::KeepAspectRatio,
+                        Qt::SmoothTransformation
+                        ));
+
+                    QGraphicsOpacityEffect *fadeEffect = new QGraphicsOpacityEffect();
+                    ui->studentPhoto->setGraphicsEffect(fadeEffect);
+
+                    QPropertyAnimation *fadeAnim = new QPropertyAnimation(fadeEffect, "opacity");
+                    fadeAnim->setDuration(700);
+                    fadeAnim->setStartValue(0.0);
+                    fadeAnim->setEndValue(1.0);
+                    fadeAnim->start(QAbstractAnimation::DeleteWhenStopped);
+                }
+            }
+            photoReply->deleteLater();
+        });
+        photoManager->get(request);
+    }
+
+    recentLogins.prepend(student);
+    while (recentLogins.size() > 9)
+        recentLogins.removeLast();
+    refreshRightPanel();
+}
 
 void MainWindow::toggleFullscreen(){
     if (isFullScreen()){
