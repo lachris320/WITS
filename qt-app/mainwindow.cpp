@@ -24,6 +24,9 @@
 #include <QSettings>
 #include <QGraphicsOpacityEffect>
 #include <QPropertyAnimation>
+#include <QApplication>
+#include <QElapsedTimer>
+#include "rfidkeyboardfilter.h"
 
 
 MainWindow::MainWindow(QWidget *parent)
@@ -76,6 +79,11 @@ MainWindow::MainWindow(QWidget *parent)
 
     ui->guestLoginBtn->setVisible(false);
     connect(ui->username, &QLineEdit::returnPressed, this, &MainWindow::handleLogin);
+
+    rfidFilter = new RfidKeyboardFilter(this, this);
+    qApp->installEventFilter(rfidFilter);
+    connect(rfidFilter, &RfidKeyboardFilter::rfidScanned, this, &MainWindow::handleRfidLogin);
+    m_rfidDebounceClock.start();
 
     QSettings settings("MyCompany", "MyApp");
     QString schoolName = settings.value("school/name", "").toString();
@@ -322,6 +330,70 @@ void MainWindow::displayStudent(const QJsonObject &student) {
     while (recentLogins.size() > 9)
         recentLogins.removeLast();
     refreshRightPanel();
+}
+
+void MainWindow::showKioskStatus(const QString &message, bool error) {
+    if (!m_statusLabel) {
+        m_statusLabel = new QLabel(this);
+        m_statusLabel->setAlignment(Qt::AlignCenter);
+        m_statusLabel->hide();
+    }
+    m_statusLabel->setStyleSheet(error
+        ? "background:#C0392B; color:white; padding:14px; border-radius:8px; font-size:18px;"
+        : "background:#27AE60; color:white; padding:14px; border-radius:8px; font-size:18px;");
+    m_statusLabel->setText(message);
+    m_statusLabel->adjustSize();
+    m_statusLabel->move((width() - m_statusLabel->width()) / 2,
+                        height() - m_statusLabel->height() - 60);
+    m_statusLabel->raise();
+    m_statusLabel->show();
+    QTimer::singleShot(2500, m_statusLabel, [this]() {
+        if (m_statusLabel) m_statusLabel->hide();
+    });
+}
+
+void MainWindow::handleRfidLogin(const QString &code) {
+    // Debounce: ignore the same card re-scanned within 2.5s (one tap = one visit).
+    const qint64 now = m_rfidDebounceClock.elapsed();
+    if (code == m_lastRfidCode && (now - m_lastRfidMs) < 2500)
+        return;
+    m_lastRfidCode = code;
+    m_lastRfidMs = now;
+
+    ui->username->clear(); // remove the brief flash of the scanned code
+
+    QUrl url("http://localhost/rfid_login.php");
+    QUrlQuery postData;
+    postData.addQueryItem("rfid_id", code);
+
+    QNetworkRequest request;
+    request.setUrl(url);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
+    QNetworkReply *reply = networkManager->post(request, postData.toString(QUrl::FullyEncoded).toUtf8());
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            showKioskStatus("Network error. Please try again.", true);
+            reply->deleteLater();
+            return;
+        }
+
+        QByteArray response = reply->readAll();
+        reply->deleteLater();
+
+        QJsonDocument jsonDoc = QJsonDocument::fromJson(response);
+        if (!jsonDoc.isObject()) {
+            showKioskStatus("Invalid server response.", true);
+            return;
+        }
+
+        QJsonObject obj = jsonDoc.object();
+        if (obj["status"].toString() == "success" && obj.contains("student")) {
+            displayStudent(obj["student"].toObject());
+        } else {
+            showKioskStatus("Card not registered. Please see the librarian.", true);
+        }
+    });
 }
 
 void MainWindow::toggleFullscreen(){
