@@ -534,6 +534,7 @@ adminWindow::adminWindow(QWidget *parent)
             border-radius: 6px;
             padding: 4px 8px;
             background: #FAFAFA;
+            color: #2C3E50;
         }
         QLineEdit:focus {
             border: 1px solid #4A90E2;

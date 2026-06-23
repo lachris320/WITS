@@ -148,6 +148,7 @@ MainWindow::MainWindow(QWidget *parent)
             border-radius: 10px;
             padding: 8px;
             background: white;
+            color: #2C3E50;
             font-size: 14px;
         }
         QLabel#schoolNameLabel, QLabel#schAddressLabel {
