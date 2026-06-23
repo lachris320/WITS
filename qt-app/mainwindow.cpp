@@ -297,6 +297,7 @@ void MainWindow::displayStudent(const QJsonObject &student) {
 
     if (!photoUrl.isEmpty()) {
         QNetworkAccessManager *photoManager = new QNetworkAccessManager(this);
+        connect(photoManager, &QNetworkAccessManager::finished, photoManager, &QObject::deleteLater);
         QNetworkRequest request{QUrl(photoUrl)};
 
         connect(photoManager, &QNetworkAccessManager::finished, this, [this](QNetworkReply *photoReply) {
