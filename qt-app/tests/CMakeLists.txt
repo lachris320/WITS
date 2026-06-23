@@ -36,3 +36,19 @@ add_test(NAME tst_theme COMMAND tst_theme)
 set_tests_properties(tst_theme PROPERTIES
     ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1;QT_QPA_PLATFORM=offscreen"
 )
+
+qt_add_executable(tst_responsive_ui
+    tst_responsive_ui.cpp
+)
+set_target_properties(tst_responsive_ui PROPERTIES WIN32_EXECUTABLE FALSE)
+target_include_directories(tst_responsive_ui PRIVATE ${CMAKE_SOURCE_DIR})
+target_compile_definitions(tst_responsive_ui PRIVATE WITS_UI_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(tst_responsive_ui PRIVATE
+    Qt${QT_VERSION_MAJOR}::Test
+    Qt${QT_VERSION_MAJOR}::Widgets
+    Qt${QT_VERSION_MAJOR}::UiTools
+)
+add_test(NAME tst_responsive_ui COMMAND tst_responsive_ui)
+set_tests_properties(tst_responsive_ui PROPERTIES
+    ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1;QT_QPA_PLATFORM=offscreen"
+)
