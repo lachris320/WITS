@@ -18,8 +18,15 @@ std::optional<QString> RfidScanDetector::feedKey(QChar character, qint64 timesta
         return result;
     }
 
+    if (m_lastTimestampMs >= 0 && (timestampMs - m_lastTimestampMs) > m_maxInterKeyGapMs)
+        reset(); // a human-pace gap breaks the burst; start a fresh candidate
+
     m_buffer.append(character);
     m_lastTimestampMs = timestampMs;
+
+    if (m_buffer.length() > m_maxBufferLength)
+        reset();
+
     return std::nullopt;
 }
 
