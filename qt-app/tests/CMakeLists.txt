@@ -23,5 +23,5 @@ target_include_directories(tst_rfidkeyboardfilter PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(tst_rfidkeyboardfilter PRIVATE Qt${QT_VERSION_MAJOR}::Test Qt${QT_VERSION_MAJOR}::Widgets)
 add_test(NAME tst_rfidkeyboardfilter COMMAND tst_rfidkeyboardfilter)
 set_tests_properties(tst_rfidkeyboardfilter PROPERTIES
-    ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1"
+    ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1;QT_QPA_PLATFORM=offscreen"
 )
