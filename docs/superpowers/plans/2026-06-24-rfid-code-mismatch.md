@@ -294,16 +294,15 @@ This is the deliverable that *unblocks Phase 2*. No code changes; it produces a 
 > - **Option A (no rebuild) — DebugView.** Run Sysinternals *DebugView* (`Dbgview.exe`,
 >   "Capture → Capture Win32") as Administrator, then launch `qt-app/build/WITS.exe` normally.
 >   The `RFID SCAN:` / `RFID RESPONSE:` lines appear in DebugView.
-> - **Option B (rebuild) — temporary console subsystem.** Temporarily make the app a console
->   app so `qDebug` goes to stderr, then revert after capture:
+> - **Option B (rebuild) — temporary console subsystem.** In `qt-app/CMakeLists.txt:67`, change
+>   `WIN32_EXECUTABLE TRUE` to `WIN32_EXECUTABLE FALSE` so the app becomes a console-subsystem
+>   app and `qDebug` goes to stderr, then rebuild and run from a terminal:
 >   ```powershell
 >   $env:PATH = "C:\Qt\6.11.1\mingw_64\bin;C:\Qt\Tools\mingw1310_64\bin;C:\Qt\Tools\CMake_64\bin;C:\Qt\Tools\Ninja;" + $env:PATH
->   cmake -S qt-app -B qt-app/build -G Ninja -DCMAKE_PREFIX_PATH="C:/Qt/6.11.1/mingw_64" `
->     -DWITS_CONSOLE=ON   # only if you add an option; otherwise edit CMakeLists.txt:67 WIN32_EXECUTABLE FALSE
 >   cmake --build qt-app/build
 >   .\qt-app\build\WITS.exe   # qDebug now prints to this terminal
 >   ```
->   Then restore `WIN32_EXECUTABLE TRUE` (or drop the option) and rebuild. Do **not** commit the
+>   After capturing, **restore `WIN32_EXECUTABLE TRUE`** and rebuild. Do **not** commit the
 >   console flip.
 >
 > Either way, tap the sample card and record the `RFID SCAN:` line, e.g.
