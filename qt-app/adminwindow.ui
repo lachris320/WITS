@@ -2379,7 +2379,7 @@ QLabel#visitorTotalLabel {
         </column>
         <column>
          <property name="text">
-          <string>Pupose</string>
+          <string>Purpose</string>
          </property>
         </column>
         <column>
