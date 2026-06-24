@@ -24,6 +24,16 @@ private slots:
     void mainWindowLoginRowHasLayout();
     void mainWindowHeaderHasColumns();
     void guestDialogHasLayout();
+    // --- admin-page inner reflow ---
+    void databasePageHasLayout();
+    void reportingPageHasLayout();
+    void studentSearchPageHasLayout();
+    void visitorPageHasLayout();
+    void generalPageFramesHaveLayouts();
+    void chartsPreviewExpands();
+    void visitorTableExpands();
+    void searchOverlayPreserved();
+    void adminCriticalNamesResolve();
 };
 
 QWidget *TestResponsiveUi::loadUi(const QString &fileName)
@@ -103,6 +113,130 @@ void TestResponsiveUi::guestDialogHasLayout()
     QVERIFY2(w, "failed to load guestwindow.ui");
     QVERIFY2(w->layout() != nullptr, "guest dialog has no top-level layout manager");
     QCOMPARE(w->maximumWidth(), QWIDGETSIZE_MAX);
+}
+
+static QWidget *findPage(QWidget *root, const char *name)
+{
+    return root->findChild<QWidget *>(QString::fromLatin1(name));
+}
+
+void TestResponsiveUi::databasePageHasLayout()
+{
+    QScopedPointer<QWidget> w(loadUi("adminwindow.ui"));
+    QVERIFY2(w, "failed to load adminwindow.ui");
+    QWidget *page = findPage(w.data(), "databasePage");
+    QVERIFY2(page, "databasePage not found");
+    QVERIFY2(page->layout() != nullptr, "databasePage has no top-level layout");
+}
+
+void TestResponsiveUi::reportingPageHasLayout()
+{
+    QScopedPointer<QWidget> w(loadUi("adminwindow.ui"));
+    QVERIFY2(w, "failed to load adminwindow.ui");
+    QWidget *page = findPage(w.data(), "reportingPage");
+    QVERIFY2(page, "reportingPage not found");
+    QVERIFY2(page->layout() != nullptr, "reportingPage has no top-level layout");
+}
+
+void TestResponsiveUi::studentSearchPageHasLayout()
+{
+    QScopedPointer<QWidget> w(loadUi("adminwindow.ui"));
+    QVERIFY2(w, "failed to load adminwindow.ui");
+    QWidget *page = findPage(w.data(), "studentSearchPage");
+    QVERIFY2(page, "studentSearchPage not found");
+    QVERIFY2(page->layout() != nullptr, "studentSearchPage has no top-level layout");
+}
+
+void TestResponsiveUi::visitorPageHasLayout()
+{
+    QScopedPointer<QWidget> w(loadUi("adminwindow.ui"));
+    QVERIFY2(w, "failed to load adminwindow.ui");
+    QWidget *page = findPage(w.data(), "visitorPage");
+    QVERIFY2(page, "visitorPage not found");
+    QVERIFY2(page->layout() != nullptr, "visitorPage has no top-level layout");
+}
+
+void TestResponsiveUi::generalPageFramesHaveLayouts()
+{
+    QScopedPointer<QWidget> w(loadUi("adminwindow.ui"));
+    QVERIFY2(w, "failed to load adminwindow.ui");
+    for (const char *name : {"adminFrame", "securityFrame", "libraryFrame", "settingsFrame"}) {
+        QWidget *f = w->findChild<QWidget *>(name);
+        QVERIFY2(f, qPrintable(QString("frame %1 not found").arg(name)));
+        QVERIFY2(f->layout() != nullptr,
+                 qPrintable(QString("frame %1 has no layout manager").arg(name)));
+        // Frames must also GROW to fill the page grid (spec per-frame pattern #6),
+        // else their laid-out content never gets the extra space.
+        QVERIFY2(f->sizePolicy().horizontalPolicy() == QSizePolicy::Expanding,
+                 qPrintable(QString("frame %1 should expand horizontally to fill the page").arg(name)));
+    }
+}
+
+void TestResponsiveUi::chartsPreviewExpands()
+{
+    QScopedPointer<QWidget> w(loadUi("adminwindow.ui"));
+    QVERIFY2(w, "failed to load adminwindow.ui");
+    QWidget *g = w->findChild<QWidget *>("chartsPreview");
+    QVERIFY2(g, "chartsPreview group box not found");
+    QCOMPARE(g->sizePolicy().horizontalPolicy(), QSizePolicy::Expanding);
+}
+
+void TestResponsiveUi::visitorTableExpands()
+{
+    QScopedPointer<QWidget> w(loadUi("adminwindow.ui"));
+    QVERIFY2(w, "failed to load adminwindow.ui");
+    QWidget *t = w->findChild<QWidget *>("visitorTable");
+    QVERIFY2(t, "visitorTable not found");
+    QCOMPARE(t->sizePolicy().horizontalPolicy(), QSizePolicy::Expanding);
+    QCOMPARE(t->sizePolicy().verticalPolicy(), QSizePolicy::Expanding);
+}
+
+void TestResponsiveUi::searchOverlayPreserved()
+{
+    QScopedPointer<QWidget> w(loadUi("adminwindow.ui"));
+    QVERIFY2(w, "failed to load adminwindow.ui");
+    QWidget *overlay = w->findChild<QWidget *>("searchOverlay");
+    QVERIFY2(overlay, "searchOverlay must still exist after conversion");
+    QWidget *page = findPage(w.data(), "studentSearchPage");
+    QVERIFY2(page, "studentSearchPage not found");
+    // Carve-out: overlay stays a free-floating sibling parented to the page,
+    // never managed by the page layout (else it stops covering the page).
+    QCOMPARE(overlay->parentWidget(), page);
+    if (page->layout())
+        QVERIFY2(page->layout()->indexOf(overlay) == -1,
+                 "searchOverlay must NOT be added to the studentSearchPage layout");
+}
+
+void TestResponsiveUi::adminCriticalNamesResolve()
+{
+    QScopedPointer<QWidget> w(loadUi("adminwindow.ui"));
+    QVERIFY2(w, "failed to load adminwindow.ui");
+    // Names bound by adminwindow.cpp slots / per-page stylesheets. Dropping any
+    // silently breaks the app. The exhaustive zero-deletions check is the git
+    // name-set guard run during each conversion task.
+    const char *names[] = {
+        "generalPage", "databasePage", "reportingPage", "studentSearchPage", "visitorPage",
+        "adminFrame", "securityFrame", "libraryFrame", "settingsFrame",
+        "adminNameLineEdit", "adminPositionLineEdit", "schoolName", "address",
+        "fontComboBox", "spinBox", "openHourSpinBox", "closeHourSpinBox",
+        "lineEdit", "lineEdit_2", "updateBtn", "showOldBtn", "showNewBtn",
+        "guestLoginCheckBox", "clearAttendanceCheckBox", "applyChangesBtn",
+        "schoolLogoBrowseBtn", "posterBrowseBtn", "bookDropSystemCheckBox",
+        "individualRegistrationBox", "bulkRegistrationBox", "bulkTable", "bulkProgressBar",
+        "departmentComboBox", "deleteRecordsBtn", "resetCountBtn", "deactivateBtn",
+        "filterDepartmentBox", "filterCourseBox", "durationTypeBox", "durationTypeWidget",
+        "paletteComboBox", "chartTypeBox", "chartsPreview",
+        "generatePDFBtn", "generateExcelBtn", "statusLabel",
+        "searchLineEdit", "searchBtn", "searchDepartmentFilter", "searchCourseFilter",
+        "studentSearchTable", "selectAllBtn", "editStudentBtn", "deleteStudentBtn",
+        "refreshSearchBtn", "cancelEditBtn", "searchOverlay",
+        "visitorTable", "extractVisitorBtn", "visitorTotalLabel",
+        "visitorSearchLineEdit", "visitorSearchBtn", "visitorDateFilterBox"
+    };
+    for (const char *n : names) {
+        QVERIFY2(w->findChild<QWidget *>(n),
+                 qPrintable(QString("critical objectName '%1' missing").arg(n)));
+    }
 }
 
 QTEST_MAIN(TestResponsiveUi)
