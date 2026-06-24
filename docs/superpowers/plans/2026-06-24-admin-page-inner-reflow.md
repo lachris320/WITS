@@ -76,7 +76,7 @@ Concrete before/after (one child becoming a single-item vbox):
     <(git show HEAD:qt-app/adminwindow.ui | grep -oE 'name="[^"]+"' | sort -u | grep -vE "$ART") \
     <(grep -oE 'name="[^"]+"' qt-app/adminwindow.ui | sort -u)
   ```
-  Expected output: **empty** (every committed real name still present). Any line printed = a dropped/renamed widget → fix before commit.
+  Expected output: **empty** (every committed real name still present). Any line printed = a dropped/renamed widget → fix before commit. (The grep matches every `name="…"` — property names like `name="geometry"` included — but `comm -23` is one-directional, so additions never false-positive and surviving `geometry` props elsewhere keep it quiet; if a future edit ever removes the *last* `geometry` in the file and the guard flags it, that's the known benign case, not a dropped widget.)
 - **Semantic-diff sanity (Bash tool):** `git diff --ignore-all-space qt-app/adminwindow.ui` shows only the intended structural changes for that page.
 
 ---
@@ -158,6 +158,10 @@ void TestResponsiveUi::generalPageFramesHaveLayouts()
         QVERIFY2(f, qPrintable(QString("frame %1 not found").arg(name)));
         QVERIFY2(f->layout() != nullptr,
                  qPrintable(QString("frame %1 has no layout manager").arg(name)));
+        // Frames must also GROW to fill the page grid (spec per-frame pattern #6),
+        // else their laid-out content never gets the extra space.
+        QVERIFY2(f->sizePolicy().horizontalPolicy() == QSizePolicy::Expanding,
+                 qPrintable(QString("frame %1 should expand horizontally to fill the page").arg(name)));
     }
 }
 
@@ -239,7 +243,7 @@ Expected: compiles clean, `tst_responsive_ui.exe` links.
 Run: `ctest --test-dir qt-app/build -R tst_responsive_ui --output-on-failure`
 Expected — these FAIL (the contract not yet met):
 - `databasePageHasLayout`, `reportingPageHasLayout`, `studentSearchPageHasLayout`, `visitorPageHasLayout` — no page layout yet.
-- `generalPageFramesHaveLayouts` — frames have no inner layout.
+- `generalPageFramesHaveLayouts` — frames have no inner layout AND no Expanding size policy (they default to `Preferred`); both halves fail.
 - `chartsPreviewExpands` — `chartsPreview` (QGroupBox) defaults to `Preferred`.
 
 Expected — these PASS already (regression guards, must STAY green every task):
@@ -265,6 +269,8 @@ Body: lists the failing slots and notes the two regression guards already green.
 - Produces: non-null `layout()` on `adminFrame`, `securityFrame`, `libraryFrame`, `settingsFrame` → turns `generalPageFramesHaveLayouts` green.
 
 Apply the conversion mechanic to each frame. Keep each frame's existing `minimumSize` (`adminFrame`/`securityFrame`/`settingsFrame` are `250×150`); add `minimumSize 250×150` to `libraryFrame` (it has none today).
+
+**All four frames must also get a growing size policy** (spec per-frame pattern #6) so the page grid hands them the extra space — without it the inner layouts never receive room to distribute and the page looks unchanged. Add to each frame: `<property name="sizePolicy"><sizepolicy hsizetype="Expanding" vsizetype="Preferred"><horstretch>1</horstretch><verstretch>0</verstretch></sizepolicy></property>`, and give the `gridLayout` columns stretch (e.g. `<column stretch="1"/>` entries, or per-frame `horstretch`) so columns share width evenly. Also tidy `gridLayout`'s stray empty rows (the current cells jump 0→1→5) so the four frames tile without large gaps. This is what `generalPageFramesHaveLayouts` now asserts (layout present AND horizontal policy Expanding).
 
 - [ ] **Step 1: `adminFrame` → `QVBoxLayout name="verticalLayout_admin"`**, items in order, each with `<geometry>` removed:
   1. `label_5` (heading "Admin Information")
@@ -342,7 +348,12 @@ Expected now GREEN: `databasePageHasLayout`; guards stay green.
 
 - [ ] **Step 2: Make `chartsPreview` the Expanding member** — add `<property name="sizePolicy"><sizepolicy hsizetype="Expanding" vsizetype="Expanding"><horstretch>1</horstretch><verstretch>1</verstretch></sizepolicy></property>` to the `chartsPreview` group box (NOT to `chartsPreviewBox`, which is its inner `QGridLayout`).
 
-- [ ] **Step 3: Dissolve `formLayoutWidget_4`, `formLayoutWidget_5`, `formLayoutWidget_6`.** Locate each by name (they live inside the `durationTypeWidget` QStackedWidget sub-pages — `specificDay`, `specificMonth`, `semester`). Each is a bare `QWidget` with `<geometry>` wrapping a real layout. For each: lift its inner `<layout>` up to become the layout of its immediate parent container, then delete the empty `…LayoutWidget` wrapper (mechanic step 4). Inner layout names are preserved; only the three wrapper names disappear (exempted by the guard).
+- [ ] **Step 3: Dissolve `formLayoutWidget_4`, `formLayoutWidget_5`, `formLayoutWidget_6`.** Each is a bare `QWidget` with `<geometry>` wrapping a real `QFormLayout`, inside the `durationTypeWidget` QStackedWidget. **Their immediate parents differ — lift each artifact's inner `<layout>` to its OWN immediate parent (not to the stacked sub-page):**
+  - `formLayoutWidget_4` → parent is `specificDay` (which has no layout today) — lift `formLayout` (its inner layout) to be `specificDay`'s layout.
+  - `formLayoutWidget_5` → parent is `specificMonth` (no layout today) — lift its inner layout there.
+  - `formLayoutWidget_6` → parent is **`widget_2`** (a `native="true"` wrapper at `gridLayout_6` row 0 col 0 inside `semester`; `semester` ALREADY owns `gridLayout_6`, so do NOT lift to `semester` — that would hit Qt's "already has a layout" error). Lift `formLayout_6` to be `widget_2`'s layout.
+
+  In every case: delete the empty `…LayoutWidget` wrapper (mechanic step 4). **Preserve `widget_2`** — it is NOT in the exempt set; only the three `formLayoutWidget_*` wrapper names disappear (the inner `formLayout`/`formLayout_6` names are preserved).
 
 - [ ] **Step 4: Build.** `cmake --build qt-app/build` — clean.
 
