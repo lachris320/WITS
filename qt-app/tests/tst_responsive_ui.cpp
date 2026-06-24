@@ -25,10 +25,8 @@ private slots:
     void mainWindowHeaderHasColumns();
     void guestDialogHasLayout();
     // --- admin-page inner reflow ---
-    void databasePageHasLayout();
-    void reportingPageHasLayout();
-    void studentSearchPageHasLayout();
-    void visitorPageHasLayout();
+    void adminPageHasLayout_data();
+    void adminPageHasLayout();
     void generalPageFramesHaveLayouts();
     void chartsPreviewExpands();
     void visitorTableExpands();
@@ -121,40 +119,24 @@ static QWidget *findPage(QWidget *root, const char *name)
     return root->findChild<QWidget *>(QString::fromLatin1(name));
 }
 
-void TestResponsiveUi::databasePageHasLayout()
+void TestResponsiveUi::adminPageHasLayout_data()
 {
-    QScopedPointer<QWidget> w(loadUi("adminwindow.ui"));
-    QVERIFY2(w, "failed to load adminwindow.ui");
-    QWidget *page = findPage(w.data(), "databasePage");
-    QVERIFY2(page, "databasePage not found");
-    QVERIFY2(page->layout() != nullptr, "databasePage has no top-level layout");
+    QTest::addColumn<QString>("pageName");
+    QTest::newRow("databasePage") << QStringLiteral("databasePage");
+    QTest::newRow("reportingPage") << QStringLiteral("reportingPage");
+    QTest::newRow("studentSearchPage") << QStringLiteral("studentSearchPage");
+    QTest::newRow("visitorPage") << QStringLiteral("visitorPage");
 }
 
-void TestResponsiveUi::reportingPageHasLayout()
+void TestResponsiveUi::adminPageHasLayout()
 {
+    QFETCH(QString, pageName);
     QScopedPointer<QWidget> w(loadUi("adminwindow.ui"));
     QVERIFY2(w, "failed to load adminwindow.ui");
-    QWidget *page = findPage(w.data(), "reportingPage");
-    QVERIFY2(page, "reportingPage not found");
-    QVERIFY2(page->layout() != nullptr, "reportingPage has no top-level layout");
-}
-
-void TestResponsiveUi::studentSearchPageHasLayout()
-{
-    QScopedPointer<QWidget> w(loadUi("adminwindow.ui"));
-    QVERIFY2(w, "failed to load adminwindow.ui");
-    QWidget *page = findPage(w.data(), "studentSearchPage");
-    QVERIFY2(page, "studentSearchPage not found");
-    QVERIFY2(page->layout() != nullptr, "studentSearchPage has no top-level layout");
-}
-
-void TestResponsiveUi::visitorPageHasLayout()
-{
-    QScopedPointer<QWidget> w(loadUi("adminwindow.ui"));
-    QVERIFY2(w, "failed to load adminwindow.ui");
-    QWidget *page = findPage(w.data(), "visitorPage");
-    QVERIFY2(page, "visitorPage not found");
-    QVERIFY2(page->layout() != nullptr, "visitorPage has no top-level layout");
+    QWidget *page = findPage(w.data(), pageName.toLatin1().constData());
+    QVERIFY2(page, qPrintable(QString("%1 not found").arg(pageName)));
+    QVERIFY2(page->layout() != nullptr,
+             qPrintable(QString("%1 has no top-level layout").arg(pageName)));
 }
 
 void TestResponsiveUi::generalPageFramesHaveLayouts()
