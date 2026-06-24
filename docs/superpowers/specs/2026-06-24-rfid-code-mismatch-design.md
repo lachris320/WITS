@@ -176,9 +176,10 @@ recommendation conditional on the confirmed cause:
 - **Option B — Data backfill (recommended if hypothesis 1 confirmed AND the app
   already sends the canonical full form).** Leave the app alone; run a one-off,
   reviewed SQL migration that re-pads/repairs the `students.code` column to the
-  reader's canonical format, and fix the *import* path so it stops stripping
-  zeros going forward. Lower app-code risk, but touches live data — must be
-  backed up and reviewed.
+  reader's canonical format, and close the recurrence on the **registration
+  path** (scan-into-field per the Decision rule) so newly-entered codes match by
+  construction. Lower app-code risk, but touches live data — must be backed up
+  and reviewed.
 
 - **Option C — Operational only (if hypothesis 3 confirmed).** No app/SQL logic
   change; the card was never linked. Document the registration procedure (scan
