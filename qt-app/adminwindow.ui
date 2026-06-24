@@ -2215,56 +2215,11 @@ font: bold 12px &quot;Segoe UI&quot;;
      </widget>
     </widget>
     <widget class="QWidget" name="visitorPage">
-     <widget class="QTableWidget" name="visitorTable">
-      <property name="geometry">
-       <rect>
-        <x>0</x>
-        <y>70</y>
-        <width>631</width>
-        <height>521</height>
-       </rect>
-      </property>
-      <property name="font">
-       <font>
-        <family>Segoe UI</family>
-        <pointsize>-1</pointsize>
-       </font>
-      </property>
-      <column>
-       <property name="text">
-        <string>Name</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>Company</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>Pupose</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>Date</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>Time</string>
-       </property>
-      </column>
-     </widget>
-     <widget class="QPushButton" name="extractVisitorBtn">
-      <property name="geometry">
-       <rect>
-        <x>540</x>
-        <y>550</y>
-        <width>80</width>
-        <height>24</height>
-       </rect>
-      </property>
+     <layout class="QVBoxLayout" name="verticalLayout_visitorPage">
+      <item>
+       <layout class="QHBoxLayout" name="horizontalLayout_visitorTop">
+        <item>
+         <widget class="QPushButton" name="extractVisitorBtn">
       <property name="styleSheet">
        <string notr="true">QPushButton#extractVisitorBtn {
     background-color: #2ECC71; /* green */
@@ -2279,16 +2234,10 @@ QPushButton#extractVisitorBtn:hover {
       <property name="text">
        <string>Extract</string>
       </property>
-     </widget>
-     <widget class="QLabel" name="visitorTotalLabel">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>540</y>
-        <width>206</width>
-        <height>44</height>
-       </rect>
-      </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QLabel" name="visitorTotalLabel">
       <property name="font">
        <font>
         <family>Segoe UI</family>
@@ -2330,17 +2279,11 @@ QLabel#visitorTotalLabel {
       <property name="text">
        <string>📊 Total Visitors:</string>
       </property>
-     </widget>
-     <widget class="QWidget" name="widget_3" native="true">
-      <property name="geometry">
-       <rect>
-        <x>0</x>
-        <y>10</y>
-        <width>631</width>
-        <height>55</height>
-       </rect>
-      </property>
-      <layout class="QHBoxLayout" name="horizontalLayout_5">
+         </widget>
+        </item>
+        <item>
+         <widget class="QWidget" name="widget_3" native="true">
+          <layout class="QHBoxLayout" name="horizontalLayout_5">
        <item>
         <layout class="QHBoxLayout" name="horizontalLayout_4">
          <item>
@@ -2408,8 +2351,53 @@ QLabel#visitorTotalLabel {
          </item>
         </layout>
        </item>
-      </layout>
-     </widget>
+          </layout>
+         </widget>
+        </item>
+       </layout>
+      </item>
+      <item>
+       <widget class="QTableWidget" name="visitorTable">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+          <horstretch>0</horstretch>
+          <verstretch>1</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="font">
+         <font>
+          <family>Segoe UI</family>
+          <pointsize>-1</pointsize>
+         </font>
+        </property>
+        <column>
+         <property name="text">
+          <string>Name</string>
+         </property>
+        </column>
+        <column>
+         <property name="text">
+          <string>Company</string>
+         </property>
+        </column>
+        <column>
+         <property name="text">
+          <string>Pupose</string>
+         </property>
+        </column>
+        <column>
+         <property name="text">
+          <string>Date</string>
+         </property>
+        </column>
+        <column>
+         <property name="text">
+          <string>Time</string>
+         </property>
+        </column>
+       </widget>
+      </item>
+     </layout>
     </widget>
     </widget>
     </item>
