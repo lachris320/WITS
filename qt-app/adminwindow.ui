@@ -1406,16 +1406,16 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
 }
 </string>
      </property>
-     <widget class="QGroupBox" name="groupBox_2">
-      <property name="geometry">
-       <rect>
-        <x>5</x>
-        <y>10</y>
-        <width>351</width>
-        <height>341</height>
-       </rect>
-      </property>
-      <property name="font">
+     <layout class="QGridLayout" name="gridLayout_reportingPage">
+      <item row="0" column="0">
+       <widget class="QGroupBox" name="groupBox_2">
+        <property name="minimumSize">
+         <size>
+          <width>300</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="font">
        <font>
         <family>Segoe UI</family>
         <pointsize>-1</pointsize>
@@ -1519,40 +1519,21 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
           <number>2</number>
          </property>
          <widget class="QWidget" name="specificDay">
-          <widget class="QWidget" name="formLayoutWidget_4">
-           <property name="geometry">
-            <rect>
-             <x>10</x>
-             <y>10</y>
-             <width>301</width>
-             <height>61</height>
-            </rect>
-           </property>
-           <layout class="QFormLayout" name="formLayout_4">
-            <item row="0" column="0">
-             <widget class="QLabel" name="label_30">
-              <property name="text">
-               <string>Select Day:</string>
-              </property>
-             </widget>
-            </item>
-            <item row="0" column="1">
-             <widget class="QDateEdit" name="dateEdit"/>
-            </item>
-           </layout>
-          </widget>
+          <layout class="QFormLayout" name="formLayout_4">
+           <item row="0" column="0">
+            <widget class="QLabel" name="label_30">
+             <property name="text">
+              <string>Select Day:</string>
+             </property>
+            </widget>
+           </item>
+           <item row="0" column="1">
+            <widget class="QDateEdit" name="dateEdit"/>
+           </item>
+          </layout>
          </widget>
          <widget class="QWidget" name="specificMonth">
-          <widget class="QWidget" name="formLayoutWidget_5">
-           <property name="geometry">
-            <rect>
-             <x>0</x>
-             <y>0</y>
-             <width>311</width>
-             <height>81</height>
-            </rect>
-           </property>
-           <layout class="QFormLayout" name="formLayout_5">
+          <layout class="QFormLayout" name="formLayout_5">
             <item row="0" column="1">
              <widget class="QComboBox" name="monthComboBox">
               <item>
@@ -1635,22 +1616,12 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
              <widget class="QComboBox" name="yearComboBox"/>
             </item>
            </layout>
-          </widget>
          </widget>
          <widget class="QWidget" name="semester">
           <layout class="QGridLayout" name="gridLayout_6">
            <item row="0" column="0">
             <widget class="QWidget" name="widget_2" native="true">
-             <widget class="QWidget" name="formLayoutWidget_6">
-              <property name="geometry">
-               <rect>
-                <x>0</x>
-                <y>0</y>
-                <width>291</width>
-                <height>138</height>
-               </rect>
-              </property>
-              <layout class="QFormLayout" name="formLayout_6">
+             <layout class="QFormLayout" name="formLayout_6">
                <item row="0" column="1">
                 <widget class="QComboBox" name="semesterComboBox">
                  <item>
@@ -1715,7 +1686,6 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 </widget>
                </item>
               </layout>
-             </widget>
             </widget>
            </item>
           </layout>
@@ -1724,24 +1694,18 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
        </item>
       </layout>
      </widget>
-     <widget class="QGroupBox" name="groupBox_3">
-      <property name="geometry">
-       <rect>
-        <x>370</x>
-        <y>10</y>
-        <width>251</width>
-        <height>351</height>
-       </rect>
-      </property>
-      <property name="font">
-       <font>
-        <family>Segoe UI</family>
-        <pointsize>-1</pointsize>
-       </font>
-      </property>
-      <property name="title">
-       <string>VISUALIZATION</string>
-      </property>
+      </item>
+      <item row="0" column="1">
+       <widget class="QGroupBox" name="groupBox_3">
+        <property name="minimumSize">
+         <size>
+          <width>280</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="title">
+         <string>VISUALIZATION</string>
+        </property>
       <layout class="QGridLayout" name="gridLayout_4">
        <item row="0" column="0">
         <widget class="QWidget" name="visualizatioWidget" native="true">
@@ -1880,24 +1844,18 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
        </item>
       </layout>
      </widget>
-     <widget class="QGroupBox" name="groupBox_4">
-      <property name="geometry">
-       <rect>
-        <x>370</x>
-        <y>370</y>
-        <width>251</width>
-        <height>211</height>
-       </rect>
-      </property>
-      <property name="font">
-       <font>
-        <family>Segoe UI</family>
-        <pointsize>-1</pointsize>
-       </font>
-      </property>
-      <property name="title">
-       <string>Actions</string>
-      </property>
+      </item>
+      <item row="1" column="0">
+       <widget class="QGroupBox" name="groupBox_4">
+        <property name="minimumSize">
+         <size>
+          <width>280</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="title">
+         <string>Actions</string>
+        </property>
       <layout class="QGridLayout" name="gridLayout_3">
        <item row="0" column="0">
         <layout class="QFormLayout" name="formLayout_2">
@@ -1975,24 +1933,32 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
        </item>
       </layout>
      </widget>
-     <widget class="QGroupBox" name="chartsPreview">
-      <property name="geometry">
-       <rect>
-        <x>10</x>
-        <y>370</y>
-        <width>341</width>
-        <height>211</height>
-       </rect>
-      </property>
-      <property name="title">
-       <string>Charts Preview</string>
-      </property>
-      <layout class="QVBoxLayout" name="verticalLayout_6">
-       <item>
-        <layout class="QGridLayout" name="chartsPreviewBox"/>
-       </item>
-      </layout>
-     </widget>
+      </item>
+      <item row="1" column="1">
+       <widget class="QGroupBox" name="chartsPreview">
+        <property name="minimumSize">
+         <size>
+          <width>300</width>
+          <height>0</height>
+         </size>
+        </property>
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+          <horstretch>1</horstretch>
+          <verstretch>1</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="title">
+         <string>Charts Preview</string>
+        </property>
+        <layout class="QVBoxLayout" name="verticalLayout_6">
+         <item>
+          <layout class="QGridLayout" name="chartsPreviewBox"/>
+         </item>
+        </layout>
+       </widget>
+      </item>
+     </layout>
     </widget>
     <widget class="QWidget" name="studentSearchPage">
      <widget class="QWidget" name="horizontalLayoutWidget">
