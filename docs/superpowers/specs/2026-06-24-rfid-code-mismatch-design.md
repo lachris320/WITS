@@ -22,16 +22,17 @@ the librarian."* Manual login for the **same student** (typing their school ID
 ## What is already ruled out
 
 The end-to-end RFID transport works. The kiosk error string is produced by the
-client at [`mainwindow.cpp:403`](../../../qt-app/mainwindow.cpp) **only** when it
-receives a well-formed JSON object whose `status != "success"`. That JSON comes
-from [`rfid_login.php:30`](../../../deliverables/loams_api/rfid_login.php), which
-returns `{"status":"error","message":"RFID not registered"}` **only** when
+client at [`mainwindow.cpp:403`](../../../qt-app/mainwindow.cpp) when it receives
+a well-formed JSON object whose `status != "success"`. The *expected* such
+response is `{"status":"error","message":"RFID not registered"}`, echoed at
+[`rfid_login.php:89`](../../../deliverables/loams_api/rfid_login.php) **only** when
 
 ```sql
 SELECT * FROM students WHERE code = ? LIMIT 1
 ```
 
-matches **zero rows**. Therefore:
+matches **zero rows** (the `else` branch of the `fetch_assoc` success test at
+`:30`). Therefore:
 
 - The request reaches the backend (else: `QNetworkReply` error → *"Network
   error"*, not *"Card not registered"*).
@@ -41,8 +42,19 @@ matches **zero rows**. Therefore:
   [`mainwindow.cpp:395`](../../../qt-app/mainwindow.cpp), which was the *earlier*,
   now-fixed `rtrim` parse-error bug — a different defect).
 
-**The defect is narrowed to exactly one thing: the card value sent by the kiosk
-does not string-equal any `students.code` in the database.**
+**Caveat — "Card not registered" is not a unique signal.** The client funnels
+*every* non-success JSON object into that one error string. In particular the
+`catch` block at [`rfid_login.php:97`](../../../deliverables/loams_api/rfid_login.php)
+returns `{"status":"error","message":"Internal server error"}` **with no
+`http_response_code()` set — i.e. HTTP 200** — so a *registered* card whose
+`library_visits` INSERT throws (NOT NULL / type / FK on the visit row) would show
+the identical kiosk message. Phase 1 therefore must read the literal response
+body: only `"RFID not registered"` confirms the zero-row value mismatch below;
+`"Internal server error"` points at the insert/transaction instead.
+
+**Once the body is confirmed to be `"RFID not registered"`, the defect is
+narrowed to exactly one thing: the card value sent by the kiosk does not
+string-equal any `students.code` in the database.**
 
 ## Data flow (with the relevant seams)
 
@@ -54,12 +66,19 @@ HID reader (keyboard wedge)
   → rfid_login.php                     trim($_POST['rfid_id'])          (SELECT ... WHERE code = ?)
 
 Registration side (how students.code is written):
-  Admin form  → adminwindow.cpp:1044 addPart("code", codeLineEdit) → register_student.php:13 trim() → INSERT
-  Bulk import → upload_students_zip.php / bulk_update_students.php   → INSERT/UPDATE students.code
+  Admin form ONLY → adminwindow.cpp:1044 addPart("code", codeLineEdit) → register_student.php:13 trim() → INSERT
 ```
 
-Neither write path nor the read path normalizes beyond `trim()`. No leading-zero
-handling, no width-padding, no case-folding exists at any seam.
+**The admin form is the *only* writer of `students.code`.** The bulk paths do
+**not** touch it: `upload_students_zip.php`'s INSERT (`:73-76`) is
+`(school_id, name, course, department, year_level, gender, status, photo)` — no
+`code` column — and `bulk_update_students.php`'s UPDATE (`:43-44`) sets only
+`name, course, year_level, department, gender, status`. A bulk-imported student
+therefore has a NULL/empty `code` until an admin fills it in by hand. The single
+write path (`register_student.php:13`) and the read path
+([`rfid_login.php:11`](../../../deliverables/loams_api/rfid_login.php)) both only
+`trim()` — no leading-zero handling, width-padding, or case-folding exists at any
+seam.
 
 ## Root-cause investigation status (the Iron Law)
 
@@ -77,19 +96,27 @@ measured.
 
 ### Ranked hypotheses (to be confirmed by Phase 1 evidence)
 
-1. **Leading-zero / format mismatch (most likely).** Card emits `0003241370`;
-   the student row stores `3241370` because the code was imported from
-   Excel/CSV, which silently coerces a digit string to a number and drops
-   leading zeros. Classic bulk-import defect; consistent with the four leading
-   zeros in the sample.
+1. **Data-entry mismatch on the admin form (most likely).** Because the admin
+   form is the *only* writer of `code`, the live cause is almost certainly how
+   it was filled in: a librarian typed the card's *printed* number (e.g.
+   `3241370`, or a serial that differs from the reader's output) into
+   `codeLineEdit` instead of letting the reader scan into the field. The stored
+   `code` then never equals the bytes the reader emits at the kiosk. (The four
+   leading zeros in `0003241370` are a plausible instance — typed without them —
+   but the mechanism is hand entry, **not** CSV/Excel import, which never writes
+   `code` at all.)
 2. **Hidden/extra characters from the reader.** A trailing/leading whitespace,
    a checksum digit, a prefix (e.g. `;`), or a different encoding the reader
-   appends — invisible in a normal log, visible in a length/hex dump.
+   appends — invisible in a normal log, visible in a length/hex dump. Would
+   affect the kiosk side even if the stored value was scanned in correctly.
 3. **Genuinely unregistered card.** The student exists (school ID works) but
-   their `code` column is empty or holds a *different* card's value. This is a
-   data-entry gap, not a code defect — the fix is operational, not in the app.
+   their `code` column is empty/NULL (e.g. bulk-imported and never filled in) or
+   holds a *different* card's value. Operational gap, not an app defect.
 
-Phase 1 distinguishes (1)/(2) from (3) definitively.
+These three are not sharply separated — (1) and (3) are points on the same
+"how was `code` populated" axis. Phase 1 (emitted bytes vs. stored bytes)
+distinguishes a *format* difference (1/2) from an *empty/wrong* value (3)
+definitively, and the answer to open-question #1 pins down the mechanism.
 
 ## Design
 
@@ -131,10 +158,10 @@ recommendation conditional on the confirmed cause:
 
 - **Option A — Canonical normalization at every seam (recommended if the cause
   is leading-zero/whitespace, hypothesis 1/2).** Define one pure normalization
-  for RFID codes and apply it at *all three* choke points so writes and reads
-  agree: kiosk scan (`handleRfidLogin`), admin registration
-  (`register_student.php` / bulk import), and the lookup
-  (`rfid_login.php`). Normalization must be **lossless and reversible in intent**
+  for RFID codes and apply it at the *three* choke points that handle a `code`
+  value so writes and reads agree: kiosk scan (`handleRfidLogin`), admin
+  registration (`register_student.php` — the sole writer of `code`), and the
+  lookup (`rfid_login.php`). Normalization must be **lossless and reversible in intent**
   — e.g. `trim()` + strip a *known* fixed prefix, or compare on a zero-padded
   fixed width — rather than blindly stripping all leading zeros (which could
   collide two distinct cards). The exact rule is chosen from the measured
@@ -160,11 +187,14 @@ recommendation conditional on the confirmed cause:
   admin form that the entered code matches a fresh scan.
 
 **Decision rule:** Phase 1 evidence → exactly one option. Do not implement more
-than one. Whichever is chosen, the *import* path that can strip leading zeros
-([`upload_students_zip.php`](../../../deliverables/loams_api/upload_students_zip.php),
-[`bulk_update_students.php`](../../../deliverables/loams_api/bulk_update_students.php))
-should be hardened so the bug cannot silently recur, even if the immediate fix
-is client-side.
+than one. The *recurrence* fix lives on the **registration path**, since that is
+the only writer of `code`: make the admin form capture the code by *scanning the
+card into the field* (so the stored value is, by construction, exactly what the
+reader emits) rather than relying on a hand-typed printed number, and/or validate
+the entered code against a live scan. (Note: hardening `upload_students_zip.php` /
+`bulk_update_students.php` is *not* applicable here — those paths never write
+`code`, so there is no zero-stripping to prevent there. If future bulk import is
+meant to populate `code`, that is a separate enhancement, not this fix.)
 
 ## Testing
 
@@ -213,3 +243,8 @@ is client-side.
    "strip leading zeros".)
 3. Is `students.code` column type `VARCHAR` or an integer type? An integer
    column cannot store leading zeros at all, which would *force* Option A/B.
+   Note: the *existence* of this bug is already evidence the column is textual —
+   if `code` were an integer type, `WHERE code = '0003241370'` would coerce the
+   string to `3241370` and **match** a row stored as `3241370`, so the mismatch
+   could not occur. All binds are `"s"` (string), consistent with `VARCHAR`.
+   Confirm the column type to be certain, but expect textual.
