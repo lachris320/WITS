@@ -90,8 +90,8 @@ For a frame whose children are absolutely positioned (e.g. General Page's `secur
 - **Database / Reporting / Visitor** — add a top-level layout to each page (`QVBoxLayout`
   / `QHBoxLayout` / `QGridLayout` as the existing visual arrangement dictates); dissolve the
   `…LayoutWidget` artifact containers and lift their inner layouts so the page layout owns
-  them; designate tables / charts / preview panels (e.g. `visitorTable`, `chartsPreviewBox`)
-  as the **Expanding** members and keep narrow form fields at natural size.
+  them; designate tables / charts / preview panels (e.g. `visitorTable`, the `chartsPreview`
+  group box) as the **Expanding** members and keep narrow form fields at natural size.
 - **Student Search** — same as above, **with one carve-out**: `searchOverlay` (see
   "Overlay widgets" below) must NOT be added to the page layout.
 - **Re-check main/guest** — sweep `mainwindow.ui` and `guestwindow.ui` for any remaining
@@ -140,16 +140,23 @@ Extend the existing `tst_responsive_ui` `QUiLoader`-based contract test (red →
   - **Frame-level layout**: each absolutely-positioned frame / group box gains a non-null
     `layout()` — `adminFrame`, `securityFrame`, `libraryFrame`, `settingsFrame` on General;
     and any frame on the other pages whose children are converted.
-  - **Expanding members**: assert the designated content widgets carry a horizontal
-    size policy of specifically **`QSizePolicy::Expanding`** (e.g. `visitorTable`,
-    `chartsPreviewBox`). A generic "growing" check would NOT go red — `QFrame`/`QGroupBox`
-    already default to `Preferred` — so require `Expanding` on the named members to make it
-    a real guard.
+  - **Expanding members**: assert the designated content **widgets** carry a horizontal
+    size policy of specifically **`QSizePolicy::Expanding`** — e.g. `visitorTable`, and the
+    `chartsPreview` **QGroupBox** (note: `chartsPreviewBox` is its inner `QGridLayout`, which
+    has no `sizePolicy` — assert on the group box `chartsPreview`, not the layout). A generic
+    "growing" check would NOT go red — `QFrame`/`QGroupBox` already default to `Preferred` —
+    so require `Expanding` on the named members to make it a real guard.
   - **objectName rename guard, two layers:** (a) every enumerated critical `objectName`
     still resolves via `findChild` after load; plus (b) a **mechanical** check — the sorted
-    set of `name="…"` attributes after conversion is a superset of the committed set, i.e.
-    **zero deletions** (catches names the enumerated list forgot). The overlay carve-out
-    means `searchOverlay` must still resolve via `findChild` after Student Search converts.
+    set of `name="…"` attributes after conversion still contains every committed name
+    **except the explicitly-dissolved artifact containers**. The conversion intentionally
+    removes the Qt Designer artifact names (`horizontalLayoutWidget`,
+    `horizontalLayoutWidget_2`, `horizontalLayoutWidget_3`, `formLayoutWidget_4`,
+    `formLayoutWidget_5`, `formLayoutWidget_6`, `gridLayoutWidget`); these are bound by no
+    `.cpp` and no stylesheet, so deleting them is safe. The guard therefore checks
+    `committed_names − {dissolved artifacts} ⊆ post_conversion_names` (i.e. zero deletions
+    of any *real* widget). The overlay carve-out means `searchOverlay` must still resolve
+    via `findChild` after Student Search converts.
 - Convert the `.ui` files until the suite is **green**.
 
 Automated tests prove the **structure** (layouts exist, names preserved, Expanding members
