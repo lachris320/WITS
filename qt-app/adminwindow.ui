@@ -1296,6 +1296,12 @@ QProgressBar {
      </layout>
     </widget>
     <widget class="QWidget" name="reportingPage">
+     <property name="minimumSize">
+      <size>
+       <width>640</width>
+       <height>0</height>
+      </size>
+     </property>
      <property name="styleSheet">
       <string notr="true">/* === REPORTING PAGE BACKGROUND === */
 QWidget#reportingPage {
@@ -1715,137 +1721,116 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
       <layout class="QGridLayout" name="gridLayout_4">
        <item row="0" column="0">
         <widget class="QWidget" name="visualizatioWidget" native="true">
-         <widget class="QLabel" name="label_24">
-          <property name="geometry">
-           <rect>
-            <x>10</x>
-            <y>120</y>
-            <width>141</width>
-            <height>21</height>
-           </rect>
-          </property>
-          <property name="font">
-           <font>
-            <family>Segoe UI</family>
-            <pointsize>11</pointsize>
-            <fontweight>DemiBold</fontweight>
-           </font>
-          </property>
-          <property name="text">
-           <string>Select Chart Type:</string>
-          </property>
-         </widget>
-         <widget class="QComboBox" name="paletteComboBox">
-          <property name="geometry">
-           <rect>
-            <x>50</x>
-            <y>40</y>
-            <width>141</width>
-            <height>24</height>
-           </rect>
-          </property>
-          <property name="font">
-           <font>
-            <family>Segoe UI</family>
-            <pointsize>-1</pointsize>
-           </font>
-          </property>
+         <layout class="QVBoxLayout" name="verticalLayout_visualization">
           <item>
-           <property name="text">
-            <string>Default(Grey)</string>
-           </property>
+           <widget class="QLabel" name="label_19">
+            <property name="font">
+             <font>
+              <family>Segoe UI</family>
+              <pointsize>11</pointsize>
+              <fontweight>DemiBold</fontweight>
+             </font>
+            </property>
+            <property name="text">
+             <string>Select Color Palette:</string>
+            </property>
+           </widget>
           </item>
           <item>
-           <property name="text">
-            <string>Blue</string>
-           </property>
+           <widget class="QComboBox" name="paletteComboBox">
+            <property name="font">
+             <font>
+              <family>Segoe UI</family>
+              <pointsize>-1</pointsize>
+             </font>
+            </property>
+            <item>
+             <property name="text">
+              <string>Default(Grey)</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Blue</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Green</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Red</string>
+             </property>
+            </item>
+           </widget>
           </item>
           <item>
-           <property name="text">
-            <string>Green</string>
-           </property>
+           <widget class="QLabel" name="palettePreview">
+            <property name="minimumSize">
+             <size>
+              <width>200</width>
+              <height>50</height>
+             </size>
+            </property>
+            <property name="text">
+             <string/>
+            </property>
+           </widget>
           </item>
           <item>
-           <property name="text">
-            <string>Red</string>
-           </property>
-          </item>
-         </widget>
-         <widget class="QLabel" name="label_19">
-          <property name="geometry">
-           <rect>
-            <x>10</x>
-            <y>10</y>
-            <width>141</width>
-            <height>21</height>
-           </rect>
-          </property>
-          <property name="font">
-           <font>
-            <family>Segoe UI</family>
-            <pointsize>11</pointsize>
-            <fontweight>DemiBold</fontweight>
-           </font>
-          </property>
-          <property name="text">
-           <string>Select Color Palette:</string>
-          </property>
-         </widget>
-         <widget class="QLabel" name="palettePreview">
-          <property name="geometry">
-           <rect>
-            <x>10</x>
-            <y>70</y>
-            <width>200</width>
-            <height>50</height>
-           </rect>
-          </property>
-          <property name="minimumSize">
-           <size>
-            <width>200</width>
-            <height>50</height>
-           </size>
-          </property>
-          <property name="text">
-           <string/>
-          </property>
-         </widget>
-         <widget class="QComboBox" name="chartTypeBox">
-          <property name="geometry">
-           <rect>
-            <x>50</x>
-            <y>150</y>
-            <width>141</width>
-            <height>24</height>
-           </rect>
-          </property>
-          <property name="font">
-           <font>
-            <family>Segoe UI</family>
-            <pointsize>-1</pointsize>
-           </font>
-          </property>
-          <item>
-           <property name="text">
-            <string> All Chart Types</string>
-           </property>
+           <widget class="QLabel" name="label_24">
+            <property name="font">
+             <font>
+              <family>Segoe UI</family>
+              <pointsize>11</pointsize>
+              <fontweight>DemiBold</fontweight>
+             </font>
+            </property>
+            <property name="text">
+             <string>Select Chart Type:</string>
+            </property>
+           </widget>
           </item>
           <item>
-           <property name="text">
-            <string>Bar Chart</string>
-           </property>
+           <widget class="QComboBox" name="chartTypeBox">
+            <property name="font">
+             <font>
+              <family>Segoe UI</family>
+              <pointsize>-1</pointsize>
+             </font>
+            </property>
+            <item>
+             <property name="text">
+              <string> All Chart Types</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Bar Chart</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Pie Chart</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Line Chart</string>
+             </property>
+            </item>
+           </widget>
           </item>
           <item>
-           <property name="text">
-            <string>Pie Chart</string>
-           </property>
+           <spacer name="verticalSpacer_visualization">
+            <property name="orientation">
+             <enum>Qt::Vertical</enum>
+            </property>
+           </spacer>
           </item>
-          <item>
-           <property name="text">
-            <string>Line Chart</string>
-           </property>
-          </item>
-         </widget>
+         </layout>
         </widget>
        </item>
       </layout>
@@ -1973,6 +1958,12 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
      </layout>
     </widget>
     <widget class="QWidget" name="studentSearchPage">
+     <property name="minimumSize">
+      <size>
+       <width>640</width>
+       <height>0</height>
+      </size>
+     </property>
      <layout class="QVBoxLayout" name="verticalLayout_searchPage">
       <item>
        <layout class="QHBoxLayout" name="horizontalLayout">
@@ -2215,6 +2206,12 @@ font: bold 12px &quot;Segoe UI&quot;;
      </widget>
     </widget>
     <widget class="QWidget" name="visitorPage">
+     <property name="minimumSize">
+      <size>
+       <width>640</width>
+       <height>0</height>
+      </size>
+     </property>
      <layout class="QVBoxLayout" name="verticalLayout_visitorPage">
       <item>
        <layout class="QHBoxLayout" name="horizontalLayout_visitorTop">

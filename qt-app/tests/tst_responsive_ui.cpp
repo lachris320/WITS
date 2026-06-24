@@ -34,6 +34,7 @@ private slots:
     void visitorTableExpands();
     void searchOverlayPreserved();
     void adminCriticalNamesResolve();
+    void visualizationWidgetHasLayout();
 };
 
 QWidget *TestResponsiveUi::loadUi(const QString &fileName)
@@ -179,6 +180,7 @@ void TestResponsiveUi::chartsPreviewExpands()
     QWidget *g = w->findChild<QWidget *>("chartsPreview");
     QVERIFY2(g, "chartsPreview group box not found");
     QCOMPARE(g->sizePolicy().horizontalPolicy(), QSizePolicy::Expanding);
+    QCOMPARE(g->sizePolicy().verticalPolicy(), QSizePolicy::Expanding);
 }
 
 void TestResponsiveUi::visitorTableExpands()
@@ -225,7 +227,10 @@ void TestResponsiveUi::adminCriticalNamesResolve()
         "individualRegistrationBox", "bulkRegistrationBox", "bulkTable", "bulkProgressBar",
         "departmentComboBox", "deleteRecordsBtn", "resetCountBtn", "deactivateBtn",
         "filterDepartmentBox", "filterCourseBox", "durationTypeBox", "durationTypeWidget",
-        "paletteComboBox", "chartTypeBox", "chartsPreview",
+        "specificDay", "specificMonth", "semester", "widget_2",
+        "dateEdit", "monthComboBox", "yearComboBox", "semesterComboBox",
+        "semYearComboBox", "startDateEdit", "endDateEdit",
+        "paletteComboBox", "chartTypeBox", "chartsPreview", "visualizatioWidget", "palettePreview",
         "generatePDFBtn", "generateExcelBtn", "statusLabel",
         "searchLineEdit", "searchBtn", "searchDepartmentFilter", "searchCourseFilter",
         "studentSearchTable", "selectAllBtn", "editStudentBtn", "deleteStudentBtn",
@@ -237,6 +242,19 @@ void TestResponsiveUi::adminCriticalNamesResolve()
         QVERIFY2(w->findChild<QWidget *>(n),
                  qPrintable(QString("critical objectName '%1' missing").arg(n)));
     }
+}
+
+void TestResponsiveUi::visualizationWidgetHasLayout()
+{
+    QScopedPointer<QWidget> w(loadUi("adminwindow.ui"));
+    QVERIFY2(w, "failed to load adminwindow.ui");
+    // The Visualization box's inner container held absolutely-positioned controls
+    // (palette/chart-type labels + combos) that stayed glued top-left when the box
+    // grew. It must carry its own layout so those controls reflow with the page.
+    QWidget *vw = w->findChild<QWidget *>("visualizatioWidget");
+    QVERIFY2(vw, "visualizatioWidget not found");
+    QVERIFY2(vw->layout() != nullptr,
+             "visualizatioWidget has no layout — its controls will not reflow");
 }
 
 QTEST_MAIN(TestResponsiveUi)
