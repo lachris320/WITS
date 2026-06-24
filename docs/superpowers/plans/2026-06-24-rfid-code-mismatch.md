@@ -111,18 +111,45 @@ set_tests_properties(tst_rfidcodeinspect PROPERTIES
 )
 ```
 
-- [ ] **Step 3: Run the test to verify it fails**
+- [ ] **Step 3: Create a STUB header so the test compiles but fails**
+
+We want a *meaningful* red — the test running and failing on an assertion, not just a
+missing-header compile error (which would never prove the expected strings are right). Create
+`qt-app/rfidcodeinspect.h` with a deliberately-wrong stub:
+
+```cpp
+#ifndef RFIDCODEINSPECT_H
+#define RFIDCODEINSPECT_H
+
+#include <QString>
+
+namespace RfidCodeInspect {
+
+// STUB — returns empty so the test fails on QCOMPARE (replaced in Step 5).
+inline QString describe(const QString &code)
+{
+    Q_UNUSED(code);
+    return QString();
+}
+
+} // namespace RfidCodeInspect
+
+#endif // RFIDCODEINSPECT_H
+```
+
+- [ ] **Step 4: Build and run the test — verify it FAILS on the assertion**
 
 ```powershell
 $env:PATH = "C:\Qt\6.11.1\mingw_64\bin;C:\Qt\Tools\mingw1310_64\bin;C:\Qt\Tools\CMake_64\bin;C:\Qt\Tools\Ninja;" + $env:PATH
 cmake -S qt-app -B qt-app/build -G Ninja -DCMAKE_PREFIX_PATH="C:/Qt/6.11.1/mingw_64"
 cmake --build qt-app/build
+ctest --test-dir qt-app/build -R tst_rfidcodeinspect --output-on-failure
 ```
-Expected: **build FAILS** at compile/link of `tst_rfidcodeinspect` — `rfidcodeinspect.h: No such file or directory` (the header does not exist yet). This is the red state.
+Expected: the target **builds**, the test **runs and FAILS** — `Compared values are not the same / Actual ("") != Expected ("value=\"0003241370\" ...")`. This proves the test discriminates (a wrong expected-hex string would NOT reach green by accident).
 
-- [ ] **Step 4: Write the minimal implementation**
+- [ ] **Step 5: Write the real implementation**
 
-Create `qt-app/rfidcodeinspect.h`:
+Replace the stub body in `qt-app/rfidcodeinspect.h` with:
 
 ```cpp
 #ifndef RFIDCODEINSPECT_H
@@ -136,6 +163,11 @@ Create `qt-app/rfidcodeinspect.h`:
 // are directly comparable against the stored students.code. Header-only and
 // dependency-free (no Widgets/network) so it links into both the app and the
 // unit-test target. See apiconfig.h for the same header-only pattern.
+//
+// NOTE: the hex dump is Latin-1 — any code point > 0xFF renders as 3f ('?').
+// Harmless for ASCII-digit keyboard-wedge output (the realistic case); if a
+// reader ever emits non-ASCII, value= shows the real char while hex= shows 3f,
+// which is itself a useful signal.
 namespace RfidCodeInspect {
 
 inline QString describe(const QString &code)
@@ -152,7 +184,7 @@ inline QString describe(const QString &code)
 #endif // RFIDCODEINSPECT_H
 ```
 
-- [ ] **Step 5: Run the test to verify it passes**
+- [ ] **Step 6: Build and run the test — verify it PASSES**
 
 ```powershell
 cmake --build qt-app/build
@@ -160,14 +192,14 @@ ctest --test-dir qt-app/build -R tst_rfidcodeinspect --output-on-failure
 ```
 Expected: `100% tests passed, 0 tests failed out of 1` — `tst_rfidcodeinspect` PASS (3 functions).
 
-- [ ] **Step 6: Confirm the rest of the suite still builds/passes**
+- [ ] **Step 7: Confirm the rest of the suite still builds/passes**
 
 ```powershell
 ctest --test-dir qt-app/build --output-on-failure
 ```
 Expected: all existing targets still pass; one new test (`tst_rfidcodeinspect`) added.
 
-- [ ] **Step 7: Commit (via the `commit` skill)**
+- [ ] **Step 8: Commit (via the `commit` skill)**
 
 Stage `qt-app/rfidcodeinspect.h`, `qt-app/tests/tst_rfidcodeinspect.cpp`, `qt-app/tests/CMakeLists.txt`.
 Suggested message: `feat(rfid): add pure RfidCodeInspect::describe diagnostic helper`
@@ -252,15 +284,36 @@ Suggested message: `fix(rfid): log the real scanned code + literal response (tem
 
 This is the deliverable that *unblocks Phase 2*. No code changes; it produces a written finding.
 
-- [ ] **Step 1: Run the app and scan the known card**
+- [ ] **Step 1: Make `qDebug` output visible, then scan the known card**
 
-Launch `qt-app/build/WITS.exe` from a console (so `qDebug` is visible), tap the sample card, and record the `RFID SCAN:` line, e.g. `RFID SCAN: value="0003241370" len=10 hex=30 30 30 33 32 34 31 33 37 30`.
+> **Important — `WITS` is a GUI-subsystem app** (`qt-app/CMakeLists.txt:67` sets
+> `WIN32_EXECUTABLE TRUE`). On Windows it does **not** attach to the launching console, and
+> Qt's default handler routes `qDebug` to `OutputDebugString`, **not** the terminal — so just
+> "running from a console" shows nothing. Use one of these to actually see the lines:
+>
+> - **Option A (no rebuild) — DebugView.** Run Sysinternals *DebugView* (`Dbgview.exe`,
+>   "Capture → Capture Win32") as Administrator, then launch `qt-app/build/WITS.exe` normally.
+>   The `RFID SCAN:` / `RFID RESPONSE:` lines appear in DebugView.
+> - **Option B (rebuild) — temporary console subsystem.** Temporarily make the app a console
+>   app so `qDebug` goes to stderr, then revert after capture:
+>   ```powershell
+>   $env:PATH = "C:\Qt\6.11.1\mingw_64\bin;C:\Qt\Tools\mingw1310_64\bin;C:\Qt\Tools\CMake_64\bin;C:\Qt\Tools\Ninja;" + $env:PATH
+>   cmake -S qt-app -B qt-app/build -G Ninja -DCMAKE_PREFIX_PATH="C:/Qt/6.11.1/mingw_64" `
+>     -DWITS_CONSOLE=ON   # only if you add an option; otherwise edit CMakeLists.txt:67 WIN32_EXECUTABLE FALSE
+>   cmake --build qt-app/build
+>   .\qt-app\build\WITS.exe   # qDebug now prints to this terminal
+>   ```
+>   Then restore `WIN32_EXECUTABLE TRUE` (or drop the option) and rebuild. Do **not** commit the
+>   console flip.
+>
+> Either way, tap the sample card and record the `RFID SCAN:` line, e.g.
+> `RFID SCAN: value="0003241370" len=10 hex=30 30 30 33 32 34 31 33 37 30`.
 
 - [ ] **Step 2: Read the literal server response**
 
 Record the `RFID RESPONSE:` line. **Branch:**
   - Body contains `"RFID not registered"` → genuine zero-row value mismatch → continue to Step 3.
-  - Body contains `"Internal server error"` → NOT a value mismatch; the `library_visits` INSERT is throwing on a registered card. **Stop this gate** — the fix is server-side (the insert/transaction in `rfid_login.php`), and Phase 2 should be re-scoped around that. Capture the PHP error log (`deliverables/loams_api/logs/`) and hand off.
+  - Body contains `"Internal server error"` → NOT a value mismatch; the `library_visits` INSERT is throwing on a registered card. **Stop this gate** — the fix is server-side (the insert/transaction in `rfid_login.php`), and Phase 2 should be re-scoped around that. Capture the server's configured PHP error log (`error_log()` at `rfid_login.php:96` writes to the SAPI/`php.ini` destination — typically the Apache/XAMPP error log, e.g. `C:\xampp\apache\logs\error.log`, not necessarily a folder under `deliverables/`) and hand off.
 
 - [ ] **Step 3: Read back the stored value (read-only SQL, run by the operator)**
 
@@ -299,7 +352,13 @@ Phase 2 is intentionally **not** broken into bite-sized tasks here: the normaliz
 
 This task MUST be completed before the branch is finished / PR'd (binding PII rule). It runs after Phase 2's fix is verified, so the diagnostic has served its purpose.
 
-- [ ] **Step 1: Remove both `TEMP DIAGNOSTIC` lines** added in Task 2 (the `RFID SCAN:` and `RFID RESPONSE:` `qDebug` calls), and the `#include "rfidcodeinspect.h"` if `describe` is no longer referenced from `mainwindow.cpp`.
+- [ ] **Step 1: Remove both `TEMP DIAGNOSTIC` lines** added by Task 2 (the `RFID SCAN:` line and the Task-2-modified `RFID RESPONSE:` line *inside `handleRfidLogin`*, both carrying the `// TEMP DIAGNOSTIC` comment), and the `#include "rfidcodeinspect.h"` if `describe` is no longer referenced from `mainwindow.cpp`.
+
+  > **Do not touch `mainwindow.cpp:278`.** A *pre-existing*, separately-introduced
+  > `qDebug() << "RFID RESPONSE:";` lives in the **manual login** handler (`~:277-279`), unrelated
+  > to this plan — it is NOT one of the two lines to remove here. (It is itself a pre-existing
+  > PII-bearing log worth cleaning up, but that is out of scope for this branch — flag it as a
+  > separate follow-up rather than deleting it under this task.)
 
 - [ ] **Step 2: Decide on the helper.** If Phase 2 Option A reused `RfidCodeInspect` (or a normalizer beside it), keep `rfidcodeinspect.h` + its test. If nothing else uses it (YAGNI), remove `qt-app/rfidcodeinspect.h`, `qt-app/tests/tst_rfidcodeinspect.cpp`, and its `tst_rfidcodeinspect` block in `qt-app/tests/CMakeLists.txt`.
 
@@ -310,7 +369,9 @@ cmake --build qt-app/build
 ctest --test-dir qt-app/build --output-on-failure
 ```
 ```bash
-grep -rn "RFID SCAN\|RFID RESPONSE\|TEMP DIAGNOSTIC" qt-app/   # expect: no matches
+# Scope to THIS plan's unique markers only. Do NOT grep "RFID RESPONSE" — it also matches the
+# pre-existing manual-login log at mainwindow.cpp:278, which this task does not remove.
+grep -rn "RFID SCAN\|TEMP DIAGNOSTIC" qt-app/   # expect: no matches
 ```
 Expected: clean build, all tests pass, grep returns nothing.
 
