@@ -1973,16 +1973,9 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
      </layout>
     </widget>
     <widget class="QWidget" name="studentSearchPage">
-     <widget class="QWidget" name="horizontalLayoutWidget">
-      <property name="geometry">
-       <rect>
-        <x>0</x>
-        <y>10</y>
-        <width>631</width>
-        <height>51</height>
-       </rect>
-      </property>
-      <layout class="QHBoxLayout" name="horizontalLayout">
+     <layout class="QVBoxLayout" name="verticalLayout_searchPage">
+      <item>
+       <layout class="QHBoxLayout" name="horizontalLayout">
        <item>
         <widget class="QLabel" name="label_37">
          <property name="text">
@@ -2000,18 +1993,10 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
          </property>
         </widget>
        </item>
-      </layout>
-     </widget>
-     <widget class="QWidget" name="horizontalLayoutWidget_2">
-      <property name="geometry">
-       <rect>
-        <x>0</x>
-        <y>60</y>
-        <width>631</width>
-        <height>34</height>
-       </rect>
-      </property>
-      <layout class="QHBoxLayout" name="horizontalLayout_2">
+       </layout>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="horizontalLayout_2">
        <item>
         <widget class="QLabel" name="label_38">
          <property name="text">
@@ -2032,18 +2017,17 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
        <item>
         <widget class="QComboBox" name="searchCourseFilter"/>
        </item>
-      </layout>
-     </widget>
-     <widget class="QTableWidget" name="studentSearchTable">
-      <property name="geometry">
-       <rect>
-        <x>0</x>
-        <y>90</y>
-        <width>631</width>
-        <height>451</height>
-       </rect>
-      </property>
-      <property name="alternatingRowColors">
+       </layout>
+      </item>
+      <item>
+       <widget class="QTableWidget" name="studentSearchTable">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+          <horstretch>0</horstretch>
+          <verstretch>1</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="alternatingRowColors">
        <bool>true</bool>
       </property>
       <property name="selectionMode">
@@ -2103,18 +2087,11 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
         <string>Visits</string>
        </property>
       </column>
-      <column/>
-     </widget>
-     <widget class="QWidget" name="horizontalLayoutWidget_3">
-      <property name="geometry">
-       <rect>
-        <x>0</x>
-        <y>539</y>
-        <width>631</width>
-        <height>51</height>
-       </rect>
-      </property>
-      <layout class="QHBoxLayout" name="horizontalLayout_3">
+       <column/>
+       </widget>
+      </item>
+      <item>
+       <layout class="QHBoxLayout" name="horizontalLayout_3">
        <item>
         <spacer name="horizontalSpacer">
          <property name="orientation">
@@ -2163,8 +2140,9 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
          </property>
         </widget>
        </item>
-      </layout>
-     </widget>
+       </layout>
+      </item>
+     </layout>
      <widget class="QWidget" name="searchOverlay" native="true">
       <property name="geometry">
        <rect>
