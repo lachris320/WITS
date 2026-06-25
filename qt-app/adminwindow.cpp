@@ -424,7 +424,7 @@ adminWindow::adminWindow(QWidget *parent)
     updateChartsPreview(QJsonArray());  // Initialize with empty charts
     connectFilterSignals();
 
-    connect(ui->applyChangesBtn,&QPushButton::clicked, this, &::adminWindow::onApplyChangesBtnClicked);
+    connect(ui->applyChangesBtn, &QPushButton::clicked, this, &adminWindow::onApplyChangesBtnClicked);
 
     connect(ui->schoolName, &QLineEdit::textChanged, this, [=](const QString &) {
         changesMade = true;
@@ -1191,45 +1191,6 @@ adminWindow::adminWindow(QWidget *parent)
         ui->adminNameLineEdit->setText(savedName);
     if (!savedPosition.isEmpty())
         ui->adminPositionLineEdit->setText(savedPosition);
-    // --- Slot for updateBtn ---
-    connect(ui->applyChangesBtn, &QPushButton::clicked, this, [=]() {
-        QSettings settings("MyCompany", "MyApp");
-
-        // 🏫 Save school info
-        settings.setValue("school/name", ui->schoolName->text());
-        settings.setValue("school/address", ui->address->text());
-
-        // 👤 Save admin info
-        settings.setValue("admin/name", ui->adminNameLineEdit->text());
-        settings.setValue("admin/position", ui->adminPositionLineEdit->text());
-
-        // 🕒 Save library hours (always AM → PM)
-        int openHour12  = ui->openHourSpinBox->value();   // 1–12 AM
-        int closeHour12 = ui->closeHourSpinBox->value();  // 1–12 PM
-
-        int openHour24  = (openHour12 == 12) ? 0  : openHour12;        // 12 AM → 0
-        int closeHour24 = (closeHour12 == 12) ? 12 : closeHour12 + 12; // PM → +12 except 12 PM
-
-        settings.setValue("library/openHour", openHour24);
-        settings.setValue("library/closeHour", closeHour24);
-
-        // 🖼️ Update dashboard visuals (logo & poster)
-        QString logoPath = settings.value("school/logoPath").toString();
-        QString posterPath = settings.value("school/posterPath").toString();
-
-        if (!logoPath.isEmpty() && QFile::exists(logoPath)) {
-            emit logoChanged(logoPath);
-        }
-
-        if (!posterPath.isEmpty() && QFile::exists(posterPath)) {
-            emit posterChanged(posterPath);
-        }
-
-        // ✅ Mark settings as saved
-        changesMade = false;
-
-        QMessageBox::information(this, "Saved", "Changes applied successfully.");
-    });
 }
     // --- CSV Bulk Registration ---
 
@@ -1762,6 +1723,12 @@ void adminWindow::onApplyChangesBtnClicked()
             QPixmap(logoPath).scaled(150, 150, Qt::KeepAspectRatio, Qt::SmoothTransformation)
             );
     }
+
+    QString posterPath = settings.value("school/posterPath", "").toString();
+    if (!logoPath.isEmpty() && QFile::exists(logoPath))
+        emit logoChanged(logoPath);
+    if (!posterPath.isEmpty() && QFile::exists(posterPath))
+        emit posterChanged(posterPath);
 
     // Set changesMade to false BEFORE showing message box and closing
     changesMade = false;
