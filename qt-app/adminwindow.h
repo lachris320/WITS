@@ -36,6 +36,7 @@
 #include "attachfilesdialog.h"
 #include <QGraphicsOpacityEffect>
 #include <QPropertyAnimation>
+#include <QPagedPaintDevice>
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class adminWindow; }
@@ -152,11 +153,14 @@ private slots:
     void loadFilterDepartments();
     void onGeneratePDFBtnClicked();
     void onGenerateExcelBtnClicked();
+    void onPrintReportBtnClicked();
     void onFilterDepartmentBoxCurrentIndexChanged(int index);
     void fetchReportData(const QJsonObject &filters);
     void exportReportToPDF(const QJsonArray &data, const QJsonObject &filters);
     void exportReportToExcel(const QJsonArray &data, const QJsonObject &filters);
     void loadAvailableYears();
+    bool paintReport(QPagedPaintDevice *device, int resolution,
+                     const QJsonArray &data, const QJsonObject &filters);
 };
 
 
