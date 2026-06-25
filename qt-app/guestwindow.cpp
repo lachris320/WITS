@@ -1,5 +1,6 @@
 #include "guestwindow.h"
 #include "ui_guestwindow.h"
+#include "apiconfig.h"
 #include <QMessageBox>
 #include <QNetworkRequest>
 #include <QNetworkReply>
@@ -36,7 +37,7 @@ void GuestWindow::onSubmitBtnClicked()
         return;
     }
 
-    QUrl url("http://localhost/guest_login.php");
+    QUrl url = ApiConfig::endpoint("guest_login.php");
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
 

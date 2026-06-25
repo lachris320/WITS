@@ -19,7 +19,7 @@ This rule applies to any task that has **3+ steps OR touches 2+ files OR needs r
 - Read files to gather context for a subagent prompt
 - Run non-destructive bash (`git status`, `ls`, `grep`, and building/running tests for verification)
 - Edit a single line in a single file for a trivial fix (e.g. a typo) — **never** multi-line code or function bodies
-- Invoke the Skill tool for slash commands (e.g. `/codex-review`)
+- Invoke the Skill tool for slash commands (e.g. `/claude-review`)
 - Commit (always via the `commit` skill — see section 5), push, create PRs
 
 ### The main agent MUST delegate to a subagent
@@ -53,16 +53,16 @@ All feature work follows test-driven development: **red → green → refactor**
 
 From the build directory: `ctest --output-on-failure` (configure once with `cmake -S qt-app -B qt-app/build` then `cmake --build qt-app/build`). If no test target exists yet, say so plainly — don't report a passing suite that isn't there.
 
-## 3. Codex Code Review (After Implementation)
+## 3. Claude Code Review (After Implementation)
 
-After all tasks are implemented and the build + tests are green, run `/codex-review` **before finishing the branch**.
+After all tasks are implemented and the build + tests are green, run `/claude-review` **before finishing the branch**.
 
-Codex reviews for correctness, security, performance, and maintainability — a second opinion from a different model family. The review runs in rounds until **APPROVE or 3 rounds max**.
+Claude review spins up a fresh-context Claude instance to check correctness, security, performance, and maintainability — a second opinion with no memory of how the code was written. The review runs in rounds until **APPROVE or 3 rounds max**.
 
 ### Process
 
-1. Invoke `/codex-review` via the **Skill tool** (it is a slash command). This is the sanctioned way to run Codex review on this project. (For a same-family fresh-context review instead — or in addition, for high-stakes merges — use `/claude-review`.)
-   - Invocation: use the Skill tool with `skill: "codex-review"`.
+1. Invoke `/claude-review` via the **Skill tool** (it is a slash command). This is the sanctioned way to run review on this project.
+   - Invocation: use the Skill tool with `skill: "claude-review"`.
 2. Fix **Critical** and **Important** findings.
 3. Re-submit until **APPROVE**.
 4. Then proceed to QA / manual verification of the app.
@@ -71,7 +71,7 @@ Codex reviews for correctness, security, performance, and maintainability — a 
 
 ## 4. Finish Work
 
-When all tasks are done, the build passes, tests are green, and Codex has approved:
+When all tasks are done, the build passes, tests are green, and Claude review has approved:
 
 - Verify the build: configure + `cmake --build qt-app/build` completes with no new warnings/errors. Smoke-test the `WITS` executable for the feature you touched (this is a desktop GUI app — a clean build is necessary but not sufficient; actually run it).
 - Use `superpowers:finishing-a-development-branch`.

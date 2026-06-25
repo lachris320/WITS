@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "./ui_mainwindow.h"
+#include "apiconfig.h"
 #include "adminwindow.h"
 #include "guestwindow.h"
 #include <QDateTime>
@@ -24,6 +25,9 @@
 #include <QSettings>
 #include <QGraphicsOpacityEffect>
 #include <QPropertyAnimation>
+#include <QApplication>
+#include <QElapsedTimer>
+#include "rfidkeyboardfilter.h"
 
 
 MainWindow::MainWindow(QWidget *parent)
@@ -76,6 +80,11 @@ MainWindow::MainWindow(QWidget *parent)
 
     ui->guestLoginBtn->setVisible(false);
     connect(ui->username, &QLineEdit::returnPressed, this, &MainWindow::handleLogin);
+
+    rfidFilter = new RfidKeyboardFilter(this, this);
+    qApp->installEventFilter(rfidFilter);
+    connect(rfidFilter, &RfidKeyboardFilter::rfidScanned, this, &MainWindow::handleRfidLogin);
+    m_rfidDebounceClock.start();
 
     QSettings settings("MyCompany", "MyApp");
     QString schoolName = settings.value("school/name", "").toString();
@@ -140,6 +149,7 @@ MainWindow::MainWindow(QWidget *parent)
             border-radius: 10px;
             padding: 8px;
             background: white;
+            color: #2C3E50;
             font-size: 14px;
         }
         QLabel#schoolNameLabel, QLabel#schAddressLabel {
@@ -246,10 +256,10 @@ void MainWindow::handleLogin() {
     bool ok;
     input.toLongLong(&ok); // check if numeric
     if (ok) { // numeric -> assume student ID
-        url = QUrl("http://localhost/student_login.php");
+        url = ApiConfig::endpoint("student_login.php");
         postData.addQueryItem("school_id", input);
     } else { // non-numeric -> assume admin key
-        url = QUrl("http://localhost/admin_login.php");
+        url = ApiConfig::endpoint("admin_login.php");
         postData.addQueryItem("admin_key", input);
     }
 
@@ -275,47 +285,7 @@ void MainWindow::handleLogin() {
         QJsonObject obj = jsonDoc.object();
         if (obj["status"].toString() == "success") {
             if (obj.contains("student")) {
-                QJsonObject student = obj["student"].toObject();
-                QString photoUrl = student["photo_url"].toString();
-
-                // ✅ Download and display the student photo
-                if (!photoUrl.isEmpty()) {
-                    QNetworkAccessManager *photoManager = new QNetworkAccessManager(this);
-                    QNetworkRequest request{QUrl(photoUrl)};
-
-                    connect(photoManager, &QNetworkAccessManager::finished, this, [this](QNetworkReply *photoReply) {
-                        if (photoReply->error() == QNetworkReply::NoError) {
-                            QByteArray imgData = photoReply->readAll();
-                            QPixmap pix;
-                            if (pix.loadFromData(imgData)) {
-                                ui->studentPhoto->setPixmap(pix.scaled(
-                                    ui->studentPhoto->width(),
-                                    ui->studentPhoto->height(),
-                                    Qt::KeepAspectRatio,
-                                    Qt::SmoothTransformation
-                                    ));
-
-                                // 🎬 Fade-in animation
-                                QGraphicsOpacityEffect *fadeEffect = new QGraphicsOpacityEffect();
-                                ui->studentPhoto->setGraphicsEffect(fadeEffect);
-
-                                QPropertyAnimation *fadeAnim = new QPropertyAnimation(fadeEffect, "opacity");
-                                fadeAnim->setDuration(700);       // 0.7 seconds fade
-                                fadeAnim->setStartValue(0.0);
-                                fadeAnim->setEndValue(1.0);
-                                fadeAnim->start(QAbstractAnimation::DeleteWhenStopped);
-                            }
-                        }
-                        photoReply->deleteLater();
-                    });
-                    photoManager->get(request);
-                }
-
-                // ✅ Update right panel
-                recentLogins.prepend(student);
-                while (recentLogins.size() > 9)
-                    recentLogins.removeLast();
-                refreshRightPanel();
+                displayStudent(obj["student"].toObject());
             } else {
                 adminWin->show();
             }
@@ -323,6 +293,111 @@ void MainWindow::handleLogin() {
     });
 }
 
+void MainWindow::displayStudent(const QJsonObject &student) {
+    QString photoUrl = student["photo_url"].toString();
+
+    if (!photoUrl.isEmpty()) {
+        QNetworkAccessManager *photoManager = new QNetworkAccessManager(this);
+        connect(photoManager, &QNetworkAccessManager::finished, photoManager, &QObject::deleteLater);
+        QNetworkRequest request{QUrl(photoUrl)};
+
+        connect(photoManager, &QNetworkAccessManager::finished, this, [this](QNetworkReply *photoReply) {
+            if (photoReply->error() == QNetworkReply::NoError) {
+                QByteArray imgData = photoReply->readAll();
+                QPixmap pix;
+                if (pix.loadFromData(imgData)) {
+                    ui->studentPhoto->setPixmap(pix.scaled(
+                        ui->studentPhoto->width(),
+                        ui->studentPhoto->height(),
+                        Qt::KeepAspectRatio,
+                        Qt::SmoothTransformation
+                        ));
+
+                    QGraphicsOpacityEffect *fadeEffect = new QGraphicsOpacityEffect();
+                    ui->studentPhoto->setGraphicsEffect(fadeEffect);
+
+                    QPropertyAnimation *fadeAnim = new QPropertyAnimation(fadeEffect, "opacity");
+                    fadeAnim->setDuration(700);
+                    fadeAnim->setStartValue(0.0);
+                    fadeAnim->setEndValue(1.0);
+                    fadeAnim->start(QAbstractAnimation::DeleteWhenStopped);
+                }
+            }
+            photoReply->deleteLater();
+        });
+        photoManager->get(request);
+    }
+
+    recentLogins.prepend(student);
+    while (recentLogins.size() > 9)
+        recentLogins.removeLast();
+    refreshRightPanel();
+}
+
+void MainWindow::showKioskStatus(const QString &message, bool error) {
+    if (!m_statusLabel) {
+        m_statusLabel = new QLabel(this);
+        m_statusLabel->setAlignment(Qt::AlignCenter);
+        m_statusLabel->hide();
+    }
+    m_statusLabel->setStyleSheet(error
+        ? "background:#C0392B; color:white; padding:14px; border-radius:8px; font-size:18px;"
+        : "background:#27AE60; color:white; padding:14px; border-radius:8px; font-size:18px;");
+    m_statusLabel->setText(message);
+    m_statusLabel->adjustSize();
+    m_statusLabel->move((width() - m_statusLabel->width()) / 2,
+                        height() - m_statusLabel->height() - 60);
+    m_statusLabel->raise();
+    m_statusLabel->show();
+    QTimer::singleShot(2500, m_statusLabel, [this]() {
+        if (m_statusLabel) m_statusLabel->hide();
+    });
+}
+
+void MainWindow::handleRfidLogin(const QString &code) {
+    // Debounce: ignore the same card re-scanned within 2.5s (one tap = one visit).
+    const qint64 now = m_rfidDebounceClock.elapsed();
+    if (code == m_lastRfidCode && (now - m_lastRfidMs) < 2500)
+        return;
+    m_lastRfidCode = code;
+    m_lastRfidMs = now;
+
+    ui->username->clear(); // remove the brief flash of the scanned code
+
+    QUrl url = ApiConfig::endpoint("rfid_login.php");
+    QUrlQuery postData;
+    postData.addQueryItem("rfid_id", code);
+
+    QNetworkRequest request;
+    request.setUrl(url);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
+    QNetworkReply *reply = networkManager->post(request, postData.toString(QUrl::FullyEncoded).toUtf8());
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+
+        if (reply->error() != QNetworkReply::NoError) {
+            showKioskStatus("Network error. Please try again.", true);
+            reply->deleteLater();
+            return;
+        }
+
+        QByteArray response = reply->readAll();
+        reply->deleteLater();
+
+        QJsonDocument jsonDoc = QJsonDocument::fromJson(response);
+        if (!jsonDoc.isObject()) {
+            showKioskStatus("Invalid server response.", true);
+            return;
+        }
+
+        QJsonObject obj = jsonDoc.object();
+        if (obj["status"].toString() == "success" && obj.contains("student")) {
+            displayStudent(obj["student"].toObject());
+        } else {
+            showKioskStatus("Card not registered. Please see the librarian.", true);
+        }
+    });
+}
 
 void MainWindow::toggleFullscreen(){
     if (isFullScreen()){

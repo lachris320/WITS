@@ -66,7 +66,7 @@ try {
         // Build photo URL safely (same as student_login.php)
         $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
         $host = $_SERVER['HTTP_HOST'];
-        $scriptDir = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/\');
+        $scriptDir = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/\\');
         $baseURL = $protocol . $host . $scriptDir . '/';
 
         // Check if photo exists using absolute path

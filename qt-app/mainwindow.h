@@ -5,8 +5,13 @@
 #include <QNetworkRequest>
 #include <QNetworkReply>
 #include <QMainWindow>
+#include <QElapsedTimer>
+#include <QJsonObject>
 #include "adminwindow.h"
 #include "guestwindow.h"
+
+class RfidKeyboardFilter;
+class QLabel;
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -29,6 +34,7 @@ private slots:
     void handleLogin();
     void toggleFullscreen();
     void updateSchoolInfo(const QString &schoolName, const QString &address, const QFont &font);
+    void handleRfidLogin(const QString &code);
 
 private:
     Ui::MainWindow *ui;
@@ -40,6 +46,14 @@ private:
     void updateTimeandDate();
     void updateLogo(const QString &logoPath);
     void updatePoster(const QString &posterPath);
+    void displayStudent(const QJsonObject &student);
+    void showKioskStatus(const QString &message, bool error);
+
+    RfidKeyboardFilter *rfidFilter = nullptr;
+    QLabel *m_statusLabel = nullptr;
+    QElapsedTimer m_rfidDebounceClock;
+    QString m_lastRfidCode;
+    qint64 m_lastRfidMs = -100000;
 };
 
 #endif // MAINWINDOW_H
