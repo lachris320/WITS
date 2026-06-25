@@ -33,6 +33,7 @@ private slots:
     void inactiveLoginWindowIgnoresScan();
     void printableKeyNotConsumed();
     void emptyTextEventSkipped();
+    void propagatedKeyCountedOnce();
 };
 
 // ---- isTerminator (unchanged) ----
@@ -88,16 +89,15 @@ void TestRfidKeyboardFilter::recognizedScanEmitsAndConsumesEnter()
     PublicFilter filter(&w);
     QSignalSpy spy(&filter, &RfidKeyboardFilter::rfidScanned);
 
-    QWidget watched;
-
-    // Feed printable keys — none should be consumed
-    QCOMPARE(feedPrintable(filter, watched, Qt::Key_A, QStringLiteral("A")), false);
-    QCOMPARE(feedPrintable(filter, watched, Qt::Key_B, QStringLiteral("B")), false);
-    QCOMPARE(feedPrintable(filter, watched, Qt::Key_C, QStringLiteral("C")), false);
-    QCOMPARE(feedPrintable(filter, watched, Qt::Key_1, QStringLiteral("1")), false);
+    // Feed printable keys to the primary target (the active window) — none
+    // should be consumed.
+    QCOMPARE(feedPrintable(filter, w, Qt::Key_A, QStringLiteral("A")), false);
+    QCOMPARE(feedPrintable(filter, w, Qt::Key_B, QStringLiteral("B")), false);
+    QCOMPARE(feedPrintable(filter, w, Qt::Key_C, QStringLiteral("C")), false);
+    QCOMPARE(feedPrintable(filter, w, Qt::Key_1, QStringLiteral("1")), false);
 
     // Feed terminator — must be consumed and signal emitted
-    bool consumed = feedTerminator(filter, watched);
+    bool consumed = feedTerminator(filter, w);
     QVERIFY(consumed);
     QCOMPARE(spy.count(), 1);
     QCOMPARE(spy.at(0).at(0).toString(), QStringLiteral("ABC1"));
@@ -116,14 +116,14 @@ void TestRfidKeyboardFilter::inactiveLoginWindowIgnoresScan()
     PublicFilter filter(&loginWindow);
     QSignalSpy spy(&filter, &RfidKeyboardFilter::rfidScanned);
 
-    QWidget watched;
+    // Keys are delivered to the active window (`other`); the active-window gate
+    // blocks them before the primary-target gate is reached.
+    feedPrintable(filter, other, Qt::Key_A, QStringLiteral("A"));
+    feedPrintable(filter, other, Qt::Key_B, QStringLiteral("B"));
+    feedPrintable(filter, other, Qt::Key_C, QStringLiteral("C"));
+    feedPrintable(filter, other, Qt::Key_1, QStringLiteral("1"));
 
-    feedPrintable(filter, watched, Qt::Key_A, QStringLiteral("A"));
-    feedPrintable(filter, watched, Qt::Key_B, QStringLiteral("B"));
-    feedPrintable(filter, watched, Qt::Key_C, QStringLiteral("C"));
-    feedPrintable(filter, watched, Qt::Key_1, QStringLiteral("1"));
-
-    bool consumed = feedTerminator(filter, watched);
+    bool consumed = feedTerminator(filter, other);
 
     // Gate not open — Enter must NOT be consumed, no signal emitted
     QVERIFY(!consumed);
@@ -138,9 +138,8 @@ void TestRfidKeyboardFilter::printableKeyNotConsumed()
     makeActive(w);
 
     PublicFilter filter(&w);
-    QWidget watched;
 
-    bool consumed = feedPrintable(filter, watched, Qt::Key_X, QStringLiteral("X"));
+    bool consumed = feedPrintable(filter, w, Qt::Key_X, QStringLiteral("X"));
     QVERIFY(!consumed);
 }
 
@@ -154,12 +153,48 @@ void TestRfidKeyboardFilter::emptyTextEventSkipped()
     PublicFilter filter(&w);
     QSignalSpy spy(&filter, &RfidKeyboardFilter::rfidScanned);
 
-    QWidget watched;
     QKeyEvent ev(QEvent::KeyPress, Qt::Key_Shift, Qt::NoModifier, QString());
-    bool consumed = filter.callEventFilter(&watched, &ev);
+    bool consumed = filter.callEventFilter(&w, &ev);
 
     QVERIFY(!consumed);
     QCOMPARE(spy.count(), 0);
+}
+
+// ---- Test 5: a key propagated to an ancestor is counted only once ----
+void TestRfidKeyboardFilter::propagatedKeyCountedOnce()
+{
+    QWidget w;
+    w.show();
+    makeActive(w);
+
+    // The fix resolves a key's "primary target" as focusWidget() else
+    // activeWindow(). With nothing focused, target == &w, so a delivery to &w
+    // is the primary copy and a delivery to any other widget is a propagated
+    // ancestor copy to be ignored. Assert the precondition so the test stays
+    // deterministic under the offscreen QPA.
+    QVERIFY(QApplication::focusWidget() == nullptr);
+
+    PublicFilter filter(&w);
+    QSignalSpy spy(&filter, &RfidKeyboardFilter::rfidScanned);
+
+    QWidget ancestor; // a different recipient — stands in for the propagated copy
+
+    // Simulate Qt invoking the app-global filter twice per physical key: once
+    // for the focus target (&w) and once as the key propagates to an ancestor.
+    // Code "123" is >= the detector's minCodeLength (3) in its single form, so
+    // the FIXED behavior still produces a recognized scan.
+    feedPrintable(filter, w,        Qt::Key_1, QStringLiteral("1"));
+    feedPrintable(filter, ancestor, Qt::Key_1, QStringLiteral("1"));
+    feedPrintable(filter, w,        Qt::Key_2, QStringLiteral("2"));
+    feedPrintable(filter, ancestor, Qt::Key_2, QStringLiteral("2"));
+    feedPrintable(filter, w,        Qt::Key_3, QStringLiteral("3"));
+    feedPrintable(filter, ancestor, Qt::Key_3, QStringLiteral("3"));
+
+    // The terminator is delivered to the primary target; on a recognized scan
+    // the filter consumes it, so propagation stops (no ancestor copy).
+    QVERIFY(feedTerminator(filter, w));
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(spy.at(0).at(0).toString(), QStringLiteral("123"));
 }
 
 QTEST_MAIN(TestRfidKeyboardFilter)

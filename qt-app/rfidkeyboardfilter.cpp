@@ -25,6 +25,17 @@ bool RfidKeyboardFilter::eventFilter(QObject *watched, QEvent *event)
     if (QApplication::activeWindow() != m_loginWindow)
         return QObject::eventFilter(watched, event);
 
+    // A qApp-global event filter is invoked once per recipient as an unconsumed
+    // key propagates up the parent chain — which double-counts each scanned
+    // character. Act only on the key's primary target (the focus widget, or the
+    // active window when nothing is focused); skip the propagated ancestor
+    // deliveries.
+    QWidget *target = QApplication::focusWidget();
+    if (!target)
+        target = QApplication::activeWindow();
+    if (watched != target)
+        return QObject::eventFilter(watched, event);
+
     auto *ke = static_cast<QKeyEvent *>(event);
     const qint64 ts = m_clock.elapsed();
 
