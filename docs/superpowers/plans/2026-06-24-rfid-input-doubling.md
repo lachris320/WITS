@@ -195,7 +195,7 @@ FAIL!  : TestRfidKeyboardFilter::propagatedKeyCountedOnce() Compared values are 
    Actual   (spy.at(0).at(0).toString()): "112233"
    Expected (QStringLiteral("123"))      : "123"
 ```
-The four updated behavioral tests (Step 1) PASS. If `propagatedKeyCountedOnce` PASSES here, the test is not reproducing the bug — stop and fix the test before implementing.
+The four updated behavioral tests (Step 1) PASS. If `propagatedKeyCountedOnce` PASSES here, the test is not reproducing the bug — stop and fix the test before implementing. If instead it FAILS at `QVERIFY(QApplication::focusWidget() == nullptr)` (rather than at the `"112233"` vs `"123"` value comparison shown above), the offscreen QPA gave the widget a focus widget and the test's precondition is wrong — investigate that before treating the failure as the expected RED.
 
 (If `cmake --build` reports the build dir is missing, configure first:
 `cmake -S qt-app -B qt-app/build -G Ninja -DCMAKE_PREFIX_PATH="C:/Qt/6.11.1/mingw_64"`.)
