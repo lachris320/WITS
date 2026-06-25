@@ -69,6 +69,9 @@ test.pdf
 .vs/
 *.code-workspace
 
+# Agent orchestration scratch (SDD progress ledger, task briefs)
+.superpowers/
+
 # System files
 .DS_Store
 Thumbs.db
