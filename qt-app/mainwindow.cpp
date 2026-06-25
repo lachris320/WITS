@@ -464,7 +464,7 @@ void MainWindow::updateLogo(const QString &logoPath) {
         QPixmap pix(logoPath);
         if (!pix.isNull()) {
             ui->schLogo_Image->setPixmap(pix.scaled(
-                ui->schLogo_Image->size(),
+                ui->schLogo_Image->contentsRect().size(),
                 Qt::KeepAspectRatio,
                 Qt::SmoothTransformation)
             );
