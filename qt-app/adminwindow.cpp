@@ -1,5 +1,6 @@
 #include "adminwindow.h"
 #include "ui_adminwindow.h"
+#include "apiconfig.h"
 #include "busyindicator.h"
 #include "attachfilesdialog.h"
 #include <QGraphicsDropShadowEffect>
@@ -380,7 +381,7 @@ adminWindow::adminWindow(QWidget *parent)
 
                 QString dept = ui->searchDepartmentFilter->currentText();
 
-                QUrl url("http://localhost/get_courses.php");
+                QUrl url = ApiConfig::endpoint("get_courses.php");
                 QUrlQuery query;
                 query.addQueryItem("department", dept);
                 url.setQuery(query);
@@ -793,7 +794,7 @@ adminWindow::adminWindow(QWidget *parent)
     connect(ui->cancelEditBtn, &QPushButton::clicked, this, &adminWindow::onCancelEditBtnClicked);
 
     // ✅ Create a URL with query parameter include_all=true
-    QUrl deptUrl("http://localhost/get_departments.php");
+    QUrl deptUrl = ApiConfig::endpoint("get_departments.php");
     QUrlQuery query;
     query.addQueryItem("include_all", "true");
     deptUrl.setQuery(query);
@@ -893,7 +894,7 @@ adminWindow::adminWindow(QWidget *parent)
             return; // Cancel if admin chooses No
         }
 
-        QUrl url("http://localhost/deactivate_department.php");
+        QUrl url = ApiConfig::endpoint("deactivate_department.php");
         QNetworkRequest request(url);
         request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
 
@@ -941,7 +942,7 @@ adminWindow::adminWindow(QWidget *parent)
             return; // Cancel if admin chooses No
         }
 
-        QUrl url("http://localhost/reset_visits.php");
+        QUrl url = ApiConfig::endpoint("reset_visits.php");
         QNetworkRequest request(url);
         request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
 
@@ -990,7 +991,7 @@ adminWindow::adminWindow(QWidget *parent)
             return; // Cancel if admin says No
         }
 
-        QUrl url("http://localhost/delete_department.php");
+        QUrl url = ApiConfig::endpoint("delete_department.php");
         QNetworkRequest request(url);
         request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
 
@@ -1068,7 +1069,7 @@ adminWindow::adminWindow(QWidget *parent)
         }
 
         // Setup network request
-        QUrl url("http://localhost/register_student.php");
+        QUrl url = ApiConfig::endpoint("register_student.php");
         QNetworkRequest request(url);
         // NOTE: Don't set ContentTypeHeader manually - multipart sets it automatically
 
@@ -1120,7 +1121,7 @@ adminWindow::adminWindow(QWidget *parent)
     });
 
     connect(ui->updateBtn, &QPushButton::clicked, this, [=]() {
-        QUrl url("http://localhost/update_admin_key.php");
+        QUrl url = ApiConfig::endpoint("update_admin_key.php");
         QNetworkRequest request(url);
         request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
 
@@ -1305,7 +1306,7 @@ void adminWindow::onUpdateDatabaseBtnClicked()
     }
 
     // Step 2: Call check_duplicates.php
-    QUrl url("http://localhost/check_duplicates.php");
+    QUrl url = ApiConfig::endpoint("check_duplicates.php");
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
@@ -1401,7 +1402,7 @@ void adminWindow::onUpdateDatabaseBtnClicked()
         ui->bulkProgressBar->setValue(0);
 
         // Create multipart form data
-        QNetworkRequest uploadRequest(QUrl("http://localhost/upload_students_zip.php"));
+        QNetworkRequest uploadRequest(ApiConfig::endpoint("upload_students_zip.php"));
         QHttpMultiPart *multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
 
         // Excel file part
@@ -1875,7 +1876,7 @@ void adminWindow::onClearAttendanceCheckBoxStateChanged(int state) {
 }
 
 void adminWindow::loadDepartments() {
-    QUrl url("http://localhost/get_departments.php");
+    QUrl url = ApiConfig::endpoint("get_departments.php");
     QNetworkRequest request(url);
 
     QNetworkReply *reply = networkManager->get(request);
@@ -1916,7 +1917,7 @@ void adminWindow::onGeneratePDFBtnClicked() {
     emit reportFiltersReady(filters);
     qDebug() << "Generate PDF filters:" << filters;
 
-    QUrl url("http://localhost/get_report_data.php");
+    QUrl url = ApiConfig::endpoint("get_report_data.php");
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
@@ -1953,7 +1954,7 @@ void adminWindow::onGenerateExcelBtnClicked() {
     emit reportFiltersReady(filters);
     qDebug() << "Generate Excel filters:" << filters;
 
-    QUrl url("http://localhost/get_report_data.php");
+    QUrl url = ApiConfig::endpoint("get_report_data.php");
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
@@ -2102,7 +2103,7 @@ QJsonObject adminWindow::collectReportFiltersForPreview()
 
 
 void adminWindow::loadFilterDepartments() {
-    QUrl url("http://localhost/get_departments.php");
+    QUrl url = ApiConfig::endpoint("get_departments.php");
     QNetworkRequest request(url);
 
     QNetworkReply *reply = networkManager->get(request);
@@ -2139,7 +2140,7 @@ void adminWindow::loadFilterDepartments() {
 }
 
 void adminWindow::loadAvailableYears() {
-    QUrl url("http://localhost/get_years.php");
+    QUrl url = ApiConfig::endpoint("get_years.php");
     QNetworkRequest request(url);
 
     QNetworkReply *reply = networkManager->get(request);
@@ -2183,7 +2184,7 @@ void adminWindow::onFilterDepartmentBoxCurrentIndexChanged(int index)
 
     QString department = ui->filterDepartmentBox->currentText();
 
-    QUrl url("http://localhost/get_courses.php");
+    QUrl url = ApiConfig::endpoint("get_courses.php");
     QUrlQuery query;
     query.addQueryItem("department", department);
     query.addQueryItem("include_all", "true"); // ✅ Request "All" option
@@ -2223,7 +2224,7 @@ void adminWindow::onFilterDepartmentBoxCurrentIndexChanged(int index)
 }
 
 void adminWindow::fetchReportData(const QJsonObject &filters) {
-    QUrl url("http://localhost/get_report_data.php");
+    QUrl url = ApiConfig::endpoint("get_report_data.php");
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
@@ -2972,7 +2973,7 @@ void adminWindow::optimizeChartForPreview(QChart *chart)
 // Fetch preview data from API
 void adminWindow::fetchPreviewData(const QJsonObject &filters)
 {
-    QUrl url("http://localhost/api.php/reports/data");  // ✅ Using API router
+    QUrl url = ApiConfig::endpoint("api.php/reports/data");  // ✅ Using API router
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
@@ -3213,7 +3214,7 @@ void adminWindow::clearCheckboxes()
 
 void adminWindow::bulkUpdateStudents(const QJsonArray &updates)
 {
-    QUrl url("http://localhost/bulk_update_students.php");
+    QUrl url = ApiConfig::endpoint("bulk_update_students.php");
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
@@ -3390,7 +3391,7 @@ void adminWindow::performStudentSearch(bool showOverlay)
     QString course = ui->searchCourseFilter->currentText();
 
     // Prepare request
-    QUrl url("http://localhost/search_students.php");
+    QUrl url = ApiConfig::endpoint("search_students.php");
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
@@ -3509,7 +3510,7 @@ void adminWindow::onSearchBtnClicked()
 
 void adminWindow::deleteStudents(const QStringList &schoolIds)
 {
-    QUrl url("http://localhost/delete_students.php");
+    QUrl url = ApiConfig::endpoint("delete_students.php");
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
@@ -3587,7 +3588,7 @@ void adminWindow::onDeleteStudentBtnClicked()
 void adminWindow::populateFilters()
 {
     // --- Populate Departments ---
-    QNetworkRequest deptRequest(QUrl("http://localhost/get_departments.php"));
+    QNetworkRequest deptRequest(ApiConfig::endpoint("get_departments.php"));
     QNetworkReply *deptReply = networkManager->get(deptRequest);
 
     connect(deptReply, &QNetworkReply::finished, this, [=]() {
@@ -3672,7 +3673,7 @@ void adminWindow::hideSearchOverlay()
 
 void adminWindow::loadAllStudents()
 {
-    QUrl url("http://localhost/search_students.php");
+    QUrl url = ApiConfig::endpoint("search_students.php");
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
@@ -3708,7 +3709,7 @@ void adminWindow::onDepartmentFilterChanged(int)
     QString department = ui->searchDepartmentFilter->currentText();
     if (department.isEmpty() || department == "Select Department") return;
 
-    QUrl url("http://localhost/get_courses.php");
+    QUrl url = ApiConfig::endpoint("get_courses.php");
     QUrlQuery query;
     query.addQueryItem("department", department);
     // ✅ Don't include "All" for search filter
@@ -3738,7 +3739,7 @@ void adminWindow::onDepartmentFilterChanged(int)
 void adminWindow::loadVisitorLogs(const QString &search, const QString &dateType,
                                   const QString &startDate, const QString &endDate)
 {
-    QUrl url("http://localhost/get_visitors.php");
+    QUrl url = ApiConfig::endpoint("get_visitors.php");
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 

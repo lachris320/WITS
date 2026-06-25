@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "./ui_mainwindow.h"
+#include "apiconfig.h"
 #include "adminwindow.h"
 #include "guestwindow.h"
 #include <QDateTime>
@@ -255,10 +256,10 @@ void MainWindow::handleLogin() {
     bool ok;
     input.toLongLong(&ok); // check if numeric
     if (ok) { // numeric -> assume student ID
-        url = QUrl("http://localhost/student_login.php");
+        url = ApiConfig::endpoint("student_login.php");
         postData.addQueryItem("school_id", input);
     } else { // non-numeric -> assume admin key
-        url = QUrl("http://localhost/admin_login.php");
+        url = ApiConfig::endpoint("admin_login.php");
         postData.addQueryItem("admin_key", input);
     }
 
@@ -291,7 +292,6 @@ void MainWindow::handleLogin() {
         }
     });
 }
-
 
 void MainWindow::displayStudent(const QJsonObject &student) {
     QString photoUrl = student["photo_url"].toString();
@@ -364,7 +364,7 @@ void MainWindow::handleRfidLogin(const QString &code) {
 
     ui->username->clear(); // remove the brief flash of the scanned code
 
-    QUrl url("http://localhost/rfid_login.php");
+    QUrl url = ApiConfig::endpoint("rfid_login.php");
     QUrlQuery postData;
     postData.addQueryItem("rfid_id", code);
 
@@ -374,6 +374,7 @@ void MainWindow::handleRfidLogin(const QString &code) {
     QNetworkReply *reply = networkManager->post(request, postData.toString(QUrl::FullyEncoded).toUtf8());
 
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+
         if (reply->error() != QNetworkReply::NoError) {
             showKioskStatus("Network error. Please try again.", true);
             reply->deleteLater();
