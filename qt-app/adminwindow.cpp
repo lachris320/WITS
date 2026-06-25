@@ -29,6 +29,8 @@
 #include <QJsonArray>
 #include <QDebug>
 #include <QPdfWriter>
+#include <QPrinter>
+#include <QPrintDialog>
 #include <QPainter>
 #include <QColor>
 #include <QChart>
@@ -46,6 +48,8 @@
 #include "xlsxformat.h"
 #include "xlsxcellrange.h"
 #include "reportpreviewdialog.h"
+
+#include <functional>
 
 #include <QtCharts/QChart>
 #include <QtCharts/QChartView>
@@ -657,6 +661,10 @@ adminWindow::adminWindow(QWidget *parent)
     connect(ui->browsePhotoBtn, &QPushButton::clicked, this, &adminWindow::onBrowsePhotoBtnClicked);
     connect(ui->editStudentBtn, &QPushButton::clicked, this, &adminWindow::onEditStudentBtnClicked);
     connect(ui->updateDatabaseBtn, &QPushButton::clicked, this, &adminWindow::onUpdateDatabaseBtnClicked);
+    connect(ui->posterBrowseBtn, &QPushButton::clicked, this, &adminWindow::onPosterBrowseBtnClicked);
+    connect(ui->generatePDFBtn, &QPushButton::clicked, this, &adminWindow::onGeneratePDFBtnClicked);
+    connect(ui->generateExcelBtn, &QPushButton::clicked, this, &adminWindow::onGenerateExcelBtnClicked);
+    connect(ui->printReportBtn, &QPushButton::clicked, this, &adminWindow::onPrintReportBtnClicked);
 
 
     // --- Layout spacing ---
@@ -1880,55 +1888,14 @@ void adminWindow::loadDepartments() {
     });
 }
 
-void adminWindow::onGeneratePDFBtnClicked() {
-    QJsonObject filters = collectReportFilters(true); // show warnings if invalid
-    if (filters.isEmpty()) return; // stop if validation failed
-    emit reportFiltersReady(filters);
-    qDebug() << "Generate PDF filters:" << filters;
-
+void adminWindow::postReportData(const QJsonObject &filters,
+                                 std::function<void(const QJsonArray &)> onData)
+{
     QUrl url = ApiConfig::endpoint("get_report_data.php");
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
     QNetworkReply *reply = networkManager->post(request, QJsonDocument(filters).toJson());
-
-    connect(reply, &QNetworkReply::finished, this, [=]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            QMessageBox::critical(this, "Error", reply->errorString());
-            reply->deleteLater();
-            return;
-        }
-        QByteArray resp = reply->readAll();
-        reply->deleteLater();
-
-        QJsonDocument doc = QJsonDocument::fromJson(resp);
-        if (!doc.isObject()) {
-            QMessageBox::warning(this, "Error", "Invalid response from server.");
-            return;
-        }
-        QJsonObject obj = doc.object();
-        if (obj["status"].toString() == "success") {
-            QJsonArray data = obj["data"].toArray();
-            exportReportToPDF(data, filters);
-        } else {
-            QMessageBox::warning(this, "Error", obj["message"].toString());
-        }
-    });
-}
-
-void adminWindow::onGenerateExcelBtnClicked() {
-    QJsonObject filters = collectReportFilters(true); // show warnings if invalid
-    if (filters.isEmpty()) return; // stop if validation failed
-
-    emit reportFiltersReady(filters);
-    qDebug() << "Generate Excel filters:" << filters;
-
-    QUrl url = ApiConfig::endpoint("get_report_data.php");
-    QNetworkRequest request(url);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-
-    QNetworkReply *reply = networkManager->post(request, QJsonDocument(filters).toJson());
-
     connect(reply, &QNetworkReply::finished, this, [=]() {
         if (reply->error() != QNetworkReply::NoError) {
             QMessageBox::critical(this, "Error", reply->errorString());
@@ -1948,7 +1915,29 @@ void adminWindow::onGenerateExcelBtnClicked() {
             QMessageBox::warning(this, "Error", obj["message"].toString());
             return;
         }
-        QJsonArray rows = obj["data"].toArray();
+        onData(obj["data"].toArray());
+    });
+}
+
+void adminWindow::onGeneratePDFBtnClicked() {
+    QJsonObject filters = collectReportFilters(true); // show warnings if invalid
+    if (filters.isEmpty()) return; // stop if validation failed
+    emit reportFiltersReady(filters);
+    qDebug() << "Generate PDF filters:" << filters;
+
+    postReportData(filters, [=](const QJsonArray &data) {
+        exportReportToPDF(data, filters);
+    });
+}
+
+void adminWindow::onGenerateExcelBtnClicked() {
+    QJsonObject filters = collectReportFilters(true); // show warnings if invalid
+    if (filters.isEmpty()) return; // stop if validation failed
+
+    emit reportFiltersReady(filters);
+    qDebug() << "Generate Excel filters:" << filters;
+
+    postReportData(filters, [=](const QJsonArray &rows) {
         exportReportToExcel(rows, filters);
     });
 }
@@ -2271,42 +2260,18 @@ void adminWindow::fetchReportData(const QJsonObject &filters) {
     });
 }
 
-void adminWindow::exportReportToPDF(const QJsonArray &data, const QJsonObject &filters)
+bool adminWindow::paintReport(QPagedPaintDevice *device, int resolution,
+                              const QJsonArray &data, const QJsonObject &filters)
 {
-    qDebug() << "=== PDF EXPORT DEBUG ===";
-    qDebug() << "Data array size:" << data.size();
-    qDebug() << "Data contents:" << data;
-    qDebug() << "Filters received:" << filters;
-
-    if (data.isEmpty()) {
-        QMessageBox::information(this, "No Data",
-                                 "No data available for the selected filters. Please check your date range and department selection.");
-        return;
-    }
-
-    QString filePath = QFileDialog::getSaveFileName(this, "Save Report", "", "PDF Files (*.pdf)");
-    if (filePath.isEmpty()) {
-        QMessageBox::information(this, "Export Canceled", "No file selected.");
-        return;
-    }
-
-    QPdfWriter pdf(filePath);
-    // Increase resolution for crisper charts in the PDF
-    pdf.setPageOrientation(QPageLayout::Landscape);
-    pdf.setPageSize(QPageSize(QPageSize::A4));
-    pdf.setResolution(150); // -> good balance quality/filesize; increase to 300 if you want very high DPI
-    pdf.setPageMargins(QMarginsF(20, 20, 20, 20), QPageLayout::Millimeter);
-
     QPainter painter;
-    if (!painter.begin(&pdf)) {
-        QMessageBox::critical(this, "Error", "Failed to open PDF for writing.");
-        return;
+    if (!painter.begin(device)) {
+        return false;
     }
 
     auto finalize = qScopeGuard([&]() {
         if (painter.isActive()) {
             painter.end();
-            qDebug() << "PDF finalized successfully.";
+            qDebug() << "Report paint finalized successfully.";
         }
     });
 
@@ -2316,7 +2281,7 @@ void adminWindow::exportReportToPDF(const QJsonArray &data, const QJsonObject &f
         return clean;
     };
 
-    QRectF pageRect = pdf.pageLayout().paintRectPixels(pdf.resolution());
+    QRectF pageRect = device->pageLayout().paintRectPixels(resolution);
     int pageWidth  = pageRect.width();
     int pageHeight = pageRect.height();
     int margin     = pageWidth * 0.03;
@@ -2348,9 +2313,9 @@ void adminWindow::exportReportToPDF(const QJsonArray &data, const QJsonObject &f
     };
 
 
-    qDebug() << "PDF Width:" << pageWidth << "Height:" << pageHeight;
+    qDebug() << "Paint Width:" << pageWidth << "Height:" << pageHeight;
     qDebug() << "Calculated margin:" << margin;
-    qDebug() << "PDF Resolution:" << pdf.resolution();
+    qDebug() << "Paint Resolution:" << resolution;
 
     // ===== HEADER =====
     auto drawHeader = [&](int &y) {
@@ -2474,7 +2439,7 @@ void adminWindow::exportReportToPDF(const QJsonArray &data, const QJsonObject &f
 
         if (y > usableHeight - 200) {
             drawFooter(currentPage);
-            pdf.newPage();
+            device->newPage();
             currentPage++;
             y = margin;
             drawHeader(y);
@@ -2489,11 +2454,11 @@ void adminWindow::exportReportToPDF(const QJsonArray &data, const QJsonObject &f
         }
 
         drawFooter(currentPage);
-        pdf.newPage();
+        device->newPage();
         currentPage++;
         y = margin;        // reset Y for the new page
         drawHeader(y);
-        qDebug() << "New PDF page created for chart (" << label << "), page:" << currentPage;
+        qDebug() << "New page created for chart (" << label << "), page:" << currentPage;
 
         // Compute area for chart (leave space for footer)
         const int bottomReserve = 60;
@@ -2544,7 +2509,7 @@ void adminWindow::exportReportToPDF(const QJsonArray &data, const QJsonObject &f
     drawFooter(currentPage);
 
     // ===== PREPARED BY =====
-    pdf.newPage();
+    device->newPage();
     currentPage++;
 
     y = margin + 100;
@@ -2567,7 +2532,70 @@ void adminWindow::exportReportToPDF(const QJsonArray &data, const QJsonObject &f
     painter.drawText(QRect(sigX, y + 5, sigWidth, 20), Qt::AlignCenter, "(Signature)");
     drawFooter(currentPage);
 
+    return true;
+}
+
+void adminWindow::exportReportToPDF(const QJsonArray &data, const QJsonObject &filters)
+{
+    qDebug() << "=== PDF EXPORT DEBUG ===";
+    qDebug() << "Data array size:" << data.size();
+    qDebug() << "Data contents:" << data;
+    qDebug() << "Filters received:" << filters;
+
+    if (data.isEmpty()) {
+        QMessageBox::information(this, "No Data",
+                                 "No data available for the selected filters. Please check your date range and department selection.");
+        return;
+    }
+
+    QString filePath = QFileDialog::getSaveFileName(this, "Save Report", "", "PDF Files (*.pdf)");
+    if (filePath.isEmpty()) {
+        QMessageBox::information(this, "Export Canceled", "No file selected.");
+        return;
+    }
+
+    QPdfWriter pdf(filePath);
+    // Increase resolution for crisper charts in the PDF
+    pdf.setPageOrientation(QPageLayout::Landscape);
+    pdf.setPageSize(QPageSize(QPageSize::A4));
+    pdf.setResolution(150); // -> good balance quality/filesize; increase to 300 if you want very high DPI
+    pdf.setPageMargins(QMarginsF(20, 20, 20, 20), QPageLayout::Millimeter);
+
+    if (!paintReport(&pdf, 150, data, filters)) {
+        QMessageBox::critical(this, "Error", "Failed to open PDF for writing.");
+        return;
+    }
+
     QMessageBox::information(this, "Success", "Report exported to PDF successfully.");
+}
+
+void adminWindow::onPrintReportBtnClicked()
+{
+    QJsonObject filters = collectReportFilters(true); // show warnings if invalid
+    if (filters.isEmpty()) return; // stop if validation failed
+    emit reportFiltersReady(filters);
+    qDebug() << "Print Report filters:" << filters;
+
+    postReportData(filters, [=](const QJsonArray &data) {
+        if (data.isEmpty()) {
+            QMessageBox::information(this, "No Data",
+                                     "No data available for the selected filters. Please check your date range and department selection.");
+            return;
+        }
+
+        QPrinter printer(QPrinter::HighResolution);
+        printer.setPageOrientation(QPageLayout::Landscape);
+        printer.setPageSize(QPageSize(QPageSize::A4));
+        printer.setPageMargins(QMarginsF(20, 20, 20, 20), QPageLayout::Millimeter);
+
+        QPrintDialog dlg(&printer, this);
+        if (dlg.exec() != QDialog::Accepted)
+            return;
+
+        if (!paintReport(&printer, printer.resolution(), data, filters)) {
+            QMessageBox::critical(this, "Error", "Failed to start painting to printer.");
+        }
+    });
 }
 
 void adminWindow::exportReportToExcel(const QJsonArray &rows, const QJsonObject &filters)

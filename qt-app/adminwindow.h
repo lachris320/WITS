@@ -21,6 +21,7 @@
 #include <QCheckBox>
 #include <QHttpMultiPart>
 #include <QHttpPart>
+#include <functional>
 
 #include <QtCharts/QChart>
 #include <QtCharts/QChartView>
@@ -36,6 +37,7 @@
 #include "attachfilesdialog.h"
 #include <QGraphicsOpacityEffect>
 #include <QPropertyAnimation>
+#include <QPagedPaintDevice>
 
 QT_BEGIN_NAMESPACE
 namespace Ui { class adminWindow; }
@@ -118,6 +120,8 @@ private:
 
     QImage renderChartToImage(QChart *chart, const QSize &targetSize);
     void expandChartPlotArea(QChart *chart, const QSize &size);
+    void postReportData(const QJsonObject &filters,
+                        std::function<void(const QJsonArray &)> onData);
     QJsonArray currentReportData;
     QList<QPixmap> chartPixmaps;
     QJsonObject collectReportFilters(bool validateFilters = true);
@@ -152,11 +156,14 @@ private slots:
     void loadFilterDepartments();
     void onGeneratePDFBtnClicked();
     void onGenerateExcelBtnClicked();
+    void onPrintReportBtnClicked();
     void onFilterDepartmentBoxCurrentIndexChanged(int index);
     void fetchReportData(const QJsonObject &filters);
     void exportReportToPDF(const QJsonArray &data, const QJsonObject &filters);
     void exportReportToExcel(const QJsonArray &data, const QJsonObject &filters);
     void loadAvailableYears();
+    bool paintReport(QPagedPaintDevice *device, int resolution,
+                     const QJsonArray &data, const QJsonObject &filters);
 };
 
 
