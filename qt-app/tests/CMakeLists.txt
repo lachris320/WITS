@@ -37,17 +37,6 @@ set_tests_properties(tst_apiconfig PROPERTIES
     ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1"
 )
 
-qt_add_executable(tst_rfidcodeinspect
-    tst_rfidcodeinspect.cpp
-)
-set_target_properties(tst_rfidcodeinspect PROPERTIES WIN32_EXECUTABLE FALSE)
-target_include_directories(tst_rfidcodeinspect PRIVATE ${CMAKE_SOURCE_DIR})
-target_link_libraries(tst_rfidcodeinspect PRIVATE Qt${QT_VERSION_MAJOR}::Test)
-add_test(NAME tst_rfidcodeinspect COMMAND tst_rfidcodeinspect)
-set_tests_properties(tst_rfidcodeinspect PROPERTIES
-    ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1"
-)
-
 qt_add_executable(tst_theme
     tst_theme.cpp
 )

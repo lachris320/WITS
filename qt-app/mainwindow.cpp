@@ -28,7 +28,6 @@
 #include <QApplication>
 #include <QElapsedTimer>
 #include "rfidkeyboardfilter.h"
-#include "rfidcodeinspect.h"
 
 
 MainWindow::MainWindow(QWidget *parent)
@@ -368,8 +367,6 @@ void MainWindow::handleRfidLogin(const QString &code) {
     QUrl url = ApiConfig::endpoint("rfid_login.php");
     QUrlQuery postData;
     postData.addQueryItem("rfid_id", code);
-    // TEMP DIAGNOSTIC — remove before merge (PII: prints a card code).
-    qDebug().noquote() << "RFID SCAN:" << RfidCodeInspect::describe(code);
 
     QNetworkRequest request;
     request.setUrl(url);
@@ -385,8 +382,6 @@ void MainWindow::handleRfidLogin(const QString &code) {
         }
 
         QByteArray response = reply->readAll();
-        // TEMP DIAGNOSTIC — remove before merge (may contain student PII on success).
-        qDebug().noquote() << "RFID RESPONSE:" << QString::fromUtf8(response);
         reply->deleteLater();
 
         QJsonDocument jsonDoc = QJsonDocument::fromJson(response);
