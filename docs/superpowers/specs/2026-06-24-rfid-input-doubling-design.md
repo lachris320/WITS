@@ -114,6 +114,16 @@ fix is testable in the same style (no real windowing needed):
   ancestor) — then the terminator. Assert `rfidScanned` emits the **single**
   code (e.g. `"12"`), not the doubled code (`"1122"`). Against the unfixed code
   this test sees `"1122"` and fails; with the gate it passes.
+  - **Pin the target deterministically.** The gate resolves `target` as
+    `focusWidget()` first, falling back to `activeWindow()`. Under the
+    `offscreen` QPA used by the test, a stray focus widget would make `target`
+    something other than the active window and silently flip which `watched`
+    the test must pass — turning RED/GREEN flaky. So the test must assert its
+    starting state, not assume it: confirm `QApplication::focusWidget()` is
+    null (call `clearFocus()` on any widget that might hold it, or never give
+    one focus) so `target` provably resolves to the active window, and pass
+    the active window as the "primary target" `watched`. Make this explicit in
+    the test body rather than relying on the platform default.
 - **Update the existing behavioral tests** so their `watched` is the primary
   target (the active window) rather than an unrelated dummy widget, matching how
   Qt actually delivers the first copy — otherwise the gate would skip them.
