@@ -26,6 +26,17 @@ set_tests_properties(tst_rfidkeyboardfilter PROPERTIES
     ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1;QT_QPA_PLATFORM=offscreen"
 )
 
+qt_add_executable(tst_apiconfig
+    tst_apiconfig.cpp
+)
+set_target_properties(tst_apiconfig PROPERTIES WIN32_EXECUTABLE FALSE)
+target_include_directories(tst_apiconfig PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(tst_apiconfig PRIVATE Qt${QT_VERSION_MAJOR}::Test)
+add_test(NAME tst_apiconfig COMMAND tst_apiconfig)
+set_tests_properties(tst_apiconfig PROPERTIES
+    ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1"
+)
+
 qt_add_executable(tst_theme
     tst_theme.cpp
 )
