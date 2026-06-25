@@ -460,6 +460,10 @@ void MainWindow::resizeEvent(QResizeEvent *event) {
 }
 
 void MainWindow::updateLogo(const QString &logoPath) {
+    // Keep the logo area square: its height tracks the sidebar-driven width,
+    // so the logo fills the sidebar and the picture fits inside the square.
+    ui->schLogo_Image->setFixedHeight(ui->schLogo_Image->width());
+
     if (!logoPath.isEmpty() && QFile::exists(logoPath)) {
         QPixmap pix(logoPath);
         if (!pix.isNull()) {
