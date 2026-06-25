@@ -49,6 +49,8 @@
 #include "xlsxcellrange.h"
 #include "reportpreviewdialog.h"
 
+#include <functional>
+
 #include <QtCharts/QChart>
 #include <QtCharts/QChartView>
 #include <QtCharts/QBarSet>
@@ -1886,55 +1888,14 @@ void adminWindow::loadDepartments() {
     });
 }
 
-void adminWindow::onGeneratePDFBtnClicked() {
-    QJsonObject filters = collectReportFilters(true); // show warnings if invalid
-    if (filters.isEmpty()) return; // stop if validation failed
-    emit reportFiltersReady(filters);
-    qDebug() << "Generate PDF filters:" << filters;
-
+void adminWindow::postReportData(const QJsonObject &filters,
+                                 std::function<void(const QJsonArray &)> onData)
+{
     QUrl url = ApiConfig::endpoint("get_report_data.php");
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
     QNetworkReply *reply = networkManager->post(request, QJsonDocument(filters).toJson());
-
-    connect(reply, &QNetworkReply::finished, this, [=]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            QMessageBox::critical(this, "Error", reply->errorString());
-            reply->deleteLater();
-            return;
-        }
-        QByteArray resp = reply->readAll();
-        reply->deleteLater();
-
-        QJsonDocument doc = QJsonDocument::fromJson(resp);
-        if (!doc.isObject()) {
-            QMessageBox::warning(this, "Error", "Invalid response from server.");
-            return;
-        }
-        QJsonObject obj = doc.object();
-        if (obj["status"].toString() == "success") {
-            QJsonArray data = obj["data"].toArray();
-            exportReportToPDF(data, filters);
-        } else {
-            QMessageBox::warning(this, "Error", obj["message"].toString());
-        }
-    });
-}
-
-void adminWindow::onGenerateExcelBtnClicked() {
-    QJsonObject filters = collectReportFilters(true); // show warnings if invalid
-    if (filters.isEmpty()) return; // stop if validation failed
-
-    emit reportFiltersReady(filters);
-    qDebug() << "Generate Excel filters:" << filters;
-
-    QUrl url = ApiConfig::endpoint("get_report_data.php");
-    QNetworkRequest request(url);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-
-    QNetworkReply *reply = networkManager->post(request, QJsonDocument(filters).toJson());
-
     connect(reply, &QNetworkReply::finished, this, [=]() {
         if (reply->error() != QNetworkReply::NoError) {
             QMessageBox::critical(this, "Error", reply->errorString());
@@ -1954,7 +1915,29 @@ void adminWindow::onGenerateExcelBtnClicked() {
             QMessageBox::warning(this, "Error", obj["message"].toString());
             return;
         }
-        QJsonArray rows = obj["data"].toArray();
+        onData(obj["data"].toArray());
+    });
+}
+
+void adminWindow::onGeneratePDFBtnClicked() {
+    QJsonObject filters = collectReportFilters(true); // show warnings if invalid
+    if (filters.isEmpty()) return; // stop if validation failed
+    emit reportFiltersReady(filters);
+    qDebug() << "Generate PDF filters:" << filters;
+
+    postReportData(filters, [=](const QJsonArray &data) {
+        exportReportToPDF(data, filters);
+    });
+}
+
+void adminWindow::onGenerateExcelBtnClicked() {
+    QJsonObject filters = collectReportFilters(true); // show warnings if invalid
+    if (filters.isEmpty()) return; // stop if validation failed
+
+    emit reportFiltersReady(filters);
+    qDebug() << "Generate Excel filters:" << filters;
+
+    postReportData(filters, [=](const QJsonArray &rows) {
         exportReportToExcel(rows, filters);
     });
 }
@@ -2593,49 +2576,24 @@ void adminWindow::onPrintReportBtnClicked()
     emit reportFiltersReady(filters);
     qDebug() << "Print Report filters:" << filters;
 
-    QUrl url = ApiConfig::endpoint("get_report_data.php");
-    QNetworkRequest request(url);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-
-    QNetworkReply *reply = networkManager->post(request, QJsonDocument(filters).toJson());
-
-    connect(reply, &QNetworkReply::finished, this, [=]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            QMessageBox::critical(this, "Error", reply->errorString());
-            reply->deleteLater();
+    postReportData(filters, [=](const QJsonArray &data) {
+        if (data.isEmpty()) {
+            QMessageBox::information(this, "No Data",
+                                     "No data available for the selected filters. Please check your date range and department selection.");
             return;
         }
-        QByteArray resp = reply->readAll();
-        reply->deleteLater();
 
-        QJsonDocument doc = QJsonDocument::fromJson(resp);
-        if (!doc.isObject()) {
-            QMessageBox::warning(this, "Error", "Invalid response from server.");
+        QPrinter printer(QPrinter::HighResolution);
+        printer.setPageOrientation(QPageLayout::Landscape);
+        printer.setPageSize(QPageSize(QPageSize::A4));
+        printer.setPageMargins(QMarginsF(20, 20, 20, 20), QPageLayout::Millimeter);
+
+        QPrintDialog dlg(&printer, this);
+        if (dlg.exec() != QDialog::Accepted)
             return;
-        }
-        QJsonObject obj = doc.object();
-        if (obj["status"].toString() == "success") {
-            QJsonArray data = obj["data"].toArray();
-            if (data.isEmpty()) {
-                QMessageBox::information(this, "No Data",
-                                         "No data available for the selected filters. Please check your date range and department selection.");
-                return;
-            }
 
-            QPrinter printer(QPrinter::HighResolution);
-            printer.setPageOrientation(QPageLayout::Landscape);
-            printer.setPageSize(QPageSize(QPageSize::A4));
-            printer.setPageMargins(QMarginsF(20, 20, 20, 20), QPageLayout::Millimeter);
-
-            QPrintDialog dlg(&printer, this);
-            if (dlg.exec() != QDialog::Accepted)
-                return;
-
-            if (!paintReport(&printer, printer.resolution(), data, filters)) {
-                QMessageBox::critical(this, "Error", "Failed to start painting to printer.");
-            }
-        } else {
-            QMessageBox::warning(this, "Error", obj["message"].toString());
+        if (!paintReport(&printer, printer.resolution(), data, filters)) {
+            QMessageBox::critical(this, "Error", "Failed to start painting to printer.");
         }
     });
 }

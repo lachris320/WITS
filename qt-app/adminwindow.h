@@ -21,6 +21,7 @@
 #include <QCheckBox>
 #include <QHttpMultiPart>
 #include <QHttpPart>
+#include <functional>
 
 #include <QtCharts/QChart>
 #include <QtCharts/QChartView>
@@ -119,6 +120,8 @@ private:
 
     QImage renderChartToImage(QChart *chart, const QSize &targetSize);
     void expandChartPlotArea(QChart *chart, const QSize &size);
+    void postReportData(const QJsonObject &filters,
+                        std::function<void(const QJsonArray &)> onData);
     QJsonArray currentReportData;
     QList<QPixmap> chartPixmaps;
     QJsonObject collectReportFilters(bool validateFilters = true);
