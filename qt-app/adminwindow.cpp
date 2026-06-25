@@ -424,6 +424,8 @@ adminWindow::adminWindow(QWidget *parent)
     updateChartsPreview(QJsonArray());  // Initialize with empty charts
     connectFilterSignals();
 
+    connect(ui->applyChangesBtn,&QPushButton::clicked, this, &::adminWindow::onApplyChangesBtnClicked);
+
     connect(ui->schoolName, &QLineEdit::textChanged, this, [=](const QString &) {
         changesMade = true;
     });
