@@ -55,18 +55,47 @@ Separate styling from logic so the restyle is mostly QSS, not C++:
   loaded once in `main.cpp` via `qApp->setStyleSheet(...)`, layered on top of the existing
   `WitsTheme::lightPalette()`.
 - Rules are keyed off existing `objectName`s (`#frame`, `#loginBtn`, `#generalBtn`,
-  `stackedWidget`, etc.), so the bulk of the restyle requires **no `.cpp` change**.
+  `stackedWidget`, etc.), so the bulk of the *flat* styling (colors, borders, radius,
+  padding, hover/pressed/focus) requires **no `.cpp` change**. Two things are inherently
+  code, not QSS, and are called out explicitly: **drop shadows** (QSS has no `box-shadow` —
+  see below) and **state-dependent styling** (active-sidebar highlight, toast color).
 - MainWindow's large inline `setStyleSheet(...)` block (`mainwindow.cpp`) and any scattered
   admin styles are **migrated into the central stylesheet**. Per-widget runtime styling that
-  depends on state (e.g. active-sidebar highlight, toast success/error color) stays in code
-  but reads its colors from a small shared theme helper.
+  depends on state stays in code but reads its colors from a small shared theme helper.
 - **Theme helper:** extend `theme.h` (or add `theme.cpp`) with the palette constants from
   the color system below, plus a `loadStyleSheet()` helper. Keep it dependency-light so it
-  still links into the unit-test target.
+  still links into the unit-test target (see Testing for the resource-in-test caveat).
 
 *Rationale:* one source of truth, consistent look across both windows, and it satisfies the
 project's UI/logic-separation review rule. Chosen over the current inline-per-window approach
 (scattered, hard to keep consistent).
+
+### Resource wiring (prerequisite — keystone task)
+
+**The repo currently has no Qt resource (`.qrc`) file and no `qt_add_resources` in
+`qt-app/CMakeLists.txt`.** `CMAKE_AUTORCC` is `ON` but nothing feeds it, and
+`mainwindow.cpp:45` already references `":/resources/default_student.png"` — a **dangling
+reference today** (loads a null pixmap silently). The entire "central QSS + bundled icons"
+architecture depends on a resource system that does not yet exist, so creating it is the
+**first work item**, not an assumption:
+
+- Create a resource file (e.g. `qt-app/resources.qrc`) with a `/resources` prefix.
+- Register `wits.qss`, the icon set, and the **existing-but-unbundled** assets
+  (`default_student.png`, and verify any other `:/` references resolve).
+- Add the `.qrc` to the `WITS` target sources in `qt_add_executable(...)` (AUTORCC then
+  compiles it). Confirm `qApp->setStyleSheet(loadStyleSheet())` returns non-empty at runtime.
+
+### Inline-style migration surfaces (enumerated)
+
+Every existing inline `setStyleSheet` must be migrated or it will override the central sheet.
+Known surfaces:
+
+- `mainwindow.cpp` — the large window-wide block (~lines 118–208).
+- `adminwindow.cpp` — scattered page/frame styles.
+- `attachfilesdialog.cpp` — 4 inline `setStyleSheet` calls.
+- **Runtime state styles** (keep in code, but source colors from the theme helper):
+  `mainwindow.cpp:343` (toast success/error), `adminwindow.cpp:3949–3966` (state styling).
+- `busyindicator` — restyle to read theme colors (see Extras-4).
 
 ### Structural additions
 
@@ -90,8 +119,13 @@ Unified palette, defined as constants in the theme helper and referenced by the 
 | Borders / dividers | `#E2E8F0` |
 | Success / error | emerald `#10B981` / red `#EF4444` |
 
-Shadows via `QGraphicsDropShadowEffect` (the app already uses this pattern in
-`mainwindow.cpp`).
+Shadows are **code, not QSS** — QSS has no `box-shadow`. Each new card gets a
+`QGraphicsDropShadowEffect` via `setGraphicsEffect`; **reuse the existing `addShadow`
+lambda** (`adminwindow.cpp:675`) rather than re-rolling it. A `QGraphicsEffect` instance
+can belong to **only one widget** — never share one across cards; create one per widget as
+the current code does. (Note: a drop-shadow over a QSS `border-radius` background can show
+minor corner clipping because the effect renders the subtree to an offscreen pixmap — see
+Risks; already in use on `frame_3`/admin frames so it is manageable.)
 
 ## Component Design
 
@@ -148,6 +182,23 @@ styling. Optional light fade on tab switch.
 4. **Themed loading states:** restyle `BusyIndicator` and the admin search overlays
    (`showSearchOverlay`/`hideSearchOverlay`) to match the new palette.
 
+## Delivery Phasing
+
+The scope is fixed (locked decisions above) but large — 2 windows + 5 admin pages + 4 extras
++ the new resource system + theme refactor. Deliver it in ordered phases so each lands
+reviewable and keeps the build green:
+
+1. **Plumbing** — create the `.qrc` + CMake wiring (keystone), add the theme helper +
+   palette constants + `loadStyleSheet()`, load central QSS in `main.cpp`, and migrate the
+   existing inline styles into it **with no intended visual regression**. This phase changes
+   *where* styling lives, not how it looks; verify both screens still render as today.
+2. **Kiosk** — restyle `MainWindow`: sidebar, spotlight card, restyled 9-row table, toast.
+3. **Admin** — restyle `adminWindow`: sidebar nav states, new header bar, card-wrapped pages.
+4. **Extras** — iconography, micro-interactions, remaining empty-state polish, themed loading.
+
+Each phase ends with a build + run smoke test; `/claude-review` (PHASE mode) is appropriate
+at phase boundaries, with the final BRANCH review before the PR.
+
 ## Testing & Verification
 
 Presentation-layer work, so verification is primarily visual + behavioral:
@@ -158,7 +209,12 @@ Presentation-layer work, so verification is primarily visual + behavioral:
   still works: student login, admin-key login, RFID scan path, guest login toggle, all 5
   admin tabs, report PDF/Excel export, student search, settings save/load.
 - If the QSS loader gets a helper in `theme.h`, add a trivial Qt Test that it returns a
-  non-empty stylesheet (keeps the unit-test target meaningful).
+  non-empty stylesheet. **Caveat:** `tst_theme` (`qt-app/tests/CMakeLists.txt`) is built from
+  `tst_theme.cpp` only and links `Qt::Test`/`Qt::Widgets` — it does **not** compile the app's
+  `.qrc`, so a test that reads `:/resources/wits.qss` would falsely red-fail. Fix by either
+  (a) adding the `.qrc` to the `tst_theme` target sources (and `Q_INIT_RESOURCE` if needed),
+  or (b) having `loadStyleSheet()` accept a path and testing it against a file rather than a
+  `:/` resource. Decide this when the helper is written.
 - Run `/claude-review` before finishing the branch (per workflow rule), fix Critical/
   Important findings, then PR via `create-pr`.
 
@@ -171,3 +227,7 @@ Presentation-layer work, so verification is primarily visual + behavioral:
   central sheet; all must be migrated or they'll fight the new theme.
 - **Fullscreen kiosk scaling:** keep layouts using stretches/spacers so the new cards scale
   across resolutions (recent commits already moved toward responsive layout).
+- **Drop-shadow + border-radius corner artifacts:** the graphics effect renders to an
+  offscreen pixmap, which can clip rounded corners. Verify the new spotlight card and admin
+  header/cards visually at fullscreen; fall back to a flat 1px border if any card shows
+  artifacts.
