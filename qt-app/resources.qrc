@@ -1,0 +1,6 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/resources">
+        <file alias="wits.qss">resources/wits.qss</file>
+    </qresource>
+</RCC>

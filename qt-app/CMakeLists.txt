@@ -24,6 +24,7 @@ set(PROJECT_SOURCES
     rfidscandetector.h
     rfidkeyboardfilter.cpp
     rfidkeyboardfilter.h
+    resources.qrc
 )
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
