@@ -13,9 +13,9 @@
 ## Global Constraints
 
 - **No behavioral change.** Networking, RFID, report generation, search, settings persistence, and all signals/slots keep current behavior. This is a skin.
-- **Preserve every existing `objectName`.** `tst_responsive_ui` (`qt-app/tests/tst_responsive_ui.cpp`) pins an exhaustive name set + page layouts + size policies + the `searchOverlay` carve-out. It must stay green after every `.ui` edit. New widgets may be **added**; checked names must never be **removed**.
-- **Visual style:** clean solid modern — no background image, no glassmorphism.
-- **Recent-logins stays the existing fixed 9 label-rows** (restyled, not converted to a dynamic table); `refreshRightPanel`'s label arrays are untouched.
+- **Preserve every existing `objectName`.** `tst_responsive_ui` (`qt-app/tests/tst_responsive_ui.cpp`) pins an exhaustive name set + page layouts + size policies + the `searchOverlay` carve-out. It must stay green after every `.ui` edit. New widgets may be **added**; checked names must never be **removed**. (The only deliberate widget removal is `poster_Image`, which `tst_responsive_ui` does NOT pin — confirm it is absent from the test's name set before removing.)
+- **Visual style:** clean solid modern. **Exception (user change, 2026-06-30):** the kiosk's right content panel (`frame_2`) uses the admin-uploaded **welcome poster as a background image** with a dark scrim, and the content on top (spotlight + recent-logins) is rendered on **translucent ("frosted") panels** so the poster shows through while text stays legible. The admin window stays fully clean-solid (no background image). The separate `poster_Image` widget is removed and the poster drives `frame_2`'s background instead.
+- **Recent-logins stays the existing fixed 9 label-rows** (restyled, not converted to a dynamic table); `refreshRightPanel`'s label arrays are untouched. The rows render on translucent surfaces over the poster background.
 - **Color palette (exact values):** sidebar slate `#1E293B`; card `#FFFFFF` (16px radius, 1px `#E2E8F0` border); app bg `#F1F5F9`; kiosk login emerald `#10B981` (hover `#059669`); admin primary blue `#2563EB` (hover `#1D4ED8`); secondary blue `#3B82F6` (hover `#2563EB`); text `#1E293B`; muted `#64748B`; borders `#E2E8F0`; success `#10B981`; error `#EF4444`.
 - **Shadows are code, not QSS** — reuse the `addShadow` lambda pattern (`adminwindow.cpp:675`), one `QGraphicsDropShadowEffect` instance per widget (never shared).
 - **Build:** configure `cmake -S qt-app -B qt-app/build`, build `cmake --build qt-app/build`, test `ctest --test-dir qt-app/build --output-on-failure`. (Use the toolchain from project memory: Ninja + Qt 6.11.1 MinGW kit, `CMAKE_PREFIX_PATH` set; tools are not on PATH.)
@@ -509,7 +509,10 @@ Suggested message: `refactor(ui): move admin and dialog styling into central sty
 
 ## Phase 2 — Attendance kiosk (MainWindow)
 
-Add the active-profile spotlight card, restyle the recent-logins table, restyle the toast, and fix the dangling student-photo placeholder.
+Restyle the active-profile block as a frosted spotlight panel, restyle the recent-logins
+table and toast, fix the dangling student-photo placeholder, make the school logo circular,
+and use the admin-uploaded welcome poster as the right-panel background (translucent panels
+over it). Tasks 2.2–2.3 make the panels translucent; Task 2.5 puts the poster behind them.
 
 ### Task 2.1: Fix the dangling default student photo asset
 
@@ -644,29 +647,37 @@ Expected: PASS immediately (these widgets all exist today). The test now guards 
 
 Add to `qt-app/resources/wits.qss`:
 
+The spotlight is a **translucent ("frosted") panel** so the welcome-poster background (Task 2.5) shows through behind it while the dark text stays legible. Use `rgba()` backgrounds:
+
 ```css
-/* Active-profile spotlight = the existing row-0 block (#widget) */
+/* Active-profile spotlight = the existing row-0 block (#widget), frosted over the poster */
 QWidget#widget {
-    background-color: #FFFFFF;
-    border: 1px solid #E2E8F0;
+    background-color: rgba(255, 255, 255, 0.82);
+    border: 1px solid rgba(255, 255, 255, 0.55);
     border-radius: 16px;
 }
 QLabel#studentPhoto {
-    background-color: #F1F5F9;
-    border: 1px solid #E2E8F0;
+    background-color: rgba(241, 245, 249, 0.9);
+    border: 1px solid rgba(255, 255, 255, 0.6);
     border-radius: 12px;
 }
 QLabel#nameLabel { font-size: 28px; font-weight: 800; color: #1E293B; }
 /* Field captions */
 QLabel#label_5, QLabel#label_2, QLabel#label_4, QLabel#label_3 {
-    font-size: 11px; font-weight: 700; color: #94A3B8;
+    font-size: 11px; font-weight: 700; color: #475569;
 }
 /* Field values */
 QLabel#courseLabel, QLabel#yrlevel_label, QLabel#depLabel {
     font-size: 15px; color: #1E293B;
 }
-QLabel#timeDate_Label { font-size: 15px; font-weight: 700; color: #10B981; }
+QLabel#timeDate_Label { font-size: 15px; font-weight: 700; color: #059669; }
 ```
+
+> The text stays dark-on-light regardless of the poster image because the frosted panel is a
+> light translucent surface. `rgba()` backgrounds on a widget composite over the parent's
+> painted background (the poster), which is what produces the see-through effect. Captions use
+> `#475569` and the time accent `#059669` (slightly darker than the base tokens) for contrast
+> on the lighter-than-solid panel.
 
 > Note on font conflicts: `nameLabel` etc. carry inline `<font>` point sizes in
 > `mainwindow.ui`. A stylesheet `font-size` overrides them, so the QSS wins — no `.ui` edit
@@ -690,10 +701,12 @@ replace `shadow1` on that widget for the duration; prefer leaving the photo-only
 - [ ] **Step 6: Build, run, verify**
 
 Run: `cmake --build qt-app/build` then run `WITS`. Log in / scan a test student.
-Expected: the active-profile block reads as a white rounded card — photo at left, large name,
-and the Course/Year/Department/Date-and-Time grid with an emerald time value. On login the
-photo fades in and the fields populate (row 0). Idle state shows the empty card (labels
-blank — empty-state hint added in Task 4.2).
+Expected: the active-profile block reads as a frosted rounded panel — photo at left, large
+name, and the Course/Year/Department/Date-and-Time grid with an emerald time value. (Until
+the poster background lands in Task 2.5, the frosted panel sits over `frame_2`'s solid
+surface and looks like a subtle light card — that's expected at this step.) On login the photo
+fades in and the fields populate (row 0). Idle state shows the empty panel (labels blank —
+empty-state hint added in Task 4.2).
 
 - [ ] **Step 7: Run tests**
 
@@ -719,20 +732,34 @@ Suggested message: `feat(kiosk): restyle active-profile block as spotlight card`
 
 Add to `qt-app/resources/wits.qss` (the row container objectNames are `widget_2` and siblings; style the data labels generically within the right panel):
 
-The recent-login rows are `widget_2` through `widget_9` (confirmed in `mainwindow.ui`; `tst_responsive_ui` pins `widget_2`, so none may be renamed):
+The recent-login rows are `widget_2` through `widget_9` (confirmed in `mainwindow.ui`; `tst_responsive_ui` pins `widget_2`, so none may be renamed). Rows + the `frame_3` header strip are **translucent** so they sit over the poster background (Task 2.5) while staying readable:
 
 ```css
-/* Recent-logins rows — restyle the existing fixed label-rows as table rows */
+/* Recent-logins rows — translucent table rows over the poster */
 QWidget#widget_2, QWidget#widget_3, QWidget#widget_4, QWidget#widget_5,
 QWidget#widget_6, QWidget#widget_7, QWidget#widget_8, QWidget#widget_9 {
-    background-color: #FFFFFF;
-    border: 1px solid #F1F5F9;
+    background-color: rgba(255, 255, 255, 0.72);
+    border: 1px solid rgba(255, 255, 255, 0.4);
     border-radius: 10px;
 }
 QWidget#widget_2:hover, QWidget#widget_3:hover, QWidget#widget_4:hover,
 QWidget#widget_5:hover, QWidget#widget_6:hover, QWidget#widget_7:hover,
-QWidget#widget_8:hover, QWidget#widget_9:hover { background-color: #F8FAFC; }
+QWidget#widget_8:hover, QWidget#widget_9:hover { background-color: rgba(255, 255, 255, 0.9); }
 ```
+
+Also retune the `frame_3` header strip (set solid slate in Task 1.4) to a translucent slate so the poster shows through it too. **Replace** the existing `QFrame#frame_3 { background-color: #1E293B; ... }` rule in `wits.qss` with:
+
+```css
+QFrame#frame_3 {
+    background-color: rgba(30, 41, 59, 0.85);
+    border-top-left-radius: 12px;
+    border-top-right-radius: 12px;
+}
+```
+
+> The row data labels (`nameLabel_2`…, `courseLabel_2`…, etc.) inherit the global `#1E293B`
+> text color — dark on the light translucent rows, legible over any poster. Do not change the
+> row label objectNames.
 
 - [ ] **Step 2: Restyle the toast in `showKioskStatus`**
 
@@ -763,9 +790,225 @@ Suggested message: `feat(kiosk): restyle recent-logins rows and status toast`
 
 ---
 
+### Task 2.4: Make the school logo circular
+
+**Files:**
+- Modify: `qt-app/mainwindow.cpp` (`updateLogo` — mask the pixmap to a circle + round the label)
+- Modify: `qt-app/resources/wits.qss` (drop the static `border-radius` on `schLogo_Image`; the radius is set dynamically per size)
+
+**Interfaces:**
+- Consumes: `ui->schLogo_Image` (existing sidebar `QLabel`), called from the constructor and `resizeEvent` (both already call `updateLogo`).
+
+- [ ] **Step 1: Add a circular-pixmap helper**
+
+In `qt-app/mainwindow.cpp`, add includes `#include <QPainter>` and `#include <QPainterPath>`, and a file-local helper above `MainWindow::updateLogo`:
+
+```cpp
+// Render src into a circular pixmap of the given diameter (transparent corners).
+static QPixmap makeCircularPixmap(const QPixmap &src, int diameter)
+{
+    QPixmap out(diameter, diameter);
+    out.fill(Qt::transparent);
+    QPainter p(&out);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    QPainterPath clip;
+    clip.addEllipse(0, 0, diameter, diameter);
+    p.setClipPath(clip);
+    const QPixmap scaled = src.scaled(diameter, diameter,
+        Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+    p.drawPixmap((diameter - scaled.width()) / 2,
+                 (diameter - scaled.height()) / 2, scaled);
+    return out;
+}
+```
+
+- [ ] **Step 2: Rewrite `updateLogo` to produce a circle**
+
+Replace the body of `MainWindow::updateLogo` with:
+
+```cpp
+void MainWindow::updateLogo(const QString &logoPath) {
+    const int d = ui->schLogo_Image->width();
+    ui->schLogo_Image->setFixedHeight(d); // keep the logo area square
+    // Round the label's own background to a circle (matches the masked pixmap).
+    ui->schLogo_Image->setStyleSheet(
+        QString("background-color:#FFFFFF; color:#1E293B; border-radius:%1px;").arg(d / 2));
+
+    if (!logoPath.isEmpty() && QFile::exists(logoPath) && d > 0) {
+        QPixmap pix(logoPath);
+        if (!pix.isNull()) {
+            ui->schLogo_Image->setPixmap(makeCircularPixmap(pix, d));
+            return;
+        }
+    }
+    ui->schLogo_Image->setText("No Logo");
+    ui->schLogo_Image->setPixmap(QPixmap());
+    ui->schLogo_Image->setAlignment(Qt::AlignCenter);
+}
+```
+
+- [ ] **Step 3: Drop the static logo radius from wits.qss**
+
+In `qt-app/resources/wits.qss`, change the `QLabel#schLogo_Image` rule to only keep color (the dynamic per-widget stylesheet now owns background + radius). Replace it with:
+
+```css
+QLabel#schLogo_Image { color: #1E293B; }
+```
+
+- [ ] **Step 4: Build, run, verify**
+
+Run (build only — defer the visual check to the user): `cmake --build qt-app/build`.
+Expected: clean build. (User verifies the logo renders as a circle, fills on resize.)
+
+- [ ] **Step 5: Run tests**
+
+Run: `ctest --test-dir qt-app/build --output-on-failure`
+Expected: all PASS (no `.ui` changed).
+
+- [ ] **Step 6: Commit** (via the `commit` skill)
+
+Suggested message: `feat(kiosk): render the school logo as a circle`
+
+---
+
+### Task 2.5: Use the uploaded welcome poster as the right-panel background
+
+The admin "welcome poster" (uploaded via `posterBrowseBtn`, delivered to MainWindow via the
+existing `adminWindow::posterChanged` signal → `updatePoster`) becomes the background of the
+right panel `frame_2`, with a dark scrim. The separate `poster_Image` widget is removed.
+
+**Files:**
+- Modify: `qt-app/mainwindow.ui` (remove the `poster_Image` widget + its layout item)
+- Modify: `qt-app/mainwindow.h` (add a background-layer member)
+- Modify: `qt-app/mainwindow.cpp` (rewrite `updatePoster`; build + size the background layer; sync it in `resizeEvent`)
+
+**Interfaces:**
+- Consumes: `ui->frame_2`; the existing `updatePoster(const QString &posterPath)` slot and the
+  `posterChanged` connection in the constructor; `QSettings` key `school/posterPath` (already
+  loaded in the constructor and `resizeEvent`).
+- Produces: `MainWindow::m_posterBg` (`QLabel*`, a free-floating child of `frame_2`, behind
+  the content — same pattern as the admin `searchOverlay`).
+
+- [ ] **Step 1: Confirm `poster_Image` is safe to remove**
+
+Run `grep -rn "poster_Image" qt-app/` — references should be only `mainwindow.ui` and
+`mainwindow.cpp` (`updatePoster`). Confirm `poster_Image` is NOT in `tst_responsive_ui.cpp`'s
+pinned name set (it isn't). If any other reference exists, stop and report.
+
+- [ ] **Step 2: Remove the `poster_Image` widget from the .ui**
+
+In `qt-app/mainwindow.ui`, find the `<widget class="QLabel" name="poster_Image">` block and
+remove that widget together with its enclosing `<item>` (and an empty spacer wrapper if it
+leaves one). Do not remove or rename any other widget. Re-open is not needed; AUTOUIC
+regenerates `ui_mainwindow.h` on build.
+
+- [ ] **Step 3: Declare the background layer**
+
+In `qt-app/mainwindow.h` private section add:
+
+```cpp
+    QLabel *m_posterBg = nullptr;
+    void syncPosterBg();   // size the layer to frame_2 and re-render the scrimmed poster
+    QString m_posterPath;  // remembered so resize can re-render at the new size
+```
+
+- [ ] **Step 4: Rewrite `updatePoster` + add `syncPosterBg`**
+
+In `qt-app/mainwindow.cpp`, replace `updatePoster` with the layer approach and add
+`syncPosterBg`. Create the layer lazily, keep it behind the content with `lower()`:
+
+```cpp
+void MainWindow::updatePoster(const QString &posterPath) {
+    m_posterPath = posterPath;
+    if (!m_posterBg) {
+        m_posterBg = new QLabel(ui->frame_2);
+        m_posterBg->setObjectName("posterBg");
+        m_posterBg->setScaledContents(false);
+        m_posterBg->setAttribute(Qt::WA_TransparentForMouseEvents);
+    }
+    syncPosterBg();
+    m_posterBg->lower(); // behind the scroll content
+}
+
+void MainWindow::syncPosterBg() {
+    if (!m_posterBg) return;
+    m_posterBg->setGeometry(ui->frame_2->rect());
+    const QSize sz = ui->frame_2->size();
+    if (m_posterPath.isEmpty() || !QFile::exists(m_posterPath) || sz.isEmpty()) {
+        m_posterBg->clear();
+        m_posterBg->hide();   // fall back to frame_2's solid QSS background
+        return;
+    }
+    QPixmap pix(m_posterPath);
+    if (pix.isNull()) { m_posterBg->clear(); m_posterBg->hide(); return; }
+
+    // Scale to cover, center-crop, apply a rounded mask (match frame_2's 16px) + dark scrim.
+    QPixmap canvas(sz);
+    canvas.fill(Qt::transparent);
+    QPainter p(&canvas);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    QPainterPath clip;
+    clip.addRoundedRect(QRectF(QPointF(0, 0), QSizeF(sz)), 16, 16);
+    p.setClipPath(clip);
+    const QPixmap scaled = pix.scaled(sz, Qt::KeepAspectRatioByExpanding,
+                                      Qt::SmoothTransformation);
+    p.drawPixmap((sz.width() - scaled.width()) / 2,
+                 (sz.height() - scaled.height()) / 2, scaled);
+    p.fillRect(canvas.rect(), QColor(15, 23, 42, 115)); // ~0.45 dark scrim
+    p.end();
+
+    m_posterBg->setPixmap(canvas);
+    m_posterBg->show();
+}
+```
+
+Add includes if missing: `#include <QPainter>`, `#include <QPainterPath>` (may already be
+added by Task 2.4).
+
+- [ ] **Step 5: Keep the layer sized on resize**
+
+In `qt-app/mainwindow.cpp` `resizeEvent`, after the existing `updateLogo(...)` call, add:
+
+```cpp
+    syncPosterBg();
+```
+
+(The constructor already calls `updatePoster(posterPath)` after loading `QSettings`, which
+creates and shows the layer; `resizeEvent` then keeps it covering `frame_2`.)
+
+- [ ] **Step 6: Make sure the scroll content is transparent so the poster shows through**
+
+Confirm `wits.qss` keeps `QScrollArea#stdList { background: transparent; border: none; }`
+(added in Task 1.4). If the scroll contents still paint an opaque background, add:
+
+```css
+QWidget#scrollAreaWidgetContents { background: transparent; }
+```
+
+(Verify the objectName in `mainwindow.ui`; the spotlight `#widget` and rows are already
+translucent from Tasks 2.2–2.3, so the poster + scrim shows behind them.)
+
+- [ ] **Step 7: Build**
+
+Run: `cmake --build qt-app/build`
+Expected: clean build (AUTOUIC regenerates `ui_mainwindow.h` without `poster_Image`; confirm
+no leftover `ui->poster_Image` reference remains — the build will fail loudly if one does).
+
+- [ ] **Step 8: Run tests**
+
+Run: `ctest --test-dir qt-app/build --output-on-failure`
+Expected: all PASS — especially `tst_responsive_ui` (it does not reference `poster_Image`).
+
+- [ ] **Step 9: Commit** (via the `commit` skill)
+
+Suggested message: `feat(kiosk): use the welcome poster as the right-panel background`
+
+---
+
 ### Phase 2 gate
 
-- [ ] Build clean, tests green, app runs; spotlight card, table rows, toast, and placeholder all verified by running the kiosk.
+- [ ] Build clean, tests green, app runs; spotlight panel, table rows, toast, placeholder, circular logo, and the welcome-poster background (with a poster set in admin, and the no-poster fallback) all verified by running the kiosk.
 - [ ] `/claude-review` (PHASE mode) on Phase 2; fix Critical/Important.
 
 ---
@@ -1217,6 +1460,7 @@ Suggested message: `feat(ui): theme busy indicator and search overlay`
 - Spec §Inline-style migration (mainwindow, adminwindow, attachfilesdialog, runtime-state, busyindicator) → Tasks 1.4, 1.5, 2.3, 4.3.
 - Spec §Color system → Global Constraints + theme constants (1.2) + per-phase QSS.
 - Spec §Kiosk (sidebar, spotlight, table, toast, empty state) → Tasks 1.4, 2.2, 2.3, 4.2.
+- User change 2026-06-30 (circular logo; welcome poster as `frame_2` background with translucent panels + scrim; remove `poster_Image`) → Tasks 2.2/2.3 (translucent panels), 2.4 (circular logo), 2.5 (poster background); Global Constraints visual-style exception.
 - Spec §Admin (sidebar states, header bar, card pages, tables) → Tasks 3.1–3.3.
 - Spec §Extras (icons, micro-interactions, toast/empty states, themed loading) → Tasks 4.1–4.3.
 - Spec §Testing (loadStyleSheet test + resource caveat; run app) → Task 1.2 + per-task run/build/ctest steps.
