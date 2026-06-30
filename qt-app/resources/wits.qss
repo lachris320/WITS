@@ -92,11 +92,7 @@ QFrame#frame_3 {               /* recent-logins header strip */
 }
 QLabel#schoolNameLabel { color: #FFFFFF; font-size: 18px; font-weight: 700; }
 QLabel#schAddressLabel { color: #CBD5E1; font-size: 12px; }
-QLabel#schLogo_Image {
-    color: #FFFFFF;
-    background-color: #FFFFFF;
-    border-radius: 12px;
-}
+QLabel#schLogo_Image { color: #1E293B; }
 QLineEdit#username {
     border: 2px solid #334155;
     border-radius: 10px;

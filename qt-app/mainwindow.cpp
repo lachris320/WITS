@@ -8,6 +8,8 @@
 #include <QStandardPaths>
 #include <QFileInfo>
 #include <QFile>
+#include <QPainter>
+#include <QPainterPath>
 #include <QGraphicsDropShadowEffect>
 #include <QPushButton>
 #include <QLineEdit>
@@ -366,24 +368,39 @@ void MainWindow::resizeEvent(QResizeEvent *event) {
     updateLogo(logoPath);
 }
 
-void MainWindow::updateLogo(const QString &logoPath) {
-    // Keep the logo area square: its height tracks the sidebar-driven width,
-    // so the logo fills the sidebar and the picture fits inside the square.
-    ui->schLogo_Image->setFixedHeight(ui->schLogo_Image->width());
+// Render src into a circular pixmap of the given diameter (transparent corners).
+static QPixmap makeCircularPixmap(const QPixmap &src, int diameter)
+{
+    QPixmap out(diameter, diameter);
+    out.fill(Qt::transparent);
+    QPainter p(&out);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    QPainterPath clip;
+    clip.addEllipse(0, 0, diameter, diameter);
+    p.setClipPath(clip);
+    const QPixmap scaled = src.scaled(diameter, diameter,
+        Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+    p.drawPixmap((diameter - scaled.width()) / 2,
+                 (diameter - scaled.height()) / 2, scaled);
+    return out;
+}
 
-    if (!logoPath.isEmpty() && QFile::exists(logoPath)) {
+void MainWindow::updateLogo(const QString &logoPath) {
+    const int d = ui->schLogo_Image->width();
+    ui->schLogo_Image->setFixedHeight(d); // keep the logo area square
+    // Round the label's own background to a circle (matches the masked pixmap).
+    ui->schLogo_Image->setStyleSheet(
+        QString("background-color:#FFFFFF; color:#1E293B; border-radius:%1px;").arg(d / 2));
+
+    if (!logoPath.isEmpty() && QFile::exists(logoPath) && d > 0) {
         QPixmap pix(logoPath);
         if (!pix.isNull()) {
-            ui->schLogo_Image->setPixmap(pix.scaled(
-                ui->schLogo_Image->contentsRect().size(),
-                Qt::KeepAspectRatio,
-                Qt::SmoothTransformation)
-            );
+            ui->schLogo_Image->setPixmap(makeCircularPixmap(pix, d));
             return;
         }
     }
-    ui->schLogo_Image->setText("No Logo Selected");
-    ui->schLogo_Image->setPixmap(QPixmap()); // clear any old pixmap
+    ui->schLogo_Image->setText("No Logo");
+    ui->schLogo_Image->setPixmap(QPixmap());
     ui->schLogo_Image->setAlignment(Qt::AlignCenter);
 }
 
