@@ -174,7 +174,7 @@ QGroupBox::title {
 QFrame#securityFrame, QFrame#adminFrame, QFrame#libraryFrame,
 QFrame#settingsFrame, QFrame#databaseFrame {
     background-color: #FFFFFF;
-    border-radius: 12px;
+    border-radius: 16px;
     border: 1px solid #E2E8F0;
     padding: 12px;
 }
@@ -260,5 +260,16 @@ QLabel#adminHeaderWho { color: #64748B; font-weight: 600; }
 QLabel#adminHeaderAvatar {
     background-color: #DBEAFE; color: #1D4ED8;
     border-radius: 16px; font-weight: 700;
+}
+
+/* ---- Admin page background (slate-100) ---- */
+QStackedWidget > QWidget { background-color: #F1F5F9; }
+
+/* ---- Named data tables: alternate rows + card border ---- */
+QTableWidget#bulkTable, QTableWidget#studentSearchTable, QTableWidget#visitorTable {
+    background: #FFFFFF;
+    alternate-background-color: #F8FAFC;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
 }
 

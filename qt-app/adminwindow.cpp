@@ -948,6 +948,12 @@ adminWindow::adminWindow(QWidget *parent)
     addShadow(ui->adminFrame);
     addShadow(ui->libraryFrame);
     addShadow(ui->settingsFrame);
+    addShadow(ui->individualRegistrationBox);
+    addShadow(ui->bulkRegistrationBox);
+    addShadow(ui->chartsPreview);
+
+    // Enable alternating row colors for bulkTable (the other two are already enabled)
+    ui->bulkTable->setAlternatingRowColors(true);
 
     connect(ui->registerBtn, &QPushButton::clicked, this, [=]() {
         // Create multipart form data
