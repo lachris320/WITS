@@ -116,9 +116,9 @@ MainWindow::MainWindow(QWidget *parent)
     ui->schLogo_Image->setAlignment(Qt::AlignCenter);
 
     QGraphicsDropShadowEffect *shadow1 = new QGraphicsDropShadowEffect(this);
-    shadow1->setBlurRadius(15);
+    shadow1->setBlurRadius(20);
     shadow1->setOffset(0, 3);
-    shadow1->setColor(QColor(0, 0, 0, 50));
+    shadow1->setColor(QColor(0, 0, 0, 40));
     ui->widget->setGraphicsEffect(shadow1);
 
     QGraphicsDropShadowEffect *shadow3 = new QGraphicsDropShadowEffect(this);

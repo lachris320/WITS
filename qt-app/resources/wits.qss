@@ -221,3 +221,25 @@ QProgressBar::chunk {
     border-radius: 2px;
 }
 
+/* Active-profile spotlight = the existing row-0 block (#widget), frosted over the poster */
+QWidget#widget {
+    background-color: rgba(255, 255, 255, 209);
+    border: 1px solid rgba(255, 255, 255, 140);
+    border-radius: 16px;
+}
+QLabel#studentPhoto {
+    background-color: rgba(241, 245, 249, 230);
+    border: 1px solid rgba(255, 255, 255, 153);
+    border-radius: 12px;
+}
+QLabel#nameLabel { font-size: 28px; font-weight: 800; color: #1E293B; }
+/* Field captions */
+QLabel#label_5, QLabel#label_2, QLabel#label_4, QLabel#label_3 {
+    font-size: 11px; font-weight: 700; color: #475569;
+}
+/* Field values */
+QLabel#courseLabel, QLabel#yrlevel_label, QLabel#depLabel {
+    font-size: 15px; color: #1E293B;
+}
+QLabel#timeDate_Label { font-size: 15px; font-weight: 700; color: #059669; }
+

@@ -33,6 +33,7 @@ private slots:
     void searchOverlayPreserved();
     void adminCriticalNamesResolve();
     void visualizationWidgetHasLayout();
+    void mainWindowHasSpotlightHost();
 };
 
 QWidget *TestResponsiveUi::loadUi(const QString &fileName)
@@ -237,6 +238,21 @@ void TestResponsiveUi::visualizationWidgetHasLayout()
     QVERIFY2(vw, "visualizatioWidget not found");
     QVERIFY2(vw->layout() != nullptr,
              "visualizatioWidget has no layout — its controls will not reflow");
+}
+
+void TestResponsiveUi::mainWindowHasSpotlightHost()
+{
+    QScopedPointer<QWidget> w(loadUi("mainwindow.ui"));
+    QVERIFY2(w, "failed to load mainwindow.ui");
+    // The spotlight is the existing row-0 block; pin its host + key children so a
+    // future .ui edit can't silently remove the active-profile display.
+    QWidget *block = w->findChild<QWidget *>("widget");
+    QVERIFY2(block && block->layout(), "active-profile block 'widget' missing/laid-out");
+    for (const char *n : {"studentPhoto", "nameLabel", "courseLabel",
+                          "yrlevel_label", "depLabel", "timeDate_Label"}) {
+        QVERIFY2(w->findChild<QWidget *>(n),
+                 qPrintable(QString("spotlight child %1 missing").arg(n)));
+    }
 }
 
 QTEST_MAIN(TestResponsiveUi)
