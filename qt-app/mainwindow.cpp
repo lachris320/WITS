@@ -41,6 +41,9 @@ MainWindow::MainWindow(QWidget *parent)
     ui->setupUi(this);
     this ->showFullScreen();
 
+    ui->loginBtn->setIcon(QIcon(":/resources/icons/log-in.svg"));
+    ui->loginBtn->setIconSize(QSize(20, 20));
+
     updateTimeandDate();
     networkManager = new QNetworkAccessManager(this);
 

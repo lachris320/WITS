@@ -46,6 +46,7 @@
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QFrame>
+#include <QIcon>
 
 #include "xlsxdocument.h"
 #include "xlsxformat.h"
@@ -407,6 +408,16 @@ adminWindow::adminWindow(QWidget *parent)
 {
     ui->setupUi(this);
     buildHeaderBar();
+
+    ui->generalBtn->setIcon(QIcon(":/resources/icons/settings.svg"));
+    ui->databaseBtn->setIcon(QIcon(":/resources/icons/database.svg"));
+    ui->reportingBtn->setIcon(QIcon(":/resources/icons/bar-chart.svg"));
+    ui->studentSearchBtn->setIcon(QIcon(":/resources/icons/search.svg"));
+    ui->visitorBtn->setIcon(QIcon(":/resources/icons/map-pin.svg"));
+    const QSize navIcon(20, 20);
+    for (QPushButton *b : {ui->generalBtn, ui->databaseBtn, ui->reportingBtn,
+                           ui->studentSearchBtn, ui->visitorBtn})
+        b->setIconSize(navIcon);
 
     networkManager = new QNetworkAccessManager(this);
     chartsPreviewBoxLayout = ui->chartsPreviewBox;
