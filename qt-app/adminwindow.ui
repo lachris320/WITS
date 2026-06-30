@@ -100,11 +100,11 @@ QLabel#studentPhotoLabel {
 
 /* --- Floating total badge (visitor total) --- */
 QLabel#visitorTotalLabel {
-  background: rgba(255,255,255,0.96);
+  background: rgba(255,255,255,245);
   color: #2C3E50;
   padding: 6px 10px;
   border-radius: 10px;
-  border: 1px solid rgba(0,0,0,0.06);
+  border: 1px solid rgba(0,0,0,15);
   font-weight: 600;
 }
 
@@ -685,10 +685,10 @@ QProgressBar::chunk {
       <widget class="QWidget" name="databasePage">
        <property name="styleSheet">
         <string notr="true">QGroupBox {
-    border: 1px solid rgba(200,200,200,0.6);
+    border: 1px solid rgba(200,200,200,153);
     border-radius: 6px;
     margin-top: 8px;
-    background-color: rgba(255,255,255,0.9);
+    background-color: rgba(255,255,255,230);
     font-weight: bold;
 }
 
