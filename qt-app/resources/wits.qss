@@ -75,3 +75,56 @@ QToolTip {
     padding: 6px 8px;
     border-radius: 6px;
 }
+
+/* ================= Attendance kiosk (MainWindow) ================= */
+QFrame#frame {                 /* left sidebar */
+    background-color: #1E293B;
+    border: none;
+}
+QFrame#frame_2 {               /* right content panel */
+    background-color: #FFFFFF;
+    border-radius: 16px;
+}
+QFrame#frame_3 {               /* recent-logins header strip */
+    background-color: #1E293B;
+    border-top-left-radius: 12px;
+    border-top-right-radius: 12px;
+}
+QLabel#schoolNameLabel { color: #FFFFFF; font-size: 18px; font-weight: 700; }
+QLabel#schAddressLabel { color: #CBD5E1; font-size: 12px; }
+QLabel#schLogo_Image {
+    color: #FFFFFF;
+    background-color: #FFFFFF;
+    border-radius: 12px;
+}
+QLineEdit#username {
+    border: 2px solid #334155;
+    border-radius: 10px;
+    padding: 12px;
+    background: #FFFFFF;
+    color: #1E293B;
+    font-size: 15px;
+}
+QLineEdit#username:focus { border: 2px solid #10B981; }
+QPushButton#loginBtn {
+    background-color: #10B981;
+    color: #FFFFFF;
+    font-size: 15px;
+    font-weight: 700;
+    border-radius: 10px;
+    padding: 12px;
+}
+QPushButton#loginBtn:hover   { background-color: #059669; }
+QPushButton#loginBtn:pressed { background-color: #047857; }
+QLabel#time_label { color: #F1F5F9; font-size: 20px; font-weight: 700; }
+QLabel#date_label { color: #CBD5E1; font-size: 13px; }
+/* Header-strip column captions (kept by tst_responsive_ui) */
+QLabel#label_10, QLabel#label_6, QLabel#label_7, QLabel#label_8, QLabel#label_9 {
+    color: #FFFFFF; font-weight: 600;
+}
+/* Carried over from the removed inline block so no rule is silently dropped */
+QScrollArea#stdList { background: transparent; border: none; }
+QLabel#label {
+    font-size: 18px; font-weight: bold; color: #1E293B;
+    padding: 10px; border-bottom: 2px solid #E2E8F0;
+}
