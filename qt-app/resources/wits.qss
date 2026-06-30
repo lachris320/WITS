@@ -250,3 +250,15 @@ QWidget#widget_2:hover, QWidget#widget_3:hover, QWidget#widget_4:hover,
 QWidget#widget_5:hover, QWidget#widget_6:hover, QWidget#widget_7:hover,
 QWidget#widget_8:hover, QWidget#widget_9:hover { background-color: rgba(255, 255, 255, 230); }
 
+/* ---- Admin dashboard header bar ---- */
+QFrame#adminHeaderBar {
+    background-color: #FFFFFF;
+    border-bottom: 1px solid #E2E8F0;
+}
+QLabel#adminHeaderTitle { font-size: 18px; font-weight: 700; color: #1E293B; }
+QLabel#adminHeaderWho { color: #64748B; font-weight: 600; }
+QLabel#adminHeaderAvatar {
+    background-color: #DBEAFE; color: #1D4ED8;
+    border-radius: 16px; font-weight: 700;
+}
+

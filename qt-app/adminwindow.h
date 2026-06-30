@@ -18,6 +18,7 @@
 #include <QTimer>
 #include <QTableWidget>
 #include <QLabel>
+#include <QFrame>
 #include <QCheckBox>
 #include <QHttpMultiPart>
 #include <QHttpPart>
@@ -117,6 +118,10 @@ private:
     QGraphicsOpacityEffect *overlayEffect = nullptr;
     void showSearchOverlay();
     void hideSearchOverlay();
+
+    QFrame *m_headerBar = nullptr;
+    QLabel *m_headerTitle = nullptr;
+    void buildHeaderBar();
 
     QImage renderChartToImage(QChart *chart, const QSize &targetSize);
     void expandChartPlotArea(QChart *chart, const QSize &size);

@@ -43,6 +43,9 @@
 #include <QPropertyAnimation>
 #include <QGraphicsOpacityEffect>
 #include <QCheckBox>
+#include <QHBoxLayout>
+#include <QVBoxLayout>
+#include <QFrame>
 
 #include "xlsxdocument.h"
 #include "xlsxformat.h"
@@ -350,6 +353,52 @@ void adminWindow::setActiveSidebar(QPushButton* activeBtn){
         btn->style()->polish(btn);
         btn->update();
     }
+    if (m_headerTitle && activeBtn)
+        m_headerTitle->setText(activeBtn->text().trimmed());
+}
+
+void adminWindow::buildHeaderBar()
+{
+    QWidget *central = ui->stackedWidget->parentWidget();           // centralwidget
+    auto *mainRow = qobject_cast<QHBoxLayout *>(central->layout()); // horizontalLayout_main
+    if (!mainRow) return;                                           // unexpected: bail safely
+    const int stackIdx = mainRow->indexOf(ui->stackedWidget);
+    if (stackIdx < 0) return;
+    const int stackStretch = mainRow->stretch(stackIdx);
+
+    // --- the header bar itself ---
+    m_headerBar = new QFrame;
+    m_headerBar->setObjectName("adminHeaderBar");
+    m_headerBar->setFixedHeight(56);
+    auto *row = new QHBoxLayout(m_headerBar);
+    row->setContentsMargins(20, 0, 20, 0);
+
+    m_headerTitle = new QLabel("General", m_headerBar);
+    m_headerTitle->setObjectName("adminHeaderTitle");
+    row->addWidget(m_headerTitle);
+    row->addStretch(1);
+
+    auto *avatar = new QLabel("A", m_headerBar);
+    avatar->setObjectName("adminHeaderAvatar");
+    avatar->setFixedSize(32, 32);
+    avatar->setAlignment(Qt::AlignCenter);
+    auto *who = new QLabel("Administrator", m_headerBar);
+    who->setObjectName("adminHeaderWho");
+    row->addWidget(avatar);
+    row->addSpacing(8);
+    row->addWidget(who);
+
+    // --- vertical wrapper: header on top, the existing stack below ---
+    auto *contentCol = new QWidget(central);
+    contentCol->setObjectName("adminContentColumn");
+    auto *col = new QVBoxLayout(contentCol);
+    col->setContentsMargins(0, 0, 0, 0);
+    col->setSpacing(0);
+
+    mainRow->removeWidget(ui->stackedWidget);   // detach from the HBox
+    col->addWidget(m_headerBar);
+    col->addWidget(ui->stackedWidget, 1);       // addWidget reparents the stack into contentCol
+    mainRow->insertWidget(stackIdx, contentCol, stackStretch);
 }
 
 adminWindow::adminWindow(QWidget *parent)
@@ -357,6 +406,7 @@ adminWindow::adminWindow(QWidget *parent)
     , ui(new Ui::adminWindow)
 {
     ui->setupUi(this);
+    buildHeaderBar();
 
     networkManager = new QNetworkAccessManager(this);
     chartsPreviewBoxLayout = ui->chartsPreviewBox;

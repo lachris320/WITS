@@ -4,6 +4,7 @@
 #include <QWidget>
 #include <QLabel>
 #include <QLayout>
+#include <QHBoxLayout>
 #include <QSizePolicy>
 #include <QString>
 
@@ -34,6 +35,7 @@ private slots:
     void adminCriticalNamesResolve();
     void visualizationWidgetHasLayout();
     void mainWindowHasSpotlightHost();
+    void adminCentralRowHostsStack();
 };
 
 QWidget *TestResponsiveUi::loadUi(const QString &fileName)
@@ -253,6 +255,18 @@ void TestResponsiveUi::mainWindowHasSpotlightHost()
         QVERIFY2(w->findChild<QWidget *>(n),
                  qPrintable(QString("spotlight child %1 missing").arg(n)));
     }
+}
+
+void TestResponsiveUi::adminCentralRowHostsStack()
+{
+    QScopedPointer<QWidget> w(loadUi("adminwindow.ui"));
+    QVERIFY2(w, "failed to load adminwindow.ui");
+    QWidget *stack = w->findChild<QWidget *>("stackedWidget");
+    QVERIFY2(stack && stack->parentWidget(), "stackedWidget/parent not found");
+    auto *row = qobject_cast<QHBoxLayout *>(stack->parentWidget()->layout());
+    QVERIFY2(row, "stack parent must use a QHBoxLayout (header-wrap relies on it)");
+    QVERIFY2(row->indexOf(stack) >= 0,
+             "stackedWidget must be a direct child of that QHBoxLayout");
 }
 
 QTEST_MAIN(TestResponsiveUi)
