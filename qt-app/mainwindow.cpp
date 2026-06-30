@@ -13,6 +13,7 @@
 #include <QLineEdit>
 #include <QFontComboBox>
 #include <QSpinBox>
+#include <QIcon>
 #include <QLabel>
 #include <QCheckBox>
 #include <QMessageBox>
@@ -42,13 +43,9 @@ MainWindow::MainWindow(QWidget *parent)
 
     adminWin = new adminWindow(this);
 
-    QPixmap placeholder(":/resources/default_student.png");
-    ui->studentPhoto->setPixmap(placeholder.scaled(
-        ui->studentPhoto->width(),
-        ui->studentPhoto->height(),
-        Qt::KeepAspectRatio,
-        Qt::SmoothTransformation
-        ));
+    QIcon placeholderIcon(":/resources/default_student.svg");
+    ui->studentPhoto->setPixmap(placeholderIcon.pixmap(
+        ui->studentPhoto->size()));
     ui->studentPhoto->setScaledContents(false);
     ui->studentPhoto->setAlignment(Qt::AlignCenter);
 
