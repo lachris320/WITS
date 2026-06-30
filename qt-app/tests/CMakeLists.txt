@@ -42,6 +42,7 @@ qt_add_executable(tst_theme
 )
 set_target_properties(tst_theme PROPERTIES WIN32_EXECUTABLE FALSE)
 target_include_directories(tst_theme PRIVATE ${CMAKE_SOURCE_DIR})
+target_compile_definitions(tst_theme PRIVATE WITS_QSS_PATH="${CMAKE_SOURCE_DIR}/resources/wits.qss")
 target_link_libraries(tst_theme PRIVATE Qt${QT_VERSION_MAJOR}::Test Qt${QT_VERSION_MAJOR}::Widgets)
 add_test(NAME tst_theme COMMAND tst_theme)
 set_tests_properties(tst_theme PROPERTIES

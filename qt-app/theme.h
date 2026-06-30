@@ -1,8 +1,11 @@
 #ifndef THEME_H
 #define THEME_H
 
-#include <QPalette>
 #include <QColor>
+#include <QFile>
+#include <QPalette>
+#include <QString>
+#include <QTextStream>
 
 // Centralized, fixed light theme for the whole application.
 //
@@ -55,6 +58,35 @@ inline QPalette lightPalette()
     palette.setColor(QPalette::Disabled, QPalette::ButtonText, disabledText);
 
     return palette;
+}
+
+// Named colors for the clean-solid-modern theme. State-dependent styling in
+// code (active sidebar, toast) reads these instead of hardcoding hex.
+namespace Color {
+inline const QString SidebarBase   = QStringLiteral("#1E293B");
+inline const QString Card          = QStringLiteral("#FFFFFF");
+inline const QString AppBackground = QStringLiteral("#F1F5F9");
+inline const QString Border        = QStringLiteral("#E2E8F0");
+inline const QString Text          = QStringLiteral("#1E293B");
+inline const QString MutedText     = QStringLiteral("#64748B");
+inline const QString KioskPrimary  = QStringLiteral("#10B981");
+inline const QString KioskPrimaryHover = QStringLiteral("#059669");
+inline const QString AdminPrimary  = QStringLiteral("#2563EB");
+inline const QString AdminPrimaryHover = QStringLiteral("#1D4ED8");
+inline const QString Secondary     = QStringLiteral("#3B82F6");
+inline const QString Success       = QStringLiteral("#10B981");
+inline const QString Error         = QStringLiteral("#EF4444");
+} // namespace Color
+
+// Read a QSS file (resource path ":/..." or filesystem path). Returns empty
+// on failure so a missing stylesheet degrades to the palette, never a crash.
+inline QString loadStyleSheet(const QString &path = QStringLiteral(":/resources/wits.qss"))
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+        return QString();
+    QTextStream in(&file);
+    return in.readAll();
 }
 
 } // namespace WitsTheme
