@@ -139,127 +139,127 @@ QProgressBar::chunk {
      <number>0</number>
     </property>
     <item>
-    <widget class="QFrame" name="sidebarFrame">
-     <property name="minimumSize">
-      <size>
-       <width>121</width>
-       <height>0</height>
-      </size>
-     </property>
-     <property name="maximumSize">
-      <size>
-       <width>121</width>
-       <height>16777215</height>
-      </size>
-     </property>
-     <property name="sizePolicy">
-      <sizepolicy hsizetype="Fixed" vsizetype="Expanding">
-       <horstretch>0</horstretch>
-       <verstretch>0</verstretch>
-      </sizepolicy>
-     </property>
-     <property name="frameShape">
-      <enum>QFrame::Shape::StyledPanel</enum>
-     </property>
-     <property name="frameShadow">
-      <enum>QFrame::Shadow::Raised</enum>
-     </property>
-     <layout class="QVBoxLayout" name="verticalLayout">
-     <item>
-      <widget class="QLabel" name="schoolLabelLogo">
-       <property name="maximumSize">
-        <size>
-         <width>16777215</width>
-         <height>100</height>
-        </size>
-       </property>
-       <property name="text">
-        <string>School Logo</string>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="generalBtn">
-       <property name="font">
-        <font>
-         <family>Segoe UI</family>
-         <pointsize>-1</pointsize>
-        </font>
-       </property>
-       <property name="text">
-        <string>🛠️General</string>
-       </property>
-       <property name="flat">
-        <bool>true</bool>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="databaseBtn">
-       <property name="font">
-        <font>
-         <family>Segoe UI</family>
-         <pointsize>-1</pointsize>
-        </font>
-       </property>
-       <property name="text">
-        <string>🗃️Database </string>
-       </property>
-       <property name="flat">
-        <bool>true</bool>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="reportingBtn">
-       <property name="font">
-        <font>
-         <family>Segoe UI</family>
-         <pointsize>-1</pointsize>
-        </font>
-       </property>
-       <property name="text">
-        <string>📊Reporting</string>
-       </property>
-       <property name="flat">
-        <bool>true</bool>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="studentSearchBtn">
-       <property name="font">
-        <font>
-         <family>Segoe UI</family>
-         <pointsize>-1</pointsize>
-        </font>
-       </property>
-       <property name="text">
-        <string>🔎Search</string>
-       </property>
-       <property name="flat">
-        <bool>true</bool>
-       </property>
-      </widget>
-     </item>
-     <item>
-      <widget class="QPushButton" name="visitorBtn">
-       <property name="font">
-        <font>
-         <family>Segoe UI</family>
-         <pointsize>-1</pointsize>
-        </font>
-       </property>
-       <property name="text">
-        <string>📍VIsit Logs</string>
-       </property>
-       <property name="flat">
-        <bool>true</bool>
-       </property>
-      </widget>
-     </item>
-    </layout>
-    </widget>
+     <widget class="QFrame" name="sidebarFrame">
+      <property name="sizePolicy">
+       <sizepolicy hsizetype="Fixed" vsizetype="Expanding">
+        <horstretch>0</horstretch>
+        <verstretch>0</verstretch>
+       </sizepolicy>
+      </property>
+      <property name="minimumSize">
+       <size>
+        <width>121</width>
+        <height>0</height>
+       </size>
+      </property>
+      <property name="maximumSize">
+       <size>
+        <width>121</width>
+        <height>16777215</height>
+       </size>
+      </property>
+      <property name="frameShape">
+       <enum>QFrame::Shape::StyledPanel</enum>
+      </property>
+      <property name="frameShadow">
+       <enum>QFrame::Shadow::Raised</enum>
+      </property>
+      <layout class="QVBoxLayout" name="verticalLayout">
+       <item>
+        <widget class="QLabel" name="schoolLabelLogo">
+         <property name="maximumSize">
+          <size>
+           <width>16777215</width>
+           <height>100</height>
+          </size>
+         </property>
+         <property name="text">
+          <string>School Logo</string>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="generalBtn">
+         <property name="font">
+          <font>
+           <family>Segoe UI</family>
+           <pointsize>-1</pointsize>
+          </font>
+         </property>
+         <property name="text">
+          <string>🛠️General</string>
+         </property>
+         <property name="flat">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="databaseBtn">
+         <property name="font">
+          <font>
+           <family>Segoe UI</family>
+           <pointsize>-1</pointsize>
+          </font>
+         </property>
+         <property name="text">
+          <string>🗃️Database </string>
+         </property>
+         <property name="flat">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="reportingBtn">
+         <property name="font">
+          <font>
+           <family>Segoe UI</family>
+           <pointsize>-1</pointsize>
+          </font>
+         </property>
+         <property name="text">
+          <string>📊Reporting</string>
+         </property>
+         <property name="flat">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="studentSearchBtn">
+         <property name="font">
+          <font>
+           <family>Segoe UI</family>
+           <pointsize>-1</pointsize>
+          </font>
+         </property>
+         <property name="text">
+          <string>🔎Search</string>
+         </property>
+         <property name="flat">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+       <item>
+        <widget class="QPushButton" name="visitorBtn">
+         <property name="font">
+          <font>
+           <family>Segoe UI</family>
+           <pointsize>-1</pointsize>
+          </font>
+         </property>
+         <property name="text">
+          <string>📍VIsit Logs</string>
+         </property>
+         <property name="flat">
+          <bool>true</bool>
+         </property>
+        </widget>
+       </item>
+      </layout>
+     </widget>
     </item>
     <item>
      <widget class="QStackedWidget" name="stackedWidget">
@@ -272,419 +272,419 @@ QProgressBar::chunk {
       <property name="currentIndex">
        <number>0</number>
       </property>
-    <widget class="QWidget" name="generalPage">
-     <layout class="QGridLayout" name="gridLayout">
-      <item row="0" column="1" colspan="2">
-       <widget class="QFrame" name="adminFrame">
-        <property name="minimumSize">
-         <size>
-          <width>250</width>
-          <height>150</height>
-         </size>
-        </property>
-        <property name="sizePolicy">
-         <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
-          <horstretch>1</horstretch>
-          <verstretch>0</verstretch>
-         </sizepolicy>
-        </property>
-        <property name="frameShape">
-         <enum>QFrame::Shape::StyledPanel</enum>
-        </property>
-        <property name="frameShadow">
-         <enum>QFrame::Shadow::Raised</enum>
-        </property>
-        <layout class="QVBoxLayout" name="verticalLayout_admin">
-         <item>
-          <widget class="QLabel" name="label_5">
-           <property name="font">
-            <font>
-             <family>Segoe UI</family>
-             <pointsize>-1</pointsize>
-             <bold>true</bold>
-            </font>
-           </property>
-           <property name="text">
-            <string>Admin Information</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QLineEdit" name="adminNameLineEdit">
-           <property name="text">
-            <string>Enter Admin Name</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QLineEdit" name="adminPositionLineEdit">
-           <property name="text">
-            <string>Enter Admin Position/Rank</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <spacer name="verticalSpacer_admin">
-           <property name="orientation">
-            <enum>Qt::Vertical</enum>
-           </property>
-           <property name="sizeHint" stdset="0">
-            <size>
-             <width>20</width>
-             <height>40</height>
-            </size>
-           </property>
-          </spacer>
-         </item>
-        </layout>
-       </widget>
-      </item>
-      <item row="1" column="0" colspan="3">
-       <widget class="QFrame" name="libraryFrame">
-        <property name="minimumSize">
-         <size>
-          <width>250</width>
-          <height>150</height>
-         </size>
-        </property>
-        <property name="sizePolicy">
-         <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
-          <horstretch>1</horstretch>
-          <verstretch>0</verstretch>
-         </sizepolicy>
-        </property>
-        <property name="frameShape">
-         <enum>QFrame::Shape::StyledPanel</enum>
-        </property>
-        <property name="frameShadow">
-         <enum>QFrame::Shadow::Raised</enum>
-        </property>
-        <layout class="QGridLayout" name="gridLayout_library">
-         <item row="0" column="0">
-          <widget class="QLabel" name="label_4">
-           <property name="font">
-            <font>
-             <family>Segoe UI</family>
-             <pointsize>-1</pointsize>
-             <bold>true</bold>
-            </font>
-           </property>
-           <property name="text">
-            <string>School Information</string>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="0">
-          <widget class="QLineEdit" name="schoolName">
-           <property name="text">
-            <string>Enter School Name</string>
-           </property>
-          </widget>
-         </item>
-         <item row="2" column="0">
-          <widget class="QLineEdit" name="address">
-           <property name="text">
-            <string>Enter School Address</string>
-           </property>
-          </widget>
-         </item>
-         <item row="0" column="1">
-          <widget class="QLabel" name="label_3">
-           <property name="text">
-            <string>Edit Font</string>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="1">
-          <widget class="QFontComboBox" name="fontComboBox"/>
-         </item>
-         <item row="0" column="2">
-          <widget class="QLabel" name="label_9">
-           <property name="text">
-            <string>Font Size</string>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="2">
-          <widget class="QSpinBox" name="spinBox"/>
-         </item>
-         <item row="0" column="3">
-          <widget class="QLabel" name="label_34">
-           <property name="text">
-            <string>Library Hours</string>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="3">
-          <layout class="QHBoxLayout" name="horizontalLayout_libraryHours">
+      <widget class="QWidget" name="generalPage">
+       <layout class="QGridLayout" name="gridLayout">
+        <item row="0" column="1" colspan="2">
+         <widget class="QFrame" name="adminFrame">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+            <horstretch>1</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>250</width>
+            <height>150</height>
+           </size>
+          </property>
+          <property name="frameShape">
+           <enum>QFrame::Shape::StyledPanel</enum>
+          </property>
+          <property name="frameShadow">
+           <enum>QFrame::Shadow::Raised</enum>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayout_admin">
            <item>
-            <widget class="QSpinBox" name="openHourSpinBox">
-             <property name="minimum">
-              <number>1</number>
+            <widget class="QLabel" name="label_5">
+             <property name="font">
+              <font>
+               <family>Segoe UI</family>
+               <pointsize>-1</pointsize>
+               <bold>true</bold>
+              </font>
              </property>
-             <property name="maximum">
-              <number>12</number>
-             </property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QLabel" name="label_35">
              <property name="text">
-              <string>am -</string>
+              <string>Admin Information</string>
              </property>
             </widget>
            </item>
            <item>
-            <widget class="QSpinBox" name="closeHourSpinBox">
-             <property name="minimum">
-              <number>1</number>
-             </property>
-             <property name="maximum">
-              <number>12</number>
-             </property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QLabel" name="label_36">
+            <widget class="QLineEdit" name="adminNameLineEdit">
              <property name="text">
-              <string>pm</string>
+              <string>Enter Admin Name</string>
              </property>
             </widget>
+           </item>
+           <item>
+            <widget class="QLineEdit" name="adminPositionLineEdit">
+             <property name="text">
+              <string>Enter Admin Position/Rank</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <spacer name="verticalSpacer_admin">
+             <property name="orientation">
+              <enum>Qt::Orientation::Vertical</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>20</width>
+               <height>40</height>
+              </size>
+             </property>
+            </spacer>
            </item>
           </layout>
-         </item>
-         <item row="2" column="1">
-          <widget class="QLabel" name="label_10">
-           <property name="text">
-            <string>Preview:</string>
-           </property>
-          </widget>
-         </item>
-         <item row="3" column="1" colspan="3">
-          <widget class="QLabel" name="schoolText_previewLabel">
-           <property name="text">
-            <string/>
-           </property>
-          </widget>
-         </item>
-        </layout>
-       </widget>
-      </item>
-      <item row="0" column="0">
-       <widget class="QFrame" name="securityFrame">
-        <property name="minimumSize">
-         <size>
-          <width>250</width>
-          <height>150</height>
-         </size>
-        </property>
-        <property name="sizePolicy">
-         <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
-          <horstretch>1</horstretch>
-          <verstretch>0</verstretch>
-         </sizepolicy>
-        </property>
-        <property name="frameShape">
-         <enum>QFrame::Shape::StyledPanel</enum>
-        </property>
-        <property name="frameShadow">
-         <enum>QFrame::Shadow::Raised</enum>
-        </property>
-        <layout class="QVBoxLayout" name="verticalLayout_security">
-         <item>
-          <widget class="QLabel" name="label_2">
-           <property name="text">
-            <string>Change Admin Password</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <layout class="QGridLayout" name="gridLayout_security">
+         </widget>
+        </item>
+        <item row="1" column="0" colspan="3">
+         <widget class="QFrame" name="libraryFrame">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+            <horstretch>1</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>250</width>
+            <height>150</height>
+           </size>
+          </property>
+          <property name="frameShape">
+           <enum>QFrame::Shape::StyledPanel</enum>
+          </property>
+          <property name="frameShadow">
+           <enum>QFrame::Shadow::Raised</enum>
+          </property>
+          <layout class="QGridLayout" name="gridLayout_library">
            <item row="0" column="0">
-            <widget class="QLineEdit" name="lineEdit">
-             <property name="text">
-              <string>Enter Old Password</string>
+            <widget class="QLabel" name="label_4">
+             <property name="font">
+              <font>
+               <family>Segoe UI</family>
+               <pointsize>-1</pointsize>
+               <bold>true</bold>
+              </font>
              </property>
-            </widget>
-           </item>
-           <item row="0" column="1">
-            <widget class="QPushButton" name="showOldBtn">
              <property name="text">
-              <string/>
-             </property>
-             <property name="flat">
-              <bool>false</bool>
+              <string>School Information</string>
              </property>
             </widget>
            </item>
            <item row="1" column="0">
-            <widget class="QLineEdit" name="lineEdit_2">
+            <widget class="QLineEdit" name="schoolName">
              <property name="text">
-              <string>Enter New Password</string>
+              <string>Enter School Name</string>
+             </property>
+            </widget>
+           </item>
+           <item row="2" column="0">
+            <widget class="QLineEdit" name="address">
+             <property name="text">
+              <string>Enter School Address</string>
+             </property>
+            </widget>
+           </item>
+           <item row="0" column="1">
+            <widget class="QLabel" name="label_3">
+             <property name="text">
+              <string>Edit Font</string>
              </property>
             </widget>
            </item>
            <item row="1" column="1">
-            <widget class="QPushButton" name="showNewBtn">
+            <widget class="QFontComboBox" name="fontComboBox"/>
+           </item>
+           <item row="0" column="2">
+            <widget class="QLabel" name="label_9">
+             <property name="text">
+              <string>Font Size</string>
+             </property>
+            </widget>
+           </item>
+           <item row="1" column="2">
+            <widget class="QSpinBox" name="spinBox"/>
+           </item>
+           <item row="0" column="3">
+            <widget class="QLabel" name="label_34">
+             <property name="text">
+              <string>Library Hours</string>
+             </property>
+            </widget>
+           </item>
+           <item row="1" column="3">
+            <layout class="QHBoxLayout" name="horizontalLayout_libraryHours">
+             <item>
+              <widget class="QSpinBox" name="openHourSpinBox">
+               <property name="minimum">
+                <number>1</number>
+               </property>
+               <property name="maximum">
+                <number>12</number>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLabel" name="label_35">
+               <property name="text">
+                <string>am -</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QSpinBox" name="closeHourSpinBox">
+               <property name="minimum">
+                <number>1</number>
+               </property>
+               <property name="maximum">
+                <number>12</number>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLabel" name="label_36">
+               <property name="text">
+                <string>pm</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item row="2" column="1">
+            <widget class="QLabel" name="label_10">
+             <property name="text">
+              <string>Preview:</string>
+             </property>
+            </widget>
+           </item>
+           <item row="3" column="1" colspan="3">
+            <widget class="QLabel" name="schoolText_previewLabel">
              <property name="text">
               <string/>
-             </property>
-             <property name="flat">
-              <bool>false</bool>
              </property>
             </widget>
            </item>
           </layout>
-         </item>
-         <item>
-          <widget class="QPushButton" name="updateBtn">
-           <property name="text">
-            <string>Update</string>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <spacer name="verticalSpacer_security">
-           <property name="orientation">
-            <enum>Qt::Vertical</enum>
-           </property>
-           <property name="sizeHint" stdset="0">
-            <size>
-             <width>20</width>
-             <height>40</height>
-            </size>
-           </property>
-          </spacer>
-         </item>
-        </layout>
-       </widget>
-      </item>
-      <item row="2" column="0" colspan="3">
-       <widget class="QFrame" name="settingsFrame">
-        <property name="minimumSize">
-         <size>
-          <width>250</width>
-          <height>150</height>
-         </size>
-        </property>
-        <property name="sizePolicy">
-         <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
-          <horstretch>1</horstretch>
-          <verstretch>0</verstretch>
-         </sizepolicy>
-        </property>
-        <property name="frameShape">
-         <enum>QFrame::Shape::StyledPanel</enum>
-        </property>
-        <property name="frameShadow">
-         <enum>QFrame::Shadow::Raised</enum>
-        </property>
-        <layout class="QGridLayout" name="gridLayout_settings">
-         <item row="0" column="0" colspan="3">
-          <widget class="QLabel" name="label_6">
-           <property name="font">
-            <font>
-             <family>Segoe UI</family>
-             <pointsize>-1</pointsize>
-             <bold>true</bold>
-            </font>
-           </property>
-           <property name="text">
-            <string>Features and Uploads</string>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="0">
-          <widget class="QLabel" name="uploadSchoolLogo">
-           <property name="text">
-            <string>Upload School Logo</string>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="1">
-          <widget class="QPushButton" name="schoolLogoBrowseBtn">
-           <property name="text">
-            <string>Browse . . .</string>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="2">
-          <widget class="QLabel" name="schLogo_previewLabel">
-           <property name="text">
-            <string/>
-           </property>
-          </widget>
-         </item>
-         <item row="2" column="0">
-          <widget class="QLabel" name="welcomePoster_img">
-           <property name="text">
-            <string>Upload Welcome Poster</string>
-           </property>
-          </widget>
-         </item>
-         <item row="2" column="1">
-          <widget class="QPushButton" name="posterBrowseBtn">
-           <property name="text">
-            <string>Browse . . .</string>
-           </property>
-          </widget>
-         </item>
-         <item row="2" column="2">
-          <widget class="QLabel" name="posterPreviewLabel">
-           <property name="text">
-            <string/>
-           </property>
-          </widget>
-         </item>
-         <item row="3" column="0">
-          <widget class="QCheckBox" name="guestLoginCheckBox">
-           <property name="text">
-            <string>Allow Visitor/ Guest Login</string>
-           </property>
-          </widget>
-         </item>
-         <item row="4" column="0">
-          <widget class="QCheckBox" name="clearAttendanceCheckBox">
-           <property name="text">
-            <string>Clear Attendance Panel</string>
-           </property>
-          </widget>
-         </item>
-         <item row="5" column="0">
-          <widget class="QCheckBox" name="bookDropSystemCheckBox">
-           <property name="text">
-            <string>Enable Book Drop System</string>
-           </property>
-          </widget>
-         </item>
-         <item row="6" column="0" colspan="3">
-          <widget class="QPushButton" name="applyChangesBtn">
-           <property name="text">
-            <string>Apply Changes</string>
-           </property>
-          </widget>
-         </item>
-         <item row="7" column="0">
-          <spacer name="verticalSpacer_settings">
-           <property name="orientation">
-            <enum>Qt::Vertical</enum>
-           </property>
-           <property name="sizeHint" stdset="0">
-            <size>
-             <width>20</width>
-             <height>40</height>
-            </size>
-           </property>
-          </spacer>
-         </item>
-        </layout>
-       </widget>
-      </item>
-     </layout>
-    </widget>
-    <widget class="QWidget" name="databasePage">
-     <property name="styleSheet">
-      <string notr="true">QGroupBox {
+         </widget>
+        </item>
+        <item row="0" column="0">
+         <widget class="QFrame" name="securityFrame">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+            <horstretch>1</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>250</width>
+            <height>150</height>
+           </size>
+          </property>
+          <property name="frameShape">
+           <enum>QFrame::Shape::StyledPanel</enum>
+          </property>
+          <property name="frameShadow">
+           <enum>QFrame::Shadow::Raised</enum>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayout_security">
+           <item>
+            <widget class="QLabel" name="label_2">
+             <property name="text">
+              <string>Change Admin Password</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <layout class="QGridLayout" name="gridLayout_security">
+             <item row="0" column="0">
+              <widget class="QLineEdit" name="lineEdit">
+               <property name="text">
+                <string>Enter Old Password</string>
+               </property>
+              </widget>
+             </item>
+             <item row="0" column="1">
+              <widget class="QPushButton" name="showOldBtn">
+               <property name="text">
+                <string/>
+               </property>
+               <property name="flat">
+                <bool>false</bool>
+               </property>
+              </widget>
+             </item>
+             <item row="1" column="0">
+              <widget class="QLineEdit" name="lineEdit_2">
+               <property name="text">
+                <string>Enter New Password</string>
+               </property>
+              </widget>
+             </item>
+             <item row="1" column="1">
+              <widget class="QPushButton" name="showNewBtn">
+               <property name="text">
+                <string/>
+               </property>
+               <property name="flat">
+                <bool>false</bool>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+           <item>
+            <widget class="QPushButton" name="updateBtn">
+             <property name="text">
+              <string>Update</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <spacer name="verticalSpacer_security">
+             <property name="orientation">
+              <enum>Qt::Orientation::Vertical</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>20</width>
+               <height>40</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item row="2" column="0" colspan="3">
+         <widget class="QFrame" name="settingsFrame">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+            <horstretch>1</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>250</width>
+            <height>150</height>
+           </size>
+          </property>
+          <property name="frameShape">
+           <enum>QFrame::Shape::StyledPanel</enum>
+          </property>
+          <property name="frameShadow">
+           <enum>QFrame::Shadow::Raised</enum>
+          </property>
+          <layout class="QGridLayout" name="gridLayout_settings">
+           <item row="0" column="0" colspan="3">
+            <widget class="QLabel" name="label_6">
+             <property name="font">
+              <font>
+               <family>Segoe UI</family>
+               <pointsize>-1</pointsize>
+               <bold>true</bold>
+              </font>
+             </property>
+             <property name="text">
+              <string>Features and Uploads</string>
+             </property>
+            </widget>
+           </item>
+           <item row="1" column="0">
+            <widget class="QLabel" name="uploadSchoolLogo">
+             <property name="text">
+              <string>Upload School Logo</string>
+             </property>
+            </widget>
+           </item>
+           <item row="1" column="1">
+            <widget class="QPushButton" name="schoolLogoBrowseBtn">
+             <property name="text">
+              <string>Browse . . .</string>
+             </property>
+            </widget>
+           </item>
+           <item row="1" column="2">
+            <widget class="QLabel" name="schLogo_previewLabel">
+             <property name="text">
+              <string/>
+             </property>
+            </widget>
+           </item>
+           <item row="2" column="0">
+            <widget class="QLabel" name="welcomePoster_img">
+             <property name="text">
+              <string>Upload Welcome Photo</string>
+             </property>
+            </widget>
+           </item>
+           <item row="2" column="1">
+            <widget class="QPushButton" name="posterBrowseBtn">
+             <property name="text">
+              <string>Browse . . .</string>
+             </property>
+            </widget>
+           </item>
+           <item row="2" column="2">
+            <widget class="QLabel" name="posterPreviewLabel">
+             <property name="text">
+              <string/>
+             </property>
+            </widget>
+           </item>
+           <item row="3" column="0">
+            <widget class="QCheckBox" name="guestLoginCheckBox">
+             <property name="text">
+              <string>Allow Visitor/ Guest Login</string>
+             </property>
+            </widget>
+           </item>
+           <item row="4" column="0">
+            <widget class="QCheckBox" name="clearAttendanceCheckBox">
+             <property name="text">
+              <string>Clear Attendance Panel</string>
+             </property>
+            </widget>
+           </item>
+           <item row="5" column="0">
+            <widget class="QCheckBox" name="bookDropSystemCheckBox">
+             <property name="text">
+              <string>Enable Book Drop System</string>
+             </property>
+            </widget>
+           </item>
+           <item row="6" column="0" colspan="3">
+            <widget class="QPushButton" name="applyChangesBtn">
+             <property name="text">
+              <string>Apply Changes</string>
+             </property>
+            </widget>
+           </item>
+           <item row="7" column="0">
+            <spacer name="verticalSpacer_settings">
+             <property name="orientation">
+              <enum>Qt::Orientation::Vertical</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size>
+               <width>20</width>
+               <height>40</height>
+              </size>
+             </property>
+            </spacer>
+           </item>
+          </layout>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+      <widget class="QWidget" name="databasePage">
+       <property name="styleSheet">
+        <string notr="true">QGroupBox {
     border: 1px solid rgba(200,200,200,0.6);
     border-radius: 6px;
     margin-top: 8px;
@@ -717,593 +717,593 @@ QProgressBar {
     height: 12px;
 }
 </string>
-     </property>
-     <layout class="QHBoxLayout" name="horizontalLayout_databasePage">
-      <item>
-       <widget class="QGroupBox" name="groupBox">
-        <property name="minimumSize">
-         <size>
-          <width>280</width>
-          <height>0</height>
-         </size>
-        </property>
-        <property name="font">
-         <font>
-          <family>Segoe UI</family>
-          <pointsize>-1</pointsize>
-          <bold>true</bold>
-         </font>
-        </property>
-        <property name="title">
-         <string>Start New Semester</string>
-        </property>
-        <layout class="QVBoxLayout" name="verticalLayout_5">
-         <item>
-          <widget class="QLabel" name="label_7">
-           <property name="font">
-            <font>
-             <family>Segoe UI</family>
-             <pointsize>-1</pointsize>
-             <bold>true</bold>
-            </font>
-           </property>
-           <property name="text">
-            <string/>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QComboBox" name="departmentComboBox">
-           <property name="font">
-            <font>
-             <family>Segoe UI</family>
-             <pointsize>-1</pointsize>
-             <bold>true</bold>
-            </font>
-           </property>
-          </widget>
-         </item>
-         <item>
-          <layout class="QGridLayout" name="gridLayout_2">
-           <item row="4" column="0">
-            <widget class="QPushButton" name="deleteRecordsBtn">
+       </property>
+       <layout class="QHBoxLayout" name="horizontalLayout_databasePage">
+        <item>
+         <widget class="QGroupBox" name="groupBox">
+          <property name="minimumSize">
+           <size>
+            <width>280</width>
+            <height>0</height>
+           </size>
+          </property>
+          <property name="font">
+           <font>
+            <family>Segoe UI</family>
+            <pointsize>-1</pointsize>
+            <bold>true</bold>
+           </font>
+          </property>
+          <property name="title">
+           <string>Start New Semester</string>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayout_5">
+           <item>
+            <widget class="QLabel" name="label_7">
              <property name="font">
               <font>
                <family>Segoe UI</family>
                <pointsize>-1</pointsize>
-               <bold>false</bold>
+               <bold>true</bold>
               </font>
              </property>
              <property name="text">
-              <string>DELETE STUDENTS</string>
+              <string/>
              </property>
             </widget>
            </item>
-           <item row="3" column="0">
-            <widget class="QPushButton" name="resetCountBtn">
+           <item>
+            <widget class="QComboBox" name="departmentComboBox">
              <property name="font">
               <font>
                <family>Segoe UI</family>
                <pointsize>-1</pointsize>
-               <bold>false</bold>
+               <bold>true</bold>
               </font>
-             </property>
-             <property name="text">
-              <string>RESET VISIT COUNT</string>
              </property>
             </widget>
            </item>
-           <item row="2" column="0">
-            <widget class="QPushButton" name="deactivateBtn">
-             <property name="font">
-              <font>
-               <family>Segoe UI</family>
-               <pointsize>-1</pointsize>
-               <bold>false</bold>
-              </font>
-             </property>
-             <property name="text">
-              <string>DEACTIVATE ALL STUDENTS</string>
-             </property>
+           <item>
+            <layout class="QGridLayout" name="gridLayout_2">
+             <item row="4" column="0">
+              <widget class="QPushButton" name="deleteRecordsBtn">
+               <property name="font">
+                <font>
+                 <family>Segoe UI</family>
+                 <pointsize>-1</pointsize>
+                 <bold>false</bold>
+                </font>
+               </property>
+               <property name="text">
+                <string>DELETE STUDENTS</string>
+               </property>
+              </widget>
+             </item>
+             <item row="3" column="0">
+              <widget class="QPushButton" name="resetCountBtn">
+               <property name="font">
+                <font>
+                 <family>Segoe UI</family>
+                 <pointsize>-1</pointsize>
+                 <bold>false</bold>
+                </font>
+               </property>
+               <property name="text">
+                <string>RESET VISIT COUNT</string>
+               </property>
+              </widget>
+             </item>
+             <item row="2" column="0">
+              <widget class="QPushButton" name="deactivateBtn">
+               <property name="font">
+                <font>
+                 <family>Segoe UI</family>
+                 <pointsize>-1</pointsize>
+                 <bold>false</bold>
+                </font>
+               </property>
+               <property name="text">
+                <string>DEACTIVATE ALL STUDENTS</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item>
+         <widget class="QGroupBox" name="individualRegistrationBox">
+          <property name="minimumSize">
+           <size>
+            <width>280</width>
+            <height>0</height>
+           </size>
+          </property>
+          <property name="font">
+           <font>
+            <family>Segoe UI</family>
+            <pointsize>-1</pointsize>
+            <bold>true</bold>
+            <underline>false</underline>
+           </font>
+          </property>
+          <property name="title">
+           <string>Register</string>
+          </property>
+          <layout class="QHBoxLayout" name="horizontalLayout_7">
+           <item>
+            <widget class="QWidget" name="widget_4" native="true">
+             <layout class="QVBoxLayout" name="verticalLayout_3">
+              <item>
+               <widget class="QLabel" name="photoPreviewLabel">
+                <property name="minimumSize">
+                 <size>
+                  <width>162</width>
+                  <height>162</height>
+                 </size>
+                </property>
+                <property name="maximumSize">
+                 <size>
+                  <width>150</width>
+                  <height>180</height>
+                 </size>
+                </property>
+                <property name="text">
+                 <string/>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QPushButton" name="browsePhotoBtn">
+                <property name="minimumSize">
+                 <size>
+                  <width>233</width>
+                  <height>25</height>
+                 </size>
+                </property>
+                <property name="font">
+                 <font>
+                  <family>Segoe UI</family>
+                  <pointsize>-1</pointsize>
+                  <bold>true</bold>
+                  <underline>false</underline>
+                 </font>
+                </property>
+                <property name="text">
+                 <string>Upload Student Photo</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <layout class="QFormLayout" name="formLayout">
+                <item row="2" column="0">
+                 <widget class="QLabel" name="label_8">
+                  <property name="font">
+                   <font>
+                    <family>Segoe UI</family>
+                    <pointsize>-1</pointsize>
+                    <bold>true</bold>
+                    <underline>false</underline>
+                   </font>
+                  </property>
+                  <property name="text">
+                   <string>Code:</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="2" column="1">
+                 <widget class="QLineEdit" name="codeLineEdit"/>
+                </item>
+                <item row="3" column="0">
+                 <widget class="QLabel" name="label_11">
+                  <property name="font">
+                   <font>
+                    <family>Segoe UI</family>
+                    <pointsize>-1</pointsize>
+                    <bold>true</bold>
+                    <underline>false</underline>
+                   </font>
+                  </property>
+                  <property name="text">
+                   <string>Name:</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="3" column="1">
+                 <widget class="QLineEdit" name="nameLineEdit"/>
+                </item>
+                <item row="4" column="0">
+                 <widget class="QLabel" name="label_12">
+                  <property name="font">
+                   <font>
+                    <family>Segoe UI</family>
+                    <pointsize>-1</pointsize>
+                    <bold>true</bold>
+                    <underline>false</underline>
+                   </font>
+                  </property>
+                  <property name="text">
+                   <string>ID Number:</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="4" column="1">
+                 <widget class="QLineEdit" name="idLineEdit"/>
+                </item>
+                <item row="5" column="0">
+                 <widget class="QLabel" name="label_14">
+                  <property name="font">
+                   <font>
+                    <family>Segoe UI</family>
+                    <pointsize>-1</pointsize>
+                    <bold>true</bold>
+                    <underline>false</underline>
+                   </font>
+                  </property>
+                  <property name="text">
+                   <string>Year Level:</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="5" column="1">
+                 <widget class="QLineEdit" name="yrlvlLineEdit"/>
+                </item>
+                <item row="6" column="0">
+                 <widget class="QLabel" name="label_13">
+                  <property name="font">
+                   <font>
+                    <family>Segoe UI</family>
+                    <pointsize>-1</pointsize>
+                    <bold>true</bold>
+                    <underline>false</underline>
+                   </font>
+                  </property>
+                  <property name="text">
+                   <string>Course:</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="6" column="1">
+                 <widget class="QLineEdit" name="courseLineEdit"/>
+                </item>
+                <item row="7" column="0">
+                 <widget class="QLabel" name="label_15">
+                  <property name="font">
+                   <font>
+                    <family>Segoe UI</family>
+                    <pointsize>-1</pointsize>
+                    <bold>true</bold>
+                    <underline>false</underline>
+                   </font>
+                  </property>
+                  <property name="text">
+                   <string>Department:</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="7" column="1">
+                 <widget class="QLineEdit" name="departmentLineEdit"/>
+                </item>
+                <item row="8" column="0">
+                 <widget class="QLabel" name="label_17">
+                  <property name="font">
+                   <font>
+                    <family>Segoe UI</family>
+                    <pointsize>-1</pointsize>
+                    <bold>true</bold>
+                    <underline>false</underline>
+                   </font>
+                  </property>
+                  <property name="text">
+                   <string>Gender:</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="8" column="1">
+                 <widget class="QComboBox" name="genderComboBox">
+                  <property name="font">
+                   <font>
+                    <family>Segoe UI</family>
+                    <pointsize>-1</pointsize>
+                    <bold>false</bold>
+                    <underline>false</underline>
+                   </font>
+                  </property>
+                  <item>
+                   <property name="text">
+                    <string>Male</string>
+                   </property>
+                  </item>
+                  <item>
+                   <property name="text">
+                    <string>Female</string>
+                   </property>
+                  </item>
+                  <item>
+                   <property name="text">
+                    <string/>
+                   </property>
+                  </item>
+                 </widget>
+                </item>
+                <item row="9" column="0">
+                 <widget class="QLabel" name="label_16">
+                  <property name="font">
+                   <font>
+                    <family>Segoe UI</family>
+                    <pointsize>-1</pointsize>
+                    <bold>true</bold>
+                    <underline>false</underline>
+                   </font>
+                  </property>
+                  <property name="text">
+                   <string>Status:</string>
+                  </property>
+                 </widget>
+                </item>
+                <item row="9" column="1">
+                 <widget class="QComboBox" name="statusComboBox">
+                  <property name="font">
+                   <font>
+                    <family>Segoe UI</family>
+                    <pointsize>-1</pointsize>
+                    <bold>false</bold>
+                    <underline>false</underline>
+                   </font>
+                  </property>
+                  <item>
+                   <property name="text">
+                    <string>Active</string>
+                   </property>
+                  </item>
+                  <item>
+                   <property name="text">
+                    <string>Inactive</string>
+                   </property>
+                  </item>
+                 </widget>
+                </item>
+                <item row="10" column="1">
+                 <widget class="QPushButton" name="registerBtn">
+                  <property name="text">
+                   <string>REGISTER</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </item>
+             </layout>
             </widget>
            </item>
           </layout>
-         </item>
-        </layout>
-       </widget>
-      </item>
-      <item>
-       <widget class="QGroupBox" name="individualRegistrationBox">
-        <property name="minimumSize">
-         <size>
-          <width>280</width>
-          <height>0</height>
-         </size>
-        </property>
-      <property name="font">
-       <font>
-        <family>Segoe UI</family>
-        <pointsize>-1</pointsize>
-        <bold>true</bold>
-        <underline>false</underline>
-       </font>
-      </property>
-      <property name="title">
-       <string>Register</string>
-      </property>
-      <layout class="QHBoxLayout" name="horizontalLayout_7">
-       <item>
-        <widget class="QWidget" name="widget_4" native="true">
-         <layout class="QVBoxLayout" name="verticalLayout_3">
-          <item>
-           <widget class="QLabel" name="photoPreviewLabel">
-            <property name="minimumSize">
-             <size>
-              <width>162</width>
-              <height>162</height>
-             </size>
-            </property>
-            <property name="maximumSize">
-             <size>
-              <width>150</width>
-              <height>180</height>
-             </size>
-            </property>
-            <property name="text">
-             <string/>
-            </property>
-           </widget>
-          </item>
-          <item>
-           <widget class="QPushButton" name="browsePhotoBtn">
-            <property name="minimumSize">
-             <size>
-              <width>233</width>
-              <height>25</height>
-             </size>
-            </property>
-            <property name="font">
-             <font>
-              <family>Segoe UI</family>
-              <pointsize>-1</pointsize>
-              <bold>true</bold>
-              <underline>false</underline>
-             </font>
-            </property>
-            <property name="text">
-             <string>Upload Student Photo</string>
-            </property>
-           </widget>
-          </item>
-          <item>
-           <layout class="QFormLayout" name="formLayout">
-            <item row="2" column="0">
-             <widget class="QLabel" name="label_8">
-              <property name="font">
-               <font>
-                <family>Segoe UI</family>
-                <pointsize>-1</pointsize>
-                <bold>true</bold>
-                <underline>false</underline>
-               </font>
-              </property>
-              <property name="text">
-               <string>Code:</string>
-              </property>
-             </widget>
-            </item>
-            <item row="2" column="1">
-             <widget class="QLineEdit" name="codeLineEdit"/>
-            </item>
-            <item row="3" column="0">
-             <widget class="QLabel" name="label_11">
-              <property name="font">
-               <font>
-                <family>Segoe UI</family>
-                <pointsize>-1</pointsize>
-                <bold>true</bold>
-                <underline>false</underline>
-               </font>
-              </property>
-              <property name="text">
-               <string>Name:</string>
-              </property>
-             </widget>
-            </item>
-            <item row="3" column="1">
-             <widget class="QLineEdit" name="nameLineEdit"/>
-            </item>
-            <item row="4" column="0">
-             <widget class="QLabel" name="label_12">
-              <property name="font">
-               <font>
-                <family>Segoe UI</family>
-                <pointsize>-1</pointsize>
-                <bold>true</bold>
-                <underline>false</underline>
-               </font>
-              </property>
-              <property name="text">
-               <string>ID Number:</string>
-              </property>
-             </widget>
-            </item>
-            <item row="4" column="1">
-             <widget class="QLineEdit" name="idLineEdit"/>
-            </item>
-            <item row="5" column="0">
-             <widget class="QLabel" name="label_14">
-              <property name="font">
-               <font>
-                <family>Segoe UI</family>
-                <pointsize>-1</pointsize>
-                <bold>true</bold>
-                <underline>false</underline>
-               </font>
-              </property>
-              <property name="text">
-               <string>Year Level:</string>
-              </property>
-             </widget>
-            </item>
-            <item row="5" column="1">
-             <widget class="QLineEdit" name="yrlvlLineEdit"/>
-            </item>
-            <item row="6" column="0">
-             <widget class="QLabel" name="label_13">
-              <property name="font">
-               <font>
-                <family>Segoe UI</family>
-                <pointsize>-1</pointsize>
-                <bold>true</bold>
-                <underline>false</underline>
-               </font>
-              </property>
-              <property name="text">
-               <string>Course:</string>
-              </property>
-             </widget>
-            </item>
-            <item row="6" column="1">
-             <widget class="QLineEdit" name="courseLineEdit"/>
-            </item>
-            <item row="7" column="0">
-             <widget class="QLabel" name="label_15">
-              <property name="font">
-               <font>
-                <family>Segoe UI</family>
-                <pointsize>-1</pointsize>
-                <bold>true</bold>
-                <underline>false</underline>
-               </font>
-              </property>
-              <property name="text">
-               <string>Department:</string>
-              </property>
-             </widget>
-            </item>
-            <item row="7" column="1">
-             <widget class="QLineEdit" name="departmentLineEdit"/>
-            </item>
-            <item row="8" column="0">
-             <widget class="QLabel" name="label_17">
-              <property name="font">
-               <font>
-                <family>Segoe UI</family>
-                <pointsize>-1</pointsize>
-                <bold>true</bold>
-                <underline>false</underline>
-               </font>
-              </property>
-              <property name="text">
-               <string>Gender:</string>
-              </property>
-             </widget>
-            </item>
-            <item row="8" column="1">
-             <widget class="QComboBox" name="genderComboBox">
-              <property name="font">
-               <font>
-                <family>Segoe UI</family>
-                <pointsize>-1</pointsize>
-                <bold>false</bold>
-                <underline>false</underline>
-               </font>
-              </property>
+         </widget>
+        </item>
+        <item>
+         <widget class="QGroupBox" name="bulkRegistrationBox">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
+            <horstretch>1</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>280</width>
+            <height>0</height>
+           </size>
+          </property>
+          <property name="maximumSize">
+           <size>
+            <width>16777215</width>
+            <height>16777215</height>
+           </size>
+          </property>
+          <property name="font">
+           <font>
+            <family>Segoe UI</family>
+            <pointsize>-1</pointsize>
+            <bold>true</bold>
+           </font>
+          </property>
+          <property name="title">
+           <string>📦 Bulk Registration</string>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayout_4">
+           <item>
+            <widget class="QWidget" name="widget" native="true">
+             <layout class="QVBoxLayout" name="verticalLayout_2">
               <item>
-               <property name="text">
-                <string>Male</string>
-               </property>
+               <widget class="QTableWidget" name="bulkTable">
+                <property name="minimumSize">
+                 <size>
+                  <width>0</width>
+                  <height>314</height>
+                 </size>
+                </property>
+                <property name="maximumSize">
+                 <size>
+                  <width>16777215</width>
+                  <height>330</height>
+                 </size>
+                </property>
+                <property name="font">
+                 <font>
+                  <family>Segoe UI</family>
+                  <pointsize>-1</pointsize>
+                  <bold>true</bold>
+                 </font>
+                </property>
+                <property name="columnCount">
+                 <number>8</number>
+                </property>
+                <column>
+                 <property name="text">
+                  <string>Code</string>
+                 </property>
+                </column>
+                <column>
+                 <property name="text">
+                  <string>Name</string>
+                 </property>
+                </column>
+                <column>
+                 <property name="text">
+                  <string>ID Number</string>
+                 </property>
+                </column>
+                <column>
+                 <property name="text">
+                  <string>Year Level</string>
+                 </property>
+                </column>
+                <column>
+                 <property name="text">
+                  <string>Course</string>
+                 </property>
+                </column>
+                <column>
+                 <property name="text">
+                  <string>Department</string>
+                 </property>
+                </column>
+                <column>
+                 <property name="text">
+                  <string>Gender</string>
+                 </property>
+                </column>
+                <column>
+                 <property name="text">
+                  <string>Status</string>
+                 </property>
+                </column>
+               </widget>
               </item>
               <item>
-               <property name="text">
-                <string>Female</string>
-               </property>
+               <widget class="QProgressBar" name="bulkProgressBar">
+                <property name="minimumSize">
+                 <size>
+                  <width>0</width>
+                  <height>16</height>
+                 </size>
+                </property>
+                <property name="maximumSize">
+                 <size>
+                  <width>16777215</width>
+                  <height>16</height>
+                 </size>
+                </property>
+                <property name="font">
+                 <font>
+                  <family>Segoe UI</family>
+                  <pointsize>-1</pointsize>
+                  <bold>true</bold>
+                 </font>
+                </property>
+                <property name="value">
+                 <number>24</number>
+                </property>
+               </widget>
               </item>
               <item>
-               <property name="text">
-                <string/>
-               </property>
+               <layout class="QHBoxLayout" name="horizontalLayout_6">
+                <item>
+                 <widget class="QPushButton" name="attachFileBtn">
+                  <property name="minimumSize">
+                   <size>
+                    <width>0</width>
+                    <height>30</height>
+                   </size>
+                  </property>
+                  <property name="maximumSize">
+                   <size>
+                    <width>16777215</width>
+                    <height>30</height>
+                   </size>
+                  </property>
+                  <property name="font">
+                   <font>
+                    <family>Segoe UI</family>
+                    <pointsize>-1</pointsize>
+                    <fontweight>DemiBold</fontweight>
+                   </font>
+                  </property>
+                  <property name="text">
+                   <string>📂 Drop Files</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QPushButton" name="updateDatabaseBtn">
+                  <property name="minimumSize">
+                   <size>
+                    <width>0</width>
+                    <height>30</height>
+                   </size>
+                  </property>
+                  <property name="maximumSize">
+                   <size>
+                    <width>16777215</width>
+                    <height>30</height>
+                   </size>
+                  </property>
+                  <property name="font">
+                   <font>
+                    <family>Segoe UI</family>
+                    <pointsize>-1</pointsize>
+                    <fontweight>DemiBold</fontweight>
+                   </font>
+                  </property>
+                  <property name="text">
+                   <string>Update</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QPushButton" name="cancelUploadBtn">
+                  <property name="minimumSize">
+                   <size>
+                    <width>0</width>
+                    <height>30</height>
+                   </size>
+                  </property>
+                  <property name="maximumSize">
+                   <size>
+                    <width>16777215</width>
+                    <height>30</height>
+                   </size>
+                  </property>
+                  <property name="font">
+                   <font>
+                    <family>Segoe UI</family>
+                    <pointsize>-1</pointsize>
+                    <bold>true</bold>
+                   </font>
+                  </property>
+                  <property name="text">
+                   <string>Cancel</string>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
               </item>
-             </widget>
-            </item>
-            <item row="9" column="0">
-             <widget class="QLabel" name="label_16">
-              <property name="font">
-               <font>
-                <family>Segoe UI</family>
-                <pointsize>-1</pointsize>
-                <bold>true</bold>
-                <underline>false</underline>
-               </font>
-              </property>
-              <property name="text">
-               <string>Status:</string>
-              </property>
-             </widget>
-            </item>
-            <item row="9" column="1">
-             <widget class="QComboBox" name="statusComboBox">
-              <property name="font">
-               <font>
-                <family>Segoe UI</family>
-                <pointsize>-1</pointsize>
-                <bold>false</bold>
-                <underline>false</underline>
-               </font>
-              </property>
-              <item>
-               <property name="text">
-                <string>Active</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>Inactive</string>
-               </property>
-              </item>
-             </widget>
-            </item>
-            <item row="10" column="1">
-             <widget class="QPushButton" name="registerBtn">
-              <property name="text">
-               <string>REGISTER</string>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </item>
-         </layout>
-        </widget>
-       </item>
-      </layout>
-       </widget>
-      </item>
-      <item>
-       <widget class="QGroupBox" name="bulkRegistrationBox">
-        <property name="sizePolicy">
-         <sizepolicy hsizetype="Expanding" vsizetype="Preferred">
-          <horstretch>1</horstretch>
-          <verstretch>0</verstretch>
-         </sizepolicy>
-        </property>
-        <property name="minimumSize">
-         <size>
-          <width>280</width>
-          <height>0</height>
-         </size>
-        </property>
-        <property name="maximumSize">
-         <size>
-          <width>16777215</width>
-          <height>16777215</height>
-         </size>
-        </property>
-      <property name="font">
-       <font>
-        <family>Segoe UI</family>
-        <pointsize>-1</pointsize>
-        <bold>true</bold>
-       </font>
-      </property>
-      <property name="title">
-       <string>📦 Bulk Registration</string>
-      </property>
-      <layout class="QVBoxLayout" name="verticalLayout_4">
-       <item>
-        <widget class="QWidget" name="widget" native="true">
-         <layout class="QVBoxLayout" name="verticalLayout_2">
-          <item>
-           <widget class="QTableWidget" name="bulkTable">
-            <property name="minimumSize">
-             <size>
-              <width>0</width>
-              <height>314</height>
-             </size>
-            </property>
-            <property name="maximumSize">
-             <size>
-              <width>16777215</width>
-              <height>330</height>
-             </size>
-            </property>
-            <property name="font">
-             <font>
-              <family>Segoe UI</family>
-              <pointsize>-1</pointsize>
-              <bold>true</bold>
-             </font>
-            </property>
-            <property name="columnCount">
-             <number>8</number>
-            </property>
-            <column>
-             <property name="text">
-              <string>Code</string>
-             </property>
-            </column>
-            <column>
-             <property name="text">
-              <string>Name</string>
-             </property>
-            </column>
-            <column>
-             <property name="text">
-              <string>ID Number</string>
-             </property>
-            </column>
-            <column>
-             <property name="text">
-              <string>Year Level</string>
-             </property>
-            </column>
-            <column>
-             <property name="text">
-              <string>Course</string>
-             </property>
-            </column>
-            <column>
-             <property name="text">
-              <string>Department</string>
-             </property>
-            </column>
-            <column>
-             <property name="text">
-              <string>Gender</string>
-             </property>
-            </column>
-            <column>
-             <property name="text">
-              <string>Status</string>
-             </property>
-            </column>
-           </widget>
-          </item>
-          <item>
-           <widget class="QProgressBar" name="bulkProgressBar">
-            <property name="minimumSize">
-             <size>
-              <width>0</width>
-              <height>16</height>
-             </size>
-            </property>
-            <property name="maximumSize">
-             <size>
-              <width>16777215</width>
-              <height>16</height>
-             </size>
-            </property>
-            <property name="font">
-             <font>
-              <family>Segoe UI</family>
-              <pointsize>-1</pointsize>
-              <bold>true</bold>
-             </font>
-            </property>
-            <property name="value">
-             <number>24</number>
-            </property>
-           </widget>
-          </item>
-          <item>
-           <layout class="QHBoxLayout" name="horizontalLayout_6">
-            <item>
-             <widget class="QPushButton" name="attachFileBtn">
-              <property name="minimumSize">
-               <size>
-                <width>0</width>
-                <height>30</height>
-               </size>
-              </property>
-              <property name="maximumSize">
-               <size>
-                <width>16777215</width>
-                <height>30</height>
-               </size>
-              </property>
-              <property name="font">
-               <font>
-                <family>Segoe UI</family>
-                <pointsize>-1</pointsize>
-                <fontweight>DemiBold</fontweight>
-               </font>
-              </property>
-              <property name="text">
-               <string>📂 Drop Files</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QPushButton" name="updateDatabaseBtn">
-              <property name="minimumSize">
-               <size>
-                <width>0</width>
-                <height>30</height>
-               </size>
-              </property>
-              <property name="maximumSize">
-               <size>
-                <width>16777215</width>
-                <height>30</height>
-               </size>
-              </property>
-              <property name="font">
-               <font>
-                <family>Segoe UI</family>
-                <pointsize>-1</pointsize>
-                <fontweight>DemiBold</fontweight>
-               </font>
-              </property>
-              <property name="text">
-               <string>Update</string>
-              </property>
-             </widget>
-            </item>
-            <item>
-             <widget class="QPushButton" name="cancelUploadBtn">
-              <property name="minimumSize">
-               <size>
-                <width>0</width>
-                <height>30</height>
-               </size>
-              </property>
-              <property name="maximumSize">
-               <size>
-                <width>16777215</width>
-                <height>30</height>
-               </size>
-              </property>
-              <property name="font">
-               <font>
-                <family>Segoe UI</family>
-                <pointsize>-1</pointsize>
-                <bold>true</bold>
-               </font>
-              </property>
-              <property name="text">
-               <string>Cancel</string>
-              </property>
-             </widget>
-            </item>
-           </layout>
-          </item>
-         </layout>
-        </widget>
-       </item>
-      </layout>
-       </widget>
-      </item>
-     </layout>
-    </widget>
-    <widget class="QWidget" name="reportingPage">
-     <property name="minimumSize">
-      <size>
-       <width>640</width>
-       <height>0</height>
-      </size>
-     </property>
-     <property name="styleSheet">
-      <string notr="true">/* === REPORTING PAGE BACKGROUND === */
+             </layout>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+      <widget class="QWidget" name="reportingPage">
+       <property name="minimumSize">
+        <size>
+         <width>640</width>
+         <height>0</height>
+        </size>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">/* === REPORTING PAGE BACKGROUND === */
 QWidget#reportingPage {
     background-color: #F7F9FB;
     border: none;
@@ -1411,814 +1411,820 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     height: 0px;
 }
 </string>
-     </property>
-     <layout class="QGridLayout" name="gridLayout_reportingPage">
-      <item row="0" column="0">
-       <widget class="QGroupBox" name="groupBox_2">
-        <property name="minimumSize">
-         <size>
-          <width>300</width>
-          <height>0</height>
-         </size>
-        </property>
-        <property name="font">
-       <font>
-        <family>Segoe UI</family>
-        <pointsize>-1</pointsize>
-       </font>
-      </property>
-      <property name="title">
-       <string>FILTER</string>
-      </property>
-      <layout class="QGridLayout" name="gridLayout_5">
-       <item row="1" column="0">
-        <layout class="QFormLayout" name="formLayout_3">
-         <item row="0" column="0">
-          <widget class="QLabel" name="label_18">
-           <property name="font">
-            <font>
-             <family>Segoe UI</family>
-             <pointsize>11</pointsize>
-             <fontweight>DemiBold</fontweight>
-            </font>
-           </property>
-           <property name="text">
-            <string>Select Department:</string>
-           </property>
-          </widget>
-         </item>
-         <item row="0" column="1">
-          <widget class="QComboBox" name="filterDepartmentBox"/>
-         </item>
-         <item row="1" column="0">
-          <widget class="QLabel" name="label_21">
-           <property name="font">
-            <font>
-             <family>Segoe UI</family>
-             <pointsize>11</pointsize>
-             <fontweight>DemiBold</fontweight>
-            </font>
-           </property>
-           <property name="text">
-            <string>Select Course:</string>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="1">
-          <widget class="QComboBox" name="filterCourseBox"/>
-         </item>
-         <item row="3" column="0">
-          <widget class="QLabel" name="label_25">
-           <property name="font">
-            <font>
-             <family>Segoe UI</family>
-             <pointsize>11</pointsize>
-             <fontweight>DemiBold</fontweight>
-            </font>
-           </property>
-           <property name="text">
-            <string>Select Duration:</string>
-           </property>
-          </widget>
-         </item>
-         <item row="3" column="1">
-          <widget class="QComboBox" name="durationTypeBox">
-           <item>
-            <property name="text">
-             <string>Specific Day</string>
-            </property>
+       </property>
+       <layout class="QGridLayout" name="gridLayout_reportingPage">
+        <item row="0" column="0">
+         <widget class="QGroupBox" name="groupBox_2">
+          <property name="minimumSize">
+           <size>
+            <width>300</width>
+            <height>0</height>
+           </size>
+          </property>
+          <property name="font">
+           <font>
+            <family>Segoe UI</family>
+            <pointsize>-1</pointsize>
+           </font>
+          </property>
+          <property name="title">
+           <string>FILTER</string>
+          </property>
+          <layout class="QGridLayout" name="gridLayout_5">
+           <item row="1" column="0">
+            <layout class="QFormLayout" name="formLayout_3">
+             <item row="0" column="0">
+              <widget class="QLabel" name="label_18">
+               <property name="font">
+                <font>
+                 <family>Segoe UI</family>
+                 <pointsize>11</pointsize>
+                 <fontweight>DemiBold</fontweight>
+                </font>
+               </property>
+               <property name="text">
+                <string>Select Department:</string>
+               </property>
+              </widget>
+             </item>
+             <item row="0" column="1">
+              <widget class="QComboBox" name="filterDepartmentBox"/>
+             </item>
+             <item row="1" column="0">
+              <widget class="QLabel" name="label_21">
+               <property name="font">
+                <font>
+                 <family>Segoe UI</family>
+                 <pointsize>11</pointsize>
+                 <fontweight>DemiBold</fontweight>
+                </font>
+               </property>
+               <property name="text">
+                <string>Select Course:</string>
+               </property>
+              </widget>
+             </item>
+             <item row="1" column="1">
+              <widget class="QComboBox" name="filterCourseBox"/>
+             </item>
+             <item row="3" column="0">
+              <widget class="QLabel" name="label_25">
+               <property name="font">
+                <font>
+                 <family>Segoe UI</family>
+                 <pointsize>11</pointsize>
+                 <fontweight>DemiBold</fontweight>
+                </font>
+               </property>
+               <property name="text">
+                <string>Select Duration:</string>
+               </property>
+              </widget>
+             </item>
+             <item row="3" column="1">
+              <widget class="QComboBox" name="durationTypeBox">
+               <item>
+                <property name="text">
+                 <string>Specific Day</string>
+                </property>
+               </item>
+               <item>
+                <property name="text">
+                 <string>Specific Month</string>
+                </property>
+               </item>
+               <item>
+                <property name="text">
+                 <string>Semester</string>
+                </property>
+               </item>
+              </widget>
+             </item>
+             <item row="2" column="0">
+              <widget class="QLabel" name="label_33">
+               <property name="font">
+                <font>
+                 <family>Segoe UI</family>
+                 <pointsize>11</pointsize>
+                 <fontweight>DemiBold</fontweight>
+                </font>
+               </property>
+               <property name="text">
+                <string>Enter School Year:</string>
+               </property>
+              </widget>
+             </item>
+             <item row="2" column="1">
+              <widget class="QLineEdit" name="filterSchoolYearEdit"/>
+             </item>
+            </layout>
            </item>
-           <item>
-            <property name="text">
-             <string>Specific Month</string>
-            </property>
-           </item>
-           <item>
-            <property name="text">
-             <string>Semester</string>
-            </property>
-           </item>
-          </widget>
-         </item>
-         <item row="2" column="0">
-          <widget class="QLabel" name="label_33">
-           <property name="font">
-            <font>
-             <family>Segoe UI</family>
-             <pointsize>11</pointsize>
-             <fontweight>DemiBold</fontweight>
-            </font>
-           </property>
-           <property name="text">
-            <string>Enter School Year:</string>
-           </property>
-          </widget>
-         </item>
-         <item row="2" column="1">
-          <widget class="QLineEdit" name="filterSchoolYearEdit"/>
-         </item>
-        </layout>
-       </item>
-       <item row="2" column="0">
-        <widget class="QStackedWidget" name="durationTypeWidget">
-         <property name="currentIndex">
-          <number>2</number>
-         </property>
-         <widget class="QWidget" name="specificDay">
-          <layout class="QFormLayout" name="formLayout_4">
-           <item row="0" column="0">
-            <widget class="QLabel" name="label_30">
-             <property name="text">
-              <string>Select Day:</string>
+           <item row="2" column="0">
+            <widget class="QStackedWidget" name="durationTypeWidget">
+             <property name="currentIndex">
+              <number>2</number>
              </property>
-            </widget>
-           </item>
-           <item row="0" column="1">
-            <widget class="QDateEdit" name="dateEdit"/>
-           </item>
-          </layout>
-         </widget>
-         <widget class="QWidget" name="specificMonth">
-          <layout class="QFormLayout" name="formLayout_5">
-            <item row="0" column="1">
-             <widget class="QComboBox" name="monthComboBox">
-              <item>
-               <property name="text">
-                <string>January</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>February</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>March</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>April</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>May</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>June</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>July</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>August</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>September</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>October</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>November</string>
-               </property>
-              </item>
-              <item>
-               <property name="text">
-                <string>December</string>
-               </property>
-              </item>
-             </widget>
-            </item>
-            <item row="1" column="0">
-             <widget class="QLabel" name="label_27">
-              <property name="text">
-               <string>Select Year:</string>
-              </property>
-             </widget>
-            </item>
-            <item row="0" column="0">
-             <widget class="QLabel" name="label_26">
-              <property name="text">
-               <string>Select Month:</string>
-              </property>
-             </widget>
-            </item>
-            <item row="1" column="1">
-             <widget class="QComboBox" name="yearComboBox"/>
-            </item>
-           </layout>
-         </widget>
-         <widget class="QWidget" name="semester">
-          <layout class="QGridLayout" name="gridLayout_6">
-           <item row="0" column="0">
-            <widget class="QWidget" name="widget_2" native="true">
-             <layout class="QFormLayout" name="formLayout_6">
+             <widget class="QWidget" name="specificDay">
+              <layout class="QFormLayout" name="formLayout_4">
+               <item row="0" column="0">
+                <widget class="QLabel" name="label_30">
+                 <property name="text">
+                  <string>Select Day:</string>
+                 </property>
+                </widget>
+               </item>
                <item row="0" column="1">
-                <widget class="QComboBox" name="semesterComboBox">
+                <widget class="QDateEdit" name="dateEdit"/>
+               </item>
+              </layout>
+             </widget>
+             <widget class="QWidget" name="specificMonth">
+              <layout class="QFormLayout" name="formLayout_5">
+               <item row="0" column="1">
+                <widget class="QComboBox" name="monthComboBox">
                  <item>
                   <property name="text">
-                   <string>1st Semester</string>
+                   <string>January</string>
                   </property>
                  </item>
                  <item>
                   <property name="text">
-                   <string>2nd Semester</string>
+                   <string>February</string>
                   </property>
                  </item>
                  <item>
                   <property name="text">
-                   <string>3rd Semester</string>
+                   <string>March</string>
+                  </property>
+                 </item>
+                 <item>
+                  <property name="text">
+                   <string>April</string>
+                  </property>
+                 </item>
+                 <item>
+                  <property name="text">
+                   <string>May</string>
+                  </property>
+                 </item>
+                 <item>
+                  <property name="text">
+                   <string>June</string>
+                  </property>
+                 </item>
+                 <item>
+                  <property name="text">
+                   <string>July</string>
+                  </property>
+                 </item>
+                 <item>
+                  <property name="text">
+                   <string>August</string>
+                  </property>
+                 </item>
+                 <item>
+                  <property name="text">
+                   <string>September</string>
+                  </property>
+                 </item>
+                 <item>
+                  <property name="text">
+                   <string>October</string>
+                  </property>
+                 </item>
+                 <item>
+                  <property name="text">
+                   <string>November</string>
+                  </property>
+                 </item>
+                 <item>
+                  <property name="text">
+                   <string>December</string>
                   </property>
                  </item>
                 </widget>
                </item>
                <item row="1" column="0">
-                <widget class="QLabel" name="label_32">
+                <widget class="QLabel" name="label_27">
                  <property name="text">
                   <string>Select Year:</string>
                  </property>
                 </widget>
                </item>
-               <item row="1" column="1">
-                <widget class="QComboBox" name="semYearComboBox"/>
-               </item>
-               <item row="2" column="0">
-                <widget class="QLabel" name="label_28">
-                 <property name="text">
-                  <string>From:</string>
-                 </property>
-                </widget>
-               </item>
-               <item row="2" column="1">
-                <widget class="QDateEdit" name="startDateEdit"/>
-               </item>
-               <item row="3" column="0">
-                <widget class="QLabel" name="label_29">
-                 <property name="text">
-                  <string>To:</string>
-                 </property>
-                </widget>
-               </item>
-               <item row="3" column="1">
-                <widget class="QDateEdit" name="endDateEdit"/>
-               </item>
                <item row="0" column="0">
-                <widget class="QLabel" name="label_31">
-                 <property name="font">
-                  <font>
-                   <family>Segoe UI</family>
-                   <pointsize>11</pointsize>
-                   <fontweight>DemiBold</fontweight>
-                  </font>
-                 </property>
+                <widget class="QLabel" name="label_26">
                  <property name="text">
-                  <string>Select Semester:</string>
+                  <string>Select Month:</string>
                  </property>
+                </widget>
+               </item>
+               <item row="1" column="1">
+                <widget class="QComboBox" name="yearComboBox"/>
+               </item>
+              </layout>
+             </widget>
+             <widget class="QWidget" name="semester">
+              <layout class="QGridLayout" name="gridLayout_6">
+               <item row="0" column="0">
+                <widget class="QWidget" name="widget_2" native="true">
+                 <layout class="QFormLayout" name="formLayout_6">
+                  <item row="0" column="1">
+                   <widget class="QComboBox" name="semesterComboBox">
+                    <item>
+                     <property name="text">
+                      <string>1st Semester</string>
+                     </property>
+                    </item>
+                    <item>
+                     <property name="text">
+                      <string>2nd Semester</string>
+                     </property>
+                    </item>
+                    <item>
+                     <property name="text">
+                      <string>3rd Semester</string>
+                     </property>
+                    </item>
+                   </widget>
+                  </item>
+                  <item row="1" column="0">
+                   <widget class="QLabel" name="label_32">
+                    <property name="text">
+                     <string>Select Year:</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="1" column="1">
+                   <widget class="QComboBox" name="semYearComboBox"/>
+                  </item>
+                  <item row="2" column="0">
+                   <widget class="QLabel" name="label_28">
+                    <property name="text">
+                     <string>From:</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="2" column="1">
+                   <widget class="QDateEdit" name="startDateEdit"/>
+                  </item>
+                  <item row="3" column="0">
+                   <widget class="QLabel" name="label_29">
+                    <property name="text">
+                     <string>To:</string>
+                    </property>
+                   </widget>
+                  </item>
+                  <item row="3" column="1">
+                   <widget class="QDateEdit" name="endDateEdit"/>
+                  </item>
+                  <item row="0" column="0">
+                   <widget class="QLabel" name="label_31">
+                    <property name="font">
+                     <font>
+                      <family>Segoe UI</family>
+                      <pointsize>11</pointsize>
+                      <fontweight>DemiBold</fontweight>
+                     </font>
+                    </property>
+                    <property name="text">
+                     <string>Select Semester:</string>
+                    </property>
+                   </widget>
+                  </item>
+                 </layout>
                 </widget>
                </item>
               </layout>
+             </widget>
             </widget>
            </item>
           </layout>
          </widget>
-        </widget>
-       </item>
-      </layout>
-     </widget>
-      </item>
-      <item row="0" column="1">
-       <widget class="QGroupBox" name="groupBox_3">
-        <property name="minimumSize">
-         <size>
-          <width>280</width>
-          <height>0</height>
-         </size>
-        </property>
-        <property name="font">
-         <font>
-          <family>Segoe UI</family>
-          <pointsize>-1</pointsize>
-         </font>
-        </property>
-        <property name="title">
-         <string>VISUALIZATION</string>
-        </property>
-      <layout class="QGridLayout" name="gridLayout_4">
-       <item row="0" column="0">
-        <widget class="QWidget" name="visualizatioWidget" native="true">
-         <layout class="QVBoxLayout" name="verticalLayout_visualization">
+        </item>
+        <item row="0" column="1">
+         <widget class="QGroupBox" name="groupBox_3">
+          <property name="minimumSize">
+           <size>
+            <width>280</width>
+            <height>0</height>
+           </size>
+          </property>
+          <property name="font">
+           <font>
+            <family>Segoe UI</family>
+            <pointsize>-1</pointsize>
+           </font>
+          </property>
+          <property name="title">
+           <string>VISUALIZATION</string>
+          </property>
+          <layout class="QGridLayout" name="gridLayout_4">
+           <item row="0" column="0">
+            <widget class="QWidget" name="visualizatioWidget" native="true">
+             <layout class="QVBoxLayout" name="verticalLayout_visualization">
+              <item>
+               <widget class="QLabel" name="label_19">
+                <property name="font">
+                 <font>
+                  <family>Segoe UI</family>
+                  <pointsize>11</pointsize>
+                  <fontweight>DemiBold</fontweight>
+                 </font>
+                </property>
+                <property name="text">
+                 <string>Select Color Palette:</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QComboBox" name="paletteComboBox">
+                <property name="font">
+                 <font>
+                  <family>Segoe UI</family>
+                  <pointsize>-1</pointsize>
+                 </font>
+                </property>
+                <item>
+                 <property name="text">
+                  <string>Default(Grey)</string>
+                 </property>
+                </item>
+                <item>
+                 <property name="text">
+                  <string>Blue</string>
+                 </property>
+                </item>
+                <item>
+                 <property name="text">
+                  <string>Green</string>
+                 </property>
+                </item>
+                <item>
+                 <property name="text">
+                  <string>Red</string>
+                 </property>
+                </item>
+               </widget>
+              </item>
+              <item>
+               <widget class="QLabel" name="palettePreview">
+                <property name="minimumSize">
+                 <size>
+                  <width>200</width>
+                  <height>50</height>
+                 </size>
+                </property>
+                <property name="text">
+                 <string/>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QLabel" name="label_24">
+                <property name="font">
+                 <font>
+                  <family>Segoe UI</family>
+                  <pointsize>11</pointsize>
+                  <fontweight>DemiBold</fontweight>
+                 </font>
+                </property>
+                <property name="text">
+                 <string>Select Chart Type:</string>
+                </property>
+               </widget>
+              </item>
+              <item>
+               <widget class="QComboBox" name="chartTypeBox">
+                <property name="font">
+                 <font>
+                  <family>Segoe UI</family>
+                  <pointsize>-1</pointsize>
+                 </font>
+                </property>
+                <item>
+                 <property name="text">
+                  <string> All Chart Types</string>
+                 </property>
+                </item>
+                <item>
+                 <property name="text">
+                  <string>Bar Chart</string>
+                 </property>
+                </item>
+                <item>
+                 <property name="text">
+                  <string>Pie Chart</string>
+                 </property>
+                </item>
+                <item>
+                 <property name="text">
+                  <string>Line Chart</string>
+                 </property>
+                </item>
+               </widget>
+              </item>
+              <item>
+               <spacer name="verticalSpacer_visualization">
+                <property name="orientation">
+                 <enum>Qt::Orientation::Vertical</enum>
+                </property>
+                <property name="sizeHint" stdset="0">
+                 <size>
+                  <width>0</width>
+                  <height>0</height>
+                 </size>
+                </property>
+               </spacer>
+              </item>
+             </layout>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item row="1" column="0">
+         <widget class="QGroupBox" name="groupBox_4">
+          <property name="minimumSize">
+           <size>
+            <width>280</width>
+            <height>0</height>
+           </size>
+          </property>
+          <property name="font">
+           <font>
+            <family>Segoe UI</family>
+            <pointsize>-1</pointsize>
+           </font>
+          </property>
+          <property name="title">
+           <string>Actions</string>
+          </property>
+          <layout class="QGridLayout" name="gridLayout_3">
+           <item row="0" column="0">
+            <layout class="QFormLayout" name="formLayout_2">
+             <item row="0" column="0">
+              <widget class="QLabel" name="label_20">
+               <property name="font">
+                <font>
+                 <family>Segoe UI</family>
+                 <pointsize>11</pointsize>
+                 <fontweight>DemiBold</fontweight>
+                </font>
+               </property>
+               <property name="text">
+                <string>Export PDF</string>
+               </property>
+              </widget>
+             </item>
+             <item row="0" column="1">
+              <widget class="QPushButton" name="generatePDFBtn">
+               <property name="text">
+                <string>Export</string>
+               </property>
+              </widget>
+             </item>
+             <item row="1" column="0">
+              <widget class="QLabel" name="label_22">
+               <property name="font">
+                <font>
+                 <family>Segoe UI</family>
+                 <pointsize>11</pointsize>
+                 <fontweight>DemiBold</fontweight>
+                </font>
+               </property>
+               <property name="text">
+                <string>Export Excel</string>
+               </property>
+              </widget>
+             </item>
+             <item row="1" column="1">
+              <widget class="QPushButton" name="generateExcelBtn">
+               <property name="text">
+                <string>Export</string>
+               </property>
+              </widget>
+             </item>
+             <item row="2" column="0">
+              <widget class="QLabel" name="label_23">
+               <property name="font">
+                <font>
+                 <family>Segoe UI</family>
+                 <pointsize>11</pointsize>
+                 <fontweight>DemiBold</fontweight>
+                </font>
+               </property>
+               <property name="text">
+                <string>Print</string>
+               </property>
+              </widget>
+             </item>
+             <item row="2" column="1">
+              <widget class="QPushButton" name="printReportBtn">
+               <property name="text">
+                <string>Print</string>
+               </property>
+              </widget>
+             </item>
+             <item row="3" column="0" colspan="2">
+              <widget class="QLabel" name="statusLabel">
+               <property name="text">
+                <string/>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item row="1" column="1">
+         <widget class="QGroupBox" name="chartsPreview">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+            <horstretch>1</horstretch>
+            <verstretch>1</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>300</width>
+            <height>0</height>
+           </size>
+          </property>
+          <property name="title">
+           <string>Charts Preview</string>
+          </property>
+          <layout class="QVBoxLayout" name="verticalLayout_6">
+           <item>
+            <layout class="QGridLayout" name="chartsPreviewBox"/>
+           </item>
+          </layout>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+      <widget class="QWidget" name="studentSearchPage">
+       <property name="minimumSize">
+        <size>
+         <width>640</width>
+         <height>0</height>
+        </size>
+       </property>
+       <layout class="QVBoxLayout" name="verticalLayout_searchPage">
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout">
           <item>
-           <widget class="QLabel" name="label_19">
-            <property name="font">
-             <font>
-              <family>Segoe UI</family>
-              <pointsize>11</pointsize>
-              <fontweight>DemiBold</fontweight>
-             </font>
-            </property>
+           <widget class="QLabel" name="label_37">
             <property name="text">
-             <string>Select Color Palette:</string>
+             <string>Name:</string>
             </property>
            </widget>
           </item>
           <item>
-           <widget class="QComboBox" name="paletteComboBox">
-            <property name="font">
-             <font>
-              <family>Segoe UI</family>
-              <pointsize>-1</pointsize>
-             </font>
-            </property>
-            <item>
-             <property name="text">
-              <string>Default(Grey)</string>
-             </property>
-            </item>
-            <item>
-             <property name="text">
-              <string>Blue</string>
-             </property>
-            </item>
-            <item>
-             <property name="text">
-              <string>Green</string>
-             </property>
-            </item>
-            <item>
-             <property name="text">
-              <string>Red</string>
-             </property>
-            </item>
-           </widget>
+           <widget class="QLineEdit" name="searchLineEdit"/>
           </item>
           <item>
-           <widget class="QLabel" name="palettePreview">
-            <property name="minimumSize">
-             <size>
-              <width>200</width>
-              <height>50</height>
-             </size>
-            </property>
+           <widget class="QPushButton" name="searchBtn">
             <property name="text">
-             <string/>
+             <string>Search</string>
             </property>
            </widget>
           </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_2">
           <item>
-           <widget class="QLabel" name="label_24">
-            <property name="font">
-             <font>
-              <family>Segoe UI</family>
-              <pointsize>11</pointsize>
-              <fontweight>DemiBold</fontweight>
-             </font>
-            </property>
+           <widget class="QLabel" name="label_38">
             <property name="text">
-             <string>Select Chart Type:</string>
+             <string>Department:</string>
             </property>
            </widget>
           </item>
           <item>
-           <widget class="QComboBox" name="chartTypeBox">
-            <property name="font">
-             <font>
-              <family>Segoe UI</family>
-              <pointsize>-1</pointsize>
-             </font>
+           <widget class="QComboBox" name="searchDepartmentFilter"/>
+          </item>
+          <item>
+           <widget class="QLabel" name="label_39">
+            <property name="text">
+             <string>Course:</string>
             </property>
-            <item>
-             <property name="text">
-              <string> All Chart Types</string>
-             </property>
-            </item>
-            <item>
-             <property name="text">
-              <string>Bar Chart</string>
-             </property>
-            </item>
-            <item>
-             <property name="text">
-              <string>Pie Chart</string>
-             </property>
-            </item>
-            <item>
-             <property name="text">
-              <string>Line Chart</string>
-             </property>
-            </item>
            </widget>
           </item>
           <item>
-           <spacer name="verticalSpacer_visualization">
+           <widget class="QComboBox" name="searchCourseFilter"/>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <widget class="QTableWidget" name="studentSearchTable">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+            <horstretch>0</horstretch>
+            <verstretch>1</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="alternatingRowColors">
+           <bool>true</bool>
+          </property>
+          <property name="selectionMode">
+           <enum>QAbstractItemView::SelectionMode::SingleSelection</enum>
+          </property>
+          <property name="selectionBehavior">
+           <enum>QAbstractItemView::SelectionBehavior::SelectRows</enum>
+          </property>
+          <property name="columnCount">
+           <number>10</number>
+          </property>
+          <attribute name="horizontalHeaderShowSortIndicator" stdset="0">
+           <bool>false</bool>
+          </attribute>
+          <column>
+           <property name="text">
+            <string>Code</string>
+           </property>
+          </column>
+          <column>
+           <property name="text">
+            <string>School ID</string>
+           </property>
+          </column>
+          <column>
+           <property name="text">
+            <string>Name</string>
+           </property>
+          </column>
+          <column>
+           <property name="text">
+            <string>Department</string>
+           </property>
+          </column>
+          <column>
+           <property name="text">
+            <string>Course</string>
+           </property>
+          </column>
+          <column>
+           <property name="text">
+            <string>Year</string>
+           </property>
+          </column>
+          <column>
+           <property name="text">
+            <string>Status</string>
+           </property>
+          </column>
+          <column>
+           <property name="text">
+            <string>Gender</string>
+           </property>
+          </column>
+          <column>
+           <property name="text">
+            <string>Visits</string>
+           </property>
+          </column>
+          <column/>
+         </widget>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_3">
+          <item>
+           <spacer name="horizontalSpacer">
             <property name="orientation">
-             <enum>Qt::Vertical</enum>
+             <enum>Qt::Orientation::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
             </property>
            </spacer>
           </item>
+          <item>
+           <widget class="QPushButton" name="cancelEditBtn">
+            <property name="text">
+             <string>Cancel</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="selectAllBtn">
+            <property name="text">
+             <string>Select All</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="editStudentBtn">
+            <property name="text">
+             <string>Edit</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="deleteStudentBtn">
+            <property name="text">
+             <string>Delete Selected</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="refreshSearchBtn">
+            <property name="text">
+             <string>Refresh</string>
+            </property>
+           </widget>
+          </item>
          </layout>
-        </widget>
-       </item>
-      </layout>
-     </widget>
-      </item>
-      <item row="1" column="0">
-       <widget class="QGroupBox" name="groupBox_4">
-        <property name="minimumSize">
-         <size>
-          <width>280</width>
-          <height>0</height>
-         </size>
-        </property>
-        <property name="font">
-         <font>
-          <family>Segoe UI</family>
-          <pointsize>-1</pointsize>
-         </font>
-        </property>
-        <property name="title">
-         <string>Actions</string>
-        </property>
-      <layout class="QGridLayout" name="gridLayout_3">
-       <item row="0" column="0">
-        <layout class="QFormLayout" name="formLayout_2">
-         <item row="0" column="0">
-          <widget class="QLabel" name="label_20">
-           <property name="font">
-            <font>
-             <family>Segoe UI</family>
-             <pointsize>11</pointsize>
-             <fontweight>DemiBold</fontweight>
-            </font>
-           </property>
-           <property name="text">
-            <string>Export PDF</string>
-           </property>
-          </widget>
-         </item>
-         <item row="0" column="1">
-          <widget class="QPushButton" name="generatePDFBtn">
-           <property name="text">
-            <string>Export</string>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="0">
-          <widget class="QLabel" name="label_22">
-           <property name="font">
-            <font>
-             <family>Segoe UI</family>
-             <pointsize>11</pointsize>
-             <fontweight>DemiBold</fontweight>
-            </font>
-           </property>
-           <property name="text">
-            <string>Export Excel</string>
-           </property>
-          </widget>
-         </item>
-         <item row="1" column="1">
-          <widget class="QPushButton" name="generateExcelBtn">
-           <property name="text">
-            <string>Export</string>
-           </property>
-          </widget>
-         </item>
-         <item row="2" column="0">
-          <widget class="QLabel" name="label_23">
-           <property name="font">
-            <font>
-             <family>Segoe UI</family>
-             <pointsize>11</pointsize>
-             <fontweight>DemiBold</fontweight>
-            </font>
-           </property>
-           <property name="text">
-            <string>Print</string>
-           </property>
-          </widget>
-         </item>
-         <item row="2" column="1">
-          <widget class="QPushButton" name="printReportBtn">
-           <property name="text">
-            <string>Print</string>
-           </property>
-          </widget>
-         </item>
-         <item row="3" column="0" colspan="2">
-          <widget class="QLabel" name="statusLabel">
-           <property name="text">
-            <string/>
-           </property>
-          </widget>
-         </item>
-        </layout>
-       </item>
-      </layout>
-     </widget>
-      </item>
-      <item row="1" column="1">
-       <widget class="QGroupBox" name="chartsPreview">
-        <property name="minimumSize">
-         <size>
-          <width>300</width>
-          <height>0</height>
-         </size>
-        </property>
-        <property name="sizePolicy">
-         <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-          <horstretch>1</horstretch>
-          <verstretch>1</verstretch>
-         </sizepolicy>
-        </property>
-        <property name="title">
-         <string>Charts Preview</string>
-        </property>
-        <layout class="QVBoxLayout" name="verticalLayout_6">
-         <item>
-          <layout class="QGridLayout" name="chartsPreviewBox"/>
-         </item>
-        </layout>
-       </widget>
-      </item>
-     </layout>
-    </widget>
-    <widget class="QWidget" name="studentSearchPage">
-     <property name="minimumSize">
-      <size>
-       <width>640</width>
-       <height>0</height>
-      </size>
-     </property>
-     <layout class="QVBoxLayout" name="verticalLayout_searchPage">
-      <item>
-       <layout class="QHBoxLayout" name="horizontalLayout">
-       <item>
-        <widget class="QLabel" name="label_37">
-         <property name="text">
-          <string>Name:</string>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QLineEdit" name="searchLineEdit"/>
-       </item>
-       <item>
-        <widget class="QPushButton" name="searchBtn">
-         <property name="text">
-          <string>Search</string>
-         </property>
-        </widget>
-       </item>
+        </item>
        </layout>
-      </item>
-      <item>
-       <layout class="QHBoxLayout" name="horizontalLayout_2">
-       <item>
-        <widget class="QLabel" name="label_38">
-         <property name="text">
-          <string>Department:</string>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QComboBox" name="searchDepartmentFilter"/>
-       </item>
-       <item>
-        <widget class="QLabel" name="label_39">
-         <property name="text">
-          <string>Course:</string>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QComboBox" name="searchCourseFilter"/>
-       </item>
-       </layout>
-      </item>
-      <item>
-       <widget class="QTableWidget" name="studentSearchTable">
-        <property name="sizePolicy">
-         <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-          <horstretch>0</horstretch>
-          <verstretch>1</verstretch>
-         </sizepolicy>
+       <widget class="QWidget" name="searchOverlay" native="true">
+        <property name="geometry">
+         <rect>
+          <x>0</x>
+          <y>91</y>
+          <width>631</width>
+          <height>451</height>
+         </rect>
         </property>
-        <property name="alternatingRowColors">
-       <bool>true</bool>
-      </property>
-      <property name="selectionMode">
-       <enum>QAbstractItemView::SelectionMode::SingleSelection</enum>
-      </property>
-      <property name="selectionBehavior">
-       <enum>QAbstractItemView::SelectionBehavior::SelectRows</enum>
-      </property>
-      <property name="columnCount">
-       <number>10</number>
-      </property>
-      <attribute name="horizontalHeaderShowSortIndicator" stdset="0">
-       <bool>false</bool>
-      </attribute>
-      <column>
-       <property name="text">
-        <string>Code</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>School ID</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>Name</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>Department</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>Course</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>Year</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>Status</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>Gender</string>
-       </property>
-      </column>
-      <column>
-       <property name="text">
-        <string>Visits</string>
-       </property>
-      </column>
-       <column/>
-       </widget>
-      </item>
-      <item>
-       <layout class="QHBoxLayout" name="horizontalLayout_3">
-       <item>
-        <spacer name="horizontalSpacer">
-         <property name="orientation">
-          <enum>Qt::Orientation::Horizontal</enum>
-         </property>
-         <property name="sizeHint" stdset="0">
-          <size>
-           <width>40</width>
-           <height>20</height>
-          </size>
-         </property>
-        </spacer>
-       </item>
-       <item>
-        <widget class="QPushButton" name="cancelEditBtn">
-         <property name="text">
-          <string>Cancel</string>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QPushButton" name="selectAllBtn">
-         <property name="text">
-          <string>Select All</string>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QPushButton" name="editStudentBtn">
-         <property name="text">
-          <string>Edit</string>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QPushButton" name="deleteStudentBtn">
-         <property name="text">
-          <string>Delete Selected</string>
-         </property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QPushButton" name="refreshSearchBtn">
-         <property name="text">
-          <string>Refresh</string>
-         </property>
-        </widget>
-       </item>
-       </layout>
-      </item>
-     </layout>
-     <widget class="QWidget" name="searchOverlay" native="true">
-      <property name="geometry">
-       <rect>
-        <x>0</x>
-        <y>91</y>
-        <width>631</width>
-        <height>451</height>
-       </rect>
-      </property>
-      <property name="styleSheet">
-       <string notr="true">background-color: rgba(0, 0, 0, 120);
+        <property name="styleSheet">
+         <string notr="true">background-color: rgba(0, 0, 0, 120);
 border-radius: 6px;
 </string>
-      </property>
-      <widget class="QLabel" name="overlayTextLabel">
-       <property name="geometry">
-        <rect>
-         <x>270</x>
-         <y>240</y>
-         <width>81</width>
-         <height>16</height>
-        </rect>
-       </property>
-       <property name="styleSheet">
-        <string notr="true">color: white;
+        </property>
+        <widget class="QLabel" name="overlayTextLabel">
+         <property name="geometry">
+          <rect>
+           <x>270</x>
+           <y>240</y>
+           <width>81</width>
+           <height>16</height>
+          </rect>
+         </property>
+         <property name="styleSheet">
+          <string notr="true">color: white;
 font: bold 12px &quot;Segoe UI&quot;;
 </string>
-       </property>
-       <property name="text">
-        <string>Searching . . .</string>
-       </property>
-       <property name="alignment">
-        <set>Qt::AlignmentFlag::AlignCenter</set>
-       </property>
+         </property>
+         <property name="text">
+          <string>Searching . . .</string>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignmentFlag::AlignCenter</set>
+         </property>
+        </widget>
+        <widget class="QProgressBar" name="searchLoadingBar">
+         <property name="geometry">
+          <rect>
+           <x>80</x>
+           <y>260</y>
+           <width>451</width>
+           <height>4</height>
+          </rect>
+         </property>
+         <property name="minimumSize">
+          <size>
+           <width>0</width>
+           <height>4</height>
+          </size>
+         </property>
+         <property name="maximumSize">
+          <size>
+           <width>16777215</width>
+           <height>4</height>
+          </size>
+         </property>
+         <property name="maximum">
+          <number>0</number>
+         </property>
+         <property name="value">
+          <number>-1</number>
+         </property>
+         <property name="alignment">
+          <set>Qt::AlignmentFlag::AlignCenter</set>
+         </property>
+         <property name="textVisible">
+          <bool>false</bool>
+         </property>
+        </widget>
+       </widget>
       </widget>
-      <widget class="QProgressBar" name="searchLoadingBar">
-       <property name="geometry">
-        <rect>
-         <x>80</x>
-         <y>260</y>
-         <width>451</width>
-         <height>4</height>
-        </rect>
-       </property>
+      <widget class="QWidget" name="visitorPage">
        <property name="minimumSize">
         <size>
-         <width>0</width>
-         <height>4</height>
+         <width>640</width>
+         <height>0</height>
         </size>
        </property>
-       <property name="maximumSize">
-        <size>
-         <width>16777215</width>
-         <height>4</height>
-        </size>
-       </property>
-       <property name="maximum">
-        <number>0</number>
-       </property>
-       <property name="value">
-        <number>-1</number>
-       </property>
-       <property name="alignment">
-        <set>Qt::AlignmentFlag::AlignCenter</set>
-       </property>
-       <property name="textVisible">
-        <bool>false</bool>
-       </property>
-      </widget>
-     </widget>
-    </widget>
-    <widget class="QWidget" name="visitorPage">
-     <property name="minimumSize">
-      <size>
-       <width>640</width>
-       <height>0</height>
-      </size>
-     </property>
-     <layout class="QVBoxLayout" name="verticalLayout_visitorPage">
-      <item>
-       <layout class="QHBoxLayout" name="horizontalLayout_visitorTop">
+       <layout class="QVBoxLayout" name="verticalLayout_visitorPage">
         <item>
-         <widget class="QPushButton" name="extractVisitorBtn">
-      <property name="styleSheet">
-       <string notr="true">QPushButton#extractVisitorBtn {
+         <layout class="QHBoxLayout" name="horizontalLayout_visitorTop">
+          <item>
+           <widget class="QPushButton" name="extractVisitorBtn">
+            <property name="styleSheet">
+             <string notr="true">QPushButton#extractVisitorBtn {
     background-color: #2ECC71; /* green */
     color: white;
     border-radius: 6px;
@@ -2227,23 +2233,23 @@ font: bold 12px &quot;Segoe UI&quot;;
 QPushButton#extractVisitorBtn:hover {
     background-color: #27AE60;
 }</string>
-      </property>
-      <property name="text">
-       <string>Extract</string>
-      </property>
-         </widget>
-        </item>
-        <item>
-         <widget class="QLabel" name="visitorTotalLabel">
-      <property name="font">
-       <font>
-        <family>Segoe UI</family>
-        <pointsize>10</pointsize>
-        <bold>true</bold>
-       </font>
-      </property>
-      <property name="styleSheet">
-       <string notr="true">/* 🌟 Floating Total Visitors Label */
+            </property>
+            <property name="text">
+             <string>Extract</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="visitorTotalLabel">
+            <property name="font">
+             <font>
+              <family>Segoe UI</family>
+              <pointsize>10</pointsize>
+              <bold>true</bold>
+             </font>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">/* 🌟 Floating Total Visitors Label */
 QLabel#visitorTotalLabel {
     background-color: #F8F9FA;       /* Light gray background */
     border: 1px solid #D0D7DE;       /* Soft gray border */
@@ -2272,131 +2278,131 @@ QLabel#visitorTotalLabel {
     );
 }
 </string>
-      </property>
-      <property name="text">
-       <string>📊 Total Visitors:</string>
-      </property>
-         </widget>
+            </property>
+            <property name="text">
+             <string>📊 Total Visitors:</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QWidget" name="widget_3" native="true">
+            <layout class="QHBoxLayout" name="horizontalLayout_5">
+             <item>
+              <layout class="QHBoxLayout" name="horizontalLayout_4">
+               <item>
+                <widget class="QLabel" name="label_40">
+                 <property name="text">
+                  <string>Name:</string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QLineEdit" name="visitorSearchLineEdit"/>
+               </item>
+               <item>
+                <widget class="QLabel" name="label_41">
+                 <property name="text">
+                  <string>Select Date Filters: </string>
+                 </property>
+                </widget>
+               </item>
+               <item>
+                <widget class="QComboBox" name="visitorDateFilterBox">
+                 <item>
+                  <property name="text">
+                   <string>All</string>
+                  </property>
+                 </item>
+                 <item>
+                  <property name="text">
+                   <string>Specific Day</string>
+                  </property>
+                 </item>
+                 <item>
+                  <property name="text">
+                   <string>Month</string>
+                  </property>
+                 </item>
+                 <item>
+                  <property name="text">
+                   <string>Date Range</string>
+                  </property>
+                 </item>
+                </widget>
+               </item>
+               <item>
+                <widget class="QComboBox" name="visitorMonthCombo"/>
+               </item>
+               <item>
+                <widget class="QSpinBox" name="visitorYearSpin"/>
+               </item>
+               <item>
+                <widget class="QDateEdit" name="visitorDateEdit"/>
+               </item>
+               <item>
+                <widget class="QDateEdit" name="visitorStartDate"/>
+               </item>
+               <item>
+                <widget class="QDateEdit" name="visitorEndDate"/>
+               </item>
+               <item>
+                <widget class="QPushButton" name="visitorSearchBtn">
+                 <property name="text">
+                  <string>Search</string>
+                 </property>
+                </widget>
+               </item>
+              </layout>
+             </item>
+            </layout>
+           </widget>
+          </item>
+         </layout>
         </item>
         <item>
-         <widget class="QWidget" name="widget_3" native="true">
-          <layout class="QHBoxLayout" name="horizontalLayout_5">
-       <item>
-        <layout class="QHBoxLayout" name="horizontalLayout_4">
-         <item>
-          <widget class="QLabel" name="label_40">
+         <widget class="QTableWidget" name="visitorTable">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+            <horstretch>0</horstretch>
+            <verstretch>1</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="font">
+           <font>
+            <family>Segoe UI</family>
+            <pointsize>-1</pointsize>
+           </font>
+          </property>
+          <column>
            <property name="text">
-            <string>Name:</string>
+            <string>Name</string>
            </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QLineEdit" name="visitorSearchLineEdit"/>
-         </item>
-         <item>
-          <widget class="QLabel" name="label_41">
+          </column>
+          <column>
            <property name="text">
-            <string>Select Date Filters: </string>
+            <string>Company</string>
            </property>
-          </widget>
-         </item>
-         <item>
-          <widget class="QComboBox" name="visitorDateFilterBox">
-           <item>
-            <property name="text">
-             <string>All</string>
-            </property>
-           </item>
-           <item>
-            <property name="text">
-             <string>Specific Day</string>
-            </property>
-           </item>
-           <item>
-            <property name="text">
-             <string>Month</string>
-            </property>
-           </item>
-           <item>
-            <property name="text">
-             <string>Date Range</string>
-            </property>
-           </item>
-          </widget>
-         </item>
-         <item>
-          <widget class="QComboBox" name="visitorMonthCombo"/>
-         </item>
-         <item>
-          <widget class="QSpinBox" name="visitorYearSpin"/>
-         </item>
-         <item>
-          <widget class="QDateEdit" name="visitorDateEdit"/>
-         </item>
-         <item>
-          <widget class="QDateEdit" name="visitorStartDate"/>
-         </item>
-         <item>
-          <widget class="QDateEdit" name="visitorEndDate"/>
-         </item>
-         <item>
-          <widget class="QPushButton" name="visitorSearchBtn">
+          </column>
+          <column>
            <property name="text">
-            <string>Search</string>
+            <string>Purpose</string>
            </property>
-          </widget>
-         </item>
-        </layout>
-       </item>
-          </layout>
+          </column>
+          <column>
+           <property name="text">
+            <string>Date</string>
+           </property>
+          </column>
+          <column>
+           <property name="text">
+            <string>Time</string>
+           </property>
+          </column>
          </widget>
         </item>
        </layout>
-      </item>
-      <item>
-       <widget class="QTableWidget" name="visitorTable">
-        <property name="sizePolicy">
-         <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-          <horstretch>0</horstretch>
-          <verstretch>1</verstretch>
-         </sizepolicy>
-        </property>
-        <property name="font">
-         <font>
-          <family>Segoe UI</family>
-          <pointsize>-1</pointsize>
-         </font>
-        </property>
-        <column>
-         <property name="text">
-          <string>Name</string>
-         </property>
-        </column>
-        <column>
-         <property name="text">
-          <string>Company</string>
-         </property>
-        </column>
-        <column>
-         <property name="text">
-          <string>Purpose</string>
-         </property>
-        </column>
-        <column>
-         <property name="text">
-          <string>Date</string>
-         </property>
-        </column>
-        <column>
-         <property name="text">
-          <string>Time</string>
-         </property>
-        </column>
-       </widget>
-      </item>
-     </layout>
-    </widget>
-    </widget>
+      </widget>
+     </widget>
     </item>
    </layout>
   </widget>
