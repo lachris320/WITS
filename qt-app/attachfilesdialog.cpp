@@ -1,4 +1,5 @@
 #include "attachfilesdialog.h"
+#include "theme.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -14,7 +15,7 @@ AttachFilesDialog::AttachFilesDialog(QWidget *parent)
     // Excel file section
     QLabel *excelTitle = new QLabel("Excel/CSV File:", this);
     excelLabel = new QLabel("No file selected", this);
-    excelLabel->setStyleSheet("color: gray; font-style: italic;");
+    excelLabel->setStyleSheet(QStringLiteral("color: %1; font-style: italic;").arg(WitsTheme::Color::MutedText));
     excelBtn = new QPushButton("Browse Excel/CSV...", this);
 
     mainLayout->addWidget(excelTitle);
@@ -25,7 +26,7 @@ AttachFilesDialog::AttachFilesDialog(QWidget *parent)
     // ZIP file section
     QLabel *zipTitle = new QLabel("Photos ZIP File (Optional):", this);
     zipLabel = new QLabel("No file selected", this);
-    zipLabel->setStyleSheet("color: gray; font-style: italic;");
+    zipLabel->setStyleSheet(QStringLiteral("color: %1; font-style: italic;").arg(WitsTheme::Color::MutedText));
     zipBtn = new QPushButton("Browse ZIP...", this);
 
     mainLayout->addWidget(zipTitle);
@@ -63,7 +64,7 @@ void AttachFilesDialog::onExcelBtnClicked()
     if (!filePath.isEmpty()) {
         m_excelPath = filePath;
         excelLabel->setText(QFileInfo(filePath).fileName());
-        excelLabel->setStyleSheet("color: black; font-style: normal;");
+        excelLabel->setStyleSheet(QStringLiteral("color: %1; font-style: normal;").arg(WitsTheme::Color::Text));
     }
 }
 
@@ -74,6 +75,6 @@ void AttachFilesDialog::onZipBtnClicked()
     if (!filePath.isEmpty()) {
         m_zipPath = filePath;
         zipLabel->setText(QFileInfo(filePath).fileName());
-        zipLabel->setStyleSheet("color: black; font-style: normal;");
+        zipLabel->setStyleSheet(QStringLiteral("color: %1; font-style: normal;").arg(WitsTheme::Color::Text));
     }
 }
