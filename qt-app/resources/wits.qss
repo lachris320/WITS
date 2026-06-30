@@ -149,10 +149,8 @@ QPushButton#visitorBtn:hover {
     color: #FFFFFF;
 }
 /* Active sidebar button (set at runtime by setActiveSidebar via property) */
-QPushButton[active="true"] {
-    background-color: #26313C;
-    font-weight: bold;
-    border-left: 3px solid #4A90E2;
+QFrame#sidebarFrame QPushButton[active="true"] {
+    background-color: #334155;
     color: #FFFFFF;
 }
 
