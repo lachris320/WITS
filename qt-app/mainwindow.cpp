@@ -55,6 +55,11 @@ MainWindow::MainWindow(QWidget *parent)
     ui->studentPhoto->setScaledContents(false);
     ui->studentPhoto->setAlignment(Qt::AlignCenter);
 
+    m_idleHint = new QLabel("Scan your ID or type your ID number.", ui->widget);
+    m_idleHint->setObjectName("emptyState");
+    ui->detailInfoLayout->addWidget(m_idleHint);
+    m_idleHint->hide();
+    refreshRightPanel();
 
     connect(adminWin, &adminWindow::schoolInfoUpdated, this, [this](const QString &schoolName, const QString &address, const QFont &font){
         ui->schoolNameLabel->setText(schoolName);
@@ -353,6 +358,15 @@ void MainWindow::refreshRightPanel() {
             yearLabels[i]->setText(student["year_level"].toString());
             depLabels[i]->setText(student["department"].toString());
             timeLabels[i]->setText(student["time_date"].toString());
+            if (i == 0 && m_idleHint) m_idleHint->hide();
+        } else if (i == 0) {
+            // Spotlight idle empty-state: friendly placeholder when no student is active
+            nameLabels[0]->setText("Waiting for log in…");
+            courseLabels[0]->setText("—");
+            yearLabels[0]->setText("—");
+            depLabels[0]->setText("—");
+            timeLabels[0]->setText("—");
+            if (m_idleHint) m_idleHint->show();
         } else {
             nameLabels[i]->clear();
             courseLabels[i]->clear();
