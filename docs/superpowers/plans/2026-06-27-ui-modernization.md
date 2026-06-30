@@ -508,6 +508,7 @@ Add the active-profile spotlight card, restyle the recent-logins table, restyle 
 ### Task 2.1: Fix the dangling default student photo asset
 
 **Files:**
+- Modify: `qt-app/CMakeLists.txt:12-13,51-57` (add `Svg` so SVG actually rasterizes)
 - Create: `qt-app/resources/default_student.svg`
 - Modify: `qt-app/resources.qrc` (register it)
 - Modify: `qt-app/mainwindow.cpp:45-52` (load via `QIcon` so SVG renders)
@@ -515,7 +516,29 @@ Add the active-profile spotlight card, restyle the recent-logins table, restyle 
 **Interfaces:**
 - Consumes: `ui->studentPhoto` (existing `QLabel`).
 
-- [ ] **Step 1: Create the placeholder SVG**
+> **Prerequisite (from review):** `QIcon(":/…svg")` only rasterizes when Qt's SVG plugin is
+> available — used here and in Task 4.1 for every icon. `CMakeLists.txt` does not currently
+> pull in `Qt::Svg`, so without this step the placeholder and all nav/login icons render
+> blank. This step adds it once for the whole feature.
+
+- [ ] **Step 1: Add Qt Svg to the build**
+
+In `qt-app/CMakeLists.txt`, add `Svg` to both `find_package` lines (12-13):
+
+```cmake
+find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Network Charts Test UiTools PrintSupport Svg)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Network Charts Test UiTools PrintSupport Svg)
+```
+
+and link it in `target_link_libraries(WITS PRIVATE ...)` (51-57):
+
+```cmake
+    Qt${QT_VERSION_MAJOR}::Svg
+```
+
+Linking `Qt::Svg` makes the SVG image/icon plugin available; `windeployqt` then bundles it for release. Build once to confirm the package resolves: `cmake -S qt-app -B qt-app/build && cmake --build qt-app/build`.
+
+- [ ] **Step 2: Create the placeholder SVG**
 
 Create `qt-app/resources/default_student.svg`:
 
@@ -527,7 +550,7 @@ Create `qt-app/resources/default_student.svg`:
 </svg>
 ```
 
-- [ ] **Step 2: Register it in the resource file**
+- [ ] **Step 3: Register it in the resource file**
 
 In `qt-app/resources.qrc`, add inside `<qresource prefix="/resources">`:
 
@@ -535,7 +558,7 @@ In `qt-app/resources.qrc`, add inside `<qresource prefix="/resources">`:
         <file alias="default_student.svg">resources/default_student.svg</file>
 ```
 
-- [ ] **Step 3: Load it via QIcon**
+- [ ] **Step 4: Load it via QIcon**
 
 In `qt-app/mainwindow.cpp`, replace the placeholder load (lines 45-52, currently `QPixmap placeholder(":/resources/default_student.png"); ...`) with:
 
@@ -549,200 +572,131 @@ In `qt-app/mainwindow.cpp`, replace the placeholder load (lines 45-52, currently
 
 Add `#include <QIcon>` to the includes if not present.
 
-- [ ] **Step 4: Build and run**
+- [ ] **Step 5: Build and run**
 
 Run: `cmake --build qt-app/build` then run `WITS`.
 Expected: the student-photo area shows the grey silhouette placeholder (previously blank). Logging in still swaps in the fetched photo.
 
-- [ ] **Step 5: Commit** (via the `commit` skill)
+- [ ] **Step 6: Commit** (via the `commit` skill)
 
 Suggested message: `fix(ui): add student-photo placeholder and resolve dangling resource`
 
 ---
 
-### Task 2.2: Add the active-profile spotlight card
+### Task 2.2: Restyle the existing active-profile block as the spotlight card
+
+> **Design correction (from review):** `frame_2` already contains the active-profile
+> display. Its structure is `frame_2 > frame2Layout (QVBox) > stdList (QScrollArea) >
+> scrollContentsLayout (QVBox)` whose **first item is `widget`** (`widgetDetailLayout`,
+> QHBox) = `studentPhoto` + `detailInfoLayout` (`nameLabel` [20pt bold] + `detailGridLayout`
+> with captions `label_5/label_2/label_4/label_3` and values `courseLabel`, `yrlevel_label`,
+> `depLabel`, `timeDate_Label`). These value labels are **row 0** of `refreshRightPanel`'s
+> arrays (`nameLabels[0]`…), and `displayStudent` already loads the fetched photo into
+> `studentPhoto`. So we **restyle this existing block in place** — do NOT insert a new card
+> (a separate card would duplicate the active student and drop the photo). This preserves
+> `refreshRightPanel`, the photo feature, and the fade-in, with no new widgets.
 
 **Files:**
-- Modify: `qt-app/mainwindow.h` (add member labels + a build helper)
-- Modify: `qt-app/mainwindow.cpp` (build the card in the constructor; populate in `displayStudent`)
-- Modify: `qt-app/resources/wits.qss` (card styling)
-- Modify: `qt-app/tests/tst_responsive_ui.cpp` (assert the card exists)
+- Modify: `qt-app/resources/wits.qss` (card styling on the existing block)
+- Modify: `qt-app/mainwindow.cpp` (upgrade the existing `ui->widget` shadow already set at line ~217; optional reveal fade)
+- Modify: `qt-app/tests/tst_responsive_ui.cpp` (pin the spotlight host widgets)
 
 **Interfaces:**
-- Consumes: `ui->frame_2` (right panel), the `student` JSON in `displayStudent` (keys `name`, `course`, `year_level`, `department`, `time_date`), `ui->studentPhoto`.
-- Produces: `MainWindow::m_spotlightCard` (`QFrame*`, objectName `spotlightCard`) and labels `m_spotName`, `m_spotCourse`, `m_spotYear`, `m_spotDept`, `m_spotTime`, `m_spotAvatar`; method `void buildSpotlightCard()` and `void updateSpotlight(const QJsonObject &student)`.
+- Consumes (all existing): `ui->widget`, `ui->studentPhoto`, `ui->nameLabel`,
+  `ui->courseLabel`, `ui->yrlevel_label`, `ui->depLabel`, `ui->timeDate_Label`, and the
+  caption labels `label_5/label_2/label_4/label_3`.
+- Produces: no new symbols. Styling is keyed off the existing `objectName`s.
 
-- [ ] **Step 1: Add the failing structural test**
+- [ ] **Step 1: Add the failing structural test (pin the spotlight host)**
 
-In `qt-app/tests/tst_responsive_ui.cpp`, add a slot and implementation:
+In `qt-app/tests/tst_responsive_ui.cpp`, add `void mainWindowHasSpotlightHost();` to the
+`private slots:` list, then implement:
 
 ```cpp
-// in the private slots list:
-void mainWindowHasSpotlightCard();
-
-// implementation:
-void TestResponsiveUi::mainWindowHasSpotlightCard()
+void TestResponsiveUi::mainWindowHasSpotlightHost()
 {
     QScopedPointer<QWidget> w(loadUi("mainwindow.ui"));
     QVERIFY2(w, "failed to load mainwindow.ui");
-    // The spotlight card is built in code, so the .ui must expose a host
-    // container the code can attach to: the right panel frame_2 with a layout.
-    QWidget *panel = w->findChild<QWidget *>("frame_2");
-    QVERIFY2(panel, "frame_2 not found");
-    QVERIFY2(panel->layout() != nullptr,
-             "frame_2 needs a layout to host the spotlight card");
+    // The spotlight is the existing row-0 block; pin its host + key children so a
+    // future .ui edit can't silently remove the active-profile display.
+    QWidget *block = w->findChild<QWidget *>("widget");
+    QVERIFY2(block && block->layout(), "active-profile block 'widget' missing/laid-out");
+    for (const char *n : {"studentPhoto", "nameLabel", "courseLabel",
+                          "yrlevel_label", "depLabel", "timeDate_Label"}) {
+        QVERIFY2(w->findChild<QWidget *>(n),
+                 qPrintable(QString("spotlight child %1 missing").arg(n)));
+    }
 }
 ```
-
-> Note: the card itself is created at runtime (not in the `.ui`), so this test guards the *host* (`frame_2` has a layout). A widget-level test that the card populates is added in Step 6.
 
 - [ ] **Step 2: Run it to verify current state**
 
 Run: `cmake --build qt-app/build && ctest --test-dir qt-app/build -R tst_responsive_ui --output-on-failure`
-Expected: if `frame_2` already has a layout, this PASSES immediately (acceptable — it documents the dependency). If it FAILS, add a layout to `frame_2` in `mainwindow.ui` (a `QVBoxLayout`) without removing existing children, then re-run to green.
+Expected: PASS immediately (these widgets all exist today). The test now guards them.
 
-- [ ] **Step 3: Declare the card members and helpers in the header**
-
-In `qt-app/mainwindow.h`, add to the private section:
-
-```cpp
-    QFrame *m_spotlightCard = nullptr;
-    QLabel *m_spotAvatar = nullptr;
-    QLabel *m_spotName = nullptr;
-    QLabel *m_spotCourse = nullptr;
-    QLabel *m_spotYear = nullptr;
-    QLabel *m_spotDept = nullptr;
-    QLabel *m_spotTime = nullptr;
-    void buildSpotlightCard();
-    void updateSpotlight(const QJsonObject &student);
-```
-
-Add `#include <QFrame>` and `#include <QGridLayout>` to the header includes.
-
-- [ ] **Step 4: Build the card in the constructor**
-
-In `qt-app/mainwindow.cpp`, add a call `buildSpotlightCard();` near the end of the constructor (after the existing UI setup), and implement:
-
-```cpp
-void MainWindow::buildSpotlightCard()
-{
-    m_spotlightCard = new QFrame(ui->frame_2);
-    m_spotlightCard->setObjectName("spotlightCard");
-
-    auto *outer = new QVBoxLayout(m_spotlightCard);
-    outer->setContentsMargins(20, 20, 20, 20);
-    outer->setSpacing(14);
-
-    auto *headerRow = new QHBoxLayout();
-    m_spotAvatar = new QLabel("?", m_spotlightCard);
-    m_spotAvatar->setObjectName("spotAvatar");
-    m_spotAvatar->setFixedSize(64, 64);
-    m_spotAvatar->setAlignment(Qt::AlignCenter);
-    m_spotName = new QLabel("Waiting for log in…", m_spotlightCard);
-    m_spotName->setObjectName("spotName");
-    headerRow->addWidget(m_spotAvatar);
-    headerRow->addWidget(m_spotName, 1);
-    outer->addLayout(headerRow);
-
-    auto *grid = new QGridLayout();
-    grid->setHorizontalSpacing(40);
-    grid->setVerticalSpacing(10);
-    auto makeCaption = [&](const QString &t) {
-        auto *l = new QLabel(t, m_spotlightCard);
-        l->setObjectName("spotCaption");
-        return l;
-    };
-    m_spotCourse = new QLabel("—", m_spotlightCard); m_spotCourse->setObjectName("spotValue");
-    m_spotYear   = new QLabel("—", m_spotlightCard); m_spotYear->setObjectName("spotValue");
-    m_spotDept   = new QLabel("—", m_spotlightCard); m_spotDept->setObjectName("spotValue");
-    m_spotTime   = new QLabel("—", m_spotlightCard); m_spotTime->setObjectName("spotValueAccent");
-    grid->addWidget(makeCaption("COURSE"),     0, 0); grid->addWidget(m_spotCourse, 1, 0);
-    grid->addWidget(makeCaption("YEAR LEVEL"), 0, 1); grid->addWidget(m_spotYear,   1, 1);
-    grid->addWidget(makeCaption("DEPARTMENT"), 2, 0); grid->addWidget(m_spotDept,   3, 0);
-    grid->addWidget(makeCaption("TIME LOGGED"),2, 1); grid->addWidget(m_spotTime,   3, 1);
-    outer->addLayout(grid);
-
-    // Insert the card at the top of the right panel's layout.
-    if (auto *panelLayout = qobject_cast<QBoxLayout *>(ui->frame_2->layout()))
-        panelLayout->insertWidget(0, m_spotlightCard);
-
-    // Soft shadow (code, not QSS — one effect instance for this widget).
-    auto *shadow = new QGraphicsDropShadowEffect(m_spotlightCard);
-    shadow->setBlurRadius(20);
-    shadow->setOffset(0, 4);
-    shadow->setColor(QColor(0, 0, 0, 40));
-    m_spotlightCard->setGraphicsEffect(shadow);
-}
-```
-
-Add includes as needed: `#include <QVBoxLayout>`, `#include <QHBoxLayout>`, `#include <QGridLayout>`. (`QGraphicsDropShadowEffect`, `QLabel` already included.)
-
-- [ ] **Step 5: Populate the card on login**
-
-In `qt-app/mainwindow.cpp`, implement `updateSpotlight` and call it from `displayStudent` (before/after the existing `recentLogins.prepend(student)`):
-
-```cpp
-void MainWindow::updateSpotlight(const QJsonObject &student)
-{
-    const QString name = student["name"].toString();
-    m_spotName->setText(name.isEmpty() ? "Waiting for log in…" : name);
-    m_spotAvatar->setText(name.isEmpty() ? "?" : name.left(1).toUpper());
-    m_spotCourse->setText(student["course"].toString());
-    m_spotYear->setText(student["year_level"].toString());
-    m_spotDept->setText(student["department"].toString());
-    m_spotTime->setText(student["time_date"].toString());
-
-    // Reuse the existing fade pattern for a subtle reveal.
-    auto *fade = new QGraphicsOpacityEffect(m_spotlightCard);
-    m_spotlightCard->setGraphicsEffect(fade);
-    auto *anim = new QPropertyAnimation(fade, "opacity");
-    anim->setDuration(400);
-    anim->setStartValue(0.0);
-    anim->setEndValue(1.0);
-    anim->start(QAbstractAnimation::DeleteWhenStopped);
-}
-```
-
-In `displayStudent`, add `updateSpotlight(student);` as the first line.
-
-> Note: setting an opacity effect replaces the drop-shadow effect on reveal (a widget holds one effect). This is acceptable — the shadow is cosmetic and the card keeps its border. If both are desired, drop the per-reveal opacity animation and keep only the shadow.
-
-- [ ] **Step 6: Append spotlight QSS**
+- [ ] **Step 3: Append spotlight QSS targeting the existing block**
 
 Add to `qt-app/resources/wits.qss`:
 
 ```css
-QFrame#spotlightCard {
+/* Active-profile spotlight = the existing row-0 block (#widget) */
+QWidget#widget {
     background-color: #FFFFFF;
     border: 1px solid #E2E8F0;
     border-radius: 16px;
 }
-QLabel#spotAvatar {
-    background-color: #6366F1;
-    color: #FFFFFF;
-    border-radius: 16px;
-    font-size: 28px;
-    font-weight: 700;
+QLabel#studentPhoto {
+    background-color: #F1F5F9;
+    border: 1px solid #E2E8F0;
+    border-radius: 12px;
 }
-QLabel#spotName { font-size: 28px; font-weight: 800; color: #1E293B; }
-QLabel#spotCaption { font-size: 11px; font-weight: 700; color: #94A3B8; }
-QLabel#spotValue { font-size: 15px; color: #1E293B; }
-QLabel#spotValueAccent { font-size: 15px; font-weight: 700; color: #10B981; }
+QLabel#nameLabel { font-size: 28px; font-weight: 800; color: #1E293B; }
+/* Field captions */
+QLabel#label_5, QLabel#label_2, QLabel#label_4, QLabel#label_3 {
+    font-size: 11px; font-weight: 700; color: #94A3B8;
+}
+/* Field values */
+QLabel#courseLabel, QLabel#yrlevel_label, QLabel#depLabel {
+    font-size: 15px; color: #1E293B;
+}
+QLabel#timeDate_Label { font-size: 15px; font-weight: 700; color: #10B981; }
 ```
 
-- [ ] **Step 7: Build, run, verify**
+> Note on font conflicts: `nameLabel` etc. carry inline `<font>` point sizes in
+> `mainwindow.ui`. A stylesheet `font-size` overrides them, so the QSS wins — no `.ui` edit
+> needed. Do not change the `.ui` font properties (keeps `tst_responsive_ui` untouched).
+
+- [ ] **Step 4: Keep/strengthen the existing shadow (already on `ui->widget`)**
+
+`mainwindow.cpp:217` already applies a `QGraphicsDropShadowEffect` to `ui->widget`
+(`shadow1`). Leave it; optionally bump `setBlurRadius(20)` / `setColor(QColor(0,0,0,40))` for
+a softer card shadow. Do **not** add a second effect to the same widget (a widget holds one
+`QGraphicsEffect`).
+
+- [ ] **Step 5: (Optional) subtle reveal fade on login**
+
+`displayStudent` already fades `studentPhoto` in via `QGraphicsOpacityEffect` +
+`QPropertyAnimation`. The active-profile labels update through the existing
+`refreshRightPanel()` call inside `displayStudent` (row 0). No new populate code is needed.
+If a whole-block fade is desired, animate opacity on `ui->widget` — but note this would
+replace `shadow1` on that widget for the duration; prefer leaving the photo-only fade as-is.
+
+- [ ] **Step 6: Build, run, verify**
 
 Run: `cmake --build qt-app/build` then run `WITS`. Log in / scan a test student.
-Expected: spotlight card shows the avatar initial, big name, and the 4 fields; fades in on login; idle state reads "Waiting for log in…".
+Expected: the active-profile block reads as a white rounded card — photo at left, large name,
+and the Course/Year/Department/Date-and-Time grid with an emerald time value. On login the
+photo fades in and the fields populate (row 0). Idle state shows the empty card (labels
+blank — empty-state hint added in Task 4.2).
 
-- [ ] **Step 8: Run tests**
+- [ ] **Step 7: Run tests**
 
 Run: `ctest --test-dir qt-app/build --output-on-failure`
-Expected: all PASS including `mainWindowHasSpotlightCard`.
+Expected: all PASS including `mainWindowHasSpotlightHost`.
 
-- [ ] **Step 9: Commit** (via the `commit` skill)
+- [ ] **Step 8: Commit** (via the `commit` skill)
 
-Suggested message: `feat(kiosk): add active-profile spotlight card`
+Suggested message: `feat(kiosk): restyle active-profile block as spotlight card`
 
 ---
 
@@ -835,25 +789,17 @@ QFrame#sidebarFrame QPushButton[active="true"] {
 }
 ```
 
-- [ ] **Step 2: Drive the active state from `setActiveSidebar`**
+- [ ] **Step 2: Confirm the active-state mechanism (already in code — no rewrite)**
 
-In `qt-app/adminwindow.cpp`, in `setActiveSidebar` (line 339), set a dynamic property and repolish instead of (or in addition to) any inline style, so the QSS `[active="true"]` selector applies:
+> **Correction (from review):** `setActiveSidebar` (`adminwindow.cpp:339-353`) **already**
+> sets the `active` dynamic property on each nav button and calls `unpolish`/`polish`/`update`.
+> Do **not** rewrite it — a rewrite would be a no-op and risks dropping the existing
+> `btn->update()`. The only genuinely new thing is the QSS `[active="true"]` selector added in
+> Step 1, which now has an effect because the property is already being set.
 
-```cpp
-void adminWindow::setActiveSidebar(QPushButton* activeBtn) {
-    const QList<QPushButton*> navButtons = {
-        ui->generalBtn, ui->databaseBtn, ui->reportingBtn,
-        ui->studentSearchBtn, ui->visitorBtn
-    };
-    for (QPushButton *btn : navButtons) {
-        btn->setProperty("active", btn == activeBtn);
-        btn->style()->unpolish(btn);
-        btn->style()->polish(btn);
-    }
-}
-```
-
-Add `#include <QStyle>` if not present. Remove any leftover inline per-button style strings in this function.
+Verify the existing body matches (the dynamic property + repolish loop). Make **no code
+change** here unless the QSS doesn't apply, in which case confirm `#include <QStyle>` is
+present (it is, via `btn->style()`).
 
 - [ ] **Step 3: Build, run, click through tabs**
 
@@ -893,18 +839,30 @@ In `qt-app/adminwindow.h` private section:
     void buildHeaderBar();
 ```
 
-- [ ] **Step 2: Build the header bar**
+- [ ] **Step 2: Build the header bar (vertical wrapper)**
 
-In `qt-app/adminwindow.cpp`, call `buildHeaderBar();` in the constructor after `setupUi`, and implement (attach above `stackedWidget` in its parent layout — confirm the parent/layout in `adminwindow.ui`):
+> **Layout correction (from review):** `stackedWidget` sits directly in `centralwidget`'s
+> `horizontalLayout_main` (a **QHBoxLayout**: `sidebarFrame | stackedWidget`, confirmed at
+> `adminwindow.ui:124-145`). A bare `insertWidget(indexOf(stackedWidget))` would put the
+> header *beside* the content as a vertical strip, not above it (and `qobject_cast<QBoxLayout>`
+> would still succeed, hiding the bug). So we move `stackedWidget` into a **new vertical
+> container** (header on top, stack below) and drop that container into the HBox at the slot
+> the stack used to occupy, preserving its stretch.
+
+In `qt-app/adminwindow.cpp`, call `buildHeaderBar();` in the constructor after `setupUi`, and implement:
 
 ```cpp
 void adminWindow::buildHeaderBar()
 {
-    QWidget *host = ui->stackedWidget->parentWidget();
-    auto *hostLayout = qobject_cast<QBoxLayout *>(host->layout());
-    if (!hostLayout) return; // host has no box layout; skip rather than crash
+    QWidget *central = ui->stackedWidget->parentWidget();           // centralwidget
+    auto *mainRow = qobject_cast<QHBoxLayout *>(central->layout()); // horizontalLayout_main
+    if (!mainRow) return;                                           // unexpected: bail safely
+    const int stackIdx = mainRow->indexOf(ui->stackedWidget);
+    if (stackIdx < 0) return;
+    const int stackStretch = mainRow->stretch(stackIdx);
 
-    m_headerBar = new QFrame(host);
+    // --- the header bar itself ---
+    m_headerBar = new QFrame;
     m_headerBar->setObjectName("adminHeaderBar");
     m_headerBar->setFixedHeight(56);
     auto *row = new QHBoxLayout(m_headerBar);
@@ -925,12 +883,26 @@ void adminWindow::buildHeaderBar()
     row->addSpacing(8);
     row->addWidget(who);
 
-    const int idx = hostLayout->indexOf(ui->stackedWidget);
-    hostLayout->insertWidget(idx < 0 ? 0 : idx, m_headerBar);
+    // --- vertical wrapper: header on top, the existing stack below ---
+    auto *contentCol = new QWidget(central);
+    contentCol->setObjectName("adminContentColumn");
+    auto *col = new QVBoxLayout(contentCol);
+    col->setContentsMargins(0, 0, 0, 0);
+    col->setSpacing(0);
+
+    mainRow->removeWidget(ui->stackedWidget);   // detach from the HBox
+    col->addWidget(m_headerBar);
+    col->addWidget(ui->stackedWidget, 1);       // addWidget reparents the stack into contentCol
+    mainRow->insertWidget(stackIdx, contentCol, stackStretch);
 }
 ```
 
-Add includes `#include <QHBoxLayout>`, `#include <QFrame>` if needed.
+Add includes `#include <QHBoxLayout>`, `#include <QVBoxLayout>`, `#include <QFrame>` if needed.
+
+> Note: reparenting `stackedWidget` at runtime does not change `adminwindow.ui`, so
+> `tst_responsive_ui`'s page/overlay assertions (which load the static `.ui`) are unaffected.
+> The `searchOverlay` carve-out still holds — it stays parented to `studentSearchPage` inside
+> the stack.
 
 - [ ] **Step 3: Update the title from `setActiveSidebar`**
 
@@ -958,24 +930,31 @@ QLabel#adminHeaderAvatar {
 }
 ```
 
-- [ ] **Step 5: Guard the header host in tests**
+- [ ] **Step 5: Guard the header precondition in tests**
 
-In `qt-app/tests/tst_responsive_ui.cpp`, add a new slot `adminStackHostHasBoxLayout` to the `private slots:` list and implement it (this guards the layout the header bar attaches to):
+The runtime wrap depends on a specific `.ui` shape: the stack's parent layout must be a
+`QHBoxLayout` that directly contains `stackedWidget` (so we can pull it out and re-insert the
+wrapper at the same slot). Guard exactly that. In `qt-app/tests/tst_responsive_ui.cpp`, add
+`void adminCentralRowHostsStack();` to the `private slots:` list, add `#include <QHBoxLayout>`
+at the top, then implement:
 
 ```cpp
-// add `void adminStackHostHasBoxLayout();` to the private slots list, then:
-void TestResponsiveUi::adminStackHostHasBoxLayout()
+void TestResponsiveUi::adminCentralRowHostsStack()
 {
     QScopedPointer<QWidget> w(loadUi("adminwindow.ui"));
     QVERIFY2(w, "failed to load adminwindow.ui");
     QWidget *stack = w->findChild<QWidget *>("stackedWidget");
-    QVERIFY2(stack, "stackedWidget not found");
-    QVERIFY2(stack->parentWidget() && stack->parentWidget()->layout(),
-             "stackedWidget parent must have a layout to host the header bar");
+    QVERIFY2(stack && stack->parentWidget(), "stackedWidget/parent not found");
+    auto *row = qobject_cast<QHBoxLayout *>(stack->parentWidget()->layout());
+    QVERIFY2(row, "stack parent must use a QHBoxLayout (header-wrap relies on it)");
+    QVERIFY2(row->indexOf(stack) >= 0,
+             "stackedWidget must be a direct child of that QHBoxLayout");
 }
 ```
 
-If this fails, add a box layout to the stack's parent in `adminwindow.ui` without removing children.
+This catches a future `.ui` change that would silently break the header placement (the exact
+failure mode the original plan missed). If it ever fails, adjust `buildHeaderBar` to the new
+shape rather than forcing the `.ui`.
 
 - [ ] **Step 6: Build, run, verify**
 
