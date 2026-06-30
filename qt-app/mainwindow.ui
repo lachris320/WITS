@@ -337,6 +337,21 @@
            </rect>
           </property>
           <layout class="QVBoxLayout" name="scrollContentsLayout">
+           <property name="spacing">
+            <number>8</number>
+           </property>
+           <property name="leftMargin">
+            <number>8</number>
+           </property>
+           <property name="topMargin">
+            <number>8</number>
+           </property>
+           <property name="rightMargin">
+            <number>8</number>
+           </property>
+           <property name="bottomMargin">
+            <number>8</number>
+           </property>
            <item>
             <widget class="QWidget" name="widget" native="true">
              <layout class="QHBoxLayout" name="widgetDetailLayout">
@@ -634,6 +649,12 @@
            </item>
            <item>
             <widget class="QWidget" name="widget_2" native="true">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
+               <horstretch>0</horstretch>
+               <verstretch>1</verstretch>
+              </sizepolicy>
+             </property>
              <layout class="QHBoxLayout" name="row2Layout">
               <property name="leftMargin">
                <number>10</number>
@@ -777,6 +798,12 @@
            </item>
            <item>
             <widget class="QWidget" name="widget_3" native="true">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
+               <horstretch>0</horstretch>
+               <verstretch>1</verstretch>
+              </sizepolicy>
+             </property>
              <layout class="QHBoxLayout" name="row3Layout">
               <property name="leftMargin">
                <number>10</number>
@@ -920,6 +947,12 @@
            </item>
            <item>
             <widget class="QWidget" name="widget_4" native="true">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
+               <horstretch>0</horstretch>
+               <verstretch>1</verstretch>
+              </sizepolicy>
+             </property>
              <layout class="QHBoxLayout" name="row4Layout">
               <property name="leftMargin">
                <number>10</number>
@@ -1063,6 +1096,12 @@
            </item>
            <item>
             <widget class="QWidget" name="widget_5" native="true">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
+               <horstretch>0</horstretch>
+               <verstretch>1</verstretch>
+              </sizepolicy>
+             </property>
              <layout class="QHBoxLayout" name="row5Layout">
               <property name="leftMargin">
                <number>10</number>
@@ -1206,6 +1245,12 @@
            </item>
            <item>
             <widget class="QWidget" name="widget_6" native="true">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
+               <horstretch>0</horstretch>
+               <verstretch>1</verstretch>
+              </sizepolicy>
+             </property>
              <layout class="QHBoxLayout" name="row6Layout">
               <property name="leftMargin">
                <number>10</number>
@@ -1349,6 +1394,12 @@
            </item>
            <item>
             <widget class="QWidget" name="widget_7" native="true">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
+               <horstretch>0</horstretch>
+               <verstretch>1</verstretch>
+              </sizepolicy>
+             </property>
              <layout class="QHBoxLayout" name="row7Layout">
               <property name="leftMargin">
                <number>10</number>
@@ -1492,6 +1543,12 @@
            </item>
            <item>
             <widget class="QWidget" name="widget_8" native="true">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
+               <horstretch>0</horstretch>
+               <verstretch>1</verstretch>
+              </sizepolicy>
+             </property>
              <layout class="QHBoxLayout" name="row8Layout">
               <property name="leftMargin">
                <number>10</number>
@@ -1635,6 +1692,12 @@
            </item>
            <item>
             <widget class="QWidget" name="widget_9" native="true">
+             <property name="sizePolicy">
+              <sizepolicy hsizetype="Preferred" vsizetype="Expanding">
+               <horstretch>0</horstretch>
+               <verstretch>1</verstretch>
+              </sizepolicy>
+             </property>
              <layout class="QHBoxLayout" name="row9Layout">
               <property name="leftMargin">
                <number>10</number>
@@ -1775,22 +1838,6 @@
               </item>
              </layout>
             </widget>
-           </item>
-           <item>
-            <spacer name="verticalSpacer_scroll">
-             <property name="orientation">
-              <enum>Qt::Orientation::Vertical</enum>
-             </property>
-             <property name="sizeType">
-              <enum>QSizePolicy::Policy::Expanding</enum>
-             </property>
-             <property name="sizeHint" stdset="0">
-              <size>
-               <width>20</width>
-               <height>40</height>
-              </size>
-             </property>
-            </spacer>
            </item>
           </layout>
          </widget>
