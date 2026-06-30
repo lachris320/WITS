@@ -8,6 +8,7 @@ int main(int argc, char *argv[])
     do {
         QApplication a(argc, argv);
         a.setPalette(WitsTheme::lightPalette());
+        a.setStyleSheet(WitsTheme::loadStyleSheet());
         MainWindow w;
         w.show();
         exitCode = a.exec();
