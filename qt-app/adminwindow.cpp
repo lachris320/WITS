@@ -2,6 +2,7 @@
 #include "ui_adminwindow.h"
 #include "apiconfig.h"
 #include "busyindicator.h"
+#include "theme.h"
 #include "attachfilesdialog.h"
 #include <QGraphicsDropShadowEffect>
 #include <QGraphicsLayout>
@@ -3552,7 +3553,7 @@ void adminWindow::showSearchOverlay()
     if (!searchSpinner) {
         searchSpinner = new BusyIndicator(ui->searchOverlay);
         searchSpinner->setFixedSize(48, 48);
-        searchSpinner->setColor(Qt::white);
+        searchSpinner->setColor(QColor(WitsTheme::Color::Secondary));
     }
 
     // Center spinner
