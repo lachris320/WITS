@@ -29,6 +29,7 @@
 #include <QApplication>
 #include <QElapsedTimer>
 #include "rfidkeyboardfilter.h"
+#include "theme.h"
 
 
 MainWindow::MainWindow(QWidget *parent)
@@ -245,9 +246,10 @@ void MainWindow::showKioskStatus(const QString &message, bool error) {
         m_statusLabel->setAlignment(Qt::AlignCenter);
         m_statusLabel->hide();
     }
-    m_statusLabel->setStyleSheet(error
-        ? "background:#C0392B; color:white; padding:14px; border-radius:8px; font-size:18px;"
-        : "background:#27AE60; color:white; padding:14px; border-radius:8px; font-size:18px;");
+    m_statusLabel->setStyleSheet(QString(
+        "background:%1; color:white; padding:14px 22px; border-radius:22px;"
+        "font-size:18px; font-weight:600;")
+        .arg(error ? WitsTheme::Color::Error : WitsTheme::Color::Success));
     m_statusLabel->setText(message);
     m_statusLabel->adjustSize();
     m_statusLabel->move((width() - m_statusLabel->width()) / 2,

@@ -86,7 +86,7 @@ QFrame#frame_2 {               /* right content panel */
     border-radius: 16px;
 }
 QFrame#frame_3 {               /* recent-logins header strip */
-    background-color: #1E293B;
+    background-color: rgba(30, 41, 59, 217);
     border-top-left-radius: 12px;
     border-top-right-radius: 12px;
 }
@@ -242,4 +242,15 @@ QLabel#courseLabel, QLabel#yrlevel_label, QLabel#depLabel {
     font-size: 15px; color: #1E293B;
 }
 QLabel#timeDate_Label { font-size: 15px; font-weight: 700; color: #059669; }
+
+/* Recent-logins rows — translucent table rows over the poster */
+QWidget#widget_2, QWidget#widget_3, QWidget#widget_4, QWidget#widget_5,
+QWidget#widget_6, QWidget#widget_7, QWidget#widget_8, QWidget#widget_9 {
+    background-color: rgba(255, 255, 255, 184);
+    border: 1px solid rgba(255, 255, 255, 102);
+    border-radius: 10px;
+}
+QWidget#widget_2:hover, QWidget#widget_3:hover, QWidget#widget_4:hover,
+QWidget#widget_5:hover, QWidget#widget_6:hover, QWidget#widget_7:hover,
+QWidget#widget_8:hover, QWidget#widget_9:hover { background-color: rgba(255, 255, 255, 230); }
 
