@@ -366,6 +366,7 @@ void MainWindow::resizeEvent(QResizeEvent *event) {
     QSettings settings("MyCompany", "MyApp");
     QString logoPath = settings.value("school/logoPath", "").toString();
     updateLogo(logoPath);
+    syncPosterBg();          // keep the poster layer covering frame_2 on resize
 }
 
 // Render src into a circular pixmap of the given diameter (transparent corners).
@@ -405,23 +406,47 @@ void MainWindow::updateLogo(const QString &logoPath) {
 }
 
 void MainWindow::updatePoster(const QString &posterPath) {
-    if (!posterPath.isEmpty() && QFile::exists(posterPath)) {
-        QPixmap pix(posterPath);
-        if (!pix.isNull()) {
-            ui->poster_Image->setPixmap(
-                pix.scaled(
-                    ui->poster_Image->size(),
-                    Qt::KeepAspectRatioByExpanding,
-                    Qt::SmoothTransformation
-                )
-            );
-            return;
-        }
+    m_posterPath = posterPath;
+    if (!m_posterBg) {
+        m_posterBg = new QLabel(ui->frame_2);
+        m_posterBg->setObjectName("posterBg");
+        m_posterBg->setScaledContents(false);
+        m_posterBg->setAttribute(Qt::WA_TransparentForMouseEvents);
     }
-    // If invalid, show placeholder
-    ui->poster_Image->setText("No Poster Selected");
-    ui->poster_Image->setPixmap(QPixmap());
-    ui->poster_Image->setAlignment(Qt::AlignCenter);
+    syncPosterBg();
+    m_posterBg->lower(); // behind the scroll content
+}
+
+void MainWindow::syncPosterBg() {
+    if (!m_posterBg) return;
+    m_posterBg->setGeometry(ui->frame_2->rect());
+    const QSize sz = ui->frame_2->size();
+    if (m_posterPath.isEmpty() || !QFile::exists(m_posterPath) || sz.isEmpty()) {
+        m_posterBg->clear();
+        m_posterBg->hide();   // fall back to frame_2's solid QSS background
+        return;
+    }
+    QPixmap pix(m_posterPath);
+    if (pix.isNull()) { m_posterBg->clear(); m_posterBg->hide(); return; }
+
+    // Scale to cover, center-crop, apply a rounded mask (match frame_2's 16px) + dark scrim.
+    QPixmap canvas(sz);
+    canvas.fill(Qt::transparent);
+    QPainter p(&canvas);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    QPainterPath clip;
+    clip.addRoundedRect(QRectF(QPointF(0, 0), QSizeF(sz)), 16, 16);
+    p.setClipPath(clip);
+    const QPixmap scaled = pix.scaled(sz, Qt::KeepAspectRatioByExpanding,
+                                      Qt::SmoothTransformation);
+    p.drawPixmap((sz.width() - scaled.width()) / 2,
+                 (sz.height() - scaled.height()) / 2, scaled);
+    p.fillRect(canvas.rect(), QColor(15, 23, 42, 115)); // ~0.45 dark scrim
+    p.end();
+
+    m_posterBg->setPixmap(canvas);
+    m_posterBg->show();
 }
 
 

@@ -51,6 +51,9 @@ private:
 
     RfidKeyboardFilter *rfidFilter = nullptr;
     QLabel *m_statusLabel = nullptr;
+    QLabel *m_posterBg = nullptr;
+    void syncPosterBg();   // size the layer to frame_2 and re-render the scrimmed poster
+    QString m_posterPath;  // remembered so resize can re-render at the new size
     QElapsedTimer m_rfidDebounceClock;
     QString m_lastRfidCode;
     qint64 m_lastRfidMs = -100000;

@@ -292,19 +292,6 @@
          </property>
         </spacer>
        </item>
-       <item>
-        <widget class="QLabel" name="poster_Image">
-         <property name="sizePolicy">
-          <sizepolicy hsizetype="Preferred" vsizetype="Preferred">
-           <horstretch>0</horstretch>
-           <verstretch>0</verstretch>
-          </sizepolicy>
-         </property>
-         <property name="text">
-          <string>Add Library Welcome Poster</string>
-         </property>
-        </widget>
-       </item>
       </layout>
      </widget>
     </item>

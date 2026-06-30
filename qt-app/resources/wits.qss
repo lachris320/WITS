@@ -120,6 +120,8 @@ QLabel#label_10, QLabel#label_6, QLabel#label_7, QLabel#label_8, QLabel#label_9 
 }
 /* Carried over from the removed inline block so no rule is silently dropped */
 QScrollArea#stdList { background: transparent; border: none; }
+/* Defensive: ensure scroll contents are transparent so the poster background shows through */
+QWidget#scrollAreaWidgetContents { background: transparent; }
 QLabel#label {
     font-size: 18px; font-weight: bold; color: #1E293B;
     padding: 10px; border-bottom: 2px solid #E2E8F0;
