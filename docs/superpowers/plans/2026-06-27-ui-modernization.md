@@ -390,6 +390,12 @@ QLabel#date_label { color: #CBD5E1; font-size: 13px; }
 QLabel#label_10, QLabel#label_6, QLabel#label_7, QLabel#label_8, QLabel#label_9 {
     color: #FFFFFF; font-weight: 600;
 }
+/* Carried over from the removed inline block so no rule is silently dropped */
+QScrollArea#stdList { background: transparent; border: none; }
+QLabel#label {
+    font-size: 18px; font-weight: bold; color: #1E293B;
+    padding: 10px; border-bottom: 2px solid #E2E8F0;
+}
 ```
 
 - [ ] **Step 2: Remove the inline stylesheet block**
@@ -1174,7 +1180,7 @@ Suggested message: `feat(ui): add micro-interactions and empty-state polish`
 
 - [ ] **Step 1: Theme the busy indicator**
 
-In `qt-app/busyindicator.cpp`, replace any hardcoded spinner/overlay colors with `WitsTheme::Color::*` (add `#include "theme.h"`). Use `Secondary` (`#3B82F6`) for the active arc and a translucent slate for the track. Keep the existing animation/logic.
+In `qt-app/busyindicator.cpp`, the colors are **painted in `paintEvent` via `QColor` literals** (there are **0** `setStyleSheet` calls — don't hunt for a stylesheet). Replace those `QColor` literals with `WitsTheme::Color::*` (add `#include "theme.h"`): use `Secondary` (`#3B82F6`) for the active arc and a translucent slate for the track. Keep the existing animation/logic.
 
 - [ ] **Step 2: Theme the search overlay**
 
