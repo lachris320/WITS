@@ -1,4 +1,5 @@
 #include "busyindicator.h"
+#include "theme.h"
 #include <QPainter>
 #include <QtMath>
 
@@ -8,7 +9,7 @@ BusyIndicator::BusyIndicator(QWidget *parent)
     numberOfLines(12),
     lineLength(10),
     lineWidth(3),
-    color(Qt::white),
+    color(QColor(WitsTheme::Color::Secondary)),
     spinning(false)
 {
     timer.setInterval(80);

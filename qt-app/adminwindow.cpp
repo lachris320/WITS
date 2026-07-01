@@ -2,6 +2,7 @@
 #include "ui_adminwindow.h"
 #include "apiconfig.h"
 #include "busyindicator.h"
+#include "theme.h"
 #include "attachfilesdialog.h"
 #include <QGraphicsDropShadowEffect>
 #include <QGraphicsLayout>
@@ -43,6 +44,10 @@
 #include <QPropertyAnimation>
 #include <QGraphicsOpacityEffect>
 #include <QCheckBox>
+#include <QHBoxLayout>
+#include <QVBoxLayout>
+#include <QFrame>
+#include <QIcon>
 
 #include "xlsxdocument.h"
 #include "xlsxformat.h"
@@ -350,6 +355,52 @@ void adminWindow::setActiveSidebar(QPushButton* activeBtn){
         btn->style()->polish(btn);
         btn->update();
     }
+    if (m_headerTitle && activeBtn)
+        m_headerTitle->setText(activeBtn->text().trimmed());
+}
+
+void adminWindow::buildHeaderBar()
+{
+    QWidget *central = ui->stackedWidget->parentWidget();           // centralwidget
+    auto *mainRow = qobject_cast<QHBoxLayout *>(central->layout()); // horizontalLayout_main
+    if (!mainRow) return;                                           // unexpected: bail safely
+    const int stackIdx = mainRow->indexOf(ui->stackedWidget);
+    if (stackIdx < 0) return;
+    const int stackStretch = mainRow->stretch(stackIdx);
+
+    // --- the header bar itself ---
+    m_headerBar = new QFrame;
+    m_headerBar->setObjectName("adminHeaderBar");
+    m_headerBar->setFixedHeight(56);
+    auto *row = new QHBoxLayout(m_headerBar);
+    row->setContentsMargins(20, 0, 20, 0);
+
+    m_headerTitle = new QLabel("General", m_headerBar);
+    m_headerTitle->setObjectName("adminHeaderTitle");
+    row->addWidget(m_headerTitle);
+    row->addStretch(1);
+
+    auto *avatar = new QLabel("A", m_headerBar);
+    avatar->setObjectName("adminHeaderAvatar");
+    avatar->setFixedSize(32, 32);
+    avatar->setAlignment(Qt::AlignCenter);
+    auto *who = new QLabel("Administrator", m_headerBar);
+    who->setObjectName("adminHeaderWho");
+    row->addWidget(avatar);
+    row->addSpacing(8);
+    row->addWidget(who);
+
+    // --- vertical wrapper: header on top, the existing stack below ---
+    auto *contentCol = new QWidget(central);
+    contentCol->setObjectName("adminContentColumn");
+    auto *col = new QVBoxLayout(contentCol);
+    col->setContentsMargins(0, 0, 0, 0);
+    col->setSpacing(0);
+
+    mainRow->removeWidget(ui->stackedWidget);   // detach from the HBox
+    col->addWidget(m_headerBar);
+    col->addWidget(ui->stackedWidget, 1);       // addWidget reparents the stack into contentCol
+    mainRow->insertWidget(stackIdx, contentCol, stackStretch);
 }
 
 adminWindow::adminWindow(QWidget *parent)
@@ -357,6 +408,17 @@ adminWindow::adminWindow(QWidget *parent)
     , ui(new Ui::adminWindow)
 {
     ui->setupUi(this);
+    buildHeaderBar();
+
+    ui->generalBtn->setIcon(QIcon(":/resources/icons/settings.svg"));
+    ui->databaseBtn->setIcon(QIcon(":/resources/icons/database.svg"));
+    ui->reportingBtn->setIcon(QIcon(":/resources/icons/bar-chart.svg"));
+    ui->studentSearchBtn->setIcon(QIcon(":/resources/icons/search.svg"));
+    ui->visitorBtn->setIcon(QIcon(":/resources/icons/map-pin.svg"));
+    const QSize navIcon(20, 20);
+    for (QPushButton *b : {ui->generalBtn, ui->databaseBtn, ui->reportingBtn,
+                           ui->studentSearchBtn, ui->visitorBtn})
+        b->setIconSize(navIcon);
 
     networkManager = new QNetworkAccessManager(this);
     chartsPreviewBoxLayout = ui->chartsPreviewBox;
@@ -486,142 +548,6 @@ adminWindow::adminWindow(QWidget *parent)
 
 
     connect(ui->attachFileBtn, &QPushButton::clicked, this, &adminWindow::onAttachFileBtnClicked);
-        // --- Unified stylesheet ---
-        QString style = R"(
-        /* Frames (cards) */
-        QFrame#securityFrame,
-        QFrame#adminFrame,
-        QFrame#libraryFrame,
-        QFrame#settingsFrame,
-        QFrame#databaseFrame {
-            background-color: #FFFFFF;
-            border-radius: 12px;
-            border: 1px solid #E0E0E0;
-            padding: 12px;
-        }
-
-        /* Labels */
-        QLabel {
-            color: #2C3E50;
-        }
-
-        /* Page Title */
-        QLabel#pageTitleLabel {
-            font-size: 18px;
-            font-weight: bold;
-            color: #34495E;
-            margin-bottom: 8px;
-        }
-
-        /* Buttons */
-        QPushButton:hover {
-            background-color: #357ABD;
-        }
-        QPushButton:pressed {
-            background-color: #2D5C9F;
-        }
-
-        /* Special buttons for Database page */
-        QPushButton#attachFileBtn {
-            background-color: #27AE60;
-        }
-        QPushButton#attachFileBtn:hover {
-            background-color: #1E8449;
-        }
-        QPushButton#updateDatabaseBtn {
-            background-color: #E67E22;
-        }
-        QPushButton#updateDatabaseBtn:hover {
-            background-color: #CA6F1E;
-        }
-
-        /* Text fields */
-        QLineEdit {
-            border: 1px solid #BDC3C7;
-            border-radius: 6px;
-            padding: 4px 8px;
-            background: #FAFAFA;
-            color: #2C3E50;
-        }
-        QLineEdit:focus {
-            border: 1px solid #4A90E2;
-            background: #FFFFFF;
-        }
-
-        /* Checkboxes */
-        QCheckBox {
-            font-size: 10pt;
-        }
-
-        /* Sidebar */
-        QFrame#sidebarFrame {
-            background-color: #2B2F3A;
-        }
-
-        QPushButton#generalBtn,
-        QPushButton#databaseBtn,
-        QPushButton#reportingBtn,
-        QPushButton#studentSearchBtn,
-        QPushButton#visitorBtn {
-            color: white;
-            background: transparent;
-            border: none;
-            padding: 10px 12px;
-            text-align: left;
-            border-left: 3px solid transparent;
-        }
-        QPushButton#generalBtn:hover,
-        QPushButton#databaseBtn:hover,
-        QPushButton#reportingBtn:hover,
-        QPushButton#studentSearchBtn:hover,
-        QPushButton#visitorBtn:hover {
-            background-color: #3C4652;
-        }
-        QPushButton[active="true"] {
-            background-color: #26313C;
-            font-weight: bold;
-            border-left: 3px solid #4A90E2;
-        }
-
-        /* Bar Progress */
-        QProgressBar {
-            border: none;
-            background-color: #f0f0f0;
-            border-radius: 2px;
-        }
-        QProgressBar::chunk {
-            background-color: #0078d7; /* Windows blue accent, adjust as you like */
-            border-radius: 2px;
-            width: 20px; /* controls the moving chunk size */
-            margin: 0px;
-        }
-
-        /* Table Preview */
-        QTableWidget {
-            border: 1px solid #D0D7DE;
-            border-radius: 8px;
-            gridline-color: #ECF0F1;
-            selection-background-color: #4A90E2;
-            selection-color: white;
-            background-color: #FFFFFF;
-            alternate-background-color: #F8F9FA;
-        }
-        QHeaderView::section {
-            background-color: #F2F4F8;
-            color: #2C3E50;
-            padding: 6px;
-            border: 1px solid #E0E0E0;
-            font-weight: bold;
-        }
-        QTableCornerButton::section {
-            background-color: #F2F4F8;
-            border: 1px solid #E0E0E0;
-    }
-    )";
-
-
-
-    this->setStyleSheet(style);
 
     // --- Sidebar navigation ---
     connect(ui->generalBtn, &QPushButton::clicked, this, [=](){
@@ -1034,6 +960,12 @@ adminWindow::adminWindow(QWidget *parent)
     addShadow(ui->adminFrame);
     addShadow(ui->libraryFrame);
     addShadow(ui->settingsFrame);
+    addShadow(ui->individualRegistrationBox);
+    addShadow(ui->bulkRegistrationBox);
+    addShadow(ui->chartsPreview);
+
+    // Enable alternating row colors for bulkTable (the other two are already enabled)
+    ui->bulkTable->setAlternatingRowColors(true);
 
     connect(ui->registerBtn, &QPushButton::clicked, this, [=]() {
         // Create multipart form data
@@ -3621,7 +3553,7 @@ void adminWindow::showSearchOverlay()
     if (!searchSpinner) {
         searchSpinner = new BusyIndicator(ui->searchOverlay);
         searchSpinner->setFixedSize(48, 48);
-        searchSpinner->setColor(Qt::white);
+        searchSpinner->setColor(QColor(WitsTheme::Color::Secondary));
     }
 
     // Center spinner

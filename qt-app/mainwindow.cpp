@@ -8,11 +8,14 @@
 #include <QStandardPaths>
 #include <QFileInfo>
 #include <QFile>
+#include <QPainter>
+#include <QPainterPath>
 #include <QGraphicsDropShadowEffect>
 #include <QPushButton>
 #include <QLineEdit>
 #include <QFontComboBox>
 #include <QSpinBox>
+#include <QIcon>
 #include <QLabel>
 #include <QCheckBox>
 #include <QMessageBox>
@@ -28,6 +31,7 @@
 #include <QApplication>
 #include <QElapsedTimer>
 #include "rfidkeyboardfilter.h"
+#include "theme.h"
 
 
 MainWindow::MainWindow(QWidget *parent)
@@ -37,21 +41,25 @@ MainWindow::MainWindow(QWidget *parent)
     ui->setupUi(this);
     this ->showFullScreen();
 
+    ui->loginBtn->setIcon(QIcon(":/resources/icons/log-in.svg"));
+    ui->loginBtn->setIconSize(QSize(20, 20));
+
     updateTimeandDate();
     networkManager = new QNetworkAccessManager(this);
 
     adminWin = new adminWindow(this);
 
-    QPixmap placeholder(":/resources/default_student.png");
-    ui->studentPhoto->setPixmap(placeholder.scaled(
-        ui->studentPhoto->width(),
-        ui->studentPhoto->height(),
-        Qt::KeepAspectRatio,
-        Qt::SmoothTransformation
-        ));
+    QIcon placeholderIcon(":/resources/default_student.svg");
+    ui->studentPhoto->setPixmap(placeholderIcon.pixmap(
+        ui->studentPhoto->size()));
     ui->studentPhoto->setScaledContents(false);
     ui->studentPhoto->setAlignment(Qt::AlignCenter);
 
+    m_idleHint = new QLabel("Scan your ID or type your ID number.", ui->widget);
+    m_idleHint->setObjectName("emptyState");
+    ui->detailInfoLayout->addWidget(m_idleHint);
+    m_idleHint->hide();
+    refreshRightPanel();
 
     connect(adminWin, &adminWindow::schoolInfoUpdated, this, [this](const QString &schoolName, const QString &address, const QFont &font){
         ui->schoolNameLabel->setText(schoolName);
@@ -115,105 +123,13 @@ MainWindow::MainWindow(QWidget *parent)
     connect(timer, &QTimer::timeout, this, &MainWindow::updateTimeandDate);
     connect(ui->loginBtn, &QPushButton::clicked, this, &MainWindow::handleLogin);
     timer->start(1000);
-    this->setStyleSheet(R"(
-        QMainWindow {
-            background-color: #BDC3C7;
-        }
-
-        /* Left Sidebar Frame */
-        QFrame#frame {
-            background-color: #2C3E50;
-            border: 1px solid #BDC3C7;
-            border: none;
-        }
-
-        QFrame#frame_3 {
-            background-color: #3B4C61;   /* Lighter grey */
-            border: 1px solid #BDC3C7;   /* Soft border for texture */
-            padding: 10px;
-        }
-
-
-        QLabel#schLogo_Image {
-            color: white;
-            font-size: 16px;
-            font-weight: bold;
-            qproperty-alignment: AlignCenter;
-            border: 2px dashed #BDC3C7;
-            border-radius: 8px;
-            background-color: rgba(255,255,255,0.05);
-        }
-
-        QLineEdit#username {
-            border: 2px solid #BDC3C7;
-            border-radius: 10px;
-            padding: 8px;
-            background: white;
-            color: #2C3E50;
-            font-size: 14px;
-        }
-        QLabel#schoolNameLabel, QLabel#schAddressLabel {
-            color: #FFFFFF; /* or another dark color that contrasts with the background */
-        }
-        QPushButton {
-            background-color: #4A90E2;
-            color: white;
-            border-radius: 8px;
-            padding: 6px 12px;
-        }
-
-        QPushButton#loginBtn {
-            background-color: #1ABC9C;
-            color: white;
-            font-size: 14px;
-            font-weight: bold;
-            border-radius: 10px;
-            padding: 6px 12px;
-        }
-        QPushButton#loginBtn:hover {
-            background-color: #16A085;
-        }
-        QPushButton#loginBtn:pressed {
-            background-color: #149174;
-        }
-
-        QLabel#time_label, QLabel#date_label {
-            color: #ECF0F1;
-            font-size: 14px;
-            font-weight: bold;
-            padding-left: 10px;
-        }
-
-        QFrame#frame_2 {
-            background-color: #FFFFFF;
-            border-radius: 10px;
-        }
-
-        QScrollArea#stdList {
-            background: transparent;
-            border: none;
-        }
-
-        QLabel#label {
-            font-size: 18px;
-            font-weight: bold;
-            color: #2C3E50;
-            padding: 10px;
-            border-bottom: 2px solid #BDC3C7;
-        }
-
-        QLabel {
-            color: #2C3E50;
-        }
-    )");
-
     // Center the logo label text
     ui->schLogo_Image->setAlignment(Qt::AlignCenter);
 
     QGraphicsDropShadowEffect *shadow1 = new QGraphicsDropShadowEffect(this);
-    shadow1->setBlurRadius(15);
+    shadow1->setBlurRadius(20);
     shadow1->setOffset(0, 3);
-    shadow1->setColor(QColor(0, 0, 0, 50));
+    shadow1->setColor(QColor(0, 0, 0, 40));
     ui->widget->setGraphicsEffect(shadow1);
 
     QGraphicsDropShadowEffect *shadow3 = new QGraphicsDropShadowEffect(this);
@@ -340,9 +256,10 @@ void MainWindow::showKioskStatus(const QString &message, bool error) {
         m_statusLabel->setAlignment(Qt::AlignCenter);
         m_statusLabel->hide();
     }
-    m_statusLabel->setStyleSheet(error
-        ? "background:#C0392B; color:white; padding:14px; border-radius:8px; font-size:18px;"
-        : "background:#27AE60; color:white; padding:14px; border-radius:8px; font-size:18px;");
+    m_statusLabel->setStyleSheet(QString(
+        "background:%1; color:white; padding:14px 22px; border-radius:22px;"
+        "font-size:18px; font-weight:600;")
+        .arg(error ? WitsTheme::Color::Error : WitsTheme::Color::Success));
     m_statusLabel->setText(message);
     m_statusLabel->adjustSize();
     m_statusLabel->move((width() - m_statusLabel->width()) / 2,
@@ -441,6 +358,15 @@ void MainWindow::refreshRightPanel() {
             yearLabels[i]->setText(student["year_level"].toString());
             depLabels[i]->setText(student["department"].toString());
             timeLabels[i]->setText(student["time_date"].toString());
+            if (i == 0 && m_idleHint) m_idleHint->hide();
+        } else if (i == 0) {
+            // Spotlight idle empty-state: friendly placeholder when no student is active
+            nameLabels[0]->setText("Waiting for log in…");
+            courseLabels[0]->setText("—");
+            yearLabels[0]->setText("—");
+            depLabels[0]->setText("—");
+            timeLabels[0]->setText("—");
+            if (m_idleHint) m_idleHint->show();
         } else {
             nameLabels[i]->clear();
             courseLabels[i]->clear();
@@ -457,47 +383,87 @@ void MainWindow::resizeEvent(QResizeEvent *event) {
     QSettings settings("MyCompany", "MyApp");
     QString logoPath = settings.value("school/logoPath", "").toString();
     updateLogo(logoPath);
+    syncPosterBg();          // keep the poster layer covering frame_2 on resize
+}
+
+// Render src into a circular pixmap of the given diameter (transparent corners).
+static QPixmap makeCircularPixmap(const QPixmap &src, int diameter)
+{
+    QPixmap out(diameter, diameter);
+    out.fill(Qt::transparent);
+    QPainter p(&out);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    QPainterPath clip;
+    clip.addEllipse(0, 0, diameter, diameter);
+    p.setClipPath(clip);
+    const QPixmap scaled = src.scaled(diameter, diameter,
+        Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+    p.drawPixmap((diameter - scaled.width()) / 2,
+                 (diameter - scaled.height()) / 2, scaled);
+    return out;
 }
 
 void MainWindow::updateLogo(const QString &logoPath) {
-    // Keep the logo area square: its height tracks the sidebar-driven width,
-    // so the logo fills the sidebar and the picture fits inside the square.
-    ui->schLogo_Image->setFixedHeight(ui->schLogo_Image->width());
+    const int d = ui->schLogo_Image->width();
+    ui->schLogo_Image->setFixedHeight(d); // keep the logo area square
+    // Round the label's own background to a circle (matches the masked pixmap).
+    ui->schLogo_Image->setStyleSheet(
+        QString("background-color:#FFFFFF; color:#1E293B; border-radius:%1px;").arg(d / 2));
 
-    if (!logoPath.isEmpty() && QFile::exists(logoPath)) {
+    if (!logoPath.isEmpty() && QFile::exists(logoPath) && d > 0) {
         QPixmap pix(logoPath);
         if (!pix.isNull()) {
-            ui->schLogo_Image->setPixmap(pix.scaled(
-                ui->schLogo_Image->contentsRect().size(),
-                Qt::KeepAspectRatio,
-                Qt::SmoothTransformation)
-            );
+            ui->schLogo_Image->setPixmap(makeCircularPixmap(pix, d));
             return;
         }
     }
-    ui->schLogo_Image->setText("No Logo Selected");
-    ui->schLogo_Image->setPixmap(QPixmap()); // clear any old pixmap
+    ui->schLogo_Image->setText("No Logo");
+    ui->schLogo_Image->setPixmap(QPixmap());
     ui->schLogo_Image->setAlignment(Qt::AlignCenter);
 }
 
 void MainWindow::updatePoster(const QString &posterPath) {
-    if (!posterPath.isEmpty() && QFile::exists(posterPath)) {
-        QPixmap pix(posterPath);
-        if (!pix.isNull()) {
-            ui->poster_Image->setPixmap(
-                pix.scaled(
-                    ui->poster_Image->size(),
-                    Qt::KeepAspectRatioByExpanding,
-                    Qt::SmoothTransformation
-                )
-            );
-            return;
-        }
+    m_posterPath = posterPath;
+    if (!m_posterBg) {
+        m_posterBg = new QLabel(ui->frame_2);
+        m_posterBg->setObjectName("posterBg");
+        m_posterBg->setScaledContents(false);
+        m_posterBg->setAttribute(Qt::WA_TransparentForMouseEvents);
     }
-    // If invalid, show placeholder
-    ui->poster_Image->setText("No Poster Selected");
-    ui->poster_Image->setPixmap(QPixmap());
-    ui->poster_Image->setAlignment(Qt::AlignCenter);
+    syncPosterBg();
+    m_posterBg->lower(); // behind the scroll content
+}
+
+void MainWindow::syncPosterBg() {
+    if (!m_posterBg) return;
+    m_posterBg->setGeometry(ui->frame_2->rect());
+    const QSize sz = ui->frame_2->size();
+    if (m_posterPath.isEmpty() || !QFile::exists(m_posterPath) || sz.isEmpty()) {
+        m_posterBg->clear();
+        m_posterBg->hide();   // fall back to frame_2's solid QSS background
+        return;
+    }
+    QPixmap pix(m_posterPath);
+    if (pix.isNull()) { m_posterBg->clear(); m_posterBg->hide(); return; }
+
+    // Scale to cover, center-crop, apply a rounded mask (match frame_2's 16px) + dark scrim.
+    QPixmap canvas(sz);
+    canvas.fill(Qt::transparent);
+    QPainter p(&canvas);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    QPainterPath clip;
+    clip.addRoundedRect(QRectF(QPointF(0, 0), QSizeF(sz)), 16, 16);
+    p.setClipPath(clip);
+    const QPixmap scaled = pix.scaled(sz, Qt::KeepAspectRatioByExpanding,
+                                      Qt::SmoothTransformation);
+    p.drawPixmap((sz.width() - scaled.width()) / 2,
+                 (sz.height() - scaled.height()) / 2, scaled);
+    p.fillRect(canvas.rect(), QColor(15, 23, 42, 115)); // ~0.45 dark scrim
+    p.end();
+
+    m_posterBg->setPixmap(canvas);
+    m_posterBg->show();
 }
 
 

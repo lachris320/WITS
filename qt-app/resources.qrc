@@ -1,0 +1,13 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/resources">
+        <file alias="wits.qss">resources/wits.qss</file>
+        <file alias="default_student.svg">resources/default_student.svg</file>
+        <file alias="icons/settings.svg">resources/icons/settings.svg</file>
+        <file alias="icons/database.svg">resources/icons/database.svg</file>
+        <file alias="icons/bar-chart.svg">resources/icons/bar-chart.svg</file>
+        <file alias="icons/search.svg">resources/icons/search.svg</file>
+        <file alias="icons/map-pin.svg">resources/icons/map-pin.svg</file>
+        <file alias="icons/log-in.svg">resources/icons/log-in.svg</file>
+    </qresource>
+</RCC>
