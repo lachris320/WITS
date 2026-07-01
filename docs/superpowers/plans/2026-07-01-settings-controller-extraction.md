@@ -17,6 +17,11 @@
 - Do **not** touch QSettings calls inside `makeLineChartImage()` (line 247), `exportReportToPDF()` (line 2254), or `exportReportToExcel()` (line 2549) — those are the Reports section and are out of scope for this step.
 - No unit tests in this plan — they are a separate follow-up step.
 - Commit via the `commit` skill after each task, never raw `git add/commit`.
+- **Three intentional behavior improvements** (not regressions — document as such in manual verification):
+  1. School name, address, and font now populate correctly on open. The old constructor read these from QSettings into local variables but never wrote them to the form widgets; the new `populateSettingsForm` fixes this silently-broken load path.
+  2. `guestLoginEnabled` is now persisted under `features/guestLogin` (was emitted but never saved to QSettings).
+  3. Logo/poster are now copied to `QStandardPaths::AppDataLocation` before the path is stored (old code saved the raw source path). As a consequence, browse-then-close-without-Apply no longer persists paths — paths are only stored on Apply.
+- **`changesMade` / dirty-window on open:** `populateSettingsForm` calls `setText` on `ui->schoolName` and `ui->address`, which fire their `textChanged` → `changesMade = true` connections (lines 495–500). This marks the window dirty immediately on open. Wrap the entire `populateSettingsForm` body in a `QSignalBlocker` for each affected widget, or set `changesMade = false` after calling `populateSettingsForm` in the constructor body. The recommended approach: add `changesMade = false;` as the last line of the constructor body (after `populateSettingsForm`), since the constructor runs before the window is shown.
 
 ---
 
@@ -342,6 +347,7 @@ Replace that entire block (keeping the final `}`) with:
     bindSettingsSignals();
     m_currentSettings = m_settingsController->load();
     populateSettingsForm(m_currentSettings);
+    changesMade = false;   // populateSettingsForm fires textChanged; reset the dirty flag
 }
 ```
 
@@ -552,16 +558,18 @@ Expected: build completes with **no new warnings or errors**. If the compiler co
 
 - [ ] **Step 14: Run the app and exercise the Settings tab**
 
-Launch `qt-app/build/WITS.exe`. Work through each verification criterion from the spec:
+Launch `qt-app/build/WITS.exe`. Work through each criterion:
 
-1. Open admin window → Settings tab loads with previously saved values in all fields.
-2. Change school name, address, font, size → click Apply → reopen admin → values persisted.
-3. Click Browse Logo → pick an image → preview updates → click Apply → logo persists across restart.
-4. Click Browse Poster → pick an image → preview updates → click Apply → poster persists across restart.
-5. Change open/close hour spinboxes → Apply → reopen → same hours shown.
-6. Toggle guest login → Apply → expected behaviour in kiosk.
-7. Click Apply without picking a file → no crash, no spurious error dialog.
-8. Confirm `adminWindow` source no longer contains direct `QSettings` construction in the settings slots (grep for `QSettings settings` in the settings-tab methods).
+1. Open admin window → Settings tab loads with previously saved values in ALL fields — school name, address, font, size, admin name/position, library hours, guest login. *(Intentional fix: the old constructor never wrote school name/address/font to the form.)*
+2. Open admin window with saved values → close without touching anything → NO "Unsaved Changes" dialog. *(Verifies the `changesMade = false` line after `populateSettingsForm`.)*
+3. Change school name, address, font, size → click Apply → reopen admin → values persisted.
+4. Click Browse Logo → pick an image → preview updates → click Apply → logo persists across restart.
+5. Click Browse Poster → pick an image → preview updates → click Apply → poster persists across restart.
+6. Browse logo → close window WITHOUT Apply → reopen → logo from previous Apply still shown. *(New behavior: browse-without-Apply no longer persists — intentional.)*
+7. Change open/close hour spinboxes → Apply → reopen → same hours shown.
+8. Toggle guest login → Apply → expected behaviour in kiosk → reopen → checkbox state persists. *(Intentional new persistence under `features/guestLogin`.)*
+9. Click Apply without picking a file → no crash, no spurious error dialog.
+10. Confirm `adminWindow` source no longer contains direct `QSettings` construction in the settings-tab methods (grep for `QSettings settings` in the settings-tab methods).
 
 - [ ] **Step 15: Commit via the `commit` skill**
 
