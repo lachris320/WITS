@@ -1,4 +1,5 @@
-#pragma once
+#ifndef SETTINGSDATA_H
+#define SETTINGSDATA_H
 #include <QString>
 
 struct SettingsData
@@ -22,3 +23,5 @@ struct SettingsData
     // Features
     bool    guestLoginEnabled = false;
 };
+
+#endif // SETTINGSDATA_H

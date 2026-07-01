@@ -1,4 +1,5 @@
-#pragma once
+#ifndef SETTINGSCONTROLLER_H
+#define SETTINGSCONTROLLER_H
 #include <QObject>
 #include "settingsdata.h"
 
@@ -23,3 +24,5 @@ signals:
 private:
     QString importImageFile(const QString &sourcePath, const QString &type);
 };
+
+#endif // SETTINGSCONTROLLER_H
