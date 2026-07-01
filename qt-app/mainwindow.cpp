@@ -205,6 +205,10 @@ void MainWindow::handleLogin() {
             } else {
                 adminWin->show();
             }
+        } else {
+            QString msg = obj.contains("message") ? obj["message"].toString()
+                                                  : "Login failed. Please check your ID or Admin Key.";
+            QMessageBox::warning(this, "Login Failed", msg);
         }
     });
 }
