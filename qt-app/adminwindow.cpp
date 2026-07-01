@@ -1749,6 +1749,7 @@ void adminWindow::onLogoChanged(const QString &path)
     m_currentSettings.logoPath = path;
     ui->schLogo_previewLabel->setPixmap(
         QPixmap(path).scaled(150, 150, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    changesMade = true;
 }
 
 void adminWindow::onPosterBrowseBtnClicked()
@@ -1771,6 +1772,7 @@ void adminWindow::onPosterChanged(const QString &path)
             ui->posterPreviewLabel->size(),
             Qt::KeepAspectRatio,
             Qt::SmoothTransformation));
+    changesMade = true;
 }
 
 void adminWindow::onSettingsImportError(const QString &message)
