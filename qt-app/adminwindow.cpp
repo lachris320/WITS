@@ -1673,8 +1673,11 @@ SettingsData adminWindow::collectSettingsForm()
 void adminWindow::onApplyChangesBtnClicked()
 {
     m_currentSettings = collectSettingsForm();
-    if (!m_settingsController->save(m_currentSettings))
+    if (!m_settingsController->save(m_currentSettings)) {
+        QMessageBox::warning(this, tr("Save Failed"),
+                             tr("Could not save settings. Please try again."));
         return;
+    }
 
     updatePreviewLabel();
     changesMade = false;
