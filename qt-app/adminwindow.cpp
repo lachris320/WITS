@@ -1106,7 +1106,8 @@ adminWindow::adminWindow(QWidget *parent)
     populateSettingsForm(m_currentSettings);
     changesMade = false;   // populateSettingsForm fires textChanged; reset the dirty flag
 }
-    // --- CSV Bulk Registration ---
+
+// --- CSV Bulk Registration ---
 
 void adminWindow::onAttachFileBtnClicked()
 {
