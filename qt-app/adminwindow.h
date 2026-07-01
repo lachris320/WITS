@@ -36,6 +36,8 @@
 
 #include "busyindicator.h"
 #include "attachfilesdialog.h"
+#include "settingsdata.h"
+#include "settingscontroller.h"
 #include <QGraphicsOpacityEffect>
 #include <QPropertyAnimation>
 #include <QPagedPaintDevice>
@@ -81,9 +83,14 @@ private:
 
     bool changesMade = false;
     bool reportEdited = false;
-    void loadSettings(); // Helper to load saved settings into UI
-    void saveSettings();
     bool isSettingUpEditMode = false;
+
+    SettingsController* const m_settingsController;
+    SettingsData              m_currentSettings;
+
+    void bindSettingsSignals();
+    void populateSettingsForm(const SettingsData &data);
+    SettingsData collectSettingsForm();
     bool cancelUpload = false;
     void populateFilters();
     ReportPalette getPalette(const QString &choice);
@@ -155,6 +162,10 @@ private slots:
     void onApplyChangesBtnClicked();
     void onSchoolLogoBrowseBtnClicked();
     void onPosterBrowseBtnClicked();
+    void onSettingsSaved(const SettingsData &data);
+    void onLogoChanged(const QString &path);
+    void onPosterChanged(const QString &path);
+    void onSettingsImportError(const QString &message);
     void onClearAttendanceCheckBoxStateChanged(int state);
     void onCancelUploadBtnClicked();
     void loadDepartments();

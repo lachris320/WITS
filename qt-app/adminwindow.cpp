@@ -406,6 +406,7 @@ void adminWindow::buildHeaderBar()
 adminWindow::adminWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::adminWindow)
+    , m_settingsController(new SettingsController(this))
 {
     ui->setupUi(this);
     buildHeaderBar();
@@ -1100,37 +1101,10 @@ adminWindow::adminWindow(QWidget *parent)
         });
     });
 
-    QSettings settings("MyCompany", "MyApp");
-    QString savedName = settings.value("admin/name", "").toString();
-    QString savedPosition = settings.value("admin/position", "").toString();
-    QString schoolName = settings.value("school/name", "").toString();
-    QString address = settings.value("school/address", "").toString();
-    // ✅ Load saved library hours (default 8 AM – 5 PM if not set)
-    int openHour24  = settings.value("library/openHour", 8).toInt();   // default 8 AM
-    int closeHour24 = settings.value("library/closeHour", 17).toInt(); // default 5 PM
-
-    // ✅ ADD THIS: Load and display the saved logo
-    QString savedLogoPath = settings.value("school/logoPath", "").toString();
-    if (!savedLogoPath.isEmpty() && QFile::exists(savedLogoPath)) {
-        QPixmap logoPixmap(savedLogoPath);
-        if (!logoPixmap.isNull()) {
-            ui->schoolLabelLogo->setPixmap(
-                logoPixmap.scaled(100, 100, Qt::KeepAspectRatio, Qt::SmoothTransformation)
-                );
-        }
-    }
-
-    // Convert back to 12-hour format for spinboxes
-    int openHour12  = (openHour24 == 0) ? 12 : openHour24;           // midnight → 12
-    int closeHour12 = (closeHour24 == 12) ? 12 : closeHour24 - 12;   // 12 PM stays 12, 13 → 1
-
-    ui->openHourSpinBox->setValue(openHour12);
-    ui->closeHourSpinBox->setValue(closeHour12);
-
-    if (!savedName.isEmpty())
-        ui->adminNameLineEdit->setText(savedName);
-    if (!savedPosition.isEmpty())
-        ui->adminPositionLineEdit->setText(savedPosition);
+    bindSettingsSignals();
+    m_currentSettings = m_settingsController->load();
+    populateSettingsForm(m_currentSettings);
+    changesMade = false;   // populateSettingsForm fires textChanged; reset the dirty flag
 }
     // --- CSV Bulk Registration ---
 
@@ -1628,68 +1602,102 @@ adminWindow::~adminWindow()
     delete ui;
 }
 
+void adminWindow::bindSettingsSignals()
+{
+    connect(m_settingsController, &SettingsController::settingsSaved,
+            this,                 &adminWindow::onSettingsSaved);
+    connect(m_settingsController, &SettingsController::logoChanged,
+            this,                 &adminWindow::onLogoChanged);
+    connect(m_settingsController, &SettingsController::posterChanged,
+            this,                 &adminWindow::onPosterChanged);
+    connect(m_settingsController, &SettingsController::importError,
+            this,                 &adminWindow::onSettingsImportError);
+}
+
+void adminWindow::populateSettingsForm(const SettingsData &d)
+{
+    ui->schoolName->setText(d.schoolName);
+    ui->address->setText(d.schoolAddress);
+
+    if (!d.fontFamily.isEmpty())
+        ui->fontComboBox->setCurrentFont(QFont(d.fontFamily, d.fontSize));
+    ui->spinBox->setValue(d.fontSize);
+
+    if (!d.adminName.isEmpty())
+        ui->adminNameLineEdit->setText(d.adminName);
+    if (!d.adminPosition.isEmpty())
+        ui->adminPositionLineEdit->setText(d.adminPosition);
+
+    // QSettings stores 24 h; spinboxes display 12 h (1–12 AM / PM)
+    const int openH12  = (d.libraryOpenHour  == 0)  ? 12 : d.libraryOpenHour;
+    const int closeH12 = (d.libraryCloseHour == 12) ? 12 : d.libraryCloseHour - 12;
+    ui->openHourSpinBox->setValue(openH12);
+    ui->closeHourSpinBox->setValue(closeH12);
+
+    ui->guestLoginCheckBox->setChecked(d.guestLoginEnabled);
+
+    if (!d.logoPath.isEmpty() && QFile::exists(d.logoPath)) {
+        QPixmap pix(d.logoPath);
+        if (!pix.isNull())
+            ui->schoolLabelLogo->setPixmap(
+                pix.scaled(100, 100, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+    }
+}
+
+SettingsData adminWindow::collectSettingsForm()
+{
+    SettingsData d;
+    d.schoolName    = ui->schoolName->text();
+    d.schoolAddress = ui->address->text();
+    d.fontFamily    = ui->fontComboBox->currentFont().family();
+    d.fontSize      = ui->spinBox->value();
+    d.adminName     = ui->adminNameLineEdit->text().trimmed();
+    d.adminPosition = ui->adminPositionLineEdit->text().trimmed();
+
+    // Spinboxes are 12 h (1–12 AM / PM) → convert to 24 h for storage
+    const int openH12  = ui->openHourSpinBox->value();
+    const int closeH12 = ui->closeHourSpinBox->value();
+    d.libraryOpenHour  = (openH12  == 12) ? 0  : openH12;
+    d.libraryCloseHour = (closeH12 == 12) ? 12 : closeH12 + 12;
+
+    d.guestLoginEnabled = ui->guestLoginCheckBox->isChecked();
+
+    // logoPath and posterPath are maintained by onLogoChanged/onPosterChanged
+    d.logoPath   = m_currentSettings.logoPath;
+    d.posterPath = m_currentSettings.posterPath;
+    return d;
+}
+
 // --- Apply button handler ---
 void adminWindow::onApplyChangesBtnClicked()
 {
-    // Get text from line edits
-    QString adminName = ui->adminNameLineEdit->text().trimmed();
-    QString adminPosition = ui->adminPositionLineEdit->text().trimmed();
-    int fontSize = ui->spinBox->value();
-    QString fontFamily = ui->fontComboBox->currentFont().family();
-
-    QSettings settings("MyCompany", "MyApp");
-    settings.setValue("school/name", ui->schoolName->text());
-    settings.setValue("school/address", ui->address->text());
-    settings.setValue("school/fontFamily", ui->fontComboBox->currentFont().family());
-    settings.setValue("school/fontSize", fontSize);
-    settings.setValue("admin/name", ui->adminNameLineEdit->text());
-    settings.setValue("admin/position", ui->adminPositionLineEdit->text());
-
-    // ✅ Save library hours (always AM → PM)
-    int openHour12  = ui->openHourSpinBox->value();   // 1–12 AM
-    int closeHour12 = ui->closeHourSpinBox->value();  // 1–12 PM
-
-    int openHour24  = (openHour12 == 12) ? 0  : openHour12;       // 12 AM → 0
-    int closeHour24 = (closeHour12 == 12) ? 12 : closeHour12 + 12; // PM → +12 except 12 PM
-
-    settings.setValue("library/openHour", openHour24);
-    settings.setValue("library/closeHour", closeHour24);
+    m_currentSettings = collectSettingsForm();
+    if (!m_settingsController->save(m_currentSettings))
+        return;
 
     updatePreviewLabel();
-
-    QString logoPath = settings.value("school/logoPath", "").toString();
-    if (!logoPath.isEmpty()) {
-        ui->schLogo_previewLabel->setPixmap(
-            QPixmap(logoPath).scaled(150, 150, Qt::KeepAspectRatio, Qt::SmoothTransformation)
-            );
-    }
-
-    QString posterPath = settings.value("school/posterPath", "").toString();
-    if (!logoPath.isEmpty() && QFile::exists(logoPath))
-        emit logoChanged(logoPath);
-    if (!posterPath.isEmpty() && QFile::exists(posterPath))
-        emit posterChanged(posterPath);
-
-    // Set changesMade to false BEFORE showing message box and closing
     changesMade = false;
 
-    QString msg = "Changes applied successfully.";
+    QString msg = tr("Changes applied successfully.");
     if (ui->clearAttendanceCheckBox->isChecked()) {
         emit clearAttendanceRequested();
-        msg += "\n\nAttendance panel has been cleared.";
+        msg += tr("\n\nAttendance panel has been cleared.");
         ui->clearAttendanceCheckBox->setChecked(false);
     }
 
-    emit guestLoginToggled(ui->guestLoginCheckBox->isChecked());
-    QFont selectedFont(fontFamily, fontSize);
-
-    // ✅ Tell MainWindow about updates
-    emit schoolInfoUpdated(ui->schoolName->text(),
-                           ui->address->text(),
-                           selectedFont);
-
-    QMessageBox::information(this, "Saved", msg);
+    QMessageBox::information(this, tr("Saved"), msg);
     this->close();
+}
+
+void adminWindow::onSettingsSaved(const SettingsData &data)
+{
+    QFont selectedFont(data.fontFamily, data.fontSize);
+    emit schoolInfoUpdated(data.schoolName, data.schoolAddress, selectedFont);
+    if (!data.logoPath.isEmpty() && QFile::exists(data.logoPath))
+        emit logoChanged(data.logoPath);
+    if (!data.posterPath.isEmpty() && QFile::exists(data.posterPath))
+        emit posterChanged(data.posterPath);
+    emit guestLoginToggled(data.guestLoginEnabled);
 }
 
 
@@ -1720,62 +1728,50 @@ void adminWindow::closeEvent(QCloseEvent *event) {
 
 
 
-void adminWindow::onSchoolLogoBrowseBtnClicked() {
-    QString filePath = QFileDialog::getOpenFileName(
-        this,
-        tr("Select Logo"),
-        "",
-        tr("Images (*.png *.jpg *.jpeg *.bmp)")
-        );
-
-    if (!filePath.isEmpty()) {
-        // Preview inside AdminWindow
-        ui->schLogo_previewLabel->setPixmap(
-            QPixmap(filePath).scaled(
-                100, 100,
-                Qt::KeepAspectRatio,
-                Qt::SmoothTransformation
-                )
-            );
-
-        // Save path in QSettings
-        QSettings settings("MyCompany", "MyApp");
-        settings.setValue("school/logoPath", filePath);
-
-        QMessageBox::information(this, "Changes Applied", "School logo has been uploaded successfully!");
-
-        // Emit signal so MainWindow updates immediately
-        //emit logoChanged(filePath);
-    }
+void adminWindow::onSchoolLogoBrowseBtnClicked()
+{
+    const QString path = QFileDialog::getOpenFileName(
+        this, tr("Select Logo"), QString(),
+        tr("Images (*.png *.jpg *.jpeg *.bmp)"));
+    if (path.isEmpty()) return;
+    const QString dest = m_settingsController->importLogo(path);
+    if (!dest.isEmpty())
+        QMessageBox::information(this, tr("Changes Applied"),
+                                 tr("School logo has been uploaded successfully!"));
 }
 
-void adminWindow::onPosterBrowseBtnClicked() {
-    QString filePath = QFileDialog::getOpenFileName(
-        this,
-        "Select Poster",
-        "",
-        "Images (*.png *.jpg *.jpeg *.bmp)"
-        );
+void adminWindow::onLogoChanged(const QString &path)
+{
+    m_currentSettings.logoPath = path;
+    ui->schLogo_previewLabel->setPixmap(
+        QPixmap(path).scaled(150, 150, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+}
 
-    if (!filePath.isEmpty()) {
-        // Preview poster
-        ui->posterPreviewLabel->setPixmap(
-            QPixmap(filePath).scaled(
-                ui->posterPreviewLabel->size(),
-                Qt::KeepAspectRatio,
-                Qt::SmoothTransformation
-            )
-        );
+void adminWindow::onPosterBrowseBtnClicked()
+{
+    const QString path = QFileDialog::getOpenFileName(
+        this, tr("Select Poster"), QString(),
+        tr("Images (*.png *.jpg *.jpeg *.bmp)"));
+    if (path.isEmpty()) return;
+    const QString dest = m_settingsController->importPoster(path);
+    if (!dest.isEmpty())
+        QMessageBox::information(this, tr("Changes Applied"),
+                                 tr("Poster has been updated successfully!"));
+}
 
-        // Save path to QSettings
-        QSettings settings("MyCompany", "MyApp");
-        settings.setValue("school/posterPath", filePath);
+void adminWindow::onPosterChanged(const QString &path)
+{
+    m_currentSettings.posterPath = path;
+    ui->posterPreviewLabel->setPixmap(
+        QPixmap(path).scaled(
+            ui->posterPreviewLabel->size(),
+            Qt::KeepAspectRatio,
+            Qt::SmoothTransformation));
+}
 
-        QMessageBox::information(this, "Changes Applied", "School logo has been updated successfully!");
-
-        // Emit signal so MainWindow updates immediately
-        //emit posterChanged(filePath);
-    }
+void adminWindow::onSettingsImportError(const QString &message)
+{
+    QMessageBox::warning(this, tr("Import Error"), message);
 }
 
 void adminWindow::onClearAttendanceCheckBoxStateChanged(int state) {
