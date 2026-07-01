@@ -1617,9 +1617,16 @@ void adminWindow::onDurationChanged(int index)
 
 
 void adminWindow::updatePreviewLabel() {
-    QFont previewFont = ui->fontComboBox->currentFont();
-    previewFont.setPointSize(ui->spinBox->value());
-    ui->schoolText_previewLabel->setFont(previewFont);
+    // The adminWindow root stylesheet has a `QWidget { font-family; font-size; }`
+    // rule that cascades to every child widget. In Qt a stylesheet font rule
+    // outranks QWidget::setFont(), so setFont() on the preview label is silently
+    // ignored. Setting the font via the label's OWN stylesheet outranks the
+    // inherited QWidget rule, so the preview actually updates.
+    const QFont previewFont = ui->fontComboBox->currentFont();
+    ui->schoolText_previewLabel->setStyleSheet(
+        QStringLiteral("font-family: '%1'; font-size: %2pt;")
+            .arg(previewFont.family())
+            .arg(ui->spinBox->value()));
     ui->schoolText_previewLabel->setText(ui->schoolName->text() + "\n" + ui->address->text());
 }
 
