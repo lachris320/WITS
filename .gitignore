@@ -72,6 +72,9 @@ test.pdf
 # Agent orchestration scratch (SDD progress ledger, task briefs)
 .superpowers/
 
+# /qwen3-review local code-review report (regenerated each run, not source)
+qwen3-review.md
+
 # System files
 .DS_Store
 Thumbs.db
