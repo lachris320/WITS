@@ -533,7 +533,7 @@ cmake --build qt-app/build
 ctest --test-dir qt-app/build -R tst_visitorcontroller --output-on-failure
 ```
 
-Expected: the target compiles and links, and `tst_visitorcontroller` **FAILS** — every slot except none passes (all 16 slots assert against the skeleton `return {};` / `return false;` bodies). If the failure is a compile or link error instead, fix that first; the red phase must fail on `QCOMPARE`/`QVERIFY`.
+Expected: the target compiles and links, and `tst_visitorcontroller` **FAILS** — all 16 slots fail on assertions (each `QCOMPARE`/`QVERIFY` asserts against the skeleton `return {};` / `return false;` bodies). If the failure is a compile or link error instead, fix that first; the red phase must fail on `QCOMPARE`/`QVERIFY`.
 
 - [ ] **Step 7: Implement the statics (green) — replace the five red skeletons in `qt-app/visitorcontroller.cpp`**
 
