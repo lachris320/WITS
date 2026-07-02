@@ -176,6 +176,7 @@ public:
 signals:
     void duplicatesResolved(const QStringList &duplicates);   // empty = none found
     void importError(const QString &title, const QString &message, ImportSeverity severity);
+    void uploadStarted();                        // excel file opened OK; request about to post
     void uploadProgress(int percent);
     void uploadFinished(const UploadResult &result);
     void uploadFailed(const QString &message);   // always critical, title "Upload Failed"
@@ -272,19 +273,21 @@ the View reads the file and passes the text in.
   `QTextStream`'s newline translation; `parseCsv` reproduces the same
   end-user-visible result by trimming a trailing `'\r'` if present before
   further processing).
-- If `lines` is empty, returns a `ParsedTable` with empty `headers`/`rows`
-  and an empty `headerIndex`. `parseCsv` never shows a dialog (purity
-  rule) — it only signals "no data" via the empty result. The View is
-  responsible for picking the right one of the two legacy messages before
-  it even calls `parseCsv`, exactly as legacy does: it checks
-  `rawText.isEmpty()` (or, equivalently, whether the first line split
-  yields zero headers) itself and shows `QMessageBox::information(this,
-  "CSV Preview", "File is empty.")` (line 1483) or
+- `parseCsv` never shows a dialog (purity rule) — it only signals "no data"
+  via an empty result (empty `headers`/`rows`/`headerIndex`). Note that
+  `QString::split("\n")` never actually yields an empty list (`""` splits to
+  `[""]`), so the "no lines" state surfaces as an empty `headers` list after
+  the header split, not as an empty `lines` list — the empty `ParsedTable`
+  is produced either way, but the mechanism is the header split, not a
+  `lines.isEmpty()` check. **The View owns rows 7/8** and picks the message
+  without duplicating parse logic: show `QMessageBox::information(this,
+  "CSV Preview", "File is empty.")` (line 1483) when `rawText.isEmpty()`;
+  otherwise call `parseCsv` and, if the returned `headers` is empty, show
   `QMessageBox::warning(this, "CSV Error", "CSV file has no headers.")`
-  (line 1493) accordingly — the latter branch is already dead in practice
-  in legacy (it only fires when a non-empty header line still splits to
-  zero headers), and this extraction preserves that same dead branch
-  rather than removing it.
+  (line 1493). The latter is a dead-in-practice branch in legacy (a
+  non-empty text whose first line splits to zero headers), preserved rather
+  than removed. The View does **not** re-split the first line itself to
+  decide — it keys off `parseCsv`'s returned `headers`.
 - Header line = `lines.first()`, split on `","` with `Qt::SkipEmptyParts`,
   each entry `.trimmed()` (line 1488–1490) — this is the exact split used
   today; it is **not** RFC-4180 CSV (no quoted-comma handling), and this
@@ -331,10 +334,16 @@ failure/empty dialogs listed in the message table below, driven off the
   written exactly once. `parseExcel` itself shows no dialog (purity rule).
 - Sheet selection (`xlsx.selectSheet(xlsx.sheetNames().first())`) and the
   dimension check (`xlsx.dimension().isValid()`) only run when the
-  respective prior step succeeded, matching lines 1392–1406. The legacy
-  code additionally clears/resizes `ui->bulkTable` to zero rows/columns on
-  the empty-sheet path (lines 1402–1404) — View-side table plumbing the
-  View still performs whenever it receives an empty `ParsedTable`.
+  respective prior step succeeded, matching lines 1392–1406.
+- **Table-clear on failure is case-specific — do NOT clear on every empty
+  result.** Legacy clears/resizes `ui->bulkTable` to zero rows/columns
+  **only** on the empty-dimension path (`EmptySheet`, lines 1402–1404).
+  On `OpenFailed` (lines 1387–1390) and `NoSheets` (lines 1393–1396) legacy
+  returns *without touching the table*, leaving any previously-loaded
+  preview intact. So the View must clear the table **only when
+  `errorOut == ExcelParseError::EmptySheet`**, and leave it untouched for
+  `OpenFailed`/`NoSheets`. (This differs from CSV, which clears the table
+  up front — see `loadCSVtoTable` note below.)
 - Otherwise: `firstRow`/`lastRow`/`firstCol`/`lastCol` from `rng`. Header
   row = `firstRow`, read cell-by-cell via `xlsx.read(firstRow, c).toString()`
   for `c` in `[firstCol, lastCol]`; `headerIndex` cleared and built via
@@ -403,14 +412,30 @@ Port of the upload half of `onUpdateDatabaseBtnClicked` (adminwindow.cpp:
   "Cannot open Excel file.", ImportSeverity::Critical)` — not `uploadFailed`,
   because `uploadFailed` is reserved for the post-send network-error path
   and always carries the fixed title `"Upload Failed"` (row 22), whereas
-  this pre-send failure needs the title `"Error"`. The controller also does
-  **not** touch the progress bar or button state in this path (that stayed
-  in the View before this request began in legacy too — the
-  `bulkProgressBar`/button state was only set *after* a successful
-  excel-file open, at lines 1251–1258, so the fatal-file-open case never
-  toggled it in the first place; this extraction preserves that ordering by
-  only emitting `uploadProgress`/state-relevant signals after the excel
-  file opens successfully).
+  this pre-send failure needs the title `"Error"`. On this abort the
+  controller must **free the resources it already allocated** before
+  returning — `delete excelFile; delete multiPart;` (legacy lines
+  1272–1273) — so the port does not leak.
+- **The progress-bar / button state machine (state revert on failure).**
+  Legacy sets `cancelUpload = false`, disables `updateDatabaseBtn`, enables
+  `cancelUploadBtn`, and puts `bulkProgressBar` into visible/indeterminate
+  mode at lines 1251–1258 — **before** it opens the excel file at 1270 — and
+  then, on excel-open failure, **reverts** all of that at lines 1274–1276
+  (hide bar, re-enable `updateDatabaseBtn`, disable `cancelUploadBtn`) before
+  returning. (An earlier draft of this spec wrongly claimed the state was set
+  only *after* a successful open; it is not.) Because the extracted View must
+  not sprinkle this order-dependent revert across two code paths, the
+  controller emits a dedicated `uploadStarted()` signal **immediately after
+  the excel `QFile` opens successfully** (i.e. only on the path that legacy
+  reached *past* line 1270). The View sets the full progress/button state in
+  its `onUploadStarted` slot, and restores it (hide bar, re-enable
+  `updateDatabaseBtn`, disable `cancelUploadBtn`) in **both** `onUploadFinished`
+  and `onUploadFailed`. On excel-open failure `uploadStarted` never fires, so
+  the state is never set and there is nothing to revert — reproducing the
+  legacy net behavior exactly (legacy set-then-revert within one synchronous
+  block produces no observable state change either). This keeps `onImportError`
+  a pure message-box slot with no state side effects, so the non-fatal ZIP
+  warning (row 21) correctly leaves the in-progress upload state untouched.
 - **ZIP part (optional, non-fatal on failure):** only attempted when
   `zipPath` is non-empty. If the file fails to open, **this is non-fatal**:
   legacy shows `QMessageBox::warning(this, "Warning", "Cannot open ZIP
@@ -429,16 +454,17 @@ Port of the upload half of `onUpdateDatabaseBtnClicked` (adminwindow.cpp:
   the View passes whatever `skipIds` it decided on (which is empty when the
   user had no duplicates, or the "Yes, skip" duplicates list otherwise) —
   see "The async dialog seam".
-- Progress: the controller does not emit any synthetic "start" signal
-  before sending — it relies purely on `uploadProgress(int percent)` wired
-  to the reply's native `uploadProgress(qint64, qint64)` signal exactly as
-  legacy (lines 1358–1365):
+- Progress: the controller emits `uploadStarted()` once (right after the
+  excel file opens, see the state-machine bullet above), then relies purely
+  on `uploadProgress(int percent)` wired to the reply's native
+  `uploadProgress(qint64, qint64)` signal exactly as legacy (lines
+  1358–1365):
   `if (bytesTotal > 0) { percent = (bytesSent * 100) / bytesTotal; emit
-  uploadProgress(percent); }` — no signal at all is emitted when
-  `bytesTotal <= 0`. The View is responsible for the indeterminate
-  progress-bar state (`setMinimum(0); setMaximum(0); setValue(0)`, lines
-  1256–1258) **before** calling `uploadStudents`, and for switching the bar
-  to determinate (`setMaximum(100)`) on the **first** `uploadProgress`
+  uploadProgress(percent); }` — no `uploadProgress` is emitted when
+  `bytesTotal <= 0`. The View sets the indeterminate progress-bar state
+  (`setMinimum(0); setMaximum(0); setValue(0)`, lines 1256–1258) in its
+  `onUploadStarted` slot (not before calling `uploadStudents`), and switches
+  the bar to determinate (`setMaximum(100)`) on the **first** `uploadProgress`
   signal it receives — matching the legacy lambda which calls
   `ui->bulkProgressBar->setMaximum(100)` unconditionally inside the
   `uploadProgress` handler (line 1362), i.e. every emission re-asserts
@@ -545,12 +571,29 @@ This dialog sequence lives entirely in `adminWindow`'s slot for
   boxes, and the parse-loader warning/info boxes (`"Failed to open Excel
   file."`, `"This workbook has no sheets."`, `"Sheet is empty."`, `"File is
   empty."`, `"CSV file has no headers."`, `"Cannot open file: ..."`).
-- `bulkTable` population from `ParsedTable` (`headers`,
-  `resizeColumnsToContents`, the Excel row-count math) — the View calls
-  `ui->bulkTable->clear()`, sets row/column counts from
-  `parsedTable.rows.size()` / `parsedTable.headers.size()`, sets
-  `setHorizontalHeaderLabels(parsedTable.headers)`, and fills cells from
-  `parsedTable.rows`.
+- `bulkTable` population from `ParsedTable`. **The two loaders populate the
+  table with different, order-dependent sequences, and both must be ported
+  verbatim — do NOT unify them into a single generic fill.** The
+  `ParsedTable` supplies the parsed `headers`/`rows`/`headerIndex`; the
+  View's per-source rendering loop is preserved exactly:
+  - **Excel population** (port `loadExcelToTable` lines 1449–1462): `clear()`,
+    then `setRowCount(lastRow - firstRow)` and
+    `setColumnCount(lastCol - firstCol + 1)` up front (equivalently
+    `rows.size()` and `headers.size()` given how `parseExcel` fills them),
+    `setHorizontalHeaderLabels(headers)`, fill every cell, then
+    `resizeColumnsToContents()`.
+  - **CSV population** (port `loadCSVtoTable` lines 1479–1541): `clear()` and
+    `setRowCount(0)` **up front** (before any failure dialog — this is why a
+    failed CSV load clears the table but a failed Excel `OpenFailed`/`NoSheets`
+    does not), then for each row `insertRow(row)` and fill cells with the
+    guard `j < rowData.size() && j < ui->bulkTable->columnCount()` — note this
+    truncates against the **current (possibly stale/default) column count**,
+    *then* `setColumnCount(qMax(columnCount(), headers.size()))`,
+    `setHorizontalHeaderLabels(headers)`, `resizeColumnsToContents()`. The
+    "fill against the stale column count, widen afterward" ordering is a
+    legacy quirk (a first load into a table whose Designer default column
+    count is smaller than the data can render short rows) and is preserved
+    verbatim rather than corrected.
 - **School-ID collection from the live `bulkTable`** at upload time — the
   View keeps its own `getCell` lambda reading `ui->bulkTable->item(row,
   col)->text().trimmed()` using the cached `headerIndex` (from the last
@@ -682,17 +725,21 @@ onUpdateDatabaseBtnClicked()
   → [duplicatesResolved non-empty] View runs the full duplicate-dialog seam
         → on confirm: uploadStudents(excelPath, zipPath, duplicates)
         → on cancel: "Cancelled" info box, stop
-  → View sets progress bar indeterminate + button states before calling uploadStudents
   → m_importController->uploadStudents(excelPath, zipPath, skipIds)
-        → builds multipart (excel mandatory/fatal, zip optional/non-fatal,
-          skip_ids when non-empty)
+        → opens excel QFile
+        → [excel open fails] delete excelFile+multiPart;
+          importError("Error", "Cannot open Excel file.", Critical) — fatal, stop
+          (uploadStarted never fires → View state never set → nothing to revert)
+        → [excel open OK] emits uploadStarted()
+              → View: cancelUpload=false, disable updateDatabaseBtn, enable
+                cancelUploadBtn, progress bar visible + indeterminate
+        → builds rest of multipart (zip optional/non-fatal, skip_ids when non-empty)
         → [zip open fails] importError("Warning", "Cannot open ZIP file. ...", Warning)
-          then continues
-        → [excel open fails] importError("Error", "Cannot open Excel file.", Critical) — fatal, stop
+          then continues (View shows warning only; upload state untouched)
         → POST upload_students_zip.php
-        → emits uploadProgress(percent) repeatedly
+        → emits uploadProgress(percent) repeatedly (View: setMaximum(100) each time)
         → emits uploadFinished(result)  or  uploadFailed(errorString)
-  → View: progress bar hidden, buttons re-enabled
+  → View onUploadFinished/onUploadFailed: progress bar hidden, buttons re-enabled
   → View branches on result.plainText / result.ok → rows 23/24/25 dialogs
   → [row 23 only] View clears bulkTable, clears selectedExcelPath/selectedZipPath
 ```
@@ -812,10 +859,15 @@ Mirrors the three-task shape used for the Visitor extraction:
 - **Task 3** — wire `ImportController` into `adminWindow`: add
   `m_importController` member, construct it in the constructor after
   `networkManager`, add `onImportDuplicatesResolved` / `onImportError` /
-  `onUploadProgress` / `onUploadFinished` / `onUploadFailed` slots, replace
+  `onUploadStarted` / `onUploadProgress` / `onUploadFinished` /
+  `onUploadFailed` slots (the `onUploadStarted` slot sets the progress/button
+  state; `onUploadFinished` and `onUploadFailed` both restore it — see the
+  state-machine bullet under `uploadStudents`), replace
   the bodies of `onAttachFileBtnClicked`, `onUpdateDatabaseBtnClicked`,
   `loadExcelToTable`, `loadCSVtoTable` with the View-side flow described
-  above, delete the free-function `normalizeHeader` and the duplicated
+  above (porting each loader's exact table-population sequence verbatim, and
+  clearing the table only on `ExcelParseError::EmptySheet` for the Excel
+  path), delete the free-function `normalizeHeader` and the duplicated
   header-mapping chains from `adminwindow.cpp`, keep
   `onCancelUploadBtnClicked` untouched. Finish with a purity grep gate
   (`importcontroller.cpp` has no `ui->`/`QMessageBox`/`QFileDialog`/
