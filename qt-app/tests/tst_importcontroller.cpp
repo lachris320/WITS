@@ -3,8 +3,10 @@
 #include <QMap>
 #include <QString>
 #include <QStringList>
+#include <QTemporaryDir>
 #include "importcontroller.h"
 #include "importdata.h"
+#include "xlsxdocument.h"
 
 class TestImportController : public QObject
 {
@@ -44,6 +46,11 @@ private slots:
     void parseUploadResponseSuccess();
     void parseUploadResponseStatusNotSuccess();
     void parseUploadResponsePlainTextFallback();
+
+    // parseExcel
+    void parseExcelRoundTrip();
+    void parseExcelHeaderOnlyNoDataRows();
+    void parseExcelOpenFailedOnBadPath();
 };
 
 void TestImportController::normalizeHeaderTrimsLowersStrips()
@@ -307,6 +314,74 @@ void TestImportController::parseUploadResponsePlainTextFallback()
     const UploadResult result = ImportController::parseUploadResponse(raw);
     QVERIFY(result.plainText);
     QCOMPARE(result.rawText, QString::fromUtf8(raw));
+}
+
+void TestImportController::parseExcelRoundTrip()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString filePath = dir.filePath(QStringLiteral("import_test.xlsx"));
+
+    {
+        QXlsx::Document doc;
+        doc.write("A1", "School ID");
+        doc.write("B1", "Full Name");
+        doc.write("C1", "Course");
+        doc.write("A2", "2023-00123");
+        doc.write("B2", "Juan Dela Cruz");
+        doc.write("C2", "BSIT");
+        doc.write("A3", "2023-00456");
+        doc.write("B3", "Maria Clara");
+        doc.write("C3", "BSCS");
+        QVERIFY(doc.saveAs(filePath));
+    }
+
+    ImportController controller(nullptr);   // parseExcel never touches the manager
+    ExcelParseError err = ExcelParseError::OpenFailed;
+    const ParsedTable table = controller.parseExcel(filePath, &err);
+
+    QCOMPARE(err, ExcelParseError::None);
+    QCOMPARE(table.headers, QStringList({"School ID", "Full Name", "Course"}));
+    QCOMPARE(table.rows.size(), 2);
+    QCOMPARE(table.rows[0], QStringList({"2023-00123", "Juan Dela Cruz", "BSIT"}));
+    QCOMPARE(table.rows[1], QStringList({"2023-00456", "Maria Clara", "BSCS"}));
+    QCOMPARE(table.headerIndex.value("school_id"), 0);
+    QCOMPARE(table.headerIndex.value("name"),      1);
+    QCOMPARE(table.headerIndex.value("course"),    2);
+}
+
+void TestImportController::parseExcelHeaderOnlyNoDataRows()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString filePath = dir.filePath(QStringLiteral("import_header_only.xlsx"));
+
+    {
+        QXlsx::Document doc;
+        doc.write("A1", "School ID");
+        doc.write("B1", "Full Name");
+        QVERIFY(doc.saveAs(filePath));
+    }
+
+    ImportController controller(nullptr);
+    ExcelParseError err = ExcelParseError::OpenFailed;
+    const ParsedTable table = controller.parseExcel(filePath, &err);
+
+    QCOMPARE(err, ExcelParseError::None);
+    QCOMPARE(table.headers, QStringList({"School ID", "Full Name"}));
+    QVERIFY(table.rows.isEmpty());
+}
+
+void TestImportController::parseExcelOpenFailedOnBadPath()
+{
+    ImportController controller(nullptr);
+    ExcelParseError err = ExcelParseError::None;
+    const ParsedTable table = controller.parseExcel(
+        QStringLiteral("nonexistent_path_does_not_exist.xlsx"), &err);
+
+    QCOMPARE(err, ExcelParseError::OpenFailed);
+    QVERIFY(table.headers.isEmpty());
+    QVERIFY(table.rows.isEmpty());
 }
 
 QTEST_MAIN(TestImportController)

@@ -1,8 +1,19 @@
 #include "importcontroller.h"
+#include "apiconfig.h"
 
+#include <QFile>
+#include <QFileInfo>
+#include <QHttpMultiPart>
+#include <QHttpPart>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+
+#include "xlsxdocument.h"
+#include "xlsxcellrange.h"
 
 ImportController::ImportController(QNetworkAccessManager *nam, QObject *parent)
     : QObject(parent)
@@ -91,23 +102,188 @@ ParsedTable ImportController::parseCsv(const QString &rawText)
 
 ParsedTable ImportController::parseExcel(const QString &filePath, ExcelParseError *errorOut)
 {
-    Q_UNUSED(filePath);
+    ParsedTable table;
+
+    QXlsx::Document xlsx(filePath);
+    if (!xlsx.isLoadPackage()) {
+        if (errorOut)
+            *errorOut = ExcelParseError::OpenFailed;
+        return table;
+    }
+
+    const QStringList sheets = xlsx.sheetNames();
+    if (sheets.isEmpty()) {
+        if (errorOut)
+            *errorOut = ExcelParseError::NoSheets;
+        return table;
+    }
+    xlsx.selectSheet(sheets.first());
+
+    const QXlsx::CellRange rng = xlsx.dimension();
+    if (!rng.isValid()) {
+        if (errorOut)
+            *errorOut = ExcelParseError::EmptySheet;
+        return table;
+    }
+
+    const int firstRow = rng.firstRow();
+    const int lastRow  = rng.lastRow();
+    const int firstCol = rng.firstColumn();
+    const int lastCol  = rng.lastColumn();
+
+    QStringList headers;
+    for (int c = firstCol; c <= lastCol; ++c)
+        headers << xlsx.read(firstRow, c).toString();
+
+    table.headers = headers;
+    mapHeaders(headers, table.headerIndex);   // tableCol = c - firstCol, matching line 1422
+
+    // rows = lastRow - firstRow (excludes header row) — off-by-one convention
+    // preserved verbatim from line 1446, NOT lastRow - firstRow + 1.
+    for (int r = firstRow + 1; r <= lastRow; ++r) {
+        QStringList row;
+        for (int c = firstCol; c <= lastCol; ++c)
+            row << xlsx.read(r, c).toString();
+        table.rows << row;
+    }
+
     if (errorOut)
-        *errorOut = ExcelParseError::OpenFailed;
-    return {};          // Stub — real QXlsx parse lands in Task 2, Step 4.
+        *errorOut = ExcelParseError::None;
+    return table;
 }
 
 void ImportController::checkDuplicates(const QStringList &schoolIds)
 {
-    Q_UNUSED(schoolIds);   // Stub — real network call lands in Task 2, Step 2.
+    QNetworkRequest request(ApiConfig::endpoint(QStringLiteral("check_duplicates.php")));
+    request.setHeader(QNetworkRequest::ContentTypeHeader,
+                      QStringLiteral("application/json"));
+
+    QJsonArray idsArray;
+    for (const QString &id : schoolIds)
+        idsArray.append(id);
+
+    QJsonObject payload;
+    payload[QLatin1String("school_ids")] = idsArray;
+
+    QNetworkReply *reply = m_nam->post(request, QJsonDocument(payload).toJson());
+
+    // `this` (the controller) as the context object is mandatory: the
+    // connection auto-disconnects if the controller is destroyed while the
+    // reply — owned by the shared QNetworkAccessManager — is still in flight.
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            // Legacy uses "Error" as the title here, not "Network Error"
+            // (adminwindow.cpp:1180) — preserved verbatim, not unified with
+            // VisitorController's "Network Error" convention.
+            emit importError(QStringLiteral("Error"), reply->errorString(),
+                             ImportSeverity::Critical);
+            reply->deleteLater();
+            return;
+        }
+
+        const QByteArray resp = reply->readAll();
+        reply->deleteLater();
+
+        QStringList duplicates;
+        QString errorMsg;
+        if (!parseDuplicateResponse(resp, &duplicates, &errorMsg)) {
+            emit importError(QStringLiteral("Error"), errorMsg, ImportSeverity::Warning);
+            return;
+        }
+
+        emit duplicatesResolved(duplicates);   // empty list = no duplicates found
+    });
 }
 
 void ImportController::uploadStudents(const QString &excelPath, const QString &zipPath,
                                       const QStringList &skipIds)
 {
-    Q_UNUSED(excelPath);
-    Q_UNUSED(zipPath);
-    Q_UNUSED(skipIds);     // Stub — real network call lands in Task 2, Step 3.
+    QNetworkRequest uploadRequest(ApiConfig::endpoint(QStringLiteral("upload_students_zip.php")));
+    QHttpMultiPart *multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
+
+    // Excel part (mandatory, fatal on failure).
+    QHttpPart excelPart;
+    excelPart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                        QVariant("form-data; name=\"excel\"; filename=\"" +
+                                 QFileInfo(excelPath).fileName() + "\""));
+    QFile *excelFile = new QFile(excelPath);
+    if (!excelFile->open(QIODevice::ReadOnly)) {
+        // Fatal, exactly as legacy (adminwindow.cpp:1270-1278): free what was
+        // already allocated and abort before sending anything. uploadStarted
+        // never fires here, so the View never sets progress/button state —
+        // nothing to revert, reproducing legacy's set-then-revert net effect.
+        emit importError(QStringLiteral("Error"), QStringLiteral("Cannot open Excel file."),
+                         ImportSeverity::Critical);
+        delete excelFile;
+        delete multiPart;
+        return;
+    }
+    excelPart.setBodyDevice(excelFile);
+    excelFile->setParent(multiPart);
+    multiPart->append(excelPart);
+
+    // The excel file opened OK — this is the exact point legacy passed line
+    // 1270 and had already set the progress/button state at lines 1251-1258.
+    // The View sets that state in its onUploadStarted slot.
+    emit uploadStarted();
+
+    // ZIP part (optional, non-fatal on failure).
+    if (!zipPath.isEmpty()) {
+        QHttpPart zipPart;
+        zipPart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                          QVariant("form-data; name=\"photos_zip\"; filename=\"" +
+                                   QFileInfo(zipPath).fileName() + "\""));
+        QFile *zipFile = new QFile(zipPath);
+        if (!zipFile->open(QIODevice::ReadOnly)) {
+            // Non-fatal as legacy (adminwindow.cpp:1291): warn and continue
+            // the upload without the ZIP part. The delete below fixes a
+            // pre-existing zipFile leak (legacy never freed it on this
+            // branch); no observable behavior change.
+            emit importError(QStringLiteral("Warning"),
+                             QStringLiteral("Cannot open ZIP file. Proceeding without photos."),
+                             ImportSeverity::Warning);
+            delete zipFile;
+        } else {
+            zipPart.setBodyDevice(zipFile);
+            zipFile->setParent(multiPart);
+            multiPart->append(zipPart);
+        }
+    }
+
+    // skip_ids part — only appended when non-empty (adminwindow.cpp:1300-1306).
+    if (!skipIds.isEmpty()) {
+        QHttpPart dupPart;
+        dupPart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                          QVariant("form-data; name=\"skip_ids\""));
+        dupPart.setBody(skipIds.join(",").toUtf8());
+        multiPart->append(dupPart);
+    }
+
+    QNetworkReply *uploadReply = m_nam->post(uploadRequest, multiPart);
+    multiPart->setParent(uploadReply);
+
+    connect(uploadReply, &QNetworkReply::uploadProgress, this,
+            [this](qint64 bytesSent, qint64 bytesTotal) {
+                if (bytesTotal > 0) {
+                    const int percent = static_cast<int>((bytesSent * 100) / bytesTotal);
+                    emit uploadProgress(percent);
+                }
+            });
+
+    // `this` (the controller) as the context object — same rationale as
+    // checkDuplicates and VisitorController::fetchVisitors.
+    connect(uploadReply, &QNetworkReply::finished, this, [this, uploadReply]() {
+        if (uploadReply->error() != QNetworkReply::NoError) {
+            emit uploadFailed(uploadReply->errorString());
+            uploadReply->deleteLater();
+            return;
+        }
+
+        const QByteArray response = uploadReply->readAll();
+        uploadReply->deleteLater();
+
+        emit uploadFinished(parseUploadResponse(response));
+    });
 }
 
 bool ImportController::parseDuplicateResponse(const QByteArray &raw,
