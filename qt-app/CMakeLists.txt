@@ -38,6 +38,8 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         attachfilesdialog.h attachfilesdialog.cpp
         settingsdata.h
         settingscontroller.h settingscontroller.cpp
+        visitordata.h
+        visitorcontroller.h visitorcontroller.cpp
     )
 else()
     if(ANDROID)
