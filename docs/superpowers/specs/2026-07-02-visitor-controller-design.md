@@ -193,7 +193,21 @@ signals:
   - otherwise runs `parseVisitorsResponse` on the body — on failure emits
     `fetchError("Error", errorMsg)`, on success emits
     `visitorsLoaded(records, totalCount)`.
+- **The `finished` connection MUST pass the controller as the 3rd-arg context
+  object**: `connect(reply, &QNetworkReply::finished, this, [this, reply]{...})`
+  where `this` is the `VisitorController`. Today's code gets lifetime safety
+  from `this` = `adminWindow` (adminwindow.cpp:3692) — the connection
+  auto-disconnects when the receiver dies. The controller is destroyed during
+  `~adminWindow`, but a reply parented to the *shared* `QNetworkAccessManager`
+  can outlive it; a context-less lambda would fire after controller
+  destruction and dereference a dangling pointer. The context arg preserves
+  the auto-disconnect.
 - Calls `reply->deleteLater()` on every path (matching lines 3695, 3700).
+- Overlapping in-flight fetches (e.g. rapid Search clicks) are **preserved
+  as-is**: each call creates an independent reply and last-to-finish wins the
+  table, exactly as today (adminwindow.cpp:3690 has no cancellation either).
+  The extraction neither fixes nor worsens this; request cancellation is a
+  possible follow-up, not part of this behavior-preserving step.
 - Never touches a widget.
 
 ### `parseVisitorsResponse(json, out, totalCount, errorMsg)` — static
@@ -506,9 +520,17 @@ target_link_libraries(tst_visitorcontroller PRIVATE
 )
 add_test(NAME tst_visitorcontroller COMMAND tst_visitorcontroller)
 set_tests_properties(tst_visitorcontroller PROPERTIES
-    ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1"
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_FORCE_STDERR_LOGGING=1"
 )
 ```
+
+`QT_QPA_PLATFORM=offscreen` is required, not optional: QXlsx links `Qt::Gui`
+and propagates it, so `QTEST_MAIN` instantiates a `QGuiApplication`, which
+needs a platform plugin on a headless runner. The three existing Gui-touching
+targets (`tst_rfidkeyboardfilter`, `tst_theme`, `tst_responsive_ui`) set it
+for exactly this reason — follow them. The flip side: do NOT "optimize" this
+target down to Core-only; `QXlsx::Format` font/color handling in the
+`exportToExcel` test needs the `QGuiApplication` that the Gui link provides.
 
 The `QXlsx` target is available because the parent `CMakeLists.txt` runs
 `add_subdirectory(libs/QXlsx)` before `add_subdirectory(tests)`.
@@ -526,7 +548,9 @@ The `QXlsx` target is available because the parent `CMakeLists.txt` runs
   - the redundant per-load table re-setup (`setColumnCount`, header labels,
     resize mode, selection flags on every fetch) — kept exactly as today
     inside `populateVisitorTable`;
-  - the underscore→space round-trip in the export's "Search Keyword" cell.
+  - the underscore→space round-trip in the export's "Search Keyword" cell;
+  - unmanaged overlapping in-flight fetches (last-to-finish wins the table) —
+    see the `fetchVisitors` section.
 - Backend URL configurability (separate spec; `ApiConfig` is used as-is).
 
 ---
