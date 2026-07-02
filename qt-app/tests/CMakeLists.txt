@@ -64,3 +64,21 @@ add_test(NAME tst_responsive_ui COMMAND tst_responsive_ui)
 set_tests_properties(tst_responsive_ui PROPERTIES
     ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1;QT_QPA_PLATFORM=offscreen"
 )
+
+qt_add_executable(tst_visitorcontroller
+    tst_visitorcontroller.cpp
+    ${CMAKE_SOURCE_DIR}/visitorcontroller.cpp
+    ${CMAKE_SOURCE_DIR}/visitorcontroller.h
+    ${CMAKE_SOURCE_DIR}/visitordata.h
+)
+set_target_properties(tst_visitorcontroller PROPERTIES WIN32_EXECUTABLE FALSE)
+target_include_directories(tst_visitorcontroller PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(tst_visitorcontroller PRIVATE
+    Qt${QT_VERSION_MAJOR}::Test
+    Qt${QT_VERSION_MAJOR}::Network
+    QXlsx
+)
+add_test(NAME tst_visitorcontroller COMMAND tst_visitorcontroller)
+set_tests_properties(tst_visitorcontroller PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_FORCE_STDERR_LOGGING=1"
+)
