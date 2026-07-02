@@ -38,6 +38,8 @@
 #include "attachfilesdialog.h"
 #include "settingsdata.h"
 #include "settingscontroller.h"
+#include "visitordata.h"
+#include "visitorcontroller.h"
 #include <QGraphicsOpacityEffect>
 #include <QPropertyAnimation>
 #include <QPagedPaintDevice>
@@ -91,6 +93,11 @@ private:
     void bindSettingsSignals();
     void populateSettingsForm(const SettingsData &data);
     SettingsData collectSettingsForm();
+
+    VisitorController *m_visitorController;   // child of this, created in ctor
+    QList<VisitorRecord> m_visitorRecords;    // cache of the last visitorsLoaded payload
+
+    VisitorFilter collectVisitorFilter() const;
     bool cancelUpload = false;
     void populateFilters();
     ReportPalette getPalette(const QString &choice);
@@ -144,7 +151,6 @@ private:
     QImage makeBarChartImage(const QJsonArray &data, QSize size, const ReportPalette &palette);
     QImage makePieChartImage(const QJsonArray &data, QSize size, const ReportPalette &palette);
     QImage makeLineChartImage(const QJsonArray &data, QSize size, const ReportPalette &palette);
-    void loadVisitorLogs(const QString &search, const QString &dateType, const QString &startDate, const QString &endDate);
 
 private slots:
     void onAttachFileBtnClicked();
@@ -166,6 +172,8 @@ private slots:
     void onLogoChanged(const QString &path);
     void onPosterChanged(const QString &path);
     void onSettingsImportError(const QString &message);
+    void populateVisitorTable(const QList<VisitorRecord> &records, int totalCount);
+    void onVisitorFetchError(const QString &title, const QString &message);
     void onClearAttendanceCheckBoxStateChanged(int state);
     void onCancelUploadBtnClicked();
     void loadDepartments();

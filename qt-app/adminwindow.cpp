@@ -422,6 +422,11 @@ adminWindow::adminWindow(QWidget *parent)
         b->setIconSize(navIcon);
 
     networkManager = new QNetworkAccessManager(this);
+    m_visitorController = new VisitorController(networkManager, this);
+    connect(m_visitorController, &VisitorController::visitorsLoaded,
+            this, &adminWindow::populateVisitorTable);
+    connect(m_visitorController, &VisitorController::fetchError,
+            this, &adminWindow::onVisitorFetchError);
     chartsPreviewBoxLayout = ui->chartsPreviewBox;
     searchSpinner = nullptr;
     overlayEffect = nullptr;
@@ -677,40 +682,13 @@ adminWindow::adminWindow(QWidget *parent)
     });
 
     connect(ui->visitorSearchBtn, &QPushButton::clicked, this, [=]() {
-        QString search = ui->visitorSearchLineEdit->text().trimmed();
-        QString dateType = ui->visitorDateFilterBox->currentText();
-        QString startDate, endDate;
-
-        if (dateType == "Specific Day") {
-            startDate = ui->visitorDateEdit->date().toString("yyyy-MM-dd");
-            endDate = startDate;
-        }
-        else if (dateType == "Month") {
-            int month = ui->visitorMonthCombo->currentIndex() + 1; // assuming 0-based
-            int year = ui->visitorYearSpin->value();
-            QDate firstDay(year, month, 1);
-            QDate lastDay(year, month, firstDay.daysInMonth());
-            startDate = firstDay.toString("yyyy-MM-dd");
-            endDate = lastDay.toString("yyyy-MM-dd");
-        }
-        else if (dateType == "Date Range") {
-            startDate = ui->visitorStartDate->date().toString("yyyy-MM-dd");
-            endDate = ui->visitorEndDate->date().toString("yyyy-MM-dd");
-        }
-        else {
-            // Default fallback: show all
-            dateType = "all";
-            startDate = "";
-            endDate = "";
-        }
-
-        loadVisitorLogs(search, dateType, startDate, endDate);
+        m_visitorController->fetchVisitors(collectVisitorFilter());
     });
 
     connect(ui->visitorBtn, &QPushButton::clicked, this, [=]() {
         ui->stackedWidget->setCurrentWidget(ui->visitorPage);
         setActiveSidebar(ui->visitorBtn);
-        loadVisitorLogs("", "all", "", ""); // Auto-load all logs on open
+        m_visitorController->fetchVisitors(VisitorFilter{}); // Auto-load all logs on open
     });
 
     // Connectors for studentSearchPage
@@ -3674,131 +3652,104 @@ void adminWindow::onDepartmentFilterChanged(int)
     });
 }
 
-void adminWindow::loadVisitorLogs(const QString &search, const QString &dateType,
-                                  const QString &startDate, const QString &endDate)
+VisitorFilter adminWindow::collectVisitorFilter() const
 {
-    QUrl url = ApiConfig::endpoint("get_visitors.php");
-    QNetworkRequest request(url);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    VisitorFilter f;
+    f.search = ui->visitorSearchLineEdit->text().trimmed();
 
-    QJsonObject payload;
-    payload["search"] = search;
-    payload["date_type"] = dateType;
-    payload["start_date"] = startDate;
-    payload["end_date"] = endDate;
+    const QString dateType = ui->visitorDateFilterBox->currentText();
+    if (dateType == "Specific Day") {
+        f.dateType  = DateFilterType::SpecificDay;
+        f.startDate = ui->visitorDateEdit->date().toString("yyyy-MM-dd");
+        f.endDate   = f.startDate;
+    }
+    else if (dateType == "Month") {
+        f.dateType = DateFilterType::Month;
+        const QPair<QString, QString> range =
+            VisitorController::monthRange(ui->visitorMonthCombo->currentIndex() + 1,
+                                          ui->visitorYearSpin->value());
+        f.startDate = range.first;
+        f.endDate   = range.second;
+    }
+    else if (dateType == "Date Range") {
+        f.dateType  = DateFilterType::DateRange;
+        f.startDate = ui->visitorStartDate->date().toString("yyyy-MM-dd");
+        f.endDate   = ui->visitorEndDate->date().toString("yyyy-MM-dd");
+    }
+    else {
+        // Default fallback: show all — dates stay empty
+        f.dateType = DateFilterType::All;
+    }
+    return f;
+}
 
-    QNetworkReply *reply = networkManager->post(request, QJsonDocument(payload).toJson());
+void adminWindow::populateVisitorTable(const QList<VisitorRecord> &records, int totalCount)
+{
+    m_visitorRecords = records;
 
-    connect(reply, &QNetworkReply::finished, this, [=]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            QMessageBox::critical(this, "Network Error", reply->errorString());
-            reply->deleteLater();
-            return;
-        }
+    ui->visitorTable->setRowCount(records.size());
+    ui->visitorTable->setColumnCount(5);
+    QStringList headers = {"Name", "Company", "Purpose", "Date", "Time"};
+    ui->visitorTable->setHorizontalHeaderLabels(headers);
 
-        QByteArray resp = reply->readAll();
-        reply->deleteLater();
+    for (int i = 0; i < records.size(); ++i) {
+        const VisitorRecord &rec = records.at(i);
+        ui->visitorTable->setItem(i, 0, new QTableWidgetItem(rec.name));
+        ui->visitorTable->setItem(i, 1, new QTableWidgetItem(rec.company));
+        ui->visitorTable->setItem(i, 2, new QTableWidgetItem(rec.purpose));
+        ui->visitorTable->setItem(i, 3, new QTableWidgetItem(rec.date));
+        ui->visitorTable->setItem(i, 4, new QTableWidgetItem(rec.time));
+    }
 
-        QJsonDocument doc = QJsonDocument::fromJson(resp);
-        if (!doc.isObject()) {
-            QMessageBox::warning(this, "Error", "Invalid server response.");
-            return;
-        }
+    // Per-load table re-setup — redundant on repeat loads but kept exactly as
+    // today to stay behavior-preserving.
+    ui->visitorTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
+    ui->visitorTable->setAlternatingRowColors(true);
+    ui->visitorTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    ui->visitorTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    ui->visitorTable->setSelectionMode(QAbstractItemView::SingleSelection);
 
-        QJsonObject obj = doc.object();
-        if (obj["status"].toString() != "success") {
-            QMessageBox::warning(this, "Error", obj["message"].toString());
-            return;
-        }
+    if (ui->visitorTotalLabel) {
+        ui->visitorTotalLabel->setText(QString("📊 Total Visitors: %1").arg(totalCount));
+    }
 
-        QJsonArray logs = obj["visitors"].toArray();
-        int totalCount = obj["count"].toInt();
+    if (records.isEmpty()) {
+        ui->visitorTable->setRowCount(0);
+        showTemporaryOverlay(ui->visitorTable, "No visitors found for the selected filters.");
+        if (ui->visitorTotalLabel)
+            ui->visitorTotalLabel->setText("📊 Total Visitors: 0");
+        return;
+    }
+}
 
-        // --- Populate visitor table ---
-        ui->visitorTable->setRowCount(logs.size());
-        ui->visitorTable->setColumnCount(5);  // ✅ Changed from 4 to 5
-        QStringList headers = {"Name", "Company", "Purpose", "Date", "Time"};  // ✅ Added Date column
-        ui->visitorTable->setHorizontalHeaderLabels(headers);
-
-        for (int i = 0; i < logs.size(); ++i) {
-            QJsonObject log = logs[i].toObject();
-
-            // Parse the datetime from server
-            QString timeIn = log["time_in"].toString();  // e.g., "2025-01-15 14:30:00"
-            QDateTime dt = QDateTime::fromString(timeIn, "yyyy-MM-dd HH:mm:ss");
-
-            QString dateStr = dt.isValid() ? dt.toString("yyyy-MM-dd") : "N/A";
-            QString timeStr = dt.isValid() ? dt.toString("hh:mm AP") : "N/A";
-
-            ui->visitorTable->setItem(i, 0, new QTableWidgetItem(log["name"].toString()));
-            ui->visitorTable->setItem(i, 1, new QTableWidgetItem(log["company"].toString()));
-            ui->visitorTable->setItem(i, 2, new QTableWidgetItem(log["purpose"].toString()));
-            ui->visitorTable->setItem(i, 3, new QTableWidgetItem(dateStr));  // ✅ Date column
-            ui->visitorTable->setItem(i, 4, new QTableWidgetItem(timeStr));  // ✅ Time column
-        }
-
-        ui->visitorTable->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
-        ui->visitorTable->setAlternatingRowColors(true);
-        ui->visitorTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-        ui->visitorTable->setSelectionBehavior(QAbstractItemView::SelectRows);
-        ui->visitorTable->setSelectionMode(QAbstractItemView::SingleSelection);
-
-        // ✅ Display total count
-        if (ui->visitorTotalLabel) {
-            ui->visitorTotalLabel->setText(QString("📊 Total Visitors: %1").arg(totalCount));
-        }
-
-        if (logs.isEmpty()) {
-            ui->visitorTable->setRowCount(0);
-            showTemporaryOverlay(ui->visitorTable, "No visitors found for the selected filters.");
-            if (ui->visitorTotalLabel)
-                ui->visitorTotalLabel->setText("📊 Total Visitors: 0");
-            return;
-        }
-    });
+void adminWindow::onVisitorFetchError(const QString &title, const QString &message)
+{
+    // Reproduces today's three cases exactly (old adminwindow.cpp:3694, 3704,
+    // 3710): network error → critical, everything else → warning.
+    if (title == QLatin1String("Network Error"))
+        QMessageBox::critical(this, title, message);
+    else
+        QMessageBox::warning(this, title, message);
 }
 
 void adminWindow::on_extractVisitorBtn_clicked() {
-    if (ui->visitorTable->rowCount() == 0) {
+    // Guard moves from visitorTable->rowCount() == 0 to the cache —
+    // equivalent, since the table always mirrors the cache.
+    if (m_visitorRecords.isEmpty()) {
         QMessageBox::information(this, "No Data", "There are no visitor logs to export.");
         return;
     }
 
-    // --- Build default filename based on filters ---
-    QString baseName = "VisitorLogs";
-    QString dateType = ui->visitorDateFilterBox->currentText();
-    QString datePart;
-
-    if (dateType == "Specific Day") {
-        datePart = ui->visitorDateEdit->date().toString("yyyy-MM-dd");
-    }
-    else if (dateType == "Month") {
-        QString month = ui->visitorMonthCombo->currentText();
-        QString year = QString::number(ui->visitorYearSpin->value());
-        datePart = QString("%1_%2").arg(month, year);
-    }
-    else if (dateType == "Date Range") {
-        QString start = ui->visitorStartDate->date().toString("yyyy-MM-dd");
-        QString end = ui->visitorEndDate->date().toString("yyyy-MM-dd");
-        datePart = QString("Range_%1_to_%2").arg(start, end);
-    }
-    else {
-        datePart = "All";
-    }
-
-    QString searchTerm = ui->visitorSearchLineEdit->text().trimmed();
-    if (!searchTerm.isEmpty()) {
-        searchTerm.replace(" ", "_");
-        baseName += "_" + searchTerm;
-    }
-
-    QString defaultFileName = QString("%1_%2.xlsx").arg(baseName, datePart);
+    // Read at export time, matching today's behavior of deriving the
+    // filename/filter rows from the CURRENT widget state even if the user
+    // changed filters without re-searching.
+    const VisitorFilter filter = collectVisitorFilter();
 
     // --- Ask user where to save ---
     QString filePath = QFileDialog::getSaveFileName(
         this,
         "Export Visitor Logs",
-        QDir::homePath() + "/" + defaultFileName,
+        QDir::homePath() + "/" + VisitorController::defaultExportFileName(filter),
         "Excel Files (*.xlsx)"
         );
     if (filePath.isEmpty())
@@ -3807,72 +3758,8 @@ void adminWindow::on_extractVisitorBtn_clicked() {
     if (!filePath.endsWith(".xlsx"))
         filePath += ".xlsx";
 
-    // --- Initialize Excel document ---
-    QXlsx::Document xlsx;
-
-    QXlsx::Format boldCenter;
-    boldCenter.setFontBold(true);
-    boldCenter.setHorizontalAlignment(QXlsx::Format::AlignHCenter);
-
-    QXlsx::Format headerFormat;
-    headerFormat.setFontBold(true);
-    headerFormat.setHorizontalAlignment(QXlsx::Format::AlignHCenter);
-    headerFormat.setPatternBackgroundColor(Qt::lightGray);
-    headerFormat.setBorderStyle(QXlsx::Format::BorderThin);
-
-    QXlsx::Format normalCenter;
-    normalCenter.setHorizontalAlignment(QXlsx::Format::AlignHCenter);
-    normalCenter.setBorderStyle(QXlsx::Format::BorderThin);
-
-    // --- Header info ---
-    QString schoolName = ui->schoolName->text().isEmpty() ? "School Name" : ui->schoolName->text();
-    QString reportTitle = "Library Visitor Logs Report";
-    QString generatedDate = QDateTime::currentDateTime().toString("MMMM dd, yyyy hh:mm AP");
-
-    // Merge & write school name and title
-    xlsx.mergeCells("A1:E1");
-    xlsx.mergeCells("A2:E2");
-    xlsx.write("A1", schoolName, boldCenter);
-    xlsx.write("A2", reportTitle, boldCenter);
-
-    // --- Write filter info ---
-    xlsx.write("A4", "Generated On:", boldCenter);
-    xlsx.write("B4", generatedDate, normalCenter);
-
-    if (datePart != "All")
-        xlsx.write("A5", "Filter Applied:", boldCenter),
-            xlsx.write("B5", datePart, normalCenter);
-
-    if (!searchTerm.isEmpty())
-        xlsx.write("A6", "Search Keyword:", boldCenter),
-            xlsx.write("B6", searchTerm.replace("_", " "), normalCenter);
-
-    int startRow = 8;
-
-    // --- Write table headers ---
-    for (int col = 0; col < ui->visitorTable->columnCount(); ++col) {
-        QString headerText = ui->visitorTable->horizontalHeaderItem(col)->text();
-        xlsx.write(startRow, col + 1, headerText, headerFormat);
-    }
-
-    // --- Write table data ---
-    for (int row = 0; row < ui->visitorTable->rowCount(); ++row) {
-        for (int col = 0; col < ui->visitorTable->columnCount(); ++col) {
-            QTableWidgetItem *item = ui->visitorTable->item(row, col);
-            if (item)
-                xlsx.write(startRow + row + 1, col + 1, item->text(), normalCenter);
-        }
-    }
-
-    // Auto-size columns
-    for (int col = 1; col <= ui->visitorTable->columnCount(); ++col)
-        xlsx.setColumnWidth(col, 25);
-
-    int lastRow = startRow + ui->visitorTable->rowCount() + 2;
-    xlsx.write(lastRow, 1, "Total Visitors:", boldCenter);
-    xlsx.write(lastRow, 2, ui->visitorTable->rowCount(), normalCenter);
-
-    if (xlsx.saveAs(filePath)) {
+    if (m_visitorController->exportToExcel(m_visitorRecords, filter,
+                                           ui->schoolName->text(), filePath)) {
         QMessageBox::information(this, "Export Successful",
                                  QString("Visitor logs exported successfully!\n\nSaved as:\n%1").arg(filePath));
     } else {
