@@ -36,7 +36,8 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         busyindicator.h busyindicator.cpp
         attachFilesDialog.ui
         attachfilesdialog.h attachfilesdialog.cpp
-
+        settingsdata.h
+        settingscontroller.h settingscontroller.cpp
     )
 else()
     if(ANDROID)
