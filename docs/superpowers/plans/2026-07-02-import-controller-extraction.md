@@ -353,6 +353,9 @@ void TestImportController::normalizeHeaderTrimsLowersStrips()
     QCOMPARE(ImportController::normalizeHeader("Year-Level"),  QString("yearlevel"));
 }
 
+// NOTE: idempotence is trivially satisfied by the Step 3 stub ("" -> "") —
+// this slot is expected to PASS in the red phase; it earns its keep only
+// once the real implementation lands.
 void TestImportController::normalizeHeaderIdempotent()
 {
     const QString already = ImportController::normalizeHeader("Full_Name");
@@ -380,18 +383,24 @@ void TestImportController::mapHeadersCodeFamily()
     QCOMPARE(idx.value("code"), 1);
 }
 
+// NOTE: the single-alias tests below deliberately place the target header at
+// a NON-ZERO column (behind an unrecognized "Notes" header) and assert
+// contains() first — QMap::value() returns 0 for a missing key, so asserting
+// index 0 on an empty map would vacuously pass against the Step 3 no-op stub.
 void TestImportController::mapHeadersCourse()
 {
     QMap<QString, int> idx;
-    ImportController::mapHeaders({"Course"}, idx);
-    QCOMPARE(idx.value("course"), 0);
+    ImportController::mapHeaders({"Notes", "Course"}, idx);
+    QVERIFY(idx.contains("course"));
+    QCOMPARE(idx.value("course"), 1);
 }
 
 void TestImportController::mapHeadersYearLevel()
 {
     QMap<QString, int> idx;
-    ImportController::mapHeaders({"Year Level"}, idx);
-    QCOMPARE(idx.value("year_level"), 0);
+    ImportController::mapHeaders({"Notes", "Year Level"}, idx);
+    QVERIFY(idx.contains("year_level"));
+    QCOMPARE(idx.value("year_level"), 1);
 }
 
 void TestImportController::mapHeadersDepartmentFamily()
@@ -404,29 +413,33 @@ void TestImportController::mapHeadersDepartmentFamily()
 void TestImportController::mapHeadersGender()
 {
     QMap<QString, int> idx;
-    ImportController::mapHeaders({"Gender"}, idx);
-    QCOMPARE(idx.value("gender"), 0);
+    ImportController::mapHeaders({"Notes", "Gender"}, idx);
+    QVERIFY(idx.contains("gender"));
+    QCOMPARE(idx.value("gender"), 1);
 }
 
 void TestImportController::mapHeadersStatus()
 {
     QMap<QString, int> idx;
-    ImportController::mapHeaders({"Status"}, idx);
-    QCOMPARE(idx.value("status"), 0);
+    ImportController::mapHeaders({"Notes", "Status"}, idx);
+    QVERIFY(idx.contains("status"));
+    QCOMPARE(idx.value("status"), 1);
 }
 
 void TestImportController::mapHeadersVisits()
 {
     QMap<QString, int> idx;
-    ImportController::mapHeaders({"Visits"}, idx);
-    QCOMPARE(idx.value("visits"), 0);
+    ImportController::mapHeaders({"Notes", "Visits"}, idx);
+    QVERIFY(idx.contains("visits"));
+    QCOMPARE(idx.value("visits"), 1);
 }
 
 void TestImportController::mapHeadersUnrecognizedFallsBackToColN()
 {
     QMap<QString, int> idx;
-    ImportController::mapHeaders({"Notes"}, idx);
-    QCOMPARE(idx.value("col_0"), 0);
+    ImportController::mapHeaders({"Course", "Notes"}, idx);
+    QVERIFY(idx.contains("col_1"));   // unrecognized header at NON-ZERO column
+    QCOMPARE(idx.value("col_1"), 1);
     QVERIFY(!idx.contains("notes"));
 }
 
@@ -489,6 +502,9 @@ void TestImportController::parseCsvRaggedRowKeptAsIs()
     QCOMPARE(table.rows[0], QStringList({"2023-00123", "Juan Dela Cruz"}));   // natural length 2, not padded to 3
 }
 
+// NOTE: an empty stub ParsedTable{} already satisfies all three isEmpty()
+// checks — this slot is expected to PASS in the red phase; it guards the
+// empty-input contract once the real implementation lands.
 void TestImportController::parseCsvEmptyTextReturnsEmptyTable()
 {
     const ParsedTable table = ImportController::parseCsv(QString());
@@ -604,7 +620,11 @@ cmake --build qt-app/build
 ctest --test-dir qt-app/build -R tst_importcontroller --output-on-failure
 ```
 
-Expected: the target compiles and links, and `tst_importcontroller` **FAILS** — all 24 slots fail on assertions (each `QCOMPARE`/`QVERIFY` asserts against the skeleton `return {};` / `return false;` bodies, or against an empty `QMap` from the no-op `mapHeaders` stub). If the failure is a compile or link error instead, fix that first; the red phase must fail on `QCOMPARE`/`QVERIFY`.
+Expected: the target compiles and links, and `tst_importcontroller` **FAILS** — **22 of the 24 slots fail on assertions** against the skeleton `return {};` / `return false;` / no-op bodies. Exactly **2 slots PASS in the red phase, by design** (both are annotated in the test file):
+- `normalizeHeaderIdempotent` — idempotence is trivially satisfied by the stub (`"" -> ""`);
+- `parseCsvEmptyTextReturnsEmptyTable` — the stub's empty `ParsedTable{}` already satisfies the three `isEmpty()` checks.
+
+Do **not** "fix" those two — they are contract guards that become meaningful once the real implementations land in Step 7. Every other slot must fail on `QCOMPARE`/`QVERIFY`; if the run instead shows a compile or link error, fix that first. (The `mapHeaders` slots place their target headers at non-zero columns with `contains()` checks precisely so the no-op stub cannot vacuously pass them — `QMap::value()` returns `0` for a missing key.)
 
 - [ ] **Step 7: Implement the statics (green) — replace the five red skeletons in `qt-app/importcontroller.cpp`**
 
@@ -1020,8 +1040,10 @@ void ImportController::uploadStudents(const QString &excelPath, const QString &z
                                    QFileInfo(zipPath).fileName() + "\""));
         QFile *zipFile = new QFile(zipPath);
         if (!zipFile->open(QIODevice::ReadOnly)) {
-            // Non-fatal, exactly as legacy (adminwindow.cpp:1291): warn and
-            // continue the upload without the ZIP part.
+            // Non-fatal as legacy (adminwindow.cpp:1291): warn and continue
+            // the upload without the ZIP part. The delete below fixes a
+            // pre-existing zipFile leak (legacy never freed it on this
+            // branch); no observable behavior change.
             emit importError(QStringLiteral("Warning"),
                              QStringLiteral("Cannot open ZIP file. Proceeding without photos."),
                              ImportSeverity::Warning);
