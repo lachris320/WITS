@@ -82,3 +82,21 @@ add_test(NAME tst_visitorcontroller COMMAND tst_visitorcontroller)
 set_tests_properties(tst_visitorcontroller PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_FORCE_STDERR_LOGGING=1"
 )
+
+qt_add_executable(tst_importcontroller
+    tst_importcontroller.cpp
+    ${CMAKE_SOURCE_DIR}/importcontroller.cpp
+    ${CMAKE_SOURCE_DIR}/importcontroller.h
+    ${CMAKE_SOURCE_DIR}/importdata.h
+)
+set_target_properties(tst_importcontroller PROPERTIES WIN32_EXECUTABLE FALSE)
+target_include_directories(tst_importcontroller PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(tst_importcontroller PRIVATE
+    Qt${QT_VERSION_MAJOR}::Test
+    Qt${QT_VERSION_MAJOR}::Network
+    QXlsx
+)
+add_test(NAME tst_importcontroller COMMAND tst_importcontroller)
+set_tests_properties(tst_importcontroller PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_FORCE_STDERR_LOGGING=1"
+)
