@@ -1,4 +1,5 @@
 #include "visitorcontroller.h"
+#include "apiconfig.h"
 
 #include <QDate>
 #include <QDateTime>
@@ -6,6 +7,13 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLocale>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QStringList>
+
+#include "xlsxdocument.h"
+#include "xlsxformat.h"
 
 VisitorController::VisitorController(QNetworkAccessManager *nam, QObject *parent)
     : QObject(parent)
@@ -14,7 +22,41 @@ VisitorController::VisitorController(QNetworkAccessManager *nam, QObject *parent
 
 void VisitorController::fetchVisitors(const VisitorFilter &filter)
 {
-    Q_UNUSED(filter);   // Stub — real network fetch lands in Task 2, Step 3.
+    QNetworkRequest request(ApiConfig::endpoint(QStringLiteral("get_visitors.php")));
+    request.setHeader(QNetworkRequest::ContentTypeHeader,
+                      QStringLiteral("application/json"));
+
+    QJsonObject payload;
+    payload[QLatin1String("search")]     = filter.search;
+    payload[QLatin1String("date_type")]  = wireDateType(filter.dateType);
+    payload[QLatin1String("start_date")] = filter.startDate;
+    payload[QLatin1String("end_date")]   = filter.endDate;
+
+    QNetworkReply *reply = m_nam->post(request, QJsonDocument(payload).toJson());
+
+    // `this` (the controller) as the context object is mandatory: the
+    // connection auto-disconnects if the controller is destroyed while the
+    // reply — owned by the shared QNetworkAccessManager — is still in flight.
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            emit fetchError(QStringLiteral("Network Error"), reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+
+        const QByteArray resp = reply->readAll();
+        reply->deleteLater();
+
+        QList<VisitorRecord> records;
+        int totalCount = 0;
+        QString errorMsg;
+        if (!parseVisitorsResponse(resp, &records, &totalCount, &errorMsg)) {
+            emit fetchError(QStringLiteral("Error"), errorMsg);
+            return;
+        }
+
+        emit visitorsLoaded(records, totalCount);
+    });
 }
 
 bool VisitorController::exportToExcel(const QList<VisitorRecord> &records,
@@ -22,11 +64,80 @@ bool VisitorController::exportToExcel(const QList<VisitorRecord> &records,
                                       const QString &schoolName,
                                       const QString &filePath)
 {
-    Q_UNUSED(records);
-    Q_UNUSED(filter);
-    Q_UNUSED(schoolName);
-    Q_UNUSED(filePath);
-    return false;       // Stub — real QXlsx export lands in Task 2, Step 4.
+    QXlsx::Document xlsx;
+
+    QXlsx::Format boldCenter;
+    boldCenter.setFontBold(true);
+    boldCenter.setHorizontalAlignment(QXlsx::Format::AlignHCenter);
+
+    QXlsx::Format headerFormat;
+    headerFormat.setFontBold(true);
+    headerFormat.setHorizontalAlignment(QXlsx::Format::AlignHCenter);
+    headerFormat.setPatternBackgroundColor(Qt::lightGray);
+    headerFormat.setBorderStyle(QXlsx::Format::BorderThin);
+
+    QXlsx::Format normalCenter;
+    normalCenter.setHorizontalAlignment(QXlsx::Format::AlignHCenter);
+    normalCenter.setBorderStyle(QXlsx::Format::BorderThin);
+
+    // The View passes ui->schoolName->text() unmodified; the fallback lives here.
+    const QString effectiveSchoolName =
+        schoolName.isEmpty() ? QStringLiteral("School Name") : schoolName;
+    const QString reportTitle   = QStringLiteral("Library Visitor Logs Report");
+    const QString generatedDate =
+        QDateTime::currentDateTime().toString(QStringLiteral("MMMM dd, yyyy hh:mm AP"));
+    const QString datePart = datePartForFilter(filter);
+
+    xlsx.mergeCells("A1:E1");
+    xlsx.mergeCells("A2:E2");
+    xlsx.write("A1", effectiveSchoolName, boldCenter);
+    xlsx.write("A2", reportTitle, boldCenter);
+
+    xlsx.write("A4", "Generated On:", boldCenter);
+    xlsx.write("B4", generatedDate, normalCenter);
+
+    // Written only when datePart != "All"; the Month datePart keeps its
+    // underscore ("January_2026"), exactly as today (adminwindow.cpp:3842-3844).
+    if (datePart != QLatin1String("All")) {
+        xlsx.write("A5", "Filter Applied:", boldCenter);
+        xlsx.write("B5", datePart, normalCenter);
+    }
+
+    // Written only when a search term exists. The underscore→space replace
+    // preserves the pre-existing quirk (adminwindow.cpp:3846-3848): the old
+    // code space→underscored the term for the filename and underscored→spaced
+    // it back for this cell, which also turned any ORIGINAL underscores into
+    // spaces.
+    if (!filter.search.isEmpty()) {
+        QString keyword = filter.search;
+        keyword.replace(QLatin1Char('_'), QLatin1Char(' '));
+        xlsx.write("A6", "Search Keyword:", boldCenter);
+        xlsx.write("B6", keyword, normalCenter);
+    }
+
+    const int startRow = 8;
+    const QStringList headers = {"Name", "Company", "Purpose", "Date", "Time"};
+    for (int col = 0; col < headers.size(); ++col)
+        xlsx.write(startRow, col + 1, headers.at(col), headerFormat);
+
+    for (int row = 0; row < records.size(); ++row) {
+        const VisitorRecord &rec = records.at(row);
+        xlsx.write(startRow + row + 1, 1, rec.name,    normalCenter);
+        xlsx.write(startRow + row + 1, 2, rec.company, normalCenter);
+        xlsx.write(startRow + row + 1, 3, rec.purpose, normalCenter);
+        xlsx.write(startRow + row + 1, 4, rec.date,    normalCenter);
+        xlsx.write(startRow + row + 1, 5, rec.time,    normalCenter);
+    }
+
+    for (int col = 1; col <= 5; ++col)
+        xlsx.setColumnWidth(col, 25);
+
+    // Row count, not the server "count" field — matching adminwindow.cpp:3873.
+    const int lastRow = startRow + records.size() + 2;
+    xlsx.write(lastRow, 1, "Total Visitors:", boldCenter);
+    xlsx.write(lastRow, 2, records.size(), normalCenter);
+
+    return xlsx.saveAs(filePath);
 }
 
 QString VisitorController::wireDateType(DateFilterType t)

@@ -2,8 +2,10 @@
 #include <QByteArray>
 #include <QList>
 #include <QPair>
+#include <QTemporaryDir>
 #include "visitorcontroller.h"
 #include "visitordata.h"
+#include "xlsxdocument.h"
 
 class TestVisitorController : public QObject
 {
@@ -32,6 +34,10 @@ private slots:
     void fileNameDateRange();
     void fileNameWithSearchSpacesToUnderscores();
     void fileNameSearchWithoutSpaces();
+
+    // exportToExcel
+    void exportToExcelWritesLayout();
+    void exportToExcelSchoolNameFallback();
 };
 
 void TestVisitorController::parseSuccessPayload()
@@ -228,6 +234,77 @@ void TestVisitorController::fileNameSearchWithoutSpaces()
     f.endDate   = "2026-02-28";
     QCOMPARE(VisitorController::defaultExportFileName(f),
              QString("VisitorLogs_Acme_February_2026.xlsx"));
+}
+
+void TestVisitorController::exportToExcelWritesLayout()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString filePath = dir.filePath(QStringLiteral("visitor_export_test.xlsx"));
+
+    QList<VisitorRecord> records;
+    records.append({QStringLiteral("Juan Dela Cruz"), QStringLiteral("Acme Corp"),
+                    QStringLiteral("Research"), QStringLiteral("2026-06-15"),
+                    QStringLiteral("02:30 PM")});
+    records.append({QStringLiteral("Maria Clara"), QStringLiteral("Globex Inc"),
+                    QStringLiteral("Book Donation"), QStringLiteral("2026-06-16"),
+                    QStringLiteral("09:15 AM")});
+
+    VisitorFilter filter;
+    filter.dateType  = DateFilterType::Month;
+    filter.startDate = QStringLiteral("2026-06-01");
+    filter.endDate   = QStringLiteral("2026-06-30");
+    filter.search    = QStringLiteral("Juan_Santos");   // underscore exercises the legacy quirk
+
+    VisitorController controller(nullptr);   // exportToExcel never touches the manager
+    QVERIFY(controller.exportToExcel(records, filter,
+                                     QStringLiteral("Sample University"), filePath));
+
+    QXlsx::Document readBack(filePath);
+    QVERIFY(readBack.isLoadPackage());
+
+    QCOMPARE(readBack.read("A1").toString(), QString("Sample University"));
+    QCOMPARE(readBack.read("A2").toString(), QString("Library Visitor Logs Report"));
+    QCOMPARE(readBack.read("A4").toString(), QString("Generated On:"));
+    QCOMPARE(readBack.read("A5").toString(), QString("Filter Applied:"));
+    QCOMPARE(readBack.read("B5").toString(), QString("June_2026"));     // underscore kept
+    QCOMPARE(readBack.read("A6").toString(), QString("Search Keyword:"));
+    QCOMPARE(readBack.read("B6").toString(), QString("Juan Santos"));   // underscore→space quirk
+
+    QCOMPARE(readBack.read(8, 1).toString(), QString("Name"));
+    QCOMPARE(readBack.read(8, 2).toString(), QString("Company"));
+    QCOMPARE(readBack.read(8, 3).toString(), QString("Purpose"));
+    QCOMPARE(readBack.read(8, 4).toString(), QString("Date"));
+    QCOMPARE(readBack.read(8, 5).toString(), QString("Time"));
+
+    QCOMPARE(readBack.read(9, 1).toString(),  QString("Juan Dela Cruz"));
+    QCOMPARE(readBack.read(9, 5).toString(),  QString("02:30 PM"));
+    QCOMPARE(readBack.read(10, 4).toString(), QString("2026-06-16"));
+
+    const int totalRow = 8 + records.size() + 2;   // startRow + rows + 2 = 12
+    QCOMPARE(readBack.read(totalRow, 1).toString(), QString("Total Visitors:"));
+    QCOMPARE(readBack.read(totalRow, 2).toInt(), 2);
+}
+
+void TestVisitorController::exportToExcelSchoolNameFallback()
+{
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString filePath = dir.filePath(QStringLiteral("visitor_export_fallback.xlsx"));
+
+    QList<VisitorRecord> records;
+    records.append({QStringLiteral("Juan Dela Cruz"), QStringLiteral("Acme Corp"),
+                    QStringLiteral("Research"), QStringLiteral("2026-06-15"),
+                    QStringLiteral("02:30 PM")});
+
+    VisitorController controller(nullptr);
+    QVERIFY(controller.exportToExcel(records, VisitorFilter{}, QString(), filePath));
+
+    QXlsx::Document readBack(filePath);
+    QVERIFY(readBack.isLoadPackage());
+    QCOMPARE(readBack.read("A1").toString(), QString("School Name"));   // empty-name fallback
+    QVERIFY(readBack.read("A5").toString().isEmpty());   // All filter → no "Filter Applied:" row
+    QVERIFY(readBack.read("A6").toString().isEmpty());   // no search → no "Search Keyword:" row
 }
 
 QTEST_MAIN(TestVisitorController)
