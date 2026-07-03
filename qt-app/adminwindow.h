@@ -42,6 +42,7 @@
 #include "visitorcontroller.h"
 #include "importdata.h"
 #include "importcontroller.h"
+#include "studentcontroller.h"
 #include <QGraphicsOpacityEffect>
 #include <QPropertyAnimation>
 #include <QPagedPaintDevice>
@@ -101,6 +102,8 @@ private:
 
     VisitorFilter collectVisitorFilter() const;
     ImportController *m_importController;   // child of this, created in ctor
+    StudentController *m_studentController;   // child of this, created in ctor
+    bool m_studentSearchShowOverlay = true;   // View-side overlay-suppression flag for silent refreshes
     bool cancelUpload = false;
     void populateFilters();
     ReportPalette getPalette(const QString &choice);
@@ -111,30 +114,24 @@ private:
     void fetchPreviewData(const QJsonObject &filters);
     void connectFilterSignals();
     void performStudentSearch(bool showOverlay=true);
-    void displaySearchResults(const QJsonArray &students, const QString &highlightTerm);
+    void displaySearchResults(const QList<StudentRecord> &students, const QString &highlightTerm);
     void clearCheckboxes();
     void setupStudentSearchPage();
     void loadSearchFilters();
-    void loadAllStudents();
     void onDepartmentFilterChanged(int);
     void onSearchTextChanged(const QString &text);
     void onStudentCheckboxChanged();
     void openViewDialog(const QJsonObject &student);
     void openEditDialog(const QJsonObject &student);
     void saveStudentChanges(const QJsonObject &student);
-    void deleteStudents(const QStringList &schoolIds);
     void fetchStudentVisitHistory(const QString &schoolId, QTableWidget *table);
-    void bulkUpdateStudents(const QJsonArray &updates);
+    void bulkUpdateStudents(const QList<StudentRecord> &updates);
     void on_extractVisitorBtn_clicked();
     void onStudentTableItemChanged(QTableWidgetItem *item);
     void showTemporaryOverlay(QWidget *parent, const QString &message);
     QMap<QString,int> bulkHeaderIndex;    // track cancellation
 
-    BusyIndicator *searchSpinner = nullptr;
     QLabel *overlayText = nullptr;            // optional
-    QGraphicsOpacityEffect *overlayEffect = nullptr;
-    void showSearchOverlay();
-    void hideSearchOverlay();
 
     QFrame *m_headerBar = nullptr;
     QLabel *m_headerTitle = nullptr;
@@ -162,7 +159,6 @@ private slots:
     void onCancelEditBtnClicked();
     void onSearchBtnClicked();
     void onBrowsePhotoBtnClicked();
-    void onDeleteStudentBtnClicked();
     void loadCSVtoTable(const QString &filePath);
     void loadExcelToTable(const QString &filePath);
     void setActiveSidebar(QPushButton* activeBtn);
@@ -183,6 +179,15 @@ private slots:
     void onUploadProgress(int percent);
     void onUploadFinished(const UploadResult &result);
     void onUploadFailed(const QString &message);
+    void onSearchFinished(SearchOutcome outcome,
+                          const QList<StudentRecord> &records,
+                          const QString &message,
+                          const QString &searchTerm);
+    void onSearchFailed(const QString &errorString);
+    void onBulkUpdateFinished(const BulkUpdateResult &result);
+    void onBulkUpdateFailed(const QString &errorString);
+    void onDepartmentsLoaded(const QStringList &departments);
+    void onCoursesLoaded(const QStringList &courses);
     void onClearAttendanceCheckBoxStateChanged(int state);
     void onCancelUploadBtnClicked();
     void loadDepartments();

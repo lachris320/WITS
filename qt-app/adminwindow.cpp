@@ -440,9 +440,20 @@ adminWindow::adminWindow(QWidget *parent)
             this, &adminWindow::onUploadFinished);
     connect(m_importController, &ImportController::uploadFailed,
             this, &adminWindow::onUploadFailed);
+    m_studentController = new StudentController(networkManager, this);
+    connect(m_studentController, &StudentController::searchFinished,
+            this, &adminWindow::onSearchFinished);
+    connect(m_studentController, &StudentController::searchFailed,
+            this, &adminWindow::onSearchFailed);
+    connect(m_studentController, &StudentController::bulkUpdateFinished,
+            this, &adminWindow::onBulkUpdateFinished);
+    connect(m_studentController, &StudentController::bulkUpdateFailed,
+            this, &adminWindow::onBulkUpdateFailed);
+    connect(m_studentController, &StudentController::departmentsLoaded,
+            this, &adminWindow::onDepartmentsLoaded);
+    connect(m_studentController, &StudentController::coursesLoaded,
+            this, &adminWindow::onCoursesLoaded);
     chartsPreviewBoxLayout = ui->chartsPreviewBox;
-    searchSpinner = nullptr;
-    overlayEffect = nullptr;
 
     loadFilterDepartments();
 
@@ -456,42 +467,6 @@ adminWindow::adminWindow(QWidget *parent)
     loadAvailableYears();
     loadDepartments();
     populateFilters();
-
-    connect(ui->searchDepartmentFilter, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, [=](int index) {
-                ui->searchCourseFilter->clear();
-                ui->searchCourseFilter->addItem("Select Course");
-
-                if (index <= 0) return;
-
-                QString dept = ui->searchDepartmentFilter->currentText();
-
-                QUrl url = ApiConfig::endpoint("get_courses.php");
-                QUrlQuery query;
-                query.addQueryItem("department", dept);
-                url.setQuery(query);
-
-                QNetworkRequest courseRequest(url);
-                QNetworkReply *courseReply = networkManager->get(courseRequest);
-
-                connect(courseReply, &QNetworkReply::finished, this, [=]() {
-                    QByteArray resp = courseReply->readAll();
-                    courseReply->deleteLater();
-
-                    QJsonDocument doc = QJsonDocument::fromJson(resp);
-                    QJsonObject obj = doc.object();
-
-                    ui->searchCourseFilter->clear();
-                    ui->searchCourseFilter->addItem("Select Course");
-
-                    if (obj["status"].toString() == "success") {
-                        QJsonArray arr = obj["courses"].toArray();
-                        for (const QJsonValue &val : arr) {
-                            ui->searchCourseFilter->addItem(val.toString());
-                        }
-                    }
-                });
-            });
 
     connect(this, &adminWindow::logoChanged, this, [=](const QString &path) {
         if (ui->schoolLabelLogo) {
@@ -2924,7 +2899,7 @@ void adminWindow::onEditStudentBtnClicked()
         // --- Update Mode ---
         ui->selectAllBtn->setVisible(false);
 
-        QJsonArray updates;
+        QList<StudentRecord> updates;
 
         for (int row = 0; row < ui->studentSearchTable->rowCount(); ++row) {
             QWidget *widget = ui->studentSearchTable->cellWidget(row, 0);
@@ -2939,17 +2914,16 @@ void adminWindow::onEditStudentBtnClicked()
             QString schoolId = getText(2);
             if (schoolId.isEmpty()) continue;
 
-            QJsonObject student;
-            student["school_id"]  = schoolId;
-            student["code"]       = getText(1);
-            student["name"]       = getText(3);
-            student["department"] = getText(5);
-            student["course"]     = getText(4);
-            student["year_level"] = getText(6);
-            student["gender"]     = getText(7);
-            student["status"]     = getText(8);
-
-            updates.append(student);
+            StudentRecord rec;
+            rec.schoolId   = schoolId;
+            rec.code       = getText(1);
+            rec.name       = getText(3);
+            rec.department = getText(5);
+            rec.course     = getText(4);
+            rec.yearLevel  = getText(6);
+            rec.gender     = getText(7);
+            rec.status     = getText(8);
+            updates.append(rec);
         }
 
         // Reset colors after update
@@ -2983,68 +2957,53 @@ void adminWindow::clearCheckboxes()
     }
 }
 
-void adminWindow::bulkUpdateStudents(const QJsonArray &updates)
+void adminWindow::bulkUpdateStudents(const QList<StudentRecord> &updates)
 {
-    QUrl url = ApiConfig::endpoint("bulk_update_students.php");
-    QNetworkRequest request(url);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    m_studentController->bulkUpdateStudents(updates);
+}
 
-    QJsonObject data;
-    data["students"] = updates;
+void adminWindow::onBulkUpdateFailed(const QString &errorString)
+{
+    ui->editStudentBtn->setText("Edit");
+    ui->editStudentBtn->setEnabled(true);
+    ui->cancelEditBtn->setVisible(false);
+    ui->selectAllBtn->setVisible(false);
+    ui->studentSearchTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    clearCheckboxes();
 
-    QNetworkReply *reply = networkManager->post(request,
-                                                QJsonDocument(data).toJson());
+    showTemporaryOverlay(ui->studentSearchPage,
+                         QString("❌ Network Error\n%1").arg(errorString));   // row 4
+}
 
-    connect(reply, &QNetworkReply::finished, this, [=]() {
-        // Re-enable button regardless of outcome
-        ui->editStudentBtn->setText("Edit");
-        ui->editStudentBtn->setEnabled(true);
-        ui->cancelEditBtn->setVisible(false);
-        ui->selectAllBtn->setVisible(false);
-        ui->studentSearchTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-        clearCheckboxes();
+void adminWindow::onBulkUpdateFinished(const BulkUpdateResult &result)
+{
+    ui->editStudentBtn->setText("Edit");
+    ui->editStudentBtn->setEnabled(true);
+    ui->cancelEditBtn->setVisible(false);
+    ui->selectAllBtn->setVisible(false);
+    ui->studentSearchTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    clearCheckboxes();
 
-        if (reply->error() != QNetworkReply::NoError) {
-            showTemporaryOverlay(ui->studentSearchPage,
-                                 QString("❌ Network Error\n%1").arg(reply->errorString()));
-            reply->deleteLater();
-            return;
+    if (result.ok) {
+        showTemporaryOverlay(ui->studentSearchPage,
+                             QString("✅ %1 student%2 updated successfully")
+                                 .arg(result.updatedCount)
+                                 .arg(result.updatedCount == 1 ? "" : "s"));   // row 5
+
+        if (!result.errors.isEmpty()) {
+            QString errorList;
+            for (const QString &err : result.errors)
+                errorList += err + "\n";
+            QTimer::singleShot(2500, this, [this, errorList]() {
+                QMessageBox::warning(this, "Some Updates Failed", errorList);   // row 6
+            });
         }
 
-        QByteArray resp = reply->readAll();
-        reply->deleteLater();
-
-        QJsonDocument doc = QJsonDocument::fromJson(resp);
-        QJsonObject obj = doc.object();
-
-        if (obj["status"].toString() == "success") {
-            int updatedCount = obj["updated"].toInt();
-
-            // ✅ Success overlay
-            showTemporaryOverlay(ui->studentSearchPage,
-                                 QString("✅ %1 student%2 updated successfully")
-                                     .arg(updatedCount)
-                                     .arg(updatedCount == 1 ? "" : "s"));
-
-            // Show errors if any
-            if (obj.contains("errors") && !obj["errors"].toArray().isEmpty()) {
-                QJsonArray errors = obj["errors"].toArray();
-                QString errorList;
-                for (const auto &err : errors) {
-                    errorList += err.toString() + "\n";
-                }
-
-                QTimer::singleShot(2500, this, [=]() {
-                    QMessageBox::warning(this, "Some Updates Failed", errorList);
-                });
-            }
-
-            performStudentSearch(false); // ✅ Refresh table silently (no overlay)
-        } else {
-            showTemporaryOverlay(ui->studentSearchPage,
-                                 QString("⚠️ Update Failed\n%1").arg(obj["message"].toString()));
-        }
-    });
+        performStudentSearch(false);   // silent refresh (flag=false via thin helper)
+    } else {
+        showTemporaryOverlay(ui->studentSearchPage,
+                             QString("⚠️ Update Failed\n%1").arg(result.message));   // row 7
+    }
 }
 
 // Add cancel button handler
@@ -3152,359 +3111,124 @@ void adminWindow::on_selectAllBtn_clicked()
 
 void adminWindow::performStudentSearch(bool showOverlay)
 {
-    // Show loading indicator
     ui->searchLoadingBar->setVisible(true);
     ui->searchLoadingBar->setValue(0);
+    m_studentSearchShowOverlay = showOverlay;
 
-    // Collect filters
-    QString searchText = ui->searchLineEdit->text().trimmed();
-    QString department = ui->searchDepartmentFilter->currentText();
-    QString course = ui->searchCourseFilter->currentText();
-
-    // Prepare request
-    QUrl url = ApiConfig::endpoint("search_students.php");
-    QNetworkRequest request(url);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-
-    QJsonObject filters;
-    filters["search"] = searchText;
-    filters["department"] = (department == "All" || department == "All Departments" || department == "Select Department") ? "" : department;
-    filters["course"] = (course == "All" || course == "All Courses" || course == "Select Course") ? "" : course;
-
-    // Send POST request
-    QNetworkReply *reply = networkManager->post(request, QJsonDocument(filters).toJson());
-
-    // Handle server response
-    connect(reply, &QNetworkReply::finished, this, [=]() {
-        ui->searchLoadingBar->setVisible(false);
-
-        if (reply->error() != QNetworkReply::NoError) {
-            // ✅ Show error overlay only if showOverlay is true
-            if (showOverlay) {
-                showTemporaryOverlay(ui->studentSearchPage,
-                                     QString("❌ Network Error\n%1").arg(reply->errorString()));
-            }
-            reply->deleteLater();
-            return;
-        }
-
-        QByteArray resp = reply->readAll();
-        reply->deleteLater();
-
-        QJsonDocument doc = QJsonDocument::fromJson(resp);
-        if (!doc.isObject()) {
-            if (showOverlay) {
-                showTemporaryOverlay(ui->studentSearchPage,
-                                     "⚠️ Invalid server response");
-            }
-            return;
-        }
-
-        QJsonObject obj = doc.object();
-
-        // If not successful, show message with overlay
-        if (obj["status"].toString() != "success") {
-            QString msg = obj.contains("message") ? obj["message"].toString() : "No students found.";
-
-            ui->studentSearchTable->clearContents();
-            ui->studentSearchTable->setRowCount(0);
-
-            // ✅ Show overlay only if showOverlay is true
-            if (showOverlay) {
-                showTemporaryOverlay(ui->studentSearchPage,
-                                     QString("🔍 %1").arg(msg));
-            }
-            return;
-        }
-
-        // Display results
-        QJsonArray students = obj["students"].toArray();
-
-        // ✅ Check if students array is empty (no results found)
-        if (students.isEmpty()) {
-            ui->studentSearchTable->clearContents();
-            ui->studentSearchTable->setRowCount(0);
-
-            if (showOverlay) {
-                showTemporaryOverlay(ui->studentSearchPage,
-                                     "🔍 No students found\nTry adjusting your search filters");
-            }
-            return;
-        }
-
-        // ✅ Show success overlay with count only if showOverlay is true
-        if (showOverlay && students.size() > 0) {
-            showTemporaryOverlay(ui->studentSearchPage,
-                                 QString("✅ Found %1 student%2")
-                                     .arg(students.size())
-                                     .arg(students.size() == 1 ? "" : "s"));
-        }
-        displaySearchResults(students, obj["searchTerm"].toString());
-    });
+    m_studentController->searchStudents(
+        ui->searchLineEdit->text().trimmed(),
+        ui->searchDepartmentFilter->currentText(),
+        ui->searchCourseFilter->currentText());
 }
 
-void adminWindow::displaySearchResults(const QJsonArray &students, const QString &searchTerm)
+void adminWindow::displaySearchResults(const QList<StudentRecord> &students,
+                                       const QString &highlightTerm)
 {
-    // Block all itemChanged() signals while filling table
+    Q_UNUSED(highlightTerm);   // legacy never used it — no highlighting exists; preserved for parity
     ui->studentSearchTable->blockSignals(true);
-
     ui->studentSearchTable->clearContents();
     ui->studentSearchTable->setRowCount(students.size());
 
     for (int row = 0; row < students.size(); ++row) {
-        QJsonObject student = students[row].toObject();
-
-        // Leave Select column (index 0) empty for now
+        const StudentRecord &s = students.at(row);
         ui->studentSearchTable->setItem(row, 0, new QTableWidgetItem(""));
-
-        ui->studentSearchTable->setItem(row, 1, new QTableWidgetItem(student["code"].toString()));
-        ui->studentSearchTable->setItem(row, 2, new QTableWidgetItem(student["school_id"].toString()));
-        ui->studentSearchTable->setItem(row, 3, new QTableWidgetItem(student["name"].toString()));
-        ui->studentSearchTable->setItem(row, 4, new QTableWidgetItem(student["course"].toString()));
-        ui->studentSearchTable->setItem(row, 5, new QTableWidgetItem(student["department"].toString()));
-        ui->studentSearchTable->setItem(row, 6, new QTableWidgetItem(student["year_level"].toString()));
-        ui->studentSearchTable->setItem(row, 7, new QTableWidgetItem(student["gender"].toString()));
-        ui->studentSearchTable->setItem(row, 8, new QTableWidgetItem(student["status"].toString()));
+        ui->studentSearchTable->setItem(row, 1, new QTableWidgetItem(s.code));
+        ui->studentSearchTable->setItem(row, 2, new QTableWidgetItem(s.schoolId));
+        ui->studentSearchTable->setItem(row, 3, new QTableWidgetItem(s.name));
+        ui->studentSearchTable->setItem(row, 4, new QTableWidgetItem(s.course));
+        ui->studentSearchTable->setItem(row, 5, new QTableWidgetItem(s.department));
+        ui->studentSearchTable->setItem(row, 6, new QTableWidgetItem(s.yearLevel));
+        ui->studentSearchTable->setItem(row, 7, new QTableWidgetItem(s.gender));
+        ui->studentSearchTable->setItem(row, 8, new QTableWidgetItem(s.status));
     }
 
-    ui->studentSearchTable->blockSignals(false); // ✅ Re-enable signals after fill
-
-    // --- Sync header checkbox state with row selections
+    ui->studentSearchTable->blockSignals(false);
     ui->selectAllBtn->setText("Select All");
 }
 
+void adminWindow::onSearchFailed(const QString &errorString)
+{
+    ui->searchLoadingBar->setVisible(false);
+    if (m_studentSearchShowOverlay)
+        showTemporaryOverlay(ui->studentSearchPage,
+                             QString("❌ Network Error\n%1").arg(errorString));   // row 11
+}
+
+void adminWindow::onSearchFinished(SearchOutcome outcome,
+                                   const QList<StudentRecord> &records,
+                                   const QString &message,
+                                   const QString &searchTerm)
+{
+    ui->searchLoadingBar->setVisible(false);
+
+    switch (outcome) {
+    case SearchOutcome::InvalidResponse:
+        if (m_studentSearchShowOverlay)
+            showTemporaryOverlay(ui->studentSearchPage, "⚠️ Invalid server response");  // row 12
+        break;
+    case SearchOutcome::NotSuccess:
+        ui->studentSearchTable->clearContents();          // cleared regardless of flag
+        ui->studentSearchTable->setRowCount(0);
+        if (m_studentSearchShowOverlay)
+            showTemporaryOverlay(ui->studentSearchPage, QString("🔍 %1").arg(message));  // row 13
+        break;
+    case SearchOutcome::Empty:
+        ui->studentSearchTable->clearContents();          // cleared regardless of flag
+        ui->studentSearchTable->setRowCount(0);
+        if (m_studentSearchShowOverlay)
+            showTemporaryOverlay(ui->studentSearchPage,
+                                 "🔍 No students found\nTry adjusting your search filters");  // row 14
+        break;
+    case SearchOutcome::Results:
+        // Legacy guard was `showOverlay && students.size() > 0` (adminwindow.cpp:3236);
+        // the size check is subsumed here because parseSearchResponse only returns
+        // Results when the array is non-empty (Empty is split out upstream).
+        if (m_studentSearchShowOverlay)
+            showTemporaryOverlay(ui->studentSearchPage,
+                                 QString("✅ Found %1 student%2")
+                                     .arg(records.size())
+                                     .arg(records.size() == 1 ? "" : "s"));   // row 15
+        displaySearchResults(records, searchTerm);
+        break;
+    case SearchOutcome::NetworkError:
+        break;   // never emitted via searchFinished; handled by onSearchFailed
+    }
+}
 
 void adminWindow::onSearchBtnClicked()
 {
     performStudentSearch(true); // That's it - performStudentSearch handles everything
 }
 
-void adminWindow::deleteStudents(const QStringList &schoolIds)
-{
-    QUrl url = ApiConfig::endpoint("delete_students.php");
-    QNetworkRequest request(url);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-
-    QJsonObject data;
-    QJsonArray ids;
-    for (const QString &id : schoolIds) {
-        ids.append(id);
-    }
-    data["school_ids"] = ids;
-
-    QNetworkReply *reply = networkManager->post(request,
-                                                QJsonDocument(data).toJson());
-
-    connect(reply, &QNetworkReply::finished, this, [=]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            showTemporaryOverlay(ui->studentSearchPage,
-                                 QString("❌ Error: %1").arg(reply->errorString()));
-            reply->deleteLater();
-            return;
-        }
-
-        QByteArray resp = reply->readAll();
-        reply->deleteLater();
-
-        QJsonDocument doc = QJsonDocument::fromJson(resp);
-        QJsonObject obj = doc.object();
-
-        if (obj["status"].toString() == "success") {
-            showTemporaryOverlay(ui->studentSearchPage,
-                                 QString("✅ %1 student%2 deleted successfully")
-                                     .arg(schoolIds.size())
-                                     .arg(schoolIds.size() == 1 ? "" : "s"));
-
-            performStudentSearch(false); // ✅ Refresh silently
-        } else {
-            showTemporaryOverlay(ui->studentSearchPage,
-                                 QString("⚠️ %1").arg(obj["message"].toString()));
-        }
-    });
-}
-
-void adminWindow::onDeleteStudentBtnClicked()
-{
-    QStringList selectedIds;
-
-    for (int row = 0; row < ui->studentSearchTable->rowCount(); ++row) {
-        QWidget *widget = ui->studentSearchTable->cellWidget(row, 0);
-        if (!widget) continue;
-
-        QCheckBox *cb = widget->findChild<QCheckBox*>();
-        if (cb && cb->isChecked()) {
-            QString id = ui->studentSearchTable->item(row, 2)->text(); // Column 2 = School ID
-            selectedIds << id;
-        }
-    }
-
-    if (selectedIds.isEmpty()) {
-        showTemporaryOverlay(ui->studentSearchPage,
-                             "⚠️ Please select at least one student to delete");
-        return;
-    }
-
-    QMessageBox::StandardButton confirm = QMessageBox::warning(
-        this, "Confirm Delete",
-        QString("Are you sure you want to delete %1 student(s)?\n\nThis action cannot be undone.")
-            .arg(selectedIds.size()),
-        QMessageBox::Yes | QMessageBox::No
-        );
-
-    if (confirm == QMessageBox::Yes) {
-        deleteStudents(selectedIds);
-    }
-}
-
 void adminWindow::populateFilters()
 {
-    // --- Populate Departments ---
-    QNetworkRequest deptRequest(ApiConfig::endpoint("get_departments.php"));
-    QNetworkReply *deptReply = networkManager->get(deptRequest);
-
-    connect(deptReply, &QNetworkReply::finished, this, [=]() {
-        QByteArray resp = deptReply->readAll();
-        deptReply->deleteLater();
-
-        QJsonDocument doc = QJsonDocument::fromJson(resp);
-        QJsonObject obj = doc.object();
-
-        ui->searchDepartmentFilter->clear();
-        ui->searchDepartmentFilter->addItem("Select Department");
-
-        if (obj["status"].toString() == "success") {
-            QJsonArray arr = obj["departments"].toArray();
-            for (const QJsonValue &val : arr) {
-                QString dept = val.toString();
-                if (dept.toLower() != "all") {  // ✅ Skip "All" since we don't request it
-                    ui->searchDepartmentFilter->addItem(dept);
-                }
-            }
-        }
-    });
-}
-
-void adminWindow::showSearchOverlay()
-{
-    if (!ui->searchOverlay) return;
-
-    ui->searchOverlay->raise();
-    ui->searchOverlay->setVisible(true);
-
-    // Create spinner if not created yet
-    if (!searchSpinner) {
-        searchSpinner = new BusyIndicator(ui->searchOverlay);
-        searchSpinner->setFixedSize(48, 48);
-        searchSpinner->setColor(QColor(WitsTheme::Color::Secondary));
-    }
-
-    // Center spinner
-    int sw = searchSpinner->width();
-    int sh = searchSpinner->height();
-    int ow = ui->searchOverlay->width();
-    int oh = ui->searchOverlay->height();
-    searchSpinner->move((ow - sw) / 2, (oh - sh) / 2 - 12);
-    searchSpinner->start();
-
-    // Fade in effect
-    if (!overlayEffect) {
-        overlayEffect = new QGraphicsOpacityEffect(ui->searchOverlay);
-        ui->searchOverlay->setGraphicsEffect(overlayEffect);
-    }
-
-    QPropertyAnimation *fadeIn = new QPropertyAnimation(overlayEffect, "opacity", this);
-    fadeIn->setDuration(250);
-    fadeIn->setStartValue(0.0);
-    fadeIn->setEndValue(1.0);
-    fadeIn->start(QPropertyAnimation::DeleteWhenStopped);
-}
-
-void adminWindow::hideSearchOverlay()
-{
-    if (!ui->searchOverlay) return;
-
-    if (!overlayEffect) {
-        overlayEffect = new QGraphicsOpacityEffect(ui->searchOverlay);
-        ui->searchOverlay->setGraphicsEffect(overlayEffect);
-        overlayEffect->setOpacity(1.0);
-    }
-
-    QPropertyAnimation *fadeOut = new QPropertyAnimation(overlayEffect, "opacity", this);
-    fadeOut->setDuration(250);
-    fadeOut->setStartValue(1.0);
-    fadeOut->setEndValue(0.0);
-
-    connect(fadeOut, &QPropertyAnimation::finished, this, [this]() {
-        if (searchSpinner) searchSpinner->stop();
-        ui->searchOverlay->setVisible(false);
-    });
-
-    fadeOut->start(QPropertyAnimation::DeleteWhenStopped);
-}
-
-void adminWindow::loadAllStudents()
-{
-    QUrl url = ApiConfig::endpoint("search_students.php");
-    QNetworkRequest request(url);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-
-    QJsonObject filters;
-    filters["search"] = "";  // Empty search = all students
-    filters["department"] = "All";
-    filters["course"] = "All";
-
-    QNetworkReply *reply = networkManager->post(request, QJsonDocument(filters).toJson());
-
-    connect(reply, &QNetworkReply::finished, this, [=]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            QMessageBox::critical(this, "Error", "Failed to load students: " + reply->errorString());
-            reply->deleteLater();
-            return;
-        }
-
-        QByteArray resp = reply->readAll();
-        reply->deleteLater();
-
-        QJsonDocument doc = QJsonDocument::fromJson(resp);
-        QJsonObject obj = doc.object();
-
-        if (obj["status"].toString() == "success") {
-            QJsonArray students = obj["students"].toArray();
-            displaySearchResults(students, "" ); // No highlighting
-        }
-    });
+    m_studentController->loadDepartments();
 }
 
 void adminWindow::onDepartmentFilterChanged(int)
 {
-    QString department = ui->searchDepartmentFilter->currentText();
-    if (department.isEmpty() || department == "Select Department") return;
+    ui->searchCourseFilter->clear();
+    ui->searchCourseFilter->addItem("Select Course");   // preserves the index-0 end state
 
-    QUrl url = ApiConfig::endpoint("get_courses.php");
-    QUrlQuery query;
-    query.addQueryItem("department", department);
-    // ✅ Don't include "All" for search filter
-    // query.addQueryItem("include_all", "false"); // Optional, false by default
-    url.setQuery(query);
+    const QString dept = ui->searchDepartmentFilter->currentText();
+    if (dept.isEmpty() || dept == "Select Department")
+        return;                                          // placeholder: combo already = ["Select Course"]
 
-    QNetworkRequest request(url);
-    QNetworkReply *reply = networkManager->get(request);
+    m_studentController->loadCourses(dept);              // single GET (was two)
+}
 
-    connect(reply, &QNetworkReply::finished, this, [=]() {
-        if (reply->error() == QNetworkReply::NoError) {
-            QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
-            QJsonObject obj = doc.object();
-            if (obj["status"].toString() == "success") {
-                ui->searchCourseFilter->clear();
-                ui->searchCourseFilter->addItem("Select Course"); // ✅ Placeholder instead of "All"
+void adminWindow::onDepartmentsLoaded(const QStringList &departments)
+{
+    ui->searchDepartmentFilter->clear();
+    ui->searchDepartmentFilter->addItem("Select Department");
+    ui->searchDepartmentFilter->addItems(departments);
+}
 
-                for (auto c : obj["courses"].toArray()) {
-                    ui->searchCourseFilter->addItem(c.toString());
-                }
-            }
-        }
-        reply->deleteLater();
-    });
+void adminWindow::onCoursesLoaded(const QStringList &courses)
+{
+    ui->searchCourseFilter->clear();
+    ui->searchCourseFilter->addItem("Select Course");
+    ui->searchCourseFilter->addItems(courses);
 }
 
 VisitorFilter adminWindow::collectVisitorFilter() const
