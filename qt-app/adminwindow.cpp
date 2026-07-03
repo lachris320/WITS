@@ -2971,7 +2971,11 @@ void adminWindow::bulkUpdateStudents(const QList<StudentRecord> &updates)
     m_studentController->bulkUpdateStudents(updates);
 }
 
-void adminWindow::onBulkUpdateFailed(const QString &errorString)
+// Restores the Student Search toolbar to its non-edit (view) state:
+// relabels/enables the Edit button, hides the edit-only controls, disables
+// table editing, and clears the row checkboxes. Shared by every edit-mode
+// exit path (cancel, bulk-update completion, delete completion).
+void adminWindow::exitStudentEditMode()
 {
     ui->editStudentBtn->setText("Edit");
     ui->editStudentBtn->setEnabled(true);
@@ -2980,6 +2984,11 @@ void adminWindow::onBulkUpdateFailed(const QString &errorString)
     ui->deleteStudentBtn->setVisible(false);
     ui->studentSearchTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     clearCheckboxes();
+}
+
+void adminWindow::onBulkUpdateFailed(const QString &errorString)
+{
+    exitStudentEditMode();
 
     showTemporaryOverlay(ui->studentSearchPage,
                          QString("❌ Network Error\n%1").arg(errorString));   // row 4
@@ -2987,13 +2996,7 @@ void adminWindow::onBulkUpdateFailed(const QString &errorString)
 
 void adminWindow::onBulkUpdateFinished(const BulkUpdateResult &result)
 {
-    ui->editStudentBtn->setText("Edit");
-    ui->editStudentBtn->setEnabled(true);
-    ui->cancelEditBtn->setVisible(false);
-    ui->selectAllBtn->setVisible(false);
-    ui->deleteStudentBtn->setVisible(false);
-    ui->studentSearchTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    clearCheckboxes();
+    exitStudentEditMode();
 
     if (result.ok) {
         showTemporaryOverlay(ui->studentSearchPage,
@@ -3049,13 +3052,7 @@ void adminWindow::onDeleteStudentBtnClicked()
 
 void adminWindow::onDeleteFinished(bool ok, int requestedCount, const QString &message)
 {
-    ui->editStudentBtn->setText("Edit");
-    ui->editStudentBtn->setEnabled(true);
-    ui->cancelEditBtn->setVisible(false);
-    ui->selectAllBtn->setVisible(false);
-    ui->deleteStudentBtn->setVisible(false);
-    ui->studentSearchTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    clearCheckboxes();
+    exitStudentEditMode();
 
     if (ok) {
         showTemporaryOverlay(ui->studentSearchPage,
@@ -3071,13 +3068,7 @@ void adminWindow::onDeleteFinished(bool ok, int requestedCount, const QString &m
 
 void adminWindow::onDeleteFailed(const QString &errorString)
 {
-    ui->editStudentBtn->setText("Edit");
-    ui->editStudentBtn->setEnabled(true);
-    ui->cancelEditBtn->setVisible(false);
-    ui->selectAllBtn->setVisible(false);
-    ui->deleteStudentBtn->setVisible(false);
-    ui->studentSearchTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    clearCheckboxes();
+    exitStudentEditMode();
 
     showTemporaryOverlay(ui->studentSearchPage,
                          QString("❌ Error: %1").arg(errorString));
@@ -3086,13 +3077,7 @@ void adminWindow::onDeleteFailed(const QString &errorString)
 // Add cancel button handler
 void adminWindow::onCancelEditBtnClicked()
 {
-    ui->editStudentBtn->setText("Edit");
-    ui->editStudentBtn->setEnabled(true);
-    ui->cancelEditBtn->setVisible(false);
-    ui->selectAllBtn->setVisible(false);
-    ui->deleteStudentBtn->setVisible(false);
-    ui->studentSearchTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
-    clearCheckboxes();
+    exitStudentEditMode();
 
     // Lock all cells again
     for (int row = 0; row < ui->studentSearchTable->rowCount(); ++row) {

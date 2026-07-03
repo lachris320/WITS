@@ -116,6 +116,7 @@ private:
     void performStudentSearch(bool showOverlay=true);
     void displaySearchResults(const QList<StudentRecord> &students, const QString &highlightTerm);
     void clearCheckboxes();
+    void exitStudentEditMode();
     void setupStudentSearchPage();
     void loadSearchFilters();
     void onDepartmentFilterChanged(int);
