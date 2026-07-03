@@ -40,6 +40,8 @@
 #include "settingscontroller.h"
 #include "visitordata.h"
 #include "visitorcontroller.h"
+#include "importdata.h"
+#include "importcontroller.h"
 #include <QGraphicsOpacityEffect>
 #include <QPropertyAnimation>
 #include <QPagedPaintDevice>
@@ -98,6 +100,7 @@ private:
     QList<VisitorRecord> m_visitorRecords;    // cache of the last visitorsLoaded payload
 
     VisitorFilter collectVisitorFilter() const;
+    ImportController *m_importController;   // child of this, created in ctor
     bool cancelUpload = false;
     void populateFilters();
     ReportPalette getPalette(const QString &choice);
@@ -174,6 +177,12 @@ private slots:
     void onSettingsImportError(const QString &message);
     void populateVisitorTable(const QList<VisitorRecord> &records, int totalCount);
     void onVisitorFetchError(const QString &title, const QString &message);
+    void onImportDuplicatesResolved(const QStringList &duplicates);
+    void onImportError(const QString &title, const QString &message, ImportSeverity severity);
+    void onUploadStarted();
+    void onUploadProgress(int percent);
+    void onUploadFinished(const UploadResult &result);
+    void onUploadFailed(const QString &message);
     void onClearAttendanceCheckBoxStateChanged(int state);
     void onCancelUploadBtnClicked();
     void loadDepartments();

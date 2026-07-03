@@ -427,6 +427,19 @@ adminWindow::adminWindow(QWidget *parent)
             this, &adminWindow::populateVisitorTable);
     connect(m_visitorController, &VisitorController::fetchError,
             this, &adminWindow::onVisitorFetchError);
+    m_importController = new ImportController(networkManager, this);
+    connect(m_importController, &ImportController::duplicatesResolved,
+            this, &adminWindow::onImportDuplicatesResolved);
+    connect(m_importController, &ImportController::importError,
+            this, &adminWindow::onImportError);
+    connect(m_importController, &ImportController::uploadStarted,
+            this, &adminWindow::onUploadStarted);
+    connect(m_importController, &ImportController::uploadProgress,
+            this, &adminWindow::onUploadProgress);
+    connect(m_importController, &ImportController::uploadFinished,
+            this, &adminWindow::onUploadFinished);
+    connect(m_importController, &ImportController::uploadFailed,
+            this, &adminWindow::onUploadFailed);
     chartsPreviewBoxLayout = ui->chartsPreviewBox;
     searchSpinner = nullptr;
     overlayEffect = nullptr;
@@ -1143,7 +1156,10 @@ void adminWindow::onUpdateDatabaseBtnClicked()
         return;
     }
 
-    // helper lambda to extract cell safely
+    // helper lambda to extract cell safely — reads the LIVE table so any
+    // hand-edit the user made after the preview load is picked up (bulkTable
+    // is editable, unlike visitorTable — this is why school IDs are NOT
+    // cached from the ParsedTable, only bulkHeaderIndex is).
     auto getCell = [&](int row, const QString &key, int fallbackIndex = -1) -> QString {
         int col = -1;
         if (bulkHeaderIndex.contains(key)) col = bulkHeaderIndex[key];
@@ -1153,7 +1169,6 @@ void adminWindow::onUpdateDatabaseBtnClicked()
         return it ? it->text().trimmed() : QString();
     };
 
-    // Step 1: Collect all school IDs
     QStringList schoolIds;
     for (int i = 0; i < rowCount; i++) {
         QString sid = getCell(i, "school_id", 1);
@@ -1161,209 +1176,7 @@ void adminWindow::onUpdateDatabaseBtnClicked()
             schoolIds << sid;
     }
 
-    // Step 2: Call check_duplicates.php
-    QUrl url = ApiConfig::endpoint("check_duplicates.php");
-    QNetworkRequest request(url);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-
-    QJsonArray idsArray;
-    for (const QString &id : schoolIds)
-        idsArray.append(id);
-
-    QJsonObject jsonReq;
-    jsonReq["school_ids"] = idsArray;
-
-    QNetworkReply *dupReply = networkManager->post(request, QJsonDocument(jsonReq).toJson());
-
-    connect(dupReply, &QNetworkReply::finished, this, [=]() {
-        if (dupReply->error() != QNetworkReply::NoError) {
-            QMessageBox::critical(this, "Error", dupReply->errorString());
-            dupReply->deleteLater();
-            return;
-        }
-
-        QByteArray resp = dupReply->readAll();
-        dupReply->deleteLater();
-
-        QJsonDocument jsonDoc = QJsonDocument::fromJson(resp);
-        if (!jsonDoc.isObject()) {
-            QMessageBox::warning(this, "Error", "Invalid duplicate check response.");
-            return;
-        }
-
-        QJsonObject obj = jsonDoc.object();
-        if (obj["status"].toString() != "success") {
-            QMessageBox::warning(this, "Error", "Duplicate check failed.");
-            return;
-        }
-
-        // Step 3: Handle duplicates before upload
-        QJsonArray dupArray = obj["duplicates"].toArray();
-        QStringList duplicates;
-        for (auto v : dupArray) duplicates << v.toString();
-
-        if (!duplicates.isEmpty()) {
-            // Show only first 3 in the main message
-            QString previewList = duplicates.mid(0, 3).join("\n");
-            QString msg = "The following School IDs already exist:\n\n" + previewList;
-
-            if (duplicates.size() > 3) {
-                msg += "\n...and more.\n\nDo you want to skip them and continue?";
-            } else {
-                msg += "\n\nDo you want to skip them and continue?";
-            }
-
-            QMessageBox box(QMessageBox::Question,
-                            "Duplicates Found",
-                            msg,
-                            QMessageBox::Yes | QMessageBox::No,
-                            this);
-
-            // Add "Show More" button if there are more than 3
-            QPushButton *showMoreBtn = nullptr;
-            if (duplicates.size() > 3) {
-                showMoreBtn = box.addButton("Show More", QMessageBox::ActionRole);
-            }
-
-            box.exec();
-
-            if (box.clickedButton() == showMoreBtn) {
-                // Show full list in a new dialog
-                QString fullMsg = "Full list of duplicate School IDs:\n\n" + duplicates.join("\n");
-                QMessageBox::information(this, "All Duplicates", fullMsg);
-
-                // Re-ask the original question after showing full list
-                QMessageBox::StandardButton choice =
-                    QMessageBox::question(this, "Proceed?",
-                                          "Do you want to skip duplicates and continue?",
-                                          QMessageBox::Yes | QMessageBox::No);
-                if (choice == QMessageBox::No) {
-                    QMessageBox::information(this, "Cancelled", "Bulk upload cancelled.");
-                    return;
-                }
-            } else if (box.standardButton(box.clickedButton()) == QMessageBox::No) {
-                QMessageBox::information(this, "Cancelled", "Bulk upload cancelled.");
-                return;
-            }
-        }
-
-        // Step 4: Prepare bulk upload with Excel and ZIP files
-        cancelUpload = false;
-        ui->cancelUploadBtn->setEnabled(true);
-        ui->updateDatabaseBtn->setEnabled(false);
-
-        ui->bulkProgressBar->setVisible(true);
-        ui->bulkProgressBar->setMinimum(0);
-        ui->bulkProgressBar->setMaximum(0); // Indeterminate progress during upload
-        ui->bulkProgressBar->setValue(0);
-
-        // Create multipart form data
-        QNetworkRequest uploadRequest(ApiConfig::endpoint("upload_students_zip.php"));
-        QHttpMultiPart *multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
-
-        // Excel file part
-        QHttpPart excelPart;
-        excelPart.setHeader(QNetworkRequest::ContentDispositionHeader,
-                            QVariant("form-data; name=\"excel\"; filename=\"" +
-                                     QFileInfo(selectedExcelPath).fileName() + "\""));
-        QFile *excelFile = new QFile(selectedExcelPath);
-        if (!excelFile->open(QIODevice::ReadOnly)) {
-            QMessageBox::critical(this, "Error", "Cannot open Excel file.");
-            delete excelFile;
-            delete multiPart;
-            ui->bulkProgressBar->setVisible(false);
-            ui->updateDatabaseBtn->setEnabled(true);
-            ui->cancelUploadBtn->setEnabled(false);
-            return;
-        }
-        excelPart.setBodyDevice(excelFile);
-        excelFile->setParent(multiPart);
-        multiPart->append(excelPart);
-
-        // ZIP file part (optional)
-        if (!selectedZipPath.isEmpty()) {
-            QHttpPart zipPart;
-            zipPart.setHeader(QNetworkRequest::ContentDispositionHeader,
-                              QVariant("form-data; name=\"photos_zip\"; filename=\"" +
-                                       QFileInfo(selectedZipPath).fileName() + "\""));
-            QFile *zipFile = new QFile(selectedZipPath);
-            if (!zipFile->open(QIODevice::ReadOnly)) {
-                QMessageBox::warning(this, "Warning", "Cannot open ZIP file. Proceeding without photos.");
-            } else {
-                zipPart.setBodyDevice(zipFile);
-                zipFile->setParent(multiPart);
-                multiPart->append(zipPart);
-            }
-        }
-
-        // Add duplicates list to skip them server-side
-        if (!duplicates.isEmpty()) {
-            QHttpPart dupPart;
-            dupPart.setHeader(QNetworkRequest::ContentDispositionHeader,
-                              QVariant("form-data; name=\"skip_ids\""));
-            dupPart.setBody(duplicates.join(",").toUtf8());
-            multiPart->append(dupPart);
-        }
-
-        // Send the upload request
-        QNetworkReply *uploadReply = networkManager->post(uploadRequest, multiPart);
-        multiPart->setParent(uploadReply);
-
-        connect(uploadReply, &QNetworkReply::finished, this, [this, uploadReply]() {
-            ui->bulkProgressBar->setVisible(false);
-            ui->updateDatabaseBtn->setEnabled(true);
-            ui->cancelUploadBtn->setEnabled(false);
-
-            if (uploadReply->error() != QNetworkReply::NoError) {
-                QMessageBox::critical(this, "Upload Failed", uploadReply->errorString());
-                uploadReply->deleteLater();
-                return;
-            }
-
-            QByteArray response = uploadReply->readAll();
-            uploadReply->deleteLater();
-
-            // Parse JSON response
-            QJsonDocument jsonDoc = QJsonDocument::fromJson(response);
-            if (jsonDoc.isObject()) {
-                QJsonObject obj = jsonDoc.object();
-                QString status = obj["status"].toString();
-                QString message = obj["message"].toString();
-                int successCount = obj["success_count"].toInt();
-                int errorCount = obj["error_count"].toInt();
-
-                if (status == "success") {
-                    QMessageBox::information(this, "Upload Complete",
-                                             QString("Bulk upload finished!\n\n"
-                                                     "Successfully inserted: %1\n"
-                                                     "Errors/Skipped: %2\n\n%3")
-                                                 .arg(successCount)
-                                                 .arg(errorCount)
-                                                 .arg(message));
-
-                    // Clear the table after successful upload
-                    ui->bulkTable->setRowCount(0);
-                    selectedExcelPath.clear();
-                    selectedZipPath.clear();
-                } else {
-                    QMessageBox::warning(this, "Upload Issue", message);
-                }
-            } else {
-                // Plain text response fallback
-                QMessageBox::information(this, "Upload Complete", QString::fromUtf8(response));
-            }
-        });
-
-        // Handle upload progress (optional)
-        connect(uploadReply, &QNetworkReply::uploadProgress, this,
-                [this](qint64 bytesSent, qint64 bytesTotal) {
-                    if (bytesTotal > 0) {
-                        int progress = (bytesSent * 100) / bytesTotal;
-                        ui->bulkProgressBar->setMaximum(100);
-                        ui->bulkProgressBar->setValue(progress);
-                    }
-                });
-    });
+    m_importController->checkDuplicates(schoolIds);
 }
 
 void adminWindow::onCancelUploadBtnClicked()
@@ -1373,96 +1186,170 @@ void adminWindow::onCancelUploadBtnClicked()
     ui->bulkTable->clearContents();
 }
 
-static QString normalizeHeader(const QString &h) {
-    QString s = h.trimmed().toLower();
-    s.remove(' ');
-    s.remove('_');
-    s.remove('-');
-    return s;
+void adminWindow::onImportDuplicatesResolved(const QStringList &duplicates)
+{
+    if (duplicates.isEmpty()) {
+        m_importController->uploadStudents(selectedExcelPath, selectedZipPath, QStringList{});
+        return;
+    }
+
+    // Show only first 3 in the main message
+    QString previewList = duplicates.mid(0, 3).join("\n");
+    QString msg = "The following School IDs already exist:\n\n" + previewList;
+
+    if (duplicates.size() > 3) {
+        msg += "\n...and more.\n\nDo you want to skip them and continue?";
+    } else {
+        msg += "\n\nDo you want to skip them and continue?";
+    }
+
+    QMessageBox box(QMessageBox::Question,
+                    "Duplicates Found",
+                    msg,
+                    QMessageBox::Yes | QMessageBox::No,
+                    this);
+
+    // Add "Show More" button if there are more than 3
+    QPushButton *showMoreBtn = nullptr;
+    if (duplicates.size() > 3) {
+        showMoreBtn = box.addButton("Show More", QMessageBox::ActionRole);
+    }
+
+    box.exec();
+
+    if (box.clickedButton() == showMoreBtn) {
+        // Show full list in a new dialog
+        QString fullMsg = "Full list of duplicate School IDs:\n\n" + duplicates.join("\n");
+        QMessageBox::information(this, "All Duplicates", fullMsg);
+
+        // Re-ask the original question after showing full list
+        QMessageBox::StandardButton choice =
+            QMessageBox::question(this, "Proceed?",
+                                  "Do you want to skip duplicates and continue?",
+                                  QMessageBox::Yes | QMessageBox::No);
+        if (choice == QMessageBox::No) {
+            QMessageBox::information(this, "Cancelled", "Bulk upload cancelled.");
+            return;
+        }
+    } else if (box.standardButton(box.clickedButton()) == QMessageBox::No) {
+        QMessageBox::information(this, "Cancelled", "Bulk upload cancelled.");
+        return;
+    }
+
+    // Yes (either directly or via the Show More re-ask) — the entire
+    // duplicates list becomes skipIds, matching legacy line 1300's guard
+    // which always sends the full list.
+    m_importController->uploadStudents(selectedExcelPath, selectedZipPath, duplicates);
+}
+
+void adminWindow::onImportError(const QString &title, const QString &message, ImportSeverity severity)
+{
+    if (severity == ImportSeverity::Critical)
+        QMessageBox::critical(this, title, message);
+    else
+        QMessageBox::warning(this, title, message);
+}
+
+void adminWindow::onUploadStarted()
+{
+    cancelUpload = false;
+    ui->cancelUploadBtn->setEnabled(true);
+    ui->updateDatabaseBtn->setEnabled(false);
+
+    ui->bulkProgressBar->setVisible(true);
+    ui->bulkProgressBar->setMinimum(0);
+    ui->bulkProgressBar->setMaximum(0); // Indeterminate progress during upload
+    ui->bulkProgressBar->setValue(0);
+}
+
+void adminWindow::onUploadProgress(int percent)
+{
+    // Every emission re-asserts determinate mode, matching the legacy lambda
+    // which called setMaximum(100) unconditionally inside uploadProgress
+    // (adminwindow.cpp:1362) — cheap, idempotent, preserved exactly.
+    ui->bulkProgressBar->setMaximum(100);
+    ui->bulkProgressBar->setValue(percent);
+}
+
+void adminWindow::onUploadFinished(const UploadResult &result)
+{
+    ui->bulkProgressBar->setVisible(false);
+    ui->updateDatabaseBtn->setEnabled(true);
+    ui->cancelUploadBtn->setEnabled(false);
+
+    if (result.plainText) {
+        QMessageBox::information(this, "Upload Complete", result.rawText);
+        return;
+    }
+
+    if (result.ok) {
+        QMessageBox::information(this, "Upload Complete",
+                                 QString("Bulk upload finished!\n\n"
+                                         "Successfully inserted: %1\n"
+                                         "Errors/Skipped: %2\n\n%3")
+                                     .arg(result.successCount)
+                                     .arg(result.errorCount)
+                                     .arg(result.message));
+
+        // Clear the table after successful upload — the ONLY outcome that
+        // clears bulkTable/selectedExcelPath/selectedZipPath.
+        ui->bulkTable->setRowCount(0);
+        selectedExcelPath.clear();
+        selectedZipPath.clear();
+    } else {
+        QMessageBox::warning(this, "Upload Issue", result.message);
+    }
+}
+
+void adminWindow::onUploadFailed(const QString &message)
+{
+    ui->bulkProgressBar->setVisible(false);
+    ui->updateDatabaseBtn->setEnabled(true);
+    ui->cancelUploadBtn->setEnabled(false);
+
+    QMessageBox::critical(this, "Upload Failed", message);
 }
 
 void adminWindow::loadExcelToTable(const QString &filePath)
 {
-    QXlsx::Document xlsx(filePath);
-    if (!xlsx.isLoadPackage()) {
+    ExcelParseError err = ExcelParseError::None;
+    const ParsedTable table = m_importController->parseExcel(filePath, &err);
+
+    if (err == ExcelParseError::OpenFailed) {
         QMessageBox::warning(this, "Error", "Failed to open Excel file.");
-        return;
+        return;   // table left untouched, matching adminwindow.cpp:1387-1390
     }
-
-    const QStringList sheets = xlsx.sheetNames();
-    if (sheets.isEmpty()) {
+    if (err == ExcelParseError::NoSheets) {
         QMessageBox::warning(this, "Error", "This workbook has no sheets.");
-        return;
+        return;   // table left untouched, matching adminwindow.cpp:1393-1396
     }
-    xlsx.selectSheet(sheets.first());
-
-    QXlsx::CellRange rng = xlsx.dimension();
-    if (!rng.isValid()) {
+    if (err == ExcelParseError::EmptySheet) {
         QMessageBox::information(this, "Excel", "Sheet is empty.");
         ui->bulkTable->clear();
         ui->bulkTable->setRowCount(0);
         ui->bulkTable->setColumnCount(0);
-        return;
+        return;   // matches adminwindow.cpp:1401-1406
     }
 
-    const int firstRow = rng.firstRow();
-    const int lastRow  = rng.lastRow();
-    const int firstCol = rng.firstColumn();
-    const int lastCol  = rng.lastColumn();
+    bulkHeaderIndex = table.headerIndex;
 
-    // Read header row (firstRow)
-    QStringList headers;
-    bulkHeaderIndex.clear();
-    for (int c = firstCol; c <= lastCol; ++c) {
-        QVariant hv = xlsx.read(firstRow, c);
-        QString hdr = hv.toString();
-        headers << hdr;
-
-        QString n = normalizeHeader(hdr);
-        int tableCol = c - firstCol; // zero-based column index for ui->bulkTable
-
-        if (n.contains("schoolid") || n.contains("studentid") || (n == "id"))
-            bulkHeaderIndex["school_id"] = tableCol;
-        else if (n.contains("name") || n.contains("fullname") || n.contains("full"))
-            bulkHeaderIndex["name"] = tableCol;
-        else if (n.contains("code") || n.contains("studentcode"))
-            bulkHeaderIndex["code"] = tableCol;
-        else if (n.contains("course"))
-            bulkHeaderIndex["course"] = tableCol;
-        else if (n.contains("year"))
-            bulkHeaderIndex["year_level"] = tableCol;
-        else if (n.contains("department") || n.contains("dept"))
-            bulkHeaderIndex["department"] = tableCol;
-        else if (n.contains("gender"))
-            bulkHeaderIndex["gender"] = tableCol;
-        else if (n.contains("status"))
-            bulkHeaderIndex["status"] = tableCol;
-        else if (n.contains("visit"))
-            bulkHeaderIndex["visits"] = tableCol;
-        else
-            bulkHeaderIndex[QString("col_%1").arg(tableCol)] = tableCol;
-    }
-
-    const int rows = lastRow - firstRow; // exclude header row
-    const int cols = lastCol - firstCol + 1;
-
+    // Excel population — port of loadExcelToTable lines 1449-1462 verbatim.
     ui->bulkTable->clear();
-    ui->bulkTable->setRowCount(rows);
-    ui->bulkTable->setColumnCount(cols);
-    ui->bulkTable->setHorizontalHeaderLabels(headers);
+    ui->bulkTable->setRowCount(table.rows.size());
+    ui->bulkTable->setColumnCount(table.headers.size());
+    ui->bulkTable->setHorizontalHeaderLabels(table.headers);
 
-    for (int r = firstRow + 1; r <= lastRow; ++r) {
-        int rowIndex = r - firstRow - 1;
-        for (int c = firstCol; c <= lastCol; ++c) {
-            QVariant val = xlsx.read(r, c);
-            ui->bulkTable->setItem(rowIndex, c - firstCol, new QTableWidgetItem(val.toString()));
-        }
+    for (int r = 0; r < table.rows.size(); ++r) {
+        const QStringList &row = table.rows.at(r);
+        for (int c = 0; c < row.size(); ++c)
+            ui->bulkTable->setItem(r, c, new QTableWidgetItem(row.at(c)));
     }
 
     ui->bulkTable->resizeColumnsToContents();
 }
 
-void adminWindow::loadCSVtoTable(const QString &filePath){
+void adminWindow::loadCSVtoTable(const QString &filePath)
+{
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         QMessageBox::warning(this, "Error", "Cannot open file: " + filePath);
@@ -1470,74 +1357,42 @@ void adminWindow::loadCSVtoTable(const QString &filePath){
     }
 
     QTextStream in(&file);
-    QStringList lines;
-    while (!in.atEnd()) {
-        lines.append(in.readLine());
-    }
+    const QString rawText = in.readAll();
     file.close();
 
+    // CSV clears the table up front — before any failure dialog — unlike
+    // Excel's case-specific clear. This is why a failed CSV load clears the
+    // table but a failed Excel OpenFailed/NoSheets does not.
     ui->bulkTable->clear();
     ui->bulkTable->setRowCount(0);
 
-    if (lines.isEmpty()) {
+    if (rawText.isEmpty()) {
         QMessageBox::information(this, "CSV Preview", "File is empty.");
         return;
     }
 
-    // Header line
-    QStringList headers = lines.first().split(",", Qt::SkipEmptyParts);
-    for (int i = 0; i < headers.size(); ++i)
-        headers[i] = headers[i].trimmed();
+    const ParsedTable table = m_importController->parseCsv(rawText);
 
-    if (headers.isEmpty()) {
+    if (table.headers.isEmpty()) {
         QMessageBox::warning(this, "CSV Error", "CSV file has no headers.");
         return;
     }
 
-    bulkHeaderIndex.clear();
-    for (int c = 0; c < headers.size(); ++c) {
-        QString n = normalizeHeader(headers[c]);
-        if (n.contains("schoolid") || n.contains("studentid") || (n == "id"))
-            bulkHeaderIndex["school_id"] = c;
-        else if (n.contains("name") || n.contains("fullname") || n.contains("full"))
-            bulkHeaderIndex["name"] = c;
-        else if (n.contains("code") || n.contains("studentcode"))
-            bulkHeaderIndex["code"] = c;
-        else if (n.contains("course"))
-            bulkHeaderIndex["course"] = c;
-        else if (n.contains("year"))
-            bulkHeaderIndex["year_level"] = c;
-        else if (n.contains("department") || n.contains("dept"))
-            bulkHeaderIndex["department"] = c;
-        else if (n.contains("gender"))
-            bulkHeaderIndex["gender"] = c;
-        else if (n.contains("status"))
-            bulkHeaderIndex["status"] = c;
-        else if (n.contains("visit"))
-            bulkHeaderIndex["visits"] = c;
-        else
-            bulkHeaderIndex[QString("col_%1").arg(c)] = c;
-    }
+    bulkHeaderIndex = table.headerIndex;
 
-    // Add rows (skip header)
-    for (int i = 1; i < lines.size(); ++i) {
-        QStringList rowData = lines[i].split(",");
-
-        // ADD this check to prevent crashes on empty lines:
-        if (rowData.isEmpty() || (rowData.size() == 1 && rowData.first().trimmed().isEmpty())) {
-            continue; // Skip empty lines
-        }
-
-        int row = ui->bulkTable->rowCount();
+    // CSV population — port of loadCSVtoTable lines 1523-1541 verbatim,
+    // including the "fill against stale column count, widen afterward" quirk.
+    for (const QStringList &rowData : table.rows) {
+        const int row = ui->bulkTable->rowCount();
         ui->bulkTable->insertRow(row);
 
         for (int j = 0; j < rowData.size() && j < ui->bulkTable->columnCount(); j++) {
-            ui->bulkTable->setItem(row, j, new QTableWidgetItem(rowData[j].trimmed()));
+            ui->bulkTable->setItem(row, j, new QTableWidgetItem(rowData.at(j)));
         }
     }
 
-    ui->bulkTable->setColumnCount(qMax(ui->bulkTable->columnCount(), headers.size()));
-    ui->bulkTable->setHorizontalHeaderLabels(headers);
+    ui->bulkTable->setColumnCount(qMax(ui->bulkTable->columnCount(), table.headers.size()));
+    ui->bulkTable->setHorizontalHeaderLabels(table.headers);
     ui->bulkTable->resizeColumnsToContents();
 }
 void adminWindow::onDurationChanged(int index)
