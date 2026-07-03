@@ -980,6 +980,9 @@ void adminWindow::onSearchFinished(SearchOutcome outcome,
                                  "🔍 No students found\nTry adjusting your search filters");  // row 14
         break;
     case SearchOutcome::Results:
+        // Legacy guard was `showOverlay && students.size() > 0` (adminwindow.cpp:3236);
+        // the size check is subsumed here because parseSearchResponse only returns
+        // Results when the array is non-empty (Empty is split out upstream).
         if (m_studentSearchShowOverlay)
             showTemporaryOverlay(ui->studentSearchPage,
                                  QString("✅ Found %1 student%2")
