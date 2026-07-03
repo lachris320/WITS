@@ -2905,6 +2905,7 @@ void adminWindow::onEditStudentBtnClicked()
     } else {
         // --- Update Mode ---
         ui->selectAllBtn->setVisible(false);
+        ui->deleteStudentBtn->setVisible(false);
 
         QList<StudentRecord> updates;
 
