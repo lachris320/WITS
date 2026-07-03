@@ -186,6 +186,9 @@ private slots:
     void onSearchFailed(const QString &errorString);
     void onBulkUpdateFinished(const BulkUpdateResult &result);
     void onBulkUpdateFailed(const QString &errorString);
+    void onDeleteStudentBtnClicked();
+    void onDeleteFinished(bool ok, int requestedCount, const QString &message);
+    void onDeleteFailed(const QString &errorString);
     void onDepartmentsLoaded(const QStringList &departments);
     void onCoursesLoaded(const QStringList &courses);
     void onClearAttendanceCheckBoxStateChanged(int state);

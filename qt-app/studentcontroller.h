@@ -25,6 +25,9 @@ public:
     static BulkUpdateResult parseBulkUpdateResponse(const QByteArray &raw);
     static QStringList parseDepartments(const QByteArray &raw);
     static QStringList parseCourses(const QByteArray &raw);
+    // Returns true when status=="success"; on failure sets outMessage to the
+    // server "message" field (empty on success).
+    static bool parseDeleteResponse(const QByteArray &raw, QString &outMessage);
 
     // Async — result arrives via searchFinished / searchFailed.
     void searchStudents(const QString &search,
@@ -33,6 +36,9 @@ public:
 
     // Async — result arrives via bulkUpdateFinished / bulkUpdateFailed.
     void bulkUpdateStudents(const QList<StudentRecord> &updates);
+
+    // Async — result arrives via deleteFinished / deleteFailed.
+    void deleteStudents(const QStringList &schoolIds);
 
     // Async — result arrives via departmentsLoaded (empty on error/!success).
     void loadDepartments();
@@ -48,6 +54,11 @@ signals:
     void searchFailed(const QString &errorString);
     void bulkUpdateFinished(const BulkUpdateResult &result);
     void bulkUpdateFailed(const QString &errorString);
+    // ok=true on success; requestedCount echoes how many ids were submitted
+    // (the View needs it for the success overlay). message is the server
+    // message on failure. deleteFailed fires only on a transport error.
+    void deleteFinished(bool ok, int requestedCount, const QString &message);
+    void deleteFailed(const QString &errorString);
     void departmentsLoaded(const QStringList &departments);
     void coursesLoaded(const QStringList &courses);
 

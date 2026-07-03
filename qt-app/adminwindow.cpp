@@ -449,6 +449,10 @@ adminWindow::adminWindow(QWidget *parent)
             this, &adminWindow::onBulkUpdateFinished);
     connect(m_studentController, &StudentController::bulkUpdateFailed,
             this, &adminWindow::onBulkUpdateFailed);
+    connect(m_studentController, &StudentController::deleteFinished,
+            this, &adminWindow::onDeleteFinished);
+    connect(m_studentController, &StudentController::deleteFailed,
+            this, &adminWindow::onDeleteFailed);
     connect(m_studentController, &StudentController::departmentsLoaded,
             this, &adminWindow::onDepartmentsLoaded);
     connect(m_studentController, &StudentController::coursesLoaded,
@@ -580,6 +584,7 @@ adminWindow::adminWindow(QWidget *parent)
             this, &adminWindow::onSchoolLogoBrowseBtnClicked);
     connect(ui->browsePhotoBtn, &QPushButton::clicked, this, &adminWindow::onBrowsePhotoBtnClicked);
     connect(ui->editStudentBtn, &QPushButton::clicked, this, &adminWindow::onEditStudentBtnClicked);
+    connect(ui->deleteStudentBtn, &QPushButton::clicked, this, &adminWindow::onDeleteStudentBtnClicked);
     connect(ui->updateDatabaseBtn, &QPushButton::clicked, this, &adminWindow::onUpdateDatabaseBtnClicked);
     connect(ui->posterBrowseBtn, &QPushButton::clicked, this, &adminWindow::onPosterBrowseBtnClicked);
     connect(ui->generatePDFBtn, &QPushButton::clicked, this, &adminWindow::onGeneratePDFBtnClicked);
@@ -684,6 +689,7 @@ adminWindow::adminWindow(QWidget *parent)
     ui->searchLoadingBar->setVisible(false);
     ui->searchOverlay->setVisible(false);
     ui->selectAllBtn->setVisible(false);
+    ui->deleteStudentBtn->setVisible(false);
     ui->cancelEditBtn->setVisible(false);
     ui->studentSearchTable->setColumnCount(9);
     ui->studentSearchTable->setHorizontalHeaderLabels(
@@ -2820,6 +2826,7 @@ void adminWindow::onEditStudentBtnClicked()
         ui->editStudentBtn->setText("Update");
         ui->cancelEditBtn->setVisible(true);
         ui->selectAllBtn->setVisible(true);
+        ui->deleteStudentBtn->setVisible(true);
         ui->selectAllBtn->setText("Select All");
         ui->studentSearchTable->setEditTriggers(QAbstractItemView::DoubleClicked);
 
@@ -2939,6 +2946,7 @@ void adminWindow::onEditStudentBtnClicked()
             ui->editStudentBtn->setText("Edit");
             ui->cancelEditBtn->setVisible(false);
             ui->selectAllBtn->setVisible(false);
+            ui->deleteStudentBtn->setVisible(false);
             ui->studentSearchTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
             clearCheckboxes();
             return;
@@ -2968,6 +2976,7 @@ void adminWindow::onBulkUpdateFailed(const QString &errorString)
     ui->editStudentBtn->setEnabled(true);
     ui->cancelEditBtn->setVisible(false);
     ui->selectAllBtn->setVisible(false);
+    ui->deleteStudentBtn->setVisible(false);
     ui->studentSearchTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     clearCheckboxes();
 
@@ -2981,6 +2990,7 @@ void adminWindow::onBulkUpdateFinished(const BulkUpdateResult &result)
     ui->editStudentBtn->setEnabled(true);
     ui->cancelEditBtn->setVisible(false);
     ui->selectAllBtn->setVisible(false);
+    ui->deleteStudentBtn->setVisible(false);
     ui->studentSearchTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     clearCheckboxes();
 
@@ -3006,6 +3016,72 @@ void adminWindow::onBulkUpdateFinished(const BulkUpdateResult &result)
     }
 }
 
+void adminWindow::onDeleteStudentBtnClicked()
+{
+    QStringList selectedIds;
+    for (int row = 0; row < ui->studentSearchTable->rowCount(); ++row) {
+        QWidget *widget = ui->studentSearchTable->cellWidget(row, 0);
+        if (!widget) continue;
+        QCheckBox *cb = widget->findChild<QCheckBox*>();
+        if (cb && cb->isChecked()) {
+            QTableWidgetItem *idItem = ui->studentSearchTable->item(row, 2); // col 2 = School ID
+            if (idItem)
+                selectedIds << idItem->text();
+        }
+    }
+
+    if (selectedIds.isEmpty()) {
+        showTemporaryOverlay(ui->studentSearchPage,
+                             "⚠️ Please select at least one student to delete");
+        return;
+    }
+
+    const QMessageBox::StandardButton confirm = QMessageBox::warning(
+        this, "Confirm Delete",
+        QString("Are you sure you want to delete %1 student(s)?\n\nThis action cannot be undone.")
+            .arg(selectedIds.size()),
+        QMessageBox::Yes | QMessageBox::No);
+
+    if (confirm == QMessageBox::Yes)
+        m_studentController->deleteStudents(selectedIds);
+}
+
+void adminWindow::onDeleteFinished(bool ok, int requestedCount, const QString &message)
+{
+    ui->editStudentBtn->setText("Edit");
+    ui->editStudentBtn->setEnabled(true);
+    ui->cancelEditBtn->setVisible(false);
+    ui->selectAllBtn->setVisible(false);
+    ui->deleteStudentBtn->setVisible(false);
+    ui->studentSearchTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    clearCheckboxes();
+
+    if (ok) {
+        showTemporaryOverlay(ui->studentSearchPage,
+                             QString("✅ %1 student%2 deleted successfully")
+                                 .arg(requestedCount)
+                                 .arg(requestedCount == 1 ? "" : "s"));
+        performStudentSearch(false);   // silent refresh
+    } else {
+        showTemporaryOverlay(ui->studentSearchPage,
+                             QString("⚠️ %1").arg(message));
+    }
+}
+
+void adminWindow::onDeleteFailed(const QString &errorString)
+{
+    ui->editStudentBtn->setText("Edit");
+    ui->editStudentBtn->setEnabled(true);
+    ui->cancelEditBtn->setVisible(false);
+    ui->selectAllBtn->setVisible(false);
+    ui->deleteStudentBtn->setVisible(false);
+    ui->studentSearchTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    clearCheckboxes();
+
+    showTemporaryOverlay(ui->studentSearchPage,
+                         QString("❌ Error: %1").arg(errorString));
+}
+
 // Add cancel button handler
 void adminWindow::onCancelEditBtnClicked()
 {
@@ -3013,6 +3089,7 @@ void adminWindow::onCancelEditBtnClicked()
     ui->editStudentBtn->setEnabled(true);
     ui->cancelEditBtn->setVisible(false);
     ui->selectAllBtn->setVisible(false);
+    ui->deleteStudentBtn->setVisible(false);
     ui->studentSearchTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     clearCheckboxes();
 

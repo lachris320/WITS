@@ -33,6 +33,11 @@ private slots:
     // parseCourses
     void parseCoursesReturnsFullList();
     void parseCoursesNotSuccessIsEmpty();
+
+    // parseDeleteResponse
+    void parseDeleteResponse_success_returnsTrueEmptyMessage();
+    void parseDeleteResponse_failure_returnsFalseWithMessage();
+    void parseDeleteResponse_invalidJson_returnsFalseEmptyMessage();
 };
 
 void TestStudentController::normalizeFilterPlaceholdersBecomeEmpty()
@@ -185,6 +190,32 @@ void TestStudentController::parseCoursesReturnsFullList()
 void TestStudentController::parseCoursesNotSuccessIsEmpty()
 {
     QVERIFY(StudentController::parseCourses(R"({"status":"error"})").isEmpty());
+}
+
+void TestStudentController::parseDeleteResponse_success_returnsTrueEmptyMessage()
+{
+    QString msg = "sentinel";
+    const bool ok = StudentController::parseDeleteResponse(
+        R"({"status":"success"})", msg);
+    QVERIFY(ok);
+    QVERIFY(msg.isEmpty());
+}
+
+void TestStudentController::parseDeleteResponse_failure_returnsFalseWithMessage()
+{
+    QString msg;
+    const bool ok = StudentController::parseDeleteResponse(
+        R"({"status":"error","message":"Student not found"})", msg);
+    QVERIFY(!ok);
+    QCOMPARE(msg, QStringLiteral("Student not found"));
+}
+
+void TestStudentController::parseDeleteResponse_invalidJson_returnsFalseEmptyMessage()
+{
+    QString msg;
+    const bool ok = StudentController::parseDeleteResponse("not json", msg);
+    QVERIFY(!ok);
+    QVERIFY(msg.isEmpty());
 }
 
 QTEST_MAIN(TestStudentController)

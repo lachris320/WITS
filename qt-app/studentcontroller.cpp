@@ -91,6 +91,18 @@ BulkUpdateResult StudentController::parseBulkUpdateResponse(const QByteArray &ra
     return result;
 }
 
+// Pure port of the reply body of the legacy deleteStudents (master
+// adminwindow.cpp:3309-3324): success => true; otherwise the server message.
+bool StudentController::parseDeleteResponse(const QByteArray &raw, QString &outMessage)
+{
+    outMessage.clear();
+    const QJsonObject obj = QJsonDocument::fromJson(raw).object();
+    if (obj["status"].toString() == "success")
+        return true;
+    outMessage = obj["message"].toString();
+    return false;
+}
+
 // Pure port of the departments parse in populateFilters (adminwindow.cpp:3375-3382).
 // Returns only the parsed entries (View prepends "Select Department"); skips
 // "all" case-insensitively; empty on !success.
@@ -194,6 +206,37 @@ void StudentController::bulkUpdateStudents(const QList<StudentRecord> &updates)
         reply->deleteLater();
 
         emit bulkUpdateFinished(parseBulkUpdateResponse(resp));
+    });
+}
+
+void StudentController::deleteStudents(const QStringList &schoolIds)
+{
+    QNetworkRequest request(ApiConfig::endpoint(QStringLiteral("delete_students.php")));
+    request.setHeader(QNetworkRequest::ContentTypeHeader,
+                      QStringLiteral("application/json"));
+
+    QJsonArray ids;
+    for (const QString &id : schoolIds)
+        ids.append(id);
+    QJsonObject data;
+    data["school_ids"] = ids;
+
+    const int requestedCount = schoolIds.size();
+    QNetworkReply *reply = m_nam->post(request, QJsonDocument(data).toJson());
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, requestedCount]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            emit deleteFailed(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+
+        const QByteArray resp = reply->readAll();
+        reply->deleteLater();
+
+        QString message;
+        const bool ok = parseDeleteResponse(resp, message);
+        emit deleteFinished(ok, requestedCount, message);
     });
 }
 
