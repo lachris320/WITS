@@ -106,7 +106,10 @@ is extracted:
   *overlayEffect` (adminwindow.h:135), and their `= nullptr` assignments in
   the constructor (adminwindow.cpp:444–445). Removed. The `BusyIndicator`
   **class** (`busyindicator.h`/`.cpp`) is **not** deleted — it is simply no
-  longer used by `adminWindow`.
+  longer used by `adminWindow`. **Careful: `overlayText` (adminwindow.h:134)
+  sits between the two deleted members — delete exactly lines 133 and 135,
+  not the range. `overlayText` stays** (its liveness is out of scope for
+  this branch).
 - The now-dead declarations in `adminwindow.h`: `loadAllStudents()` (h:118),
   `deleteStudents(const QStringList&)` (h:125), `showSearchOverlay()` /
   `hideSearchOverlay()` (h:136–137), and `onDeleteStudentBtnClicked()`
@@ -372,6 +375,14 @@ Pure port of the reply body of `performStudentSearch` (adminwindow.cpp:
 `NetworkError` is **not** produced by this function — the network method
 decides it from `reply->error()` before calling the parser.
 
+> **Note — `searchTerm` is vestigial but preserved.** Legacy
+> `displaySearchResults` (adminwindow.cpp:3246–3274) receives the
+> `searchTerm`/`highlightTerm` argument and never uses it — no highlighting
+> is implemented. `outSearchTerm` is threaded through
+> `parseSearchResponse` → `searchFinished` purely for parity with the legacy
+> signature. Do **not** "restore" highlighting during this extraction — it
+> never existed; that would be a behavior change.
+
 ### `parseBulkUpdateResponse(const QByteArray &raw)` — static
 
 Pure port of the reply body of `bulkUpdateStudents` (adminwindow.cpp:
@@ -460,6 +471,20 @@ Port of the `get_departments.php` GET in `populateFilters` (adminwindow.cpp:
   placeholder-only combo is the identical visible result).
 - `reply->deleteLater()` on every path.
 
+> **Name-collision warning for the implementer:** two *other* live functions
+> also GET `get_departments.php` and are **out of scope — do not extract,
+> rename, or delete them**: `adminWindow::loadDepartments()`
+> (adminwindow.cpp:1629, a different combo, still called from the ctor at
+> line 457) and `adminWindow::loadFilterDepartments()` (adminwindow.cpp:1837).
+> Only `populateFilters()` (cpp:3359, the Search-tab loader called from the
+> ctor at line 458) is extracted into
+> `StudentController::loadDepartments()`. After the refactor, both
+> `adminWindow::loadDepartments()` (ctor:457) and
+> `m_studentController->loadDepartments()` (via the rewritten
+> `populateFilters`, ctor:458) run at startup — same as today's two distinct
+> requests. The identical method name across the two classes is legal but a
+> footgun: extract `populateFilters` and nothing else.
+
 ### `loadCourses(const QString &department)`
 
 Port of the `get_courses.php` GET in `onDepartmentFilterChanged`
@@ -526,8 +551,9 @@ The **View owns the chaining**, exactly as `ImportController`'s
      `QTimer::singleShot(2500, this, [=]{ QMessageBox::warning(this,
      "Some Updates Failed", errorList); })` where `errorList` is the errors
      joined with a trailing `"\n"` per entry (lines 3030–3039);
-   - then calls `searchStudents(...)` with the show-overlay flag set to
-     `false` for the silent refresh (line 3042).
+   - then calls `performStudentSearch(false)` for the silent refresh
+     (line 3042) — the surviving thin helper sets the show-overlay flag
+     `false` and delegates to `searchStudents(...)` (see Task 3).
 3. Else (`!result.ok`): shows `"⚠️ Update Failed\n%1"` with `result.message`
    (line 3045) and does **not** refresh.
 
@@ -536,8 +562,9 @@ after the same UI reset (the legacy reset at 3000–3005 runs before the
 error-branch check at 3007).
 
 `onCancelEditBtnClicked` stays entirely View-side (it never talked to the
-network) but its final `performStudentSearch(false)` becomes a
-`searchStudents(...)` call with the show-overlay flag set `false`.
+network); its final `performStudentSearch(false)` call is unchanged — the
+surviving thin helper sets the show-overlay flag `false` and delegates to
+`searchStudents(...)` (see Task 3).
 
 The View owns the chaining; `StudentController` never constructs a
 `QMessageBox`, touches `ui->`, or calls `showTemporaryOverlay`.
@@ -680,6 +707,8 @@ error or non-success (legacy shows none) — see the design decision above.
 ### On Search clicked
 ```
 onSearchBtnClicked()  (or searchLineEdit returnPressed)
+  → performStudentSearch(true)   [surviving thin helper — the next three
+    View steps are its body]
   → View: searchLoadingBar visible + value 0
   → View: m_studentSearchShowOverlay = true
   → m_studentController->searchStudents(
@@ -716,7 +745,8 @@ onEditStudentBtnClicked()  [button text == "Update"]
   → View onBulkUpdateFinished: reset edit UI (rows editStudentBtn/cancelEditBtn/…)
         [result.ok]      overlay row 5;
                          if (!result.errors.isEmpty()) QTimer::singleShot(2500) row 6;
-                         m_studentSearchShowOverlay = false; searchStudents(…) silent refresh
+                         performStudentSearch(false)  [thin helper: flag=false,
+                         loading bar, searchStudents(…)] — silent refresh
         [!result.ok]     overlay row 7 (no refresh)
 ```
 
@@ -725,7 +755,8 @@ onEditStudentBtnClicked()  [button text == "Update"]
 onCancelEditBtnClicked()
   → View: reset edit UI, lock cells, reset colors
   → overlay row 8
-  → m_studentSearchShowOverlay = false; searchStudents(…)  silent refresh
+  → performStudentSearch(false)  [thin helper: flag=false, loading bar,
+    searchStudents(…)] — silent refresh
 ```
 
 ### On department combo changed / initial filter population
@@ -787,6 +818,13 @@ Coverage:
   `status != "success"` → empty list.
 - **`parseCourses`**: `status:"success"` with a `courses` array → the full
   list; `status != "success"` → empty list.
+
+**Accepted limitation (matches the Import/Visitor precedent):** automated
+coverage exercises only the five pure statics. The four network methods
+(`searchFailed`-vs-`searchFinished` routing, emit ordering,
+`reply->deleteLater()` on every path) have no `QSignalSpy`/mock-NAM tests —
+the same convention as `tst_importcontroller` — and are verified by the
+Task 3 purity/grep gates plus manual QA against the live backend.
 
 **No `QApplication`/`QGuiApplication` is required.** The controller's tested
 surface is pure (`QString`/`QByteArray`/`QJsonDocument`/`QList`/`QStringList`)
@@ -880,8 +918,15 @@ Mirrors the three-task shape used for the Import and Visitor extractions:
   `m_studentSearchShowOverlay` bool member, and rewrite
   `performStudentSearch`/`onSearchBtnClicked`/`onEditStudentBtnClicked`
   (update branch)/`bulkUpdateStudents`/`onCancelEditBtnClicked`/
-  `populateFilters`/`onDepartmentFilterChanged` to delegate to the controller
-  while keeping `displaySearchResults`/`clearCheckboxes`/
+  `populateFilters`/`onDepartmentFilterChanged` to delegate to the controller.
+  **`performStudentSearch(bool showOverlay)` survives as a thin private View
+  helper** (its decl at adminwindow.h:113 stays): it sets
+  `m_studentSearchShowOverlay = showOverlay`, shows `searchLoadingBar`
+  (visible + value 0), reads the three filter widgets, and calls
+  `m_studentController->searchStudents(…)` — so its three live call sites
+  (`onSearchBtnClicked` → `true`; `bulkUpdateStudents`' success refresh and
+  `onCancelEditBtnClicked` → `false`) remain literally unchanged. Keep
+  `displaySearchResults`/`clearCheckboxes`/
   `on_selectAllBtn_clicked`/`onStudentTableItemChanged` as View. **Delete the
   redundant inline department-filter lambda at adminwindow.cpp:460–494** and
   rewrite `onDepartmentFilterChanged` as the single collapsed handler (see
@@ -911,6 +956,12 @@ Mirrors the three-task shape used for the Import and Visitor extractions:
   `adminwindow.ui` (it carries the user's own uncommitted edit; the
   `deleteStudentBtn` widget stays present-but-unwired).
 - Backend URL configurability (separate concern; `ApiConfig` is used as-is).
+- The two *other* `get_departments.php` callers —
+  `adminWindow::loadDepartments()` (adminwindow.cpp:1629) and
+  `adminWindow::loadFilterDepartments()` (adminwindow.cpp:1837) — belong to
+  other tabs and are **untouched** despite the former sharing a name with
+  `StudentController::loadDepartments()` (see the name-collision warning in
+  the `loadDepartments()` section).
 
 **In scope by explicit decision:** collapsing the duplicated department-filter
 wiring from two `get_courses.php` requests to one — the branch's single
