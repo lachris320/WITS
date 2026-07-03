@@ -1151,7 +1151,7 @@ Run:
 grep -nE 'deleteStudents|onDeleteStudentBtnClicked|loadAllStudents|showSearchOverlay|hideSearchOverlay|searchSpinner|overlayEffect' qt-app/adminwindow.cpp qt-app/adminwindow.h
 grep -nc 'get_courses.php' qt-app/adminwindow.cpp qt-app/studentcontroller.cpp
 ```
-Expected: first grep returns **no matches** (all dead symbols gone). Second grep: **0** occurrences in `adminwindow.cpp` and **1** in `studentcontroller.cpp` (the single surviving fetch lives in the controller now).
+Expected: first grep returns **no matches** (all dead symbols gone). Second grep: **1** occurrence in `adminwindow.cpp` — the out-of-scope Reports-tab `onFilterDepartmentBoxCurrentIndexChanged` shares the endpoint and stays — and **1** in `studentcontroller.cpp` (the Student-tab's single surviving fetch lives in the controller now). *(Correction post-implementation: this line originally said 0 for `adminwindow.cpp`, overlooking the Reports-tab caller.)*
 
 - [ ] **Step 12: Run the full ctest suite**
 

@@ -123,7 +123,7 @@ QStringList StudentController::parseCourses(const QByteArray &raw)
     return out;
 }
 
-// --- Network methods: stubbed this task, implemented in Task 2 ---
+// --- Network methods ---
 
 void StudentController::searchStudents(const QString &search,
                                        const QString &department,
