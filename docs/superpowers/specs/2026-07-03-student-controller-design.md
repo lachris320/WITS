@@ -952,6 +952,16 @@ Mirrors the three-task shape used for the Import and Visitor extractions:
   payload shapes are unchanged.
 - Extracting `delete_students.php` — the delete flow is dead and **deleted**,
   not extracted.
+
+  > **Scope amendment (2026-07-04, post-QA):** during manual QA the user
+  > confirmed the Delete-Selected button had never functioned (dead on
+  > `master`: no `connect()`, wrong slot name for auto-connect, no
+  > show-on-edit), and explicitly chose to add the feature to **this** branch
+  > rather than defer it. So `delete_students.php` *is* now wired — implemented
+  > fresh through `StudentController` (`parseDeleteResponse` + `deleteStudents`
+  > + `deleteFinished`/`deleteFailed`), not resurrected inline. This is a
+  > deliberate deviation from the original "dead and deleted" decision above;
+  > the extraction of the search/bulk-update flow is unchanged.
 - UI layout changes to the Student Search tab, and any change to
   `adminwindow.ui` (it carries the user's own uncommitted edit; the
   `deleteStudentBtn` widget stays present-but-unwired).
