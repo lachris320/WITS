@@ -125,22 +125,110 @@ QStringList StudentController::parseCourses(const QByteArray &raw)
 
 // --- Network methods: stubbed this task, implemented in Task 2 ---
 
-void StudentController::searchStudents(const QString &, const QString &, const QString &)
+void StudentController::searchStudents(const QString &search,
+                                       const QString &department,
+                                       const QString &course)
 {
-    // Implemented in Task 2.
+    QNetworkRequest request(ApiConfig::endpoint(QStringLiteral("search_students.php")));
+    request.setHeader(QNetworkRequest::ContentTypeHeader,
+                      QStringLiteral("application/json"));
+
+    QJsonObject filters;
+    filters["search"]     = search;
+    filters["department"] = normalizeFilter(department);   // reproduces adminwindow.cpp:3171
+    filters["course"]     = normalizeFilter(course);       // reproduces adminwindow.cpp:3172
+
+    QNetworkReply *reply = m_nam->post(request, QJsonDocument(filters).toJson());
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            emit searchFailed(reply->errorString());       // View gates overlay row 11 on flag
+            reply->deleteLater();
+            return;
+        }
+
+        const QByteArray resp = reply->readAll();
+        reply->deleteLater();
+
+        QList<StudentRecord> records;
+        QString message, searchTerm;
+        const SearchOutcome outcome =
+            parseSearchResponse(resp, records, message, searchTerm);
+        emit searchFinished(outcome, records, message, searchTerm);
+    });
 }
 
-void StudentController::bulkUpdateStudents(const QList<StudentRecord> &)
+void StudentController::bulkUpdateStudents(const QList<StudentRecord> &updates)
 {
-    // Implemented in Task 2.
+    QNetworkRequest request(ApiConfig::endpoint(QStringLiteral("bulk_update_students.php")));
+    request.setHeader(QNetworkRequest::ContentTypeHeader,
+                      QStringLiteral("application/json"));
+
+    QJsonArray studentsArray;
+    for (const StudentRecord &rec : updates) {
+        QJsonObject student;
+        student["school_id"]  = rec.schoolId;
+        student["code"]       = rec.code;
+        student["name"]       = rec.name;
+        student["department"] = rec.department;
+        student["course"]     = rec.course;
+        student["year_level"] = rec.yearLevel;
+        student["gender"]     = rec.gender;
+        student["status"]     = rec.status;
+        studentsArray.append(student);
+    }
+
+    QJsonObject data;
+    data["students"] = studentsArray;
+
+    QNetworkReply *reply = m_nam->post(request, QJsonDocument(data).toJson());
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            emit bulkUpdateFailed(reply->errorString());   // View: overlay row 4 after UI reset
+            reply->deleteLater();
+            return;
+        }
+
+        const QByteArray resp = reply->readAll();
+        reply->deleteLater();
+
+        emit bulkUpdateFinished(parseBulkUpdateResponse(resp));
+    });
 }
 
 void StudentController::loadDepartments()
 {
-    // Implemented in Task 2.
+    QNetworkReply *reply =
+        m_nam->get(QNetworkRequest(ApiConfig::endpoint(QStringLiteral("get_departments.php"))));
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        // Legacy shows no dialog on error or !success — an empty list plus the
+        // View's always-prepended placeholder is the identical visible result.
+        const QStringList departments =
+            (reply->error() == QNetworkReply::NoError)
+                ? parseDepartments(reply->readAll())
+                : QStringList();
+        reply->deleteLater();
+        emit departmentsLoaded(departments);
+    });
 }
 
-void StudentController::loadCourses(const QString &)
+void StudentController::loadCourses(const QString &department)
 {
-    // Implemented in Task 2.
+    QUrl url = ApiConfig::endpoint(QStringLiteral("get_courses.php"));
+    QUrlQuery query;
+    query.addQueryItem(QStringLiteral("department"), department);
+    url.setQuery(query);
+
+    QNetworkReply *reply = m_nam->get(QNetworkRequest(url));
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const QStringList courses =
+            (reply->error() == QNetworkReply::NoError)
+                ? parseCourses(reply->readAll())
+                : QStringList();
+        reply->deleteLater();
+        emit coursesLoaded(courses);
+    });
 }
