@@ -605,7 +605,7 @@ set_tests_properties(tst_reportcontroller PROPERTIES
 )
 ```
 
-> `reportcontroller.cpp` includes `apiconfig.h` and references `ApiConfig::endpoint` in the (stubbed) network methods — the stubs don't call it yet, but Task 2 will. `apiconfig` is header-only/compiled into the test via `${CMAKE_SOURCE_DIR}` include dir; if the linker complains about `ApiConfig` symbols once Task 2 lands, add `${CMAKE_SOURCE_DIR}/apiconfig.cpp` to this target's sources (check whether `tst_studentcontroller` needed it — it links `ApiConfig::endpoint` the same way; mirror it).
+> `reportcontroller.cpp` includes `apiconfig.h` and references `ApiConfig::endpoint` in the (stubbed) network methods — the stubs don't call it yet, but Task 2 will. **No `apiconfig.cpp` is needed on this target:** `ApiConfig::endpoint`/`baseUrl` are `inline` in `apiconfig.h` (header-only), and the precedent `tst_studentcontroller` links `ApiConfig::endpoint` with only `tst_studentcontroller.cpp` as its source plus the `${CMAKE_SOURCE_DIR}` include dir — no `apiconfig.cpp`. Mirror that: the `${CMAKE_SOURCE_DIR}` include dir on this target is sufficient.
 
 - [ ] **Step 6: Configure + build + run the test — verify RED then GREEN**
 
@@ -1208,15 +1208,15 @@ In `qt-app/adminwindow.h`:
 - Keep `paintReport` (h:207) decl **only if** you keep a thin View wrapper; per this plan the View calls `m_reportRenderer.paintReport(...)` directly in the export wrappers, so **delete** the `paintReport` decl (h:207–208) and the `makeBarChartImage`/`makePieChartImage`/`makeLineChartImage` decls (h:152–154) too — they now live on `ReportRenderer`.
 - Add the new View slot decls in the `private slots:` block:
   ```cpp
-  void onDepartmentsLoaded(const QStringList &departments);
-  void onYearsLoaded(const QStringList &years);
+  void onReportDepartmentsLoaded(const QStringList &departments);
+  void onReportYearsLoaded(const QStringList &years);
   void onReportCoursesLoaded(const QStringList &courses);
   void onReportDataReady(const QJsonArray &data);
   void onReportError(const QString &message, bool critical);
   void onPreviewDataReady(const QJsonArray &data);
   void onReportLoadError(const QString &title, const QString &message, bool critical);
   ```
-  > Names are deliberately distinct from the Student-tab slots (`onDepartmentsLoaded` already exists at h:193 for the Student controller, and `onCoursesLoaded` at h:194). **Check h:193–194**: if `onDepartmentsLoaded`/`onCoursesLoaded` are already taken by `StudentController`, use the `onReport…` prefixes shown above for the report ones to avoid a clash. Use `onReportDepartmentsLoaded` / `onReportYearsLoaded` / `onReportCoursesLoaded` if `onDepartmentsLoaded` collides. Pick non-colliding names and use them consistently in Steps 2–8.
+  > The `onReport…` prefix is **mandatory**, not optional: `onDepartmentsLoaded` already exists at `adminwindow.h:193` (bound to `StudentController::departmentsLoaded` in the ctor at `adminwindow.cpp:456`) and `onCoursesLoaded` at h:194. Declaring the report slots as `onDepartmentsLoaded`/`onYearsLoaded` would collide/redeclare and break the build. Use `onReportDepartmentsLoaded` / `onReportYearsLoaded` / `onReportCoursesLoaded` exactly as shown here, and identically in Steps 2 (connects) and 4 (definitions).
 - Add a header-info helper decl:
   ```cpp
   ReportHeaderInfo collectHeaderInfo() const;
@@ -1333,6 +1333,8 @@ void adminWindow::onReportDataReady(const QJsonArray &data) {
 ```
 
 > `printReport(data, filters)` is a new small View helper carved from the old `onPrintReportBtnClicked` callback body (Step 7). Declare it in `adminwindow.h` `private:` as `void printReport(const QJsonArray &data, const QJsonObject &filters);`.
+>
+> **Forward-note (accepted, out of scope for this behavior-identical extraction):** the single `m_pendingReportAction` / `m_pendingReportFilters` cache coalesces concurrent export requests — if the user clicks Generate PDF then Generate Excel before the first `get_report_data.php` reply lands, only the last action dispatches (the first reply is dropped). Legacy captured each action in its own per-callback closure, so it would have run both. This is a real (if edge-case) behavior delta introduced by the locked one-cache seam design; the export buttons are not debounced today either, so it is not a regression that blocks this extraction. If it ever matters, debounce/disable the export buttons while a fetch is in flight, or key the cache by action — track as a follow-up, do not solve it here.
 
 - [ ] **Step 5: Rewrite `collectReportFilters` to call `computeDateRange`**
 
