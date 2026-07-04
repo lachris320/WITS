@@ -117,3 +117,24 @@ add_test(NAME tst_studentcontroller COMMAND tst_studentcontroller)
 set_tests_properties(tst_studentcontroller PROPERTIES
     ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1"
 )
+
+# 9th — Core+Network+Gui, NO offscreen. Gui is required because getPalette
+# returns a ReportPalette (QColor / QVector<QColor>), and QColor is a Qt::Gui
+# type — but a QColor *value* under QTEST_GUILESS_MAIN needs no QPA plugin.
+qt_add_executable(tst_reportcontroller
+    tst_reportcontroller.cpp
+    ${CMAKE_SOURCE_DIR}/reportcontroller.cpp
+    ${CMAKE_SOURCE_DIR}/reportcontroller.h
+    ${CMAKE_SOURCE_DIR}/reportdata.h
+)
+set_target_properties(tst_reportcontroller PROPERTIES WIN32_EXECUTABLE FALSE)
+target_include_directories(tst_reportcontroller PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(tst_reportcontroller PRIVATE
+    Qt${QT_VERSION_MAJOR}::Test
+    Qt${QT_VERSION_MAJOR}::Network
+    Qt${QT_VERSION_MAJOR}::Gui
+)
+add_test(NAME tst_reportcontroller COMMAND tst_reportcontroller)
+set_tests_properties(tst_reportcontroller PROPERTIES
+    ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1"
+)
