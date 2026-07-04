@@ -151,7 +151,7 @@ Confirmed **zero callers** (grep over `qt-app/*.cpp`):
    ▼             ▼                              │ preview data        ▼ + ReportHeaderInfo
         ReportController (QObject)              │            ReportRenderer (plain)
           ├── getPalette()            → pure    │              ├── aggregateVisitsByCourse() → pure
-          ├── parseDepartments()      → pure    │              ├── aggregateVisitsByHour()   → pure
+          ├── parseDepartments()      → pure    │              ├── aggregateVisitsByCourseHour() → pure
           ├── parseYears()            → pure    │              ├── makeBarChartImage()   → QImage
           ├── parseCourses()          → pure    │              ├── makePieChartImage()   → QImage
           ├── parseReportData()       → pure    │              ├── makeLineChartImage()  → QImage
@@ -305,6 +305,25 @@ private:
   exact legacy dialog. This mirrors `VisitorController::fetchError`. On success
   they emit the parsed `QStringList`; the View clears the combo, adds the
   placeholder(s), then appends the list.
+- **The network methods decode the reply themselves to route the distinct
+  error texts.** The pure parsers (`parseDepartments`/`parseCourses`) return an
+  empty list for **both** a non-object body and a non-success status, so they
+  cannot distinguish the two dialog texts. Each network method therefore checks,
+  in order: `reply->error()`, then `QJsonDocument::fromJson(...).isObject()`,
+  then `obj["status"] == "success"` — reproducing the legacy branch structure and
+  its three distinct texts:
+  - `loadDepartments`: network → row 4; `!isObject()` → row 4a
+    (`"Invalid server response."`); `!success` → row 5
+    (`"Failed to load departments."`). (`loadFilterDepartments`
+    cpp:1825/1835/1849.)
+  - `loadYears`: network → row 6; `!isObject()` → **silent** (`return;` at
+    cpp:1872 — no `loadError` emitted); `!success` → row 7 (`obj["message"]`).
+    (`loadAvailableYears` cpp:1862/1872/1884.)
+  - `loadCourses`: network → row 8; `!isObject()` → row 9
+    (`"Invalid response from server."`); `!success` → row 10 (`obj["message"]`).
+    (`onFilterDepartmentBoxCurrentIndexChanged` cpp:1910/1920/1933.)
+  `parseDepartments`/`parseCourses` stay pure success-extractors (used on the
+  success branch and unit-tested); the error routing lives in the network method.
 - **`fetchReportRows` folds all three failure branches into `reportError`.**
   Legacy `postReportData` shows `QMessageBox::critical(reply->errorString())`
   on network error (cpp:1656), `QMessageBox::warning("Invalid response…")` on
@@ -341,10 +360,14 @@ private:
 class ReportRenderer
 {
 public:
-    // Pure aggregation helpers (no Gui) — unit-testable directly.
-    static QMap<QString,int> aggregateVisitsByCourse(const QJsonArray &data);
-    static QMap<int,int>     aggregateVisitsByHour(const QJsonArray &data,
-                                                   int openHour, int closeHour);
+    // Pure aggregation helpers (no Gui) — unit-testable directly. Each is a
+    // genuine factoring of a chart maker's own aggregation, NOT a test-only
+    // invention:
+    //   aggregateVisitsByCourse    → used by make{Bar,Pie}ChartImage (cpp:125-131)
+    //   aggregateVisitsByCourseHour→ used by makeLineChartImage (cpp:253-275)
+    static QMap<QString,int>              aggregateVisitsByCourse(const QJsonArray &data);
+    static QMap<QString,QMap<int,int>>    aggregateVisitsByCourseHour(const QJsonArray &data,
+                                                                      int openHour, int closeHour);
 
     // Chart images. Verbatim ports of make{Bar,Pie,Line}ChartImage, with the
     // QSettings reads in makeLineChartImage replaced by the openHour/closeHour
@@ -466,6 +489,7 @@ after extraction. All are `QMessageBox` unless noted.
 | 2 | Report data: body not object | `Invalid response from server.` | warning | View, from `reportError` |
 | 3 | Report data: status != success | `<message>` (title "Error") | warning | View, from `reportError` |
 | 4 | Departments: network error | `<reply->errorString()>` | critical | View, from `loadError` |
+| 4a | Departments: body not object | `Invalid server response.` | warning | View, from `loadError` |
 | 5 | Departments: status != success | `Failed to load departments.` | warning | View, from `loadError` |
 | 6 | Years: network error | `<reply->errorString()>` | critical | View, from `loadError` |
 | 7 | Years: status != success | `<obj["message"]>` | warning | View, from `loadError` |
@@ -492,6 +516,14 @@ Rows 18 and 23 differ in trailing text — row 18 (PDF/Print) includes
 `"Please check your date range and department selection."`, row 23 (Excel) does
 not. Preserved verbatim. The `ReportPreviewDialog` HTML popup (dead
 `fetchReportData`) is **deleted**, not in the inventory.
+
+**String-collision watch:** row 4a's `"Invalid server response."`
+(`loadFilterDepartments`, cpp:1836) is a **different** string from rows 2 and 9's
+`"Invalid response from server."` (`postReportData` cpp:1665 /
+`onFilterDepartmentBoxCurrentIndexChanged` cpp:1921). Both are preserved
+verbatim — do not "normalize" them to one string. Note also that
+`loadAvailableYears`' non-object path is **silent** (`return;` at cpp:1872, no
+dialog), so no inventory row is owed for it.
 
 ---
 
@@ -553,7 +585,10 @@ onFilterDepartmentBoxCurrentIndexChanged(index)
 
 ## Tests
 
-### `tst_reportcontroller` (Core+Network, **no** offscreen — 9th target)
+### `tst_reportcontroller` (Core+Network+Gui, **no** offscreen — 9th target)
+
+Links `Qt::Gui` for the `QColor` symbols `getPalette` returns; no offscreen
+(no widget/painter). See the CMake section for the rationale.
 
 No live network — synthetic `QByteArray` payloads with synthetic data only
 (e.g. `"BSIT"`, `"College of Computing Studies"`, visit counts, `2023`), per
@@ -586,9 +621,10 @@ Links `Qt::Gui`/`Qt::Charts`/`QXlsx` (like `tst_visitorcontroller`), so
 
 - **`aggregateVisitsByCourse`**: an array with repeated courses → summed visit
   counts per course.
-- **`aggregateVisitsByHour`**: an array with `login_time` values → per-hour
-  counts, with out-of-`[openHour,closeHour]` rows excluded and invalid
-  `login_time` skipped (cpp:260–274).
+- **`aggregateVisitsByCourseHour`**: an array with `course` + `login_time`
+  values → per-course-per-hour counts (`QMap<QString,QMap<int,int>>`), with
+  out-of-`[openHour,closeHour]` rows excluded and invalid `login_time` skipped
+  (matching `makeLineChartImage` cpp:256–274).
 - **`make{Bar,Pie,Line}ChartImage`**: return a non-null `QImage` of the
   requested size for a small synthetic dataset (integration-level assertion —
   the same convention as the QXlsx-linked targets; pixel content is not
@@ -622,7 +658,10 @@ are already linked.
 Register two new targets (9th + 10th):
 
 ```cmake
-# 9th — Core+Network only, NO offscreen (pure surface, like tst_studentcontroller)
+# 9th — Core+Network+Gui, NO offscreen. Gui is required because getPalette
+# returns a ReportPalette (QColor / QVector<QColor>), and QColor is a Qt::Gui
+# type — so the link needs Gui even though no QPA platform plugin is needed
+# (a QColor *value* under QCoreApplication/QTEST_MAIN requires no offscreen).
 qt_add_executable(tst_reportcontroller
     tst_reportcontroller.cpp
     ${CMAKE_SOURCE_DIR}/reportcontroller.cpp
@@ -634,6 +673,7 @@ target_include_directories(tst_reportcontroller PRIVATE ${CMAKE_SOURCE_DIR})
 target_link_libraries(tst_reportcontroller PRIVATE
     Qt${QT_VERSION_MAJOR}::Test
     Qt${QT_VERSION_MAJOR}::Network
+    Qt${QT_VERSION_MAJOR}::Gui
 )
 add_test(NAME tst_reportcontroller COMMAND tst_reportcontroller)
 set_tests_properties(tst_reportcontroller PROPERTIES
@@ -668,10 +708,15 @@ set_tests_properties(tst_reportrenderer PROPERTIES
 references `getPalette`; if it constructs `ReportPalette` literals directly it
 can drop `reportcontroller.*`. Final call made in Task 3.
 
-**Why no offscreen for `tst_reportcontroller`:** its tested surface is
-Core+Network-only (`QString`/`QByteArray`/`QJsonDocument`/`QDate`/`QStringList`)
-— same rationale as `tst_studentcontroller`. `QTEST_MAIN` on a Core+Network
-target uses `QCoreApplication`, which needs no platform plugin.
+**Why Gui-link but no offscreen for `tst_reportcontroller`:** its tested surface
+is `QString`/`QByteArray`/`QJsonDocument`/`QDate`/`QStringList` **plus `QColor`**
+(returned by `getPalette` inside `ReportPalette`). `QColor` is a `Qt::Gui`
+symbol, so the target must **link** `Qt::Gui` — unlike `tst_studentcontroller`,
+which uses no `QColor`. But a `QColor` *value* constructed under
+`QCoreApplication`/`QTEST_MAIN` needs **no** QPA platform plugin (no widget is
+shown, no painter is opened), so `QT_QPA_PLATFORM=offscreen` is still
+unnecessary and omitted. Only `tst_reportrenderer` (which actually renders
+charts via `QChartView`) needs offscreen.
 
 ---
 
@@ -706,7 +751,11 @@ Four tasks (the prior 3-task shape + one for the second unit):
   `exportReportToPDF`/`exportReportToExcel`/`loadFilterDepartments`/
   `loadAvailableYears`/`onFilterDepartmentBoxCurrentIndexChanged`/the
   `connectFilterSignals` preview lambdas to delegate. Move `ReportPalette` out
-  of `adminwindow.h` (include `reportdata.h`). **Delete** the dead code
+  of `adminwindow.h` (include `reportdata.h`). **Re-point the two surviving
+  View-side `getPalette` callers** — `updateChartsPreview` (cpp:2556) and
+  `updatePalettePreview` (cpp:2512) — from the deleted member `getPalette(...)`
+  to `ReportController::getPalette(...)` (both stay View-side; only the call
+  target changes). **Delete** the dead code
   (`fetchReportData`, `renderChartToImage`, `expandChartPlotArea`, their `.h`
   decls, and the `reportpreviewdialog.h` include). Finish with a purity grep
   gate (`reportcontroller.cpp` has no `ui->`/`QMessageBox`/`QPainter`/`QXlsx`;
@@ -783,9 +832,10 @@ Complete when:
   `reply->deleteLater()` on every path; `finished` connected with the controller
   (`this`) as context object. `ReportRenderer` is stateless — no `QSettings`,
   no `ui->`, no member state; environment via `ReportHeaderInfo`, palette via
-  `ReportPalette`. `tst_reportcontroller` links only `Qt::Test` + `Qt::Network`
-  (no offscreen); `tst_reportrenderer` links `Qt::Gui`/`Qt::Charts`/`QXlsx`
-  with `QT_QPA_PLATFORM=offscreen`.
+  `ReportPalette`. `tst_reportcontroller` links `Qt::Test` + `Qt::Network` +
+  `Qt::Gui` (Gui for the `QColor` symbols in `getPalette`; **no** offscreen —
+  no widget/painter is used); `tst_reportrenderer` links
+  `Qt::Gui`/`Qt::Charts`/`QXlsx` with `QT_QPA_PLATFORM=offscreen`.
 - Security-hygiene (binding): no secrets/admin keys/credentials/backend URLs in
   source, tests, CMake, or this spec; use placeholders. No real student PII in
   fixtures — synthetic only. No hardcoded `C:\Users\<name>` personal paths in
