@@ -54,8 +54,8 @@ The View maps `critical ? QMessageBox::critical : QMessageBox::warning`. This is
 - Create: `qt-app/reportcontroller.h`
 - Create: `qt-app/reportcontroller.cpp`
 - Create: `qt-app/tests/tst_reportcontroller.cpp`
-- Modify: `qt-app/CMakeLists.txt` (add the three source pairs to `WITS`)
 - Modify: `qt-app/tests/CMakeLists.txt` (register `tst_reportcontroller`)
+- **Note:** `qt-app/CMakeLists.txt` (the `WITS` target) is **NOT** modified in Task 1 — the `reportcontroller.*` + `reportdata.h` WITS-wiring is deferred to Task 4 Step 1 (see Step 5 for the AUTOMOC-collision reason).
 
 **Interfaces:**
 - Produces (consumed by Tasks 2, 3, 4):
@@ -563,22 +563,11 @@ QTEST_GUILESS_MAIN(TstReportController)
 
 - [ ] **Step 5: Wire CMake — add sources to `WITS` and register `tst_reportcontroller`**
 
-In `qt-app/CMakeLists.txt`, add to the `qt_add_executable(WITS …)` source list, next to the student files:
+**Do NOT add `reportcontroller.*` or `reportdata.h` to the `WITS` target in Task 1.** Wiring the `Q_OBJECT` `reportcontroller.h` into `WITS` while `adminwindow.h` still defines its own `struct ReportPalette` (removed only in Task 4) makes AUTOMOC compile `moc_reportcontroller` and `moc_adminwindow` into the same translation unit (`WITS_autogen/mocs_compilation.cpp`), where `reportdata.h`'s `ReportPalette` and `adminwindow.h`'s `ReportPalette` collide — a redefinition compile error. `WITS` does not reference `ReportController` until Task 4 anyway, so the `WITS`-wiring is deferred to **Task 4 Step 1** (which removes `adminwindow.h`'s `ReportPalette` in the same edit, clearing the collision), exactly mirroring how `reportrenderer.*` is deferred to Task 3. (`reportrenderer` is a plain non-`Q_OBJECT` class, so adding it in Task 3 is moc-free and collision-free even before Task 4 removes the old struct.)
 
-```cmake
-        reportdata.h
-        reportcontroller.h reportcontroller.cpp
-        reportrenderer.h reportrenderer.cpp
-```
+> Discovered during Task 1 execution (2026-07-04): the design review's "the transient duplicate `ReportPalette` is ODR-safe — never both in one TU until Task 4" claim missed AUTOMOC's combined `mocs_compilation.cpp`. This deferral is the fix; behavior is unchanged.
 
-> The `reportrenderer.*` files do not exist until Task 3. Listing them now will break the `WITS` configure. **Add only the `reportdata.h` + `reportcontroller.h reportcontroller.cpp` lines in Task 1**; add the `reportrenderer.h reportrenderer.cpp` line in Task 3. (Split intentionally so each task configures cleanly.)
-
-So for Task 1, add exactly:
-
-```cmake
-        reportdata.h
-        reportcontroller.h reportcontroller.cpp
-```
+So in Task 1, make **no** edit to `qt-app/CMakeLists.txt`. Only the test target below is registered.
 
 In `qt-app/tests/CMakeLists.txt`, append the 9th target:
 
@@ -622,13 +611,12 @@ Expected: after Step 3+4 the statics are implemented, so the target builds and `
 
 - [ ] **Step 7: Commit**
 
-Use the `commit` skill. Stage by name:
+Use the `commit` skill. Stage by name (note: `qt-app/CMakeLists.txt` is **not** staged — the `WITS`-wiring is deferred to Task 4, see Step 5):
 ```
 qt-app/reportdata.h
 qt-app/reportcontroller.h
 qt-app/reportcontroller.cpp
 qt-app/tests/tst_reportcontroller.cpp
-qt-app/CMakeLists.txt
 qt-app/tests/CMakeLists.txt
 ```
 Suggested subject: `feat(report): add ReportController value types, pure statics, test target`
@@ -1117,11 +1105,12 @@ QTEST_MAIN(TstReportRenderer)
 
 - [ ] **Step 7: Wire CMake — add renderer to `WITS` and register `tst_reportrenderer`**
 
-In `qt-app/CMakeLists.txt`, add the renderer line to the `WITS` source list (next to the `reportcontroller` line added in Task 1):
+In `qt-app/CMakeLists.txt`, add the renderer line to the `WITS` source list, next to the student files (the `reportcontroller.*` + `reportdata.h` lines are NOT in `WITS` yet — they're deferred to Task 4 Step 1; add the renderer line on its own here):
 
 ```cmake
         reportrenderer.h reportrenderer.cpp
 ```
+> `reportrenderer` is a plain non-`Q_OBJECT` class, so wiring it into `WITS` now is moc-free and does not trigger the `ReportPalette` redefinition that deferred `reportcontroller.*` — even though `adminwindow.h` still defines its own `ReportPalette` until Task 4. (`reportrenderer.cpp` and `adminwindow.cpp` are separate TUs, each with one identical `ReportPalette` definition — legal.)
 
 In `qt-app/tests/CMakeLists.txt`, append the 10th target:
 
@@ -1185,7 +1174,15 @@ Suggested subject: `feat(report): add ReportRenderer (charts, PDF, Excel) + test
 
 This is the integration task. It touches many call sites; do it in the ordered steps below and build after each cluster.
 
-- [ ] **Step 1: Move `ReportPalette` out of `adminwindow.h`; add includes + members**
+- [ ] **Step 1: Wire `reportcontroller.*` + `reportdata.h` into `WITS`; move `ReportPalette` out of `adminwindow.h`; add includes + members**
+
+**First, in `qt-app/CMakeLists.txt`** — add the `reportcontroller` + `reportdata` sources to the `qt_add_executable(WITS …)` source list (deferred here from Task 1; see Task 1 Step 5 for the AUTOMOC-collision reason). The `reportrenderer.h reportrenderer.cpp` line was already added in Task 3, so the report block ends up as:
+```cmake
+        reportdata.h
+        reportcontroller.h reportcontroller.cpp
+        reportrenderer.h reportrenderer.cpp
+```
+This is safe now because the very next edit deletes `adminwindow.h`'s own `ReportPalette`, leaving `reportdata.h` as the single definition — so AUTOMOC's combined `mocs_compilation.cpp` (which pulls in both `moc_adminwindow` and `moc_reportcontroller`) sees `ReportPalette` defined exactly once. Do this CMake edit and the `adminwindow.h` struct deletion together; do not build in between.
 
 In `qt-app/adminwindow.h`:
 - **Delete** the `struct ReportPalette { … };` block (h:54–62).
