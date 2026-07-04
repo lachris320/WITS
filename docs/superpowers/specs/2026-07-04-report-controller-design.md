@@ -368,6 +368,11 @@ public:
     static QMap<QString,int>              aggregateVisitsByCourse(const QJsonArray &data);
     static QMap<QString,QMap<int,int>>    aggregateVisitsByCourseHour(const QJsonArray &data,
                                                                       int openHour, int closeHour);
+    // NOTE for the implementer: legacy makeLineChartImage computes `globalMax`
+    // inside its aggregation loop (cpp:273-274). Once the aggregation is
+    // factored into aggregateVisitsByCourseHour, makeLineChartImage recomputes
+    // globalMax as the max value over the returned map — trivially identical,
+    // since the same [openHour,closeHour] filter is applied in the helper.
 
     // Chart images. Verbatim ports of make{Bar,Pie,Line}ChartImage, with the
     // QSettings reads in makeLineChartImage replaced by the openHour/closeHour
