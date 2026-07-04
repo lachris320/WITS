@@ -100,3 +100,20 @@ add_test(NAME tst_importcontroller COMMAND tst_importcontroller)
 set_tests_properties(tst_importcontroller PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_FORCE_STDERR_LOGGING=1"
 )
+
+qt_add_executable(tst_studentcontroller
+    tst_studentcontroller.cpp
+    ${CMAKE_SOURCE_DIR}/studentcontroller.cpp
+    ${CMAKE_SOURCE_DIR}/studentcontroller.h
+    ${CMAKE_SOURCE_DIR}/studentdata.h
+)
+set_target_properties(tst_studentcontroller PROPERTIES WIN32_EXECUTABLE FALSE)
+target_include_directories(tst_studentcontroller PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(tst_studentcontroller PRIVATE
+    Qt${QT_VERSION_MAJOR}::Test
+    Qt${QT_VERSION_MAJOR}::Network
+)
+add_test(NAME tst_studentcontroller COMMAND tst_studentcontroller)
+set_tests_properties(tst_studentcontroller PROPERTIES
+    ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1"
+)
