@@ -1,6 +1,7 @@
 #include "reportcontroller.h"
 #include "apiconfig.h"
 
+#include <QDebug>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -189,9 +190,142 @@ DateRange ReportController::computeDateRange(int durationType,
     return range;
 }
 
-// ---- Network methods: stubbed in Task 1, implemented in Task 2 ----
-void ReportController::loadDepartments()                      { /* Task 2 */ }
-void ReportController::loadYears()                            { /* Task 2 */ }
-void ReportController::loadCourses(const QString &)           { /* Task 2 */ }
-void ReportController::fetchReportRows(const QJsonObject &)   { /* Task 2 */ }
-void ReportController::fetchPreviewData(const QJsonObject &)  { /* Task 2 */ }
+// ---- Network methods ----
+
+// Ported from adminWindow::loadFilterDepartments (adminwindow.cpp:1818-1853).
+void ReportController::loadDepartments() {
+    QUrl url = ApiConfig::endpoint("get_departments.php");
+    QNetworkRequest request(url);
+    QNetworkReply *reply = m_nam->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            emit loadError("Error", reply->errorString(), true);
+            reply->deleteLater();
+            return;
+        }
+        const QByteArray resp = reply->readAll();
+        reply->deleteLater();
+        const QJsonDocument doc = QJsonDocument::fromJson(resp);
+        if (!doc.isObject()) {
+            emit loadError("Error", "Invalid server response.", false);
+            return;
+        }
+        if (doc.object()["status"].toString() != "success") {
+            emit loadError("Error", "Failed to load departments.", false);
+            return;
+        }
+        emit departmentsLoaded(parseDepartments(resp));
+    });
+}
+
+// Ported from adminWindow::loadAvailableYears (adminwindow.cpp:1855-1888).
+// Non-object response is silent (cpp:1872) — no dialog, no signal.
+void ReportController::loadYears() {
+    QUrl url = ApiConfig::endpoint("get_years.php");
+    QNetworkRequest request(url);
+    QNetworkReply *reply = m_nam->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            emit loadError("Error", reply->errorString(), true);
+            reply->deleteLater();
+            return;
+        }
+        const QByteArray resp = reply->readAll();
+        reply->deleteLater();
+        const QJsonDocument doc = QJsonDocument::fromJson(resp);
+        if (!doc.isObject())
+            return;
+        if (doc.object()["status"].toString() != "success") {
+            emit loadError("Error", doc.object()["message"].toString(), false);
+            return;
+        }
+        emit yearsLoaded(parseYears(resp));
+    });
+}
+
+// Ported from the network half of adminWindow::onFilterDepartmentBoxCurrentIndexChanged
+// (adminwindow.cpp:1898-1936). The index <= 0 reset stays View-side.
+void ReportController::loadCourses(const QString &department) {
+    QUrl url = ApiConfig::endpoint("get_courses.php");
+    QUrlQuery query;
+    query.addQueryItem("department", department);
+    query.addQueryItem("include_all", "true");
+    url.setQuery(query);
+    QNetworkRequest request(url);
+    QNetworkReply *reply = m_nam->get(request);
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            emit loadError("Error", reply->errorString(), true);
+            reply->deleteLater();
+            return;
+        }
+        const QByteArray resp = reply->readAll();
+        reply->deleteLater();
+        const QJsonDocument doc = QJsonDocument::fromJson(resp);
+        if (!doc.isObject()) {
+            emit loadError("Error", "Invalid response from server.", false);
+            return;
+        }
+        if (doc.object()["status"].toString() != "success") {
+            emit loadError("Error", doc.object()["message"].toString(), false);
+            return;
+        }
+        emit coursesLoaded(parseCourses(resp));
+    });
+}
+
+// Ported from adminWindow::postReportData (adminwindow.cpp:1646-1675), routed
+// through the parseReportData outcome switch instead of inline JSON checks.
+void ReportController::fetchReportRows(const QJsonObject &filters) {
+    QUrl url = ApiConfig::endpoint("get_report_data.php");
+    QNetworkRequest request(url);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    QNetworkReply *reply = m_nam->post(request, QJsonDocument(filters).toJson());
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            emit reportError(reply->errorString(), true);
+            reply->deleteLater();
+            return;
+        }
+        const QByteArray resp = reply->readAll();
+        reply->deleteLater();
+        QJsonArray data;
+        QString message;
+        switch (parseReportData(resp, data, message)) {
+        case ReportDataOutcome::InvalidResponse:
+            emit reportError("Invalid response from server.", false);
+            break;
+        case ReportDataOutcome::NotSuccess:
+            emit reportError(message, false);
+            break;
+        case ReportDataOutcome::Success:
+            emit reportDataReady(data);
+            break;
+        }
+    });
+}
+
+// Ported from adminWindow::fetchPreviewData (adminwindow.cpp:2726-2750): a
+// distinct API-router endpoint, silent on error (qDebug only), and emits only
+// on a success object — including when the data array is empty (the View
+// then clears the preview, as today). Deliberately NOT routed through
+// parsePreviewData: that parser can't distinguish silent-failure from
+// success-with-empty-data, and this method must.
+void ReportController::fetchPreviewData(const QJsonObject &filters) {
+    QUrl url = ApiConfig::endpoint("api.php/reports/data");
+    QNetworkRequest request(url);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    QNetworkReply *reply = m_nam->post(request, QJsonDocument(filters).toJson());
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            qDebug() << "Preview fetch error:" << reply->errorString();
+            reply->deleteLater();
+            return;
+        }
+        const QByteArray resp = reply->readAll();
+        reply->deleteLater();
+        const QJsonDocument doc = QJsonDocument::fromJson(resp);
+        if (doc.isObject() && doc.object()["status"].toString() == "success")
+            emit previewDataReady(doc.object()["data"].toArray());
+    });
+}
