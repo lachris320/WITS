@@ -187,7 +187,7 @@ QProgressBar::chunk {
           </font>
          </property>
          <property name="text">
-          <string>🛠️General</string>
+          <string>General</string>
          </property>
          <property name="flat">
           <bool>true</bool>
@@ -203,7 +203,7 @@ QProgressBar::chunk {
           </font>
          </property>
          <property name="text">
-          <string>🗃️Database </string>
+          <string>Database </string>
          </property>
          <property name="flat">
           <bool>true</bool>
@@ -219,7 +219,7 @@ QProgressBar::chunk {
           </font>
          </property>
          <property name="text">
-          <string>📊Reporting</string>
+          <string>Reporting</string>
          </property>
          <property name="flat">
           <bool>true</bool>
@@ -235,7 +235,7 @@ QProgressBar::chunk {
           </font>
          </property>
          <property name="text">
-          <string>🔎Search</string>
+          <string>Search</string>
          </property>
          <property name="flat">
           <bool>true</bool>
@@ -251,7 +251,7 @@ QProgressBar::chunk {
           </font>
          </property>
          <property name="text">
-          <string>📍VIsit Logs</string>
+          <string>VIsit Logs</string>
          </property>
          <property name="flat">
           <bool>true</bool>
