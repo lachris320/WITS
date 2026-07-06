@@ -1,7 +1,12 @@
 #include <QtTest>
 #include <QColor>
+#include <QFile>
+#include <QImage>
+#include <QImageReader>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QPainter>
+#include <QTemporaryDir>
 #include "brandcolormath.h"
 #include "brandtheme.h"
 #include "theme.h"
@@ -10,6 +15,8 @@ class TestBrandTheme : public QObject
 {
     Q_OBJECT
 private slots:
+    void initTestCase();
+
     // Color math
     void contrastBlackWhiteIsMax();
     void contrastSameColorIsOne();
@@ -24,7 +31,84 @@ private slots:
     void paletteJsonRoundTrip();
     void configJsonRoundTrip();
     void paletteFromJsonMissingFieldsFallsBack();
+
+    // Logo validation + extraction (Task 2)
+    void validPngProducesBrandedPalette();
+    void validSvgProducesBrandedPalette();
+    void corruptFileRejectedWithSpecificError();
+    void unsupportedExtensionRejected();
+    void missingFileRejected();
+    void webpNeverCrashes();
+    void sameLogoTwiceIsDeterministic();
+    void differentLogosDifferentPalettes();
+    void twoToneLogoMapsPrimaryAndSecondary();
+    void generatedPalettesMeetMinContrast();
+    void greyscaleLogoFallsBack();
+
+private:
+    QString writePng(const QString &name, const QColor &fill);
+    QString writeTwoTonePng(const QString &name, const QColor &left, const QColor &right);
+    QString writeSvg(const QString &name, const QString &fillHex);
+    QString writeGarbage(const QString &name);
+
+    QTemporaryDir m_dir;
 };
+
+void TestBrandTheme::initTestCase()
+{
+    QVERIFY(m_dir.isValid());
+}
+
+QString TestBrandTheme::writePng(const QString &name, const QColor &fill)
+{
+    QImage img(64, 64, QImage::Format_ARGB32);
+    img.fill(fill);
+    const QString path = m_dir.filePath(name);
+    if (!img.save(path, "PNG"))
+        qWarning("failed to write test PNG: %s", qPrintable(path));
+    return path;
+}
+
+QString TestBrandTheme::writeTwoTonePng(const QString &name, const QColor &left, const QColor &right)
+{
+    QImage img(64, 64, QImage::Format_ARGB32);
+    img.fill(left);
+    QPainter p(&img);
+    p.fillRect(32, 0, 32, 64, right);
+    p.end();
+    const QString path = m_dir.filePath(name);
+    if (!img.save(path, "PNG"))
+        qWarning("failed to write test PNG: %s", qPrintable(path));
+    return path;
+}
+
+QString TestBrandTheme::writeSvg(const QString &name, const QString &fillHex)
+{
+    const QString path = m_dir.filePath(name);
+    QFile f(path);
+    if (f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QTextStream out(&f);
+        out << QStringLiteral(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"64\" height=\"64\">"
+            "<rect width=\"64\" height=\"64\" fill=\"%1\"/></svg>")
+                   .arg(fillHex);
+    } else {
+        qWarning("failed to write test SVG: %s", qPrintable(path));
+    }
+    return path;
+}
+
+QString TestBrandTheme::writeGarbage(const QString &name)
+{
+    const QString path = m_dir.filePath(name);
+    QFile f(path);
+    if (f.open(QIODevice::WriteOnly)) {
+        f.write("this is not an image");
+    } else {
+        qWarning("failed to write garbage file: %s", qPrintable(path));
+    }
+    return path;
+}
 
 void TestBrandTheme::contrastBlackWhiteIsMax()
 {
@@ -117,6 +201,151 @@ void TestBrandTheme::paletteFromJsonMissingFieldsFallsBack()
     QCOMPARE(p.adminPrimary, QColor("#7E1A15"));
     QCOMPARE(p.kioskPrimary, fb.kioskPrimary); // invalid -> fallback
     QCOMPARE(p.text, fb.text);                 // missing -> fallback
+}
+
+void TestBrandTheme::validPngProducesBrandedPalette()
+{
+    const QString path = writePng(QStringLiteral("red.png"), QColor(Qt::red));
+    QString err;
+    const BrandPalette p = BrandTheme::extractPalette(path, &err);
+    QVERIFY2(err.isEmpty(), qPrintable(err));
+    const BrandPalette fb = BrandTheme::fallbackPalette();
+    QVERIFY(p.adminPrimary != fb.adminPrimary);
+    QVERIFY(p.adminPrimary.isValid());
+}
+
+void TestBrandTheme::validSvgProducesBrandedPalette()
+{
+    const QString path = writeSvg(QStringLiteral("logo.svg"), QStringLiteral("#7E1A15"));
+    QString err;
+    const BrandPalette p = BrandTheme::extractPalette(path, &err);
+    QVERIFY2(err.isEmpty(), qPrintable(err));
+    const BrandPalette fb = BrandTheme::fallbackPalette();
+    QVERIFY(p.adminPrimary != fb.adminPrimary);
+    QVERIFY(p.adminPrimary.isValid());
+}
+
+void TestBrandTheme::corruptFileRejectedWithSpecificError()
+{
+    const QString path = writeGarbage(QStringLiteral("garbage.png"));
+    QString validateErr;
+    const bool valid = BrandTheme::validateLogoFile(path, &validateErr);
+    QVERIFY(!valid);
+    QVERIFY2(validateErr.contains(QStringLiteral("corrupt")), qPrintable(validateErr));
+
+    QString extractErr;
+    const BrandPalette p = BrandTheme::extractPalette(path, &extractErr);
+    const BrandPalette fb = BrandTheme::fallbackPalette();
+    QVERIFY(p == fb);
+    QVERIFY(!extractErr.isEmpty());
+}
+
+void TestBrandTheme::unsupportedExtensionRejected()
+{
+    const QString path = writeGarbage(QStringLiteral("garbage.txt"));
+    QString err;
+    const bool valid = BrandTheme::validateLogoFile(path, &err);
+    QVERIFY(!valid);
+    QVERIFY2(err.contains(QStringLiteral("Unsupported logo format")), qPrintable(err));
+}
+
+void TestBrandTheme::missingFileRejected()
+{
+    const QString path = m_dir.filePath(QStringLiteral("does-not-exist.png"));
+    QString err;
+    const bool valid = BrandTheme::validateLogoFile(path, &err);
+    QVERIFY(!valid);
+    QVERIFY2(err.contains(QStringLiteral("not found")), qPrintable(err));
+}
+
+void TestBrandTheme::webpNeverCrashes()
+{
+    const QString path = writeGarbage(QStringLiteral("garbage.webp"));
+    QString err;
+    const bool valid = BrandTheme::validateLogoFile(path, &err);
+    QVERIFY(!valid);
+    if (!QImageReader::supportedImageFormats().contains("webp")) {
+        QVERIFY2(err.contains(QStringLiteral("not supported")), qPrintable(err));
+    } else {
+        QVERIFY2(err.contains(QStringLiteral("corrupt or unsupported")), qPrintable(err));
+    }
+}
+
+void TestBrandTheme::sameLogoTwiceIsDeterministic()
+{
+    const QString path = writePng(QStringLiteral("red-det.png"), QColor(Qt::red));
+    QString err1, err2;
+    const BrandPalette p1 = BrandTheme::extractPalette(path, &err1);
+    const BrandPalette p2 = BrandTheme::extractPalette(path, &err2);
+    QVERIFY2(err1.isEmpty(), qPrintable(err1));
+    QVERIFY2(err2.isEmpty(), qPrintable(err2));
+    QVERIFY(p1 == p2);
+}
+
+void TestBrandTheme::differentLogosDifferentPalettes()
+{
+    const QString redPath = writePng(QStringLiteral("red-diff.png"), QColor(Qt::red));
+    const QString bluePath = writePng(QStringLiteral("blue-diff.png"), QColor(Qt::blue));
+    QString errRed, errBlue;
+    const BrandPalette pRed = BrandTheme::extractPalette(redPath, &errRed);
+    const BrandPalette pBlue = BrandTheme::extractPalette(bluePath, &errBlue);
+    QVERIFY2(errRed.isEmpty(), qPrintable(errRed));
+    QVERIFY2(errBlue.isEmpty(), qPrintable(errBlue));
+    QVERIFY(pRed.adminPrimary != pBlue.adminPrimary);
+}
+
+void TestBrandTheme::twoToneLogoMapsPrimaryAndSecondary()
+{
+    const QColor maroon(QStringLiteral("#7E1A15"));
+    const QColor gold(QStringLiteral("#D4A017"));
+    const QString path = writeTwoTonePng(QStringLiteral("twotone.png"), maroon, gold);
+    QString err;
+    const BrandPalette p = BrandTheme::extractPalette(path, &err);
+    QVERIFY2(err.isEmpty(), qPrintable(err));
+
+    const int maroonHue = maroon.hsvHue();
+    const int goldHue = gold.hsvHue();
+    QVERIFY2(qAbs(p.adminPrimary.hsvHue() - maroonHue) <= 30,
+             qPrintable(QStringLiteral("adminPrimary hue %1 vs maroon hue %2")
+                            .arg(p.adminPrimary.hsvHue())
+                            .arg(maroonHue)));
+    QVERIFY2(qAbs(p.kioskPrimary.hsvHue() - goldHue) <= 30,
+             qPrintable(QStringLiteral("kioskPrimary hue %1 vs gold hue %2")
+                            .arg(p.kioskPrimary.hsvHue())
+                            .arg(goldHue)));
+    QVERIFY(p.adminPrimary != p.kioskPrimary);
+}
+
+void TestBrandTheme::generatedPalettesMeetMinContrast()
+{
+    const QVector<QPair<QString, QColor>> cases = {
+        { QStringLiteral("contrast-red.png"), QColor(Qt::red) },
+        { QStringLiteral("contrast-blue.png"), QColor(Qt::blue) },
+        { QStringLiteral("contrast-paleyellow.png"), QColor(QStringLiteral("#F0E68C")) },
+        { QStringLiteral("contrast-navy.png"), QColor(QStringLiteral("#101840")) },
+    };
+    for (const auto &c : cases) {
+        const QString path = writePng(c.first, c.second);
+        QString err;
+        const BrandPalette p = BrandTheme::extractPalette(path, &err);
+        QVERIFY2(err.isEmpty(), qPrintable(err));
+        const double adminContrast = BrandColorMath::contrastRatio(p.adminPrimary, p.adminOnPrimary);
+        const double kioskContrast = BrandColorMath::contrastRatio(p.kioskPrimary, p.kioskOnPrimary);
+        QVERIFY2(adminContrast >= BrandTheme::MinContrast,
+                 qPrintable(QStringLiteral("%1: admin contrast %2").arg(c.first).arg(adminContrast)));
+        QVERIFY2(kioskContrast >= BrandTheme::MinContrast,
+                 qPrintable(QStringLiteral("%1: kiosk contrast %2").arg(c.first).arg(kioskContrast)));
+    }
+}
+
+void TestBrandTheme::greyscaleLogoFallsBack()
+{
+    const QString path = writePng(QStringLiteral("grey.png"), QColor(QStringLiteral("#808080")));
+    QString err;
+    const BrandPalette p = BrandTheme::extractPalette(path, &err);
+    const BrandPalette fb = BrandTheme::fallbackPalette();
+    QVERIFY2(err.isEmpty(), qPrintable(err));
+    QVERIFY(p == fb);
 }
 
 QTEST_GUILESS_MAIN(TestBrandTheme)

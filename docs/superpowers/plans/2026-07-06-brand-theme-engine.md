@@ -615,7 +615,7 @@ Red first (build error before the sources exist / assertion failures if stubs wr
    - `webp` when `!QImageReader::supportedImageFormats().contains("webp")` → err `WEBP logos are not supported on this system — use PNG or SVG instead.`
    - otherwise `QImageReader reader(path); reader.setAutoTransform(true); QImage img = reader.read();` null → err `Unable to decode logo (corrupt or unsupported): <path> (<reader.errorString()>)`; else `img.scaled(64, 64, Qt::IgnoreAspectRatio, Qt::SmoothTransformation).convertToFormat(QImage::Format_ARGB32)`.
 2. `validateLogoFile` = `!renderLogo(...).isNull()`.
-3. Chromatic histogram: for each pixel with `qAlpha >= 128`, compute HSV; skip if `saturationF < 0.15` or `valueF < 0.15` or `valueF > 0.98`; bucket key = `((r>>4)<<8) | ((g>>4)<<4) | (b>>4)`; count per key.
+3. Chromatic histogram: for each pixel with `qAlpha >= 128`, compute HSV; skip if `saturationF < 0.15` or `valueF < 0.15` *(Correction 2026-07-06: the original `valueF > 0.98` near-white ceiling also rejected fully-saturated pure hues (V = 1.0); near-white is already excluded by the saturation floor, so the ceiling was removed)*; bucket key = `((r>>4)<<8) | ((g>>4)<<4) | (b>>4)`; count per key.
 4. Empty histogram (greyscale/blank logo) → return `fallbackPalette()`, clear err.
 5. Primary seed = bucket with highest count; tie → lowest key (iterate sorted keys). Seed color = bucket center: `component = nibble*16 + 8`.
 6. Secondary seed = highest-count bucket (same tie rule) whose hue differs from the primary seed's hue by ≥ 60° (circular distance, `qAbs` wrapped); if none exists, secondary = primary rotated +45°: `QColor::fromHsvF(fmod(h + 0.125, 1.0), s, v)`.
@@ -625,7 +625,7 @@ Red first (build error before the sources exist / assertion failures if stubs wr
    - Kiosk (allows the design's dark-on-gold): if `contrastRatio(secondarySeed, white) >= MinContrast` → `kioskPrimary = secondarySeed`, `kioskOnPrimary = white`; else if `contrastRatio(secondarySeed, shade(secondarySeed, -0.60)) >= MinContrast` → `kioskPrimary = secondarySeed`, `kioskOnPrimary = shade(secondarySeed, -0.60)`; else `kioskPrimary = enforceOnWhite(secondarySeed)`, `kioskOnPrimary = white`.
    - Hovers = `shade(primary, -0.28)` each; softs = `mix(primary, white, 0.90)` each; `secondary = kioskPrimary`; neutrals copied from `fallbackPalette()`.
 
-Named constants (anonymous namespace): `kSampleSize=64, kMinAlpha=128, kMinSaturation=0.15, kMinValue=0.15, kMaxValue=0.98, kMinHueSeparationDeg=60.0, kHoverShade=-0.28, kSoftMixToWhite=0.90, kOnColorDeepShade=-0.60, kEnforceStep=-0.08, kEnforceMaxIterations=24`.
+Named constants (anonymous namespace): `kSampleSize=64, kMinAlpha=128, kMinSaturation=0.15, kMinValue=0.15, kMinHueSeparationDeg=60.0, kHoverShade=-0.28, kSoftMixToWhite=0.90, kOnColorDeepShade=-0.60, kEnforceStep=-0.08, kEnforceMaxIterations=24`.
 
 - [ ] **Step 1: Add failing tests** to `tst_brandtheme.cpp` — new slots + file-generating helpers (QTemporaryDir member `m_dir` created in `initTestCase`):
 
