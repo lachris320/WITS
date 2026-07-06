@@ -160,3 +160,25 @@ add_test(NAME tst_reportrenderer COMMAND tst_reportrenderer)
 set_tests_properties(tst_reportrenderer PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_FORCE_STDERR_LOGGING=1"
 )
+
+# 11th — brand-theme engine: pure color math, extraction, cache. Gui for
+# QColor/QImage, Svg for QSvgRenderer logo rendering, offscreen because it
+# never shows a widget but paints QImages.
+qt_add_executable(tst_brandtheme
+    tst_brandtheme.cpp
+    ${CMAKE_SOURCE_DIR}/brandtheme.cpp
+    ${CMAKE_SOURCE_DIR}/brandtheme.h
+    ${CMAKE_SOURCE_DIR}/brandthemedata.h
+    ${CMAKE_SOURCE_DIR}/brandcolormath.h
+)
+set_target_properties(tst_brandtheme PROPERTIES WIN32_EXECUTABLE FALSE)
+target_include_directories(tst_brandtheme PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(tst_brandtheme PRIVATE
+    Qt${QT_VERSION_MAJOR}::Test
+    Qt${QT_VERSION_MAJOR}::Gui
+    Qt${QT_VERSION_MAJOR}::Svg
+)
+add_test(NAME tst_brandtheme COMMAND tst_brandtheme)
+set_tests_properties(tst_brandtheme PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_FORCE_STDERR_LOGGING=1"
+)
