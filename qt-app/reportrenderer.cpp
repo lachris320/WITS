@@ -59,6 +59,24 @@ QMap<QString, QMap<int, int>> ReportRenderer::aggregateVisitsByCourseHour(
     return courseTimeCounts;
 }
 
+// Shared render tail of the three chart makers: paint a configured QChart into
+// an ARGB32 QImage of the requested size. A local QChartView owns `chart` and
+// deletes it when this returns — same ownership as the inline versions it replaces.
+QImage ReportRenderer::renderChartToImage(QChart *chart, QSize size) {
+    QImage chartImage(size, QImage::Format_ARGB32);
+    chartImage.fill(Qt::white);
+    QPainter painter(&chartImage);
+
+    QChartView view(chart);
+    view.setRenderHint(QPainter::Antialiasing);
+    view.resize(size);
+    view.show();
+    view.chart()->resize(size);
+    view.render(&painter);
+
+    return chartImage;
+}
+
 // --- Bar Chart ---
 // Verbatim port of adminWindow::makeBarChartImage (legacy adminwindow.cpp:123-187),
 // with the inline aggregation loop replaced by aggregateVisitsByCourse(data).
@@ -107,19 +125,7 @@ QImage ReportRenderer::makeBarChartImage(const QJsonArray &data, QSize size, con
     chart->layout()->setContentsMargins(0, 0, 0, 0);
     chart->setBackgroundRoundness(0);
 
-    // Render to image
-    QImage chartImage(size, QImage::Format_ARGB32);
-    chartImage.fill(Qt::white);
-    QPainter painter(&chartImage);
-
-    QChartView view(chart);
-    view.setRenderHint(QPainter::Antialiasing);
-    view.resize(size);
-    view.show();
-    view.chart()->resize(size);
-    view.render(&painter);
-
-    return chartImage;
+    return renderChartToImage(chart, size);
 }
 
 
@@ -157,19 +163,7 @@ QImage ReportRenderer::makePieChartImage(const QJsonArray &data, QSize size, con
     chart->layout()->setContentsMargins(0, 0, 0, 0);
     chart->setBackgroundRoundness(0);
 
-    // Render chart into image
-    QImage chartImage(size, QImage::Format_ARGB32);
-    chartImage.fill(Qt::white);
-    QPainter painter(&chartImage);
-
-    QChartView view(chart);
-    view.setRenderHint(QPainter::Antialiasing);
-    view.resize(size);
-    view.show();                 // ensures layout calculates
-    view.chart()->resize(size);  // force resize of chart
-    view.render(&painter);
-
-    return chartImage;
+    return renderChartToImage(chart, size);
 }
 
 
@@ -243,19 +237,7 @@ QImage ReportRenderer::makeLineChartImage(const QJsonArray &data, QSize size, co
     chart->layout()->setContentsMargins(0, 0, 0, 0);
     chart->setBackgroundRoundness(0);
 
-    // Render to QImage (your working approach)
-    QImage chartImage(size, QImage::Format_ARGB32);
-    chartImage.fill(Qt::white);
-    QPainter painter(&chartImage);
-
-    QChartView view(chart);
-    view.setRenderHint(QPainter::Antialiasing);
-    view.resize(size);
-    view.show();
-    view.chart()->resize(size);
-    view.render(&painter);
-
-    return chartImage;
+    return renderChartToImage(chart, size);
 }
 
 // Verbatim port of adminWindow::paintReport (legacy adminwindow.cpp:2018-2291), with:
