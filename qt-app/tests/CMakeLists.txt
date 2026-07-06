@@ -182,3 +182,27 @@ add_test(NAME tst_brandtheme COMMAND tst_brandtheme)
 set_tests_properties(tst_brandtheme PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_FORCE_STDERR_LOGGING=1"
 )
+
+# 12th — branding network controller: pure parser tests over synthetic
+# payloads (no live HTTP). Links brandtheme.cpp for JSON/fallback, hence
+# Gui+Svg alongside Network.
+qt_add_executable(tst_brandingcontroller
+    tst_brandingcontroller.cpp
+    ${CMAKE_SOURCE_DIR}/brandingcontroller.cpp
+    ${CMAKE_SOURCE_DIR}/brandingcontroller.h
+    ${CMAKE_SOURCE_DIR}/brandtheme.cpp
+    ${CMAKE_SOURCE_DIR}/brandtheme.h
+    ${CMAKE_SOURCE_DIR}/brandthemedata.h
+)
+set_target_properties(tst_brandingcontroller PROPERTIES WIN32_EXECUTABLE FALSE)
+target_include_directories(tst_brandingcontroller PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(tst_brandingcontroller PRIVATE
+    Qt${QT_VERSION_MAJOR}::Test
+    Qt${QT_VERSION_MAJOR}::Network
+    Qt${QT_VERSION_MAJOR}::Gui
+    Qt${QT_VERSION_MAJOR}::Svg
+)
+add_test(NAME tst_brandingcontroller COMMAND tst_brandingcontroller)
+set_tests_properties(tst_brandingcontroller PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_FORCE_STDERR_LOGGING=1"
+)
