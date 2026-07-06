@@ -32,7 +32,6 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         MANUAL_FINALIZATION
         ${PROJECT_SOURCES}
         guestwindow.h guestwindow.cpp guestwindow.ui
-        reportpreviewdialog.h reportpreviewdialog.cpp
         busyindicator.h busyindicator.cpp
         attachFilesDialog.ui
         attachfilesdialog.h attachfilesdialog.cpp
