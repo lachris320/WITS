@@ -52,9 +52,6 @@
 #include "xlsxdocument.h"
 #include "xlsxformat.h"
 #include "xlsxcellrange.h"
-#include "reportpreviewdialog.h"
-
-#include <functional>
 
 #include <QtCharts/QChart>
 #include <QtCharts/QChartView>
@@ -65,281 +62,6 @@
 #include <QtCharts/QPieSlice>
 #include <QtCharts/QLineSeries>
 #include <QtCharts/QValueAxis>
-
-// Utility: expand chart to fill most of the available space
-void adminWindow::expandChartPlotArea(QChart *chart, const QSize &targetSize)
-{
-    if (!chart) return;
-
-    // Kill chart margins and padding
-    chart->setMargins(QMargins(0, 0, 0, 0));
-    if (chart->layout()) {
-        chart->layout()->setContentsMargins(0, 0, 0, 0);
-    }
-    chart->setBackgroundRoundness(0);
-
-    // Optional: keep legend but make it smaller
-    if (chart->legend()) {
-        chart->legend()->setAlignment(Qt::AlignBottom);
-        chart->legend()->setFont(QFont("Arial", 8));
-    }
-
-    // Force the plot area to fill most of the available chart size
-    QRectF rect(10, 10, targetSize.width() - 20, targetSize.height() - 40);
-    chart->setPlotArea(rect);
-
-    qDebug() << "[expandChartPlotArea] Forced plot area to:" << rect
-             << " targetSize:" << targetSize;
-}
-
-// Renders a QChart into a QImage (software-backed) — safe for PDF use.
-QImage adminWindow::renderChartToImage(QChart *chart, const QSize &targetSize)
-{
-    if (!chart) {
-        qDebug() << "Error: Null chart passed to renderChartToImage";
-        return QImage();
-    }
-
-    QChartView chartView(chart);
-    chartView.setRenderHint(QPainter::Antialiasing);
-    chartView.resize(targetSize);
-
-    QImage img(targetSize, QImage::Format_ARGB32);
-    img.fill(Qt::white);
-
-    QPainter painter(&img);
-    painter.setRenderHint(QPainter::Antialiasing);
-    chartView.render(&painter, QRectF(QPointF(0, 0), QSizeF(targetSize)));
-    painter.end();
-
-    qDebug() << "Chart rendered to image, size:" << img.size();
-
-    return img;
-}
-
-
-
-// --- Bar Chart ---
-QImage adminWindow::makeBarChartImage(const QJsonArray &data, QSize size, const ReportPalette &palette) {
-    // Aggregate visits by course
-    QMap<QString, int> courseCounts;
-    for (const QJsonValue &v : data) {
-        QJsonObject obj = v.toObject();
-        QString course = obj["course"].toString();
-        int visits = obj["visits"].toInt();
-        courseCounts[course] += visits;
-    }
-
-    //color set
-    QBarSeries *series = new QBarSeries();
-    QStringList categories;
-    QVector<QColor> colors = { palette.rowEvenBg, palette.rowOddBg, palette.headerBg };
-
-    int colorIndex = 0;
-    for (auto it = courseCounts.begin(); it != courseCounts.end(); ++it) {
-        QBarSet *set = new QBarSet(it.key());
-        *set << it.value();
-        set->setBrush(palette.chartColors[colorIndex % palette.chartColors.size()]);
-        series->append(set);
-        categories << it.key();
-        colorIndex++;
-    }
-
-    // Create chart
-    QChart *chart = new QChart();
-    chart->addSeries(series);
-    chart->setTitle("Library Visits by Course");
-    chart->setTitleFont(QFont("Arial", 16, QFont::Bold));
-
-    QBarCategoryAxis *axisX = new QBarCategoryAxis();
-    axisX->append(categories);
-    axisX->setLabelsFont(QFont("Arial", 12));
-    chart->addAxis(axisX, Qt::AlignBottom);
-    series->attachAxis(axisX);
-
-    QValueAxis *axisY = new QValueAxis();
-    axisY->setTitleText("Number of Visits");
-    axisY->setLabelsFont(QFont("Arial", 12));
-    chart->addAxis(axisY, Qt::AlignLeft);
-    series->attachAxis(axisY);
-
-    chart->legend()->setVisible(true);
-    chart->legend()->setFont(QFont("Arial", 12));
-
-    // ✅ Remove margins and force chart to fill
-    chart->setMargins(QMargins(0, 0, 0, 0));
-    chart->layout()->setContentsMargins(0, 0, 0, 0);
-    chart->setBackgroundRoundness(0);
-
-    // Render to image
-    QImage chartImage(size, QImage::Format_ARGB32);
-    chartImage.fill(Qt::white);
-    QPainter painter(&chartImage);
-
-    QChartView view(chart);
-    view.setRenderHint(QPainter::Antialiasing);
-    view.resize(size);
-    view.show();
-    view.chart()->resize(size);
-    view.render(&painter);
-
-    return chartImage;
-}
-
-
-// --- Pie Chart ---
-QImage adminWindow::makePieChartImage(const QJsonArray &data, QSize size, const ReportPalette &palette) {
-    // Aggregate visits by course
-    QMap<QString, int> courseCounts;
-    for (const QJsonValue &v : data) {
-        QJsonObject obj = v.toObject();
-        QString course = obj["course"].toString();
-        int visits = obj["visits"].toInt();
-        courseCounts[course] += visits;
-    }
-
-    // Create pie series
-    QPieSeries *series = new QPieSeries();
-    QVector<QColor> colors = { palette.rowEvenBg, palette.rowOddBg, palette.headerBg };
-    int colorIndex = 0;
-    for (auto it = courseCounts.begin(); it != courseCounts.end(); ++it) {
-        QPieSlice *slice = series->append(it.key(), it.value());
-        slice->setLabel(QString("%1: %2").arg(it.key()).arg(it.value()));
-        slice->setLabelVisible(true);
-        slice->setBrush(palette.chartColors[colorIndex % palette.chartColors.size()]);
-        slice->setLabelFont(QFont("Arial", 14, QFont::Bold)); // ✅ bigger font
-        colorIndex++;
-    }
-
-    // Create chart
-    QChart *chart = new QChart();
-    chart->addSeries(series);
-    chart->setTitle("Library Visits by Course");
-    chart->setTitleFont(QFont("Arial", 16, QFont::Bold));
-    chart->legend()->setVisible(true);
-    chart->legend()->setFont(QFont("Arial", 12));
-    chart->legend()->setAlignment(Qt::AlignRight);
-
-    // ✅ Remove extra margins so chart fills the image
-    chart->setMargins(QMargins(0, 0, 0, 0));
-    chart->layout()->setContentsMargins(0, 0, 0, 0);
-    chart->setBackgroundRoundness(0);
-
-    // Render chart into image
-    QImage chartImage(size, QImage::Format_ARGB32);
-    chartImage.fill(Qt::white);
-    QPainter painter(&chartImage);
-
-    QChartView view(chart);
-    view.setRenderHint(QPainter::Antialiasing);
-    view.resize(size);
-    view.show();                 // ensures layout calculates
-    view.chart()->resize(size);  // force resize of chart
-    view.render(&painter);
-
-    return chartImage;
-}
-
-
-
-// --- Line Chart ---
-QImage adminWindow::makeLineChartImage(const QJsonArray &data, QSize size, const ReportPalette &palette) {
-    // ✅ Load library hours from QSettings
-    QSettings settings("MyCompany", "MyApp");
-    int openHour  = settings.value("library/openHour", 7).toInt();   // default 7 AM
-    int closeHour = settings.value("library/closeHour", 21).toInt(); // default 9 PM
-
-    // Aggregate visits per course per hour
-    QMap<QString, QMap<int, int>> courseTimeCounts;
-    int globalMax = 0;
-
-    for (const QJsonValue &v : data) {
-        QJsonObject obj = v.toObject();
-        QString course = obj["course"].toString();
-        QString loginTime = obj["login_time"].toString();
-        QTime time = QTime::fromString(loginTime, "HH:mm:ss");
-        if (!time.isValid()) {
-            qDebug() << "Invalid login_time format:" << loginTime;
-            continue;
-        }
-        int hour = time.hour();
-
-        // ✅ Skip hours outside library hours
-        if (hour < openHour || hour > closeHour)
-            continue;
-
-        courseTimeCounts[course][hour] += 1;
-
-        if (courseTimeCounts[course][hour] > globalMax)
-            globalMax = courseTimeCounts[course][hour];
-    }
-
-    QChart *chart = new QChart();
-    chart->setTitle("Library Peak Hours by Course");
-    chart->setTitleFont(QFont("Arial", 16, QFont::Bold));
-
-    // One line series per course
-    QVector<QColor> colors = { palette.rowEvenBg, palette.rowOddBg, palette.headerBg };
-    int colorIndex = 0;
-    for (auto it = courseTimeCounts.begin(); it != courseTimeCounts.end(); ++it) {
-        QLineSeries *series = new QLineSeries();
-        series->setName(it.key());
-
-        // ✅ Only loop within open–close hours
-        for (int h = openHour; h <= closeHour; ++h) {
-            int count = it.value().value(h, 0);
-            series->append(h, count);
-        }
-        series->setColor(palette.chartColors[colorIndex % palette.chartColors.size()]);
-        chart->addSeries(series);
-        colorIndex++;
-    }
-
-    // X axis = only library hours
-    QValueAxis *axisX = new QValueAxis();
-    axisX->setTitleText("Hour of Day");
-    axisX->setRange(openHour, closeHour);  // ✅ restrict to library hours
-    axisX->setTickCount(closeHour - openHour + 1);
-    axisX->setLabelFormat("%d:00");   // shows "7:00", "8:00", etc.
-    axisX->setLabelsFont(QFont("Arial", 10));
-    chart->addAxis(axisX, Qt::AlignBottom);
-
-    // Y axis = number of students (auto-scale)
-    QValueAxis *axisY = new QValueAxis();
-    axisY->setTitleText("Number of Students");
-    axisY->setLabelsFont(QFont("Arial", 10));
-    axisY->setRange(0, globalMax + 1);
-    axisY->setTickCount(globalMax + 2);
-    chart->addAxis(axisY, Qt::AlignLeft);
-
-    // Attach axes
-    for (QAbstractSeries *s : chart->series()) {
-        s->attachAxis(axisX);
-        s->attachAxis(axisY);
-    }
-
-    chart->legend()->setVisible(true);
-    chart->legend()->setFont(QFont("Arial", 12));
-
-    // ✅ Keep your centered & unclipped layout
-    chart->setMargins(QMargins(0, 0, 0, 0));
-    chart->layout()->setContentsMargins(0, 0, 0, 0);
-    chart->setBackgroundRoundness(0);
-
-    // Render to QImage (your working approach)
-    QImage chartImage(size, QImage::Format_ARGB32);
-    chartImage.fill(Qt::white);
-    QPainter painter(&chartImage);
-
-    QChartView view(chart);
-    view.setRenderHint(QPainter::Antialiasing);
-    view.resize(size);
-    view.show();
-    view.chart()->resize(size);
-    view.render(&painter);
-
-    return chartImage;
-}
 
 void adminWindow::setActiveSidebar(QPushButton* activeBtn){
     QList<QPushButton*> buttons = {
@@ -457,9 +179,27 @@ adminWindow::adminWindow(QWidget *parent)
             this, &adminWindow::onDepartmentsLoaded);
     connect(m_studentController, &StudentController::coursesLoaded,
             this, &adminWindow::onCoursesLoaded);
+
+    m_reportController = new ReportController(networkManager, this);
+
+    connect(m_reportController, &ReportController::departmentsLoaded,
+            this, &adminWindow::onReportDepartmentsLoaded);
+    connect(m_reportController, &ReportController::yearsLoaded,
+            this, &adminWindow::onReportYearsLoaded);
+    connect(m_reportController, &ReportController::coursesLoaded,
+            this, &adminWindow::onReportCoursesLoaded);
+    connect(m_reportController, &ReportController::reportDataReady,
+            this, &adminWindow::onReportDataReady);
+    connect(m_reportController, &ReportController::reportError,
+            this, &adminWindow::onReportError);
+    connect(m_reportController, &ReportController::previewDataReady,
+            this, &adminWindow::onPreviewDataReady);
+    connect(m_reportController, &ReportController::loadError,
+            this, &adminWindow::onReportLoadError);
+
     chartsPreviewBoxLayout = ui->chartsPreviewBox;
 
-    loadFilterDepartments();
+    m_reportController->loadDepartments();
 
     ui->filterCourseBox->clear();
     ui->filterCourseBox->addItem("All Courses");
@@ -468,7 +208,7 @@ adminWindow::adminWindow(QWidget *parent)
 
     connect(ui->durationTypeBox, QOverload<int>::of(&QComboBox::currentIndexChanged),
         this, &adminWindow::onDurationChanged);
-    loadAvailableYears();
+    m_reportController->loadYears();
     loadDepartments();
     populateFilters();
 
@@ -1643,58 +1383,100 @@ void adminWindow::loadDepartments() {
     });
 }
 
-void adminWindow::postReportData(const QJsonObject &filters,
-                                 std::function<void(const QJsonArray &)> onData)
-{
-    QUrl url = ApiConfig::endpoint("get_report_data.php");
-    QNetworkRequest request(url);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+ReportHeaderInfo adminWindow::collectHeaderInfo() const {
+    QSettings settings("MyCompany", "MyApp");
+    ReportHeaderInfo info;
+    info.schoolName = settings.value("school/name", "Your School Name").toString();
+    info.address    = settings.value("school/address", "Your Address").toString();
+    info.logoPath   = settings.value("school/logoPath", "").toString();
+    info.librarian  = settings.value("admin/name", "").toString();
+    info.position   = settings.value("admin/position", "").toString();
+    info.openHour   = settings.value("library/openHour", 7).toInt();
+    info.closeHour  = settings.value("library/closeHour", 21).toInt();
+    return info;
+}
 
-    QNetworkReply *reply = networkManager->post(request, QJsonDocument(filters).toJson());
-    connect(reply, &QNetworkReply::finished, this, [=]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            QMessageBox::critical(this, "Error", reply->errorString());
-            reply->deleteLater();
-            return;
-        }
-        QByteArray resp = reply->readAll();
-        reply->deleteLater();
+// Combo population (departments) — reproduces cpp:1842-1848.
+void adminWindow::onReportDepartmentsLoaded(const QStringList &departments) {
+    ui->filterDepartmentBox->clear();
+    ui->filterDepartmentBox->addItem("-- Select Department --");
+    for (const QString &d : departments)
+        ui->filterDepartmentBox->addItem(d);
+}
 
-        QJsonDocument doc = QJsonDocument::fromJson(resp);
-        if (!doc.isObject()) {
-            QMessageBox::warning(this, "Error", "Invalid response from server.");
-            return;
-        }
-        QJsonObject obj = doc.object();
-        if (obj["status"].toString() != "success") {
-            QMessageBox::warning(this, "Error", obj["message"].toString());
-            return;
-        }
-        onData(obj["data"].toArray());
-    });
+// Years -> both combos (reproduces cpp:1876-1883).
+void adminWindow::onReportYearsLoaded(const QStringList &years) {
+    ui->yearComboBox->clear();
+    ui->semYearComboBox->clear();
+    for (const QString &y : years) {
+        ui->yearComboBox->addItem(y);
+        ui->semYearComboBox->addItem(y);
+    }
+}
+
+// Courses (reproduces cpp:1927-1932).
+void adminWindow::onReportCoursesLoaded(const QStringList &courses) {
+    ui->filterCourseBox->clear();
+    for (const QString &c : courses)
+        ui->filterCourseBox->addItem(c);
+}
+
+// Combo-load dialogs (rows 4/4a/5/6/7/8/9/10).
+void adminWindow::onReportLoadError(const QString &title, const QString &message, bool critical) {
+    if (critical)
+        QMessageBox::critical(this, title, message);
+    else
+        QMessageBox::warning(this, title, message);
+}
+
+// Report-data error (rows 1/2/3), title "Error".
+void adminWindow::onReportError(const QString &message, bool critical) {
+    if (critical)
+        QMessageBox::critical(this, "Error", message);
+    else
+        QMessageBox::warning(this, "Error", message);
+    m_pendingReportAction = ReportAction::None;
+}
+
+// Preview refresh (reproduces fetchPreviewData success path cpp:2747).
+void adminWindow::onPreviewDataReady(const QJsonArray &data) {
+    updateChartsPreview(data);
+}
+
+// Export/print dispatch — replaces the three postReportData callbacks.
+void adminWindow::onReportDataReady(const QJsonArray &data) {
+    const QJsonObject filters = m_pendingReportFilters;
+    const ReportAction action = m_pendingReportAction;
+    m_pendingReportAction = ReportAction::None;
+
+    switch (action) {
+    case ReportAction::Pdf:   exportReportToPDF(data, filters);   break;
+    case ReportAction::Excel: exportReportToExcel(data, filters); break;
+    case ReportAction::Print: printReport(data, filters);         break;
+    case ReportAction::None:  break;
+    }
 }
 
 void adminWindow::onGeneratePDFBtnClicked() {
-    QJsonObject filters = collectReportFilters(true); // show warnings if invalid
-    if (filters.isEmpty()) return; // stop if validation failed
+    QJsonObject filters = collectReportFilters(true);
+    if (filters.isEmpty()) return;
     emit reportFiltersReady(filters);
     qDebug() << "Generate PDF filters:" << filters;
 
-    postReportData(filters, [=](const QJsonArray &data) {
-        exportReportToPDF(data, filters);
-    });
+    m_pendingReportAction  = ReportAction::Pdf;
+    m_pendingReportFilters = filters;
+    m_reportController->fetchReportRows(filters);
 }
 
 void adminWindow::onGenerateExcelBtnClicked() {
-    QJsonObject filters = collectReportFilters(true); // show warnings if invalid
-    if (filters.isEmpty()) return; // stop if validation failed
-
+    QJsonObject filters = collectReportFilters(true);
+    if (filters.isEmpty()) return;
     emit reportFiltersReady(filters);
     qDebug() << "Generate Excel filters:" << filters;
 
-    postReportData(filters, [=](const QJsonArray &rows) {
-        exportReportToExcel(rows, filters);
-    });
+    m_pendingReportAction  = ReportAction::Excel;
+    m_pendingReportFilters = filters;
+    m_reportController->fetchReportRows(filters);
 }
 
 
@@ -1728,17 +1510,19 @@ QJsonObject adminWindow::collectReportFilters(bool validateFilters)
 
     filters["palette"] = ui->paletteComboBox->currentText();
 
-    // --- Duration switch ---
-    switch (ui->durationTypeBox->currentIndex()) {
+    // --- Duration switch (date math delegated to ReportController::computeDateRange) ---
+    const int durationType = ui->durationTypeBox->currentIndex();
+    switch (durationType) {
     case 0: { // Day
-        QDate date = ui->dateEdit->date();
-        if (!date.isValid()) {
+        DateRange r = ReportController::computeDateRange(
+            0, ui->dateEdit->date(), 0, 0, QString(), 0, QDate(), QDate());
+        if (!r.valid) {
             if (validateFilters)
                 QMessageBox::warning(this, "Invalid Input", "Please select a valid date.");
             return {};
         }
-        filters["start"] = date.toString("yyyy-MM-dd");
-        filters["end"]   = date.toString("yyyy-MM-dd");
+        filters["start"] = r.start;
+        filters["end"]   = r.end;
         filters["durationType"] = "day";
         break;
     }
@@ -1752,10 +1536,10 @@ QJsonObject adminWindow::collectReportFilters(bool validateFilters)
         }
         int month = monthIndex + 1;
         int year  = ui->yearComboBox->currentText().toInt();
-        QDate start(year, month, 1);
-        QDate end = start.addMonths(1).addDays(-1);
-        filters["start"] = start.toString("yyyy-MM-dd");
-        filters["end"]   = end.toString("yyyy-MM-dd");
+        DateRange r = ReportController::computeDateRange(
+            1, QDate(), month, year, QString(), 0, QDate(), QDate());
+        filters["start"] = r.start;
+        filters["end"]   = r.end;
         filters["year"]  = year;
         filters["durationType"] = "month";
         break;
@@ -1770,28 +1554,26 @@ QJsonObject adminWindow::collectReportFilters(bool validateFilters)
         }
         int year = ui->semYearComboBox->currentText().toInt();
         QString sem = ui->semesterComboBox->currentText();
-        if (sem.contains("1")) {
-            filters["start"] = QString("%1-01-01").arg(year);
-            filters["end"]   = QString("%1-06-30").arg(year);
-        } else {
-            filters["start"] = QString("%1-07-01").arg(year);
-            filters["end"]   = QString("%1-12-31").arg(year);
-        }
+        DateRange r = ReportController::computeDateRange(
+            2, QDate(), 0, 0, sem, year, QDate(), QDate());
+        filters["start"]    = r.start;
+        filters["end"]      = r.end;
         filters["semester"] = sem;
         filters["year"]     = year;
         filters["durationType"] = "semester";
         break;
     }
     case 3: { // Custom
-        QDate start = ui->startDateEdit->date();
-        QDate end   = ui->endDateEdit->date();
-        if (!start.isValid() || !end.isValid() || start > end) {
+        DateRange r = ReportController::computeDateRange(
+            3, QDate(), 0, 0, QString(), 0,
+            ui->startDateEdit->date(), ui->endDateEdit->date());
+        if (!r.valid) {
             if (validateFilters)
                 QMessageBox::warning(this, "Invalid Input", "Please select a valid date range.");
             return {};
         }
-        filters["start"] = start.toString("yyyy-MM-dd");
-        filters["end"]   = end.toString("yyyy-MM-dd");
+        filters["start"] = r.start;
+        filters["end"]   = r.end;
         filters["durationType"] = "custom";
         break;
     }
@@ -1815,479 +1597,13 @@ QJsonObject adminWindow::collectReportFiltersForPreview()
 
 
 
-void adminWindow::loadFilterDepartments() {
-    QUrl url = ApiConfig::endpoint("get_departments.php");
-    QNetworkRequest request(url);
-
-    QNetworkReply *reply = networkManager->get(request);
-
-    connect(reply, &QNetworkReply::finished, this, [=]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            QMessageBox::critical(this, "Error", reply->errorString());
-            reply->deleteLater();
-            return;
-        }
-
-        QByteArray response = reply->readAll();
-        reply->deleteLater();
-
-        QJsonDocument doc = QJsonDocument::fromJson(response);
-        if (!doc.isObject()) {
-            QMessageBox::warning(this, "Error", "Invalid server response.");
-            return;
-        }
-
-        QJsonObject obj = doc.object();
-        if (obj["status"].toString() == "success") {
-            ui->filterDepartmentBox->clear();
-            ui->filterDepartmentBox->addItem("-- Select Department --");
-
-            QJsonArray deptArray = obj["departments"].toArray();
-            for (auto v : deptArray) {
-                ui->filterDepartmentBox->addItem(v.toString());
-            }
-        } else {
-            QMessageBox::warning(this, "Error", "Failed to load departments.");
-        }
-    });
-}
-
-void adminWindow::loadAvailableYears() {
-    QUrl url = ApiConfig::endpoint("get_years.php");
-    QNetworkRequest request(url);
-
-    QNetworkReply *reply = networkManager->get(request);
-
-    connect(reply, &QNetworkReply::finished, this, [=]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            QMessageBox::critical(this, "Error", reply->errorString());
-            reply->deleteLater();
-            return;
-        }
-
-        QByteArray response = reply->readAll();
-        reply->deleteLater();
-
-        QJsonDocument doc = QJsonDocument::fromJson(response);
-        if (!doc.isObject()) return;
-
-        QJsonObject obj = doc.object();
-        if (obj["status"].toString() == "success") {
-            ui->yearComboBox->clear();
-            ui->semYearComboBox->clear();
-            QJsonArray years = obj["years"].toArray();
-            for (auto v : years) {
-                QString yearStr = QString::number(v.toInt());
-                ui->yearComboBox->addItem(yearStr);
-                ui->semYearComboBox->addItem(yearStr);
-            }
-        } else {
-            QMessageBox::warning(this, "Error", obj["message"].toString());
-        }
-    });
-}
-
-void adminWindow::onFilterDepartmentBoxCurrentIndexChanged(int index)
-{
+void adminWindow::onFilterDepartmentBoxCurrentIndexChanged(int index) {
     if (index <= 0) {
         ui->filterCourseBox->clear();
         ui->filterCourseBox->addItem("All Courses");
         return;
     }
-
-    QString department = ui->filterDepartmentBox->currentText();
-
-    QUrl url = ApiConfig::endpoint("get_courses.php");
-    QUrlQuery query;
-    query.addQueryItem("department", department);
-    query.addQueryItem("include_all", "true"); // ✅ Request "All" option
-    url.setQuery(query);
-
-    QNetworkRequest request(url);
-    QNetworkReply *reply = networkManager->get(request);
-
-    connect(reply, &QNetworkReply::finished, this, [=]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            QMessageBox::critical(this, "Error", reply->errorString());
-            reply->deleteLater();
-            return;
-        }
-
-        QByteArray resp = reply->readAll();
-        reply->deleteLater();
-
-        QJsonDocument doc = QJsonDocument::fromJson(resp);
-        if (!doc.isObject()) {
-            QMessageBox::warning(this, "Error", "Invalid response from server.");
-            return;
-        }
-
-        QJsonObject obj = doc.object();
-        if (obj["status"].toString() == "success") {
-            ui->filterCourseBox->clear();
-
-            QJsonArray courses = obj["courses"].toArray();
-            for (auto v : courses) {
-                ui->filterCourseBox->addItem(v.toString());
-            }
-        } else {
-            QMessageBox::warning(this, "Error", obj["message"].toString());
-        }
-    });
-}
-
-void adminWindow::fetchReportData(const QJsonObject &filters) {
-    QUrl url = ApiConfig::endpoint("get_report_data.php");
-    QNetworkRequest request(url);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-
-    QNetworkReply *reply = networkManager->post(request, QJsonDocument(filters).toJson());
-
-    connect(reply, &QNetworkReply::finished, this, [=]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            QMessageBox::critical(this, "Error", reply->errorString());
-            reply->deleteLater();
-            return;
-        }
-
-        QByteArray resp = reply->readAll();
-        reply->deleteLater();
-
-        QJsonDocument doc = QJsonDocument::fromJson(resp);
-        if (!doc.isObject()) {
-            QMessageBox::warning(this, "Error", "Invalid server response.");
-            return;
-        }
-
-        QJsonObject obj = doc.object();
-        if (obj["status"].toString() != "success") {
-            QMessageBox::warning(this, "Error", obj["message"].toString());
-            return;
-        }
-
-        // ✅ Build a preview string (like HTML table)
-        QJsonArray rows = obj["data"].toArray();
-        updateChartsPreview(rows);
-        QString html = "<h2>Report Preview</h2>";
-
-        if (rows.isEmpty()) {
-            html += "<p><i>No data found for the selected filters.</i></p>";
-        } else {
-            // Table headers
-            QJsonObject firstRow = rows.first().toObject();
-            QStringList headers = { "school_id", "name", "gender", "status",
-                                   "course", "department", "year_level", "visits" };
-
-            html += "<table border='1' cellspacing='0' cellpadding='4'>";
-            html += "<tr>";
-            for (const QString &h : headers) {
-                // Pretty headers
-                QString pretty = h;
-                if (h == "school_id") pretty = "School ID";
-                else if (h == "name") pretty = "Name";
-                else if (h == "gender") pretty = "Gender";
-                else if (h == "status") pretty = "Status";
-                else if (h == "course") pretty = "Course";
-                else if (h == "department") pretty = "Department";
-                else if (h == "year_level") pretty = "Year Level";
-                else if (h == "visits") pretty = "Total Visits";
-
-                html += "<th>" + pretty + "</th>";
-            }
-            html += "</tr>";
-
-            // Table rows
-            for (const auto &val : rows) {
-                QJsonObject row = val.toObject();
-                html += "<tr>";
-                for (const QString &h : headers) {
-                    html += "<td>" + row[h].toVariant().toString() + "</td>";
-                }
-                html += "</tr>";
-            }
-            html += "</table>";
-        }
-
-        // ✅ Show in popup preview dialog
-        ReportPreviewDialog *preview = new ReportPreviewDialog(this);
-        preview->setHtml(html);
-        preview->exec();
-    });
-}
-
-bool adminWindow::paintReport(QPagedPaintDevice *device, int resolution,
-                              const QJsonArray &data, const QJsonObject &filters)
-{
-    QPainter painter;
-    if (!painter.begin(device)) {
-        return false;
-    }
-
-    auto finalize = qScopeGuard([&]() {
-        if (painter.isActive()) {
-            painter.end();
-            qDebug() << "Report paint finalized successfully.";
-        }
-    });
-
-    auto safeText = [](const QString &s) -> QString {
-        QString clean = s;
-        clean.replace(QChar(0xFFFD), "?");
-        return clean;
-    };
-
-    QRectF pageRect = device->pageLayout().paintRectPixels(resolution);
-    int pageWidth  = pageRect.width();
-    int pageHeight = pageRect.height();
-    int margin     = pageWidth * 0.03;
-    int usableWidth  = pageWidth - 2*margin;
-    int usableHeight = pageHeight - 2*margin;
-    int y = margin;
-    int currentPage = 1;
-    QSettings settings("MyCompany", "MyApp");
-    QString librarian  = settings.value("admin/name", "").toString();
-    QString position   = settings.value("admin/position", "").toString();
-
-    auto drawFooter = [&](int pageNum) {
-        QFont footerFont("Arial", 8);
-        footerFont.setItalic(true);
-        painter.setFont(footerFont);
-        painter.setPen(Qt::black);
-
-        // Left side: system-generated text
-        painter.drawText(QRect(margin, pageHeight - margin - 20,
-                               usableWidth, 20),
-                         Qt::AlignLeft | Qt::AlignVCenter,
-                         "This is a system generated report. LOAMS.2 (Library Occupancy and Attendance Monitoring System), WITS 2016.");
-
-        // Right side: page number
-        QString footerText = QString("Page %1").arg(pageNum);
-        painter.drawText(QRect(margin, pageHeight - margin - 20,
-                               usableWidth, 20),
-                         Qt::AlignRight | Qt::AlignVCenter, footerText);
-    };
-
-
-    qDebug() << "Paint Width:" << pageWidth << "Height:" << pageHeight;
-    qDebug() << "Calculated margin:" << margin;
-    qDebug() << "Paint Resolution:" << resolution;
-
-    // ===== HEADER =====
-    auto drawHeader = [&](int &y) {
-        QSettings settings("MyCompany", "MyApp");
-        QString schoolName = settings.value("school/name", "Your School Name").toString();
-        QString address    = settings.value("school/address", "Your Address").toString();
-        QString logoPath   = settings.value("school/logoPath", "").toString();
-
-        int logoSize = pageWidth * 0.08;
-        if (!logoPath.isEmpty()) {
-            QPixmap logo(logoPath);
-            if (!logo.isNull()) {
-                QPixmap scaledLogo = logo.scaled(logoSize, logoSize,
-                                                 Qt::KeepAspectRatio,
-                                                 Qt::SmoothTransformation);
-                painter.drawPixmap(QRect(margin, y, logoSize, logoSize),
-                                   scaledLogo, scaledLogo.rect());
-            }
-        }
-
-        int textLeft = margin + logoSize + 15;
-        int textWidth = usableWidth - logoSize - 15;
-
-        painter.setFont(QFont("Times New Roman", 16, QFont::Bold));
-        painter.drawText(QRect(textLeft, y, textWidth, 30),
-                         Qt::AlignLeft | Qt::AlignVCenter, safeText(schoolName));
-
-        painter.setFont(QFont("Times New Roman", 11));
-        painter.drawText(QRect(textLeft, y + 25, textWidth, 30),
-                         Qt::AlignLeft | Qt::AlignVCenter, safeText(address));
-
-        QString dateStr = QDate::currentDate().toString("dddd, MMMM d, yyyy");
-        QString timeStr = QTime::currentTime().toString("hh:mm:ss AP");
-        painter.setFont(QFont("Arial", 9));
-        painter.drawText(QRect(margin, y, usableWidth, 20), Qt::AlignRight, dateStr);
-        painter.drawText(QRect(margin, y + 15, usableWidth, 20), Qt::AlignRight, timeStr);
-
-        // Line under header
-        y += logoSize + 20;
-        painter.setPen(Qt::black);
-        painter.drawLine(margin, y, pageWidth - margin, y);
-        y += 30;  // spacing after header
-    };
-    drawHeader(y);
-
-
-    // ===== FILTERS =====
-    painter.setFont(QFont("Arial", 10));
-    QString filtersLine = QString("Department: %1 | Course: %2 | Period: %3 - %4 | School Year: %5")
-                              .arg(safeText(filters["department"].toString()))
-                              .arg(safeText(filters["course"].toString()))
-                              .arg(safeText(filters["start"].toString()))
-                              .arg(safeText(filters["end"].toString()))
-                              .arg(safeText(filters["schoolYear"].toString()));
-    painter.drawText(QRect(margin, y, usableWidth, 30), Qt::AlignLeft, filtersLine);
-    y += 40;
-
-    // ===== TABLE =====
-    ReportPalette palette = getPalette(filters["palette"].toString());
-
-    // --- Define column widths (8 columns total) ---
-    int col1 = margin;                                   // School ID
-    int col2 = margin + (usableWidth * 0.12);            // Name
-    int col3 = margin + (usableWidth * 0.32);            // Gender
-    int col4 = margin + (usableWidth * 0.42);            // Status
-    int col5 = margin + (usableWidth * 0.55);            // Course
-    int col6 = margin + (usableWidth * 0.70);            // Department
-    int col7 = margin + (usableWidth * 0.85);            // Year Level
-    int col8 = margin + (usableWidth * 0.95);            // Visits
-
-    // --- Draw header row ---
-    painter.fillRect(QRect(margin, y - 15, usableWidth, 20), palette.headerBg);
-    painter.setPen(palette.headerText);
-
-    painter.drawText(col1, y, "School ID");
-    painter.drawText(col2, y, "Name");
-    painter.drawText(col3, y, "Gender");
-    painter.drawText(col4, y, "Status");
-    painter.drawText(col5, y, "Course");
-    painter.drawText(col6, y, "Department");
-    painter.drawText(col7, y, "Year Level");
-    painter.drawText(col8, y, "Visits");
-
-    y += 25;
-    painter.setPen(Qt::black);
-    painter.drawLine(margin, y, pageWidth - margin, y);
-    y += 20;
-
-    qDebug() << "Starting to draw" << data.size() << "table rows";
-
-    int rowIndex = 0;
-    for (auto v : data) {
-        QJsonObject row = v.toObject();
-        if (rowIndex < 3) qDebug() << "Drawing row" << rowIndex << ":" << row;
-
-        QRect rowRect(margin, y - 15, usableWidth, 20);
-        painter.fillRect(rowRect, (rowIndex % 2 == 0) ? palette.rowEvenBg : palette.rowOddBg);
-
-        painter.setPen(palette.rowText);
-        QFontMetrics fm = painter.fontMetrics();
-
-        QString schoolId   = fm.elidedText(safeText(row["school_id"].toString()), Qt::ElideRight, col2 - col1 - 5);
-        QString name       = fm.elidedText(safeText(row["name"].toString()), Qt::ElideRight, col3 - col2 - 5);
-        QString gender     = fm.elidedText(safeText(row["gender"].toString()), Qt::ElideRight, col4 - col3 - 5);
-        QString status     = fm.elidedText(safeText(row["status"].toString()), Qt::ElideRight, col5 - col4 - 5);
-        QString course     = fm.elidedText(safeText(row["course"].toString()), Qt::ElideRight, col6 - col5 - 5);
-        QString department = fm.elidedText(safeText(row["department"].toString()), Qt::ElideRight, col7 - col6 - 5);
-        QString yearLevel  = fm.elidedText(safeText(row["year_level"].toString()), Qt::ElideRight, col8 - col7 - 5);
-
-        painter.drawText(col1, y, schoolId);
-        painter.drawText(col2, y, name);
-        painter.drawText(col3, y, gender);
-        painter.drawText(col4, y, status);
-        painter.drawText(col5, y, course);
-        painter.drawText(col6, y, department);
-        painter.drawText(col7, y, yearLevel);
-        painter.drawText(col8, y, QString::number(row["visits"].toInt()));
-
-        y += 20;
-        rowIndex++;
-
-        if (y > usableHeight - 200) {
-            drawFooter(currentPage);
-            device->newPage();
-            currentPage++;
-            y = margin;
-            drawHeader(y);
-        }
-    }
-
-    // ===== CHARTS: each chart placed on its own page and scaled to fill almost whole page =====
-    auto drawFullscreenChart = [&](const QString &label, const QImage &img) {
-        if (img.isNull()) {
-            qDebug() << label << "is null, skipping.";
-            return;
-        }
-
-        drawFooter(currentPage);
-        device->newPage();
-        currentPage++;
-        y = margin;        // reset Y for the new page
-        drawHeader(y);
-        qDebug() << "New page created for chart (" << label << "), page:" << currentPage;
-
-        // Compute area for chart (leave space for footer)
-        const int bottomReserve = 60;
-        QRect targetArea(margin, y, usableWidth, pageHeight - y - margin - bottomReserve);
-
-        // Scale preserving aspect ratio
-        QSize scaledSize = img.size().scaled(targetArea.size(), Qt::KeepAspectRatio);
-
-        // Center in target area
-        int x = targetArea.left() + (targetArea.width() - scaledSize.width()) / 2;
-        int y = targetArea.top() + (targetArea.height() - scaledSize.height()) / 2;
-        QRect drawRect(x, y, scaledSize.width(), scaledSize.height());
-
-        // Draw the image at the calculated rect
-        painter.drawImage(drawRect, img);
-
-        qDebug() << "Chart" << label << "drawn at rect:" << drawRect
-                 << "from image size:" << img.size();
-    };
-
-    QString chartChoice = filters["chartType"].toString();
-
-    // request chart images sized to the full usable area (so the chart is rendered at that resolution)
-    // Before calling chart generation functions, calculate appropriate sizes
-
-    if (chartChoice.contains("All", Qt::CaseInsensitive)) {
-        QSize barSize(usableWidth, 600);  // Wide rectangle for bar charts
-        QSize pieSize(700, 700);          // Square for pie charts
-        QSize lineSize(usableWidth, 600); // Wide rectangle for line charts
-
-        drawFullscreenChart("Bar Chart",  makeBarChartImage(data, barSize, palette));
-        drawFullscreenChart("Pie Chart",  makePieChartImage(data, pieSize, palette));
-        drawFullscreenChart("Line Chart", makeLineChartImage(data, lineSize, palette));
-    } else if (chartChoice.contains("Pie", Qt::CaseInsensitive)) {
-        QSize pieSize(700, 700);  // Square dimensions
-        drawFullscreenChart("Pie Chart", makePieChartImage(data, pieSize, palette));
-    } else {
-        // For bar and line charts, use rectangular size
-        QSize rectSize(usableWidth, 600);
-        if (chartChoice.contains("Bar", Qt::CaseInsensitive)) {
-            drawFullscreenChart("Bar Chart", makeBarChartImage(data, rectSize, palette));
-        } else if (chartChoice.contains("Line", Qt::CaseInsensitive)) {
-            drawFullscreenChart("Line Chart", makeLineChartImage(data, rectSize, palette));
-        }
-    }
-
-    // Footer on the last page with current page number
-    drawFooter(currentPage);
-
-    // ===== PREPARED BY =====
-    device->newPage();
-    currentPage++;
-
-    y = margin + 100;
-    drawHeader(y);
-
-    painter.setFont(QFont("Arial", 11, QFont::Bold));
-    painter.setPen(Qt::black);
-    painter.drawText(QRect(margin, y, pageWidth - 2*margin, 25),
-                     Qt::AlignCenter, QString("Prepared by: %1").arg(safeText(librarian)));
-    y += 25;
-
-    painter.setFont(QFont("Arial", 10));
-    painter.drawText(QRect(margin, y, pageWidth - 2*margin, 20),
-                     Qt::AlignCenter, safeText(position));
-    y += 40;
-
-    int sigWidth = 240;
-    int sigX = (pageWidth - sigWidth) / 2;
-    painter.drawLine(sigX, y, sigX + sigWidth, y);
-    painter.drawText(QRect(sigX, y + 5, sigWidth, 20), Qt::AlignCenter, "(Signature)");
-    drawFooter(currentPage);
-
-    return true;
+    m_reportController->loadCourses(ui->filterDepartmentBox->currentText());
 }
 
 void adminWindow::exportReportToPDF(const QJsonArray &data, const QJsonObject &filters)
@@ -2310,13 +1626,14 @@ void adminWindow::exportReportToPDF(const QJsonArray &data, const QJsonObject &f
     }
 
     QPdfWriter pdf(filePath);
-    // Increase resolution for crisper charts in the PDF
     pdf.setPageOrientation(QPageLayout::Landscape);
     pdf.setPageSize(QPageSize(QPageSize::A4));
-    pdf.setResolution(150); // -> good balance quality/filesize; increase to 300 if you want very high DPI
+    pdf.setResolution(150);
     pdf.setPageMargins(QMarginsF(20, 20, 20, 20), QPageLayout::Millimeter);
 
-    if (!paintReport(&pdf, 150, data, filters)) {
+    ReportHeaderInfo info = collectHeaderInfo();
+    ReportPalette palette = ReportController::getPalette(filters["palette"].toString());
+    if (!m_reportRenderer.paintReport(&pdf, 150, data, filters, palette, info)) {
         QMessageBox::critical(this, "Error", "Failed to open PDF for writing.");
         return;
     }
@@ -2324,37 +1641,41 @@ void adminWindow::exportReportToPDF(const QJsonArray &data, const QJsonObject &f
     QMessageBox::information(this, "Success", "Report exported to PDF successfully.");
 }
 
-void adminWindow::onPrintReportBtnClicked()
-{
-    QJsonObject filters = collectReportFilters(true); // show warnings if invalid
-    if (filters.isEmpty()) return; // stop if validation failed
+void adminWindow::onPrintReportBtnClicked() {
+    QJsonObject filters = collectReportFilters(true);
+    if (filters.isEmpty()) return;
     emit reportFiltersReady(filters);
     qDebug() << "Print Report filters:" << filters;
 
-    postReportData(filters, [=](const QJsonArray &data) {
-        if (data.isEmpty()) {
-            QMessageBox::information(this, "No Data",
-                                     "No data available for the selected filters. Please check your date range and department selection.");
-            return;
-        }
-
-        QPrinter printer(QPrinter::HighResolution);
-        printer.setPageOrientation(QPageLayout::Landscape);
-        printer.setPageSize(QPageSize(QPageSize::A4));
-        printer.setPageMargins(QMarginsF(20, 20, 20, 20), QPageLayout::Millimeter);
-
-        QPrintDialog dlg(&printer, this);
-        if (dlg.exec() != QDialog::Accepted)
-            return;
-
-        if (!paintReport(&printer, printer.resolution(), data, filters)) {
-            QMessageBox::critical(this, "Error", "Failed to start painting to printer.");
-        }
-    });
+    m_pendingReportAction  = ReportAction::Print;
+    m_pendingReportFilters = filters;
+    m_reportController->fetchReportRows(filters);
 }
 
-void adminWindow::exportReportToExcel(const QJsonArray &rows, const QJsonObject &filters)
-{
+void adminWindow::printReport(const QJsonArray &data, const QJsonObject &filters) {
+    if (data.isEmpty()) {
+        QMessageBox::information(this, "No Data",
+                                 "No data available for the selected filters. Please check your date range and department selection.");
+        return;
+    }
+
+    QPrinter printer(QPrinter::HighResolution);
+    printer.setPageOrientation(QPageLayout::Landscape);
+    printer.setPageSize(QPageSize(QPageSize::A4));
+    printer.setPageMargins(QMarginsF(20, 20, 20, 20), QPageLayout::Millimeter);
+
+    QPrintDialog dlg(&printer, this);
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+
+    ReportHeaderInfo info = collectHeaderInfo();
+    ReportPalette palette = ReportController::getPalette(filters["palette"].toString());
+    if (!m_reportRenderer.paintReport(&printer, printer.resolution(), data, filters, palette, info)) {
+        QMessageBox::critical(this, "Error", "Failed to start painting to printer.");
+    }
+}
+
+void adminWindow::exportReportToExcel(const QJsonArray &rows, const QJsonObject &filters) {
     if (rows.isEmpty()) {
         QMessageBox::information(this, "No Data",
                                  "No data available for the selected filters.");
@@ -2367,105 +1688,9 @@ void adminWindow::exportReportToExcel(const QJsonArray &rows, const QJsonObject 
         return;
 
     QXlsx::Document xlsx;
+    ReportHeaderInfo info = collectHeaderInfo();
+    m_reportRenderer.writeReportToXlsx(xlsx, rows, filters, info);
 
-    // ===== HEADER =====
-    QSettings settings("MyCompany", "MyApp");
-    QString schoolName = settings.value("school/name", "Your School Name").toString();
-    QString address    = settings.value("school/address", "Your Address").toString();
-    QString librarian  = settings.value("admin/name", "").toString();
-    QString position   = settings.value("admin/position", "").toString();
-
-    QXlsx::Format titleFmt;
-    titleFmt.setFontBold(true);
-    titleFmt.setFontSize(16);
-    titleFmt.setHorizontalAlignment(QXlsx::Format::AlignHCenter);
-
-    QXlsx::Format subTitleFmt;
-    subTitleFmt.setFontSize(11);
-    subTitleFmt.setHorizontalAlignment(QXlsx::Format::AlignHCenter);
-
-    int row = 1;
-    int colCount = 8; // ID, Name, Gender, Course, Year Level, Department, Status, Visits
-
-    xlsx.mergeCells(QXlsx::CellRange(row, 1, row, colCount), titleFmt);
-    xlsx.write(row++, 1, schoolName, titleFmt);
-
-    xlsx.mergeCells(QXlsx::CellRange(row, 1, row, colCount), subTitleFmt);
-    xlsx.write(row++, 1, address, subTitleFmt);
-
-    xlsx.mergeCells(QXlsx::CellRange(row, 1, row, colCount), subTitleFmt);
-    xlsx.write(row++, 1, QString("Library Report - %1 to %2")
-                             .arg(filters["start"].toString(), filters["end"].toString()), subTitleFmt);
-    row += 1;
-
-    // ===== FILTERS =====
-    xlsx.write(row++, 1, QString("Department: %1 | Course: %2 | School Year: %3")
-                             .arg(filters["department"].toString(),
-                                  filters["course"].toString(),
-                                  filters["schoolYear"].toString()));
-
-    row += 1;
-
-    // ===== TABLE HEADERS =====
-    QStringList headers = {"School ID", "Name", "Gender", "Course",
-                           "Year Level", "Department", "Status", "Visits"};
-
-    QXlsx::Format hdrFmt;
-    hdrFmt.setFontBold(true);
-    hdrFmt.setPatternBackgroundColor(QColor("#D6EAF8"));
-    hdrFmt.setHorizontalAlignment(QXlsx::Format::AlignHCenter);
-
-    for (int c = 0; c < headers.size(); ++c) {
-        xlsx.write(row, c + 1, headers[c], hdrFmt);
-    }
-
-    // Freeze the header row
-    //xlsx.currentWorksheet()->freezePane(QXlsx::CellRange(row + 1, 1, row + 1, 1));
-    row++;
-
-    // ===== TABLE ROWS =====
-    QXlsx::Format evenFmt, oddFmt;
-    evenFmt.setPatternBackgroundColor(QColor("#F9F9F9"));
-    oddFmt.setPatternBackgroundColor(QColor("#FFFFFF"));
-
-    for (const auto &val : rows) {
-        QJsonObject obj = val.toObject();
-        QStringList rowData = {
-            obj["school_id"].toString(),
-            obj["name"].toString(),
-            obj["gender"].toString(),
-            obj["course"].toString(),
-            obj["year_level"].toString(),
-            obj["department"].toString(),
-            obj["status"].toString(),
-            QString::number(obj["visits"].toInt())
-        };
-
-        for (int c = 0; c < rowData.size(); ++c) {
-            xlsx.write(row, c + 1, rowData[c], (row % 2 == 0) ? evenFmt : oddFmt);
-        }
-        row++;
-    }
-
-    // Auto-fit columns (simulate by setting width based on text length)
-    for (int c = 0; c < headers.size(); ++c) {
-        xlsx.setColumnWidth(c + 1, headers[c].length() + 5);
-    }
-
-    // ===== FOOTER =====
-    row += 2;
-    xlsx.mergeCells(QXlsx::CellRange(row, 1, row, colCount));
-    xlsx.write(row++, 1,
-               "This is a system-generated report. LOAMS.2 (Library Occupancy and Attendance Monitoring System), WITS 2016.");
-
-    row += 2;
-    xlsx.mergeCells(QXlsx::CellRange(row, 1, row, colCount));
-    xlsx.write(row++, 1, QString("Prepared by: %1").arg(librarian));
-
-    xlsx.mergeCells(QXlsx::CellRange(row, 1, row, colCount));
-    xlsx.write(row++, 1, position);
-
-    // ===== SAVE FILE =====
     if (!xlsx.saveAs(filePath)) {
         QMessageBox::critical(this, "Error", "Failed to save Excel file.");
     } else {
@@ -2475,41 +1700,8 @@ void adminWindow::exportReportToExcel(const QJsonArray &rows, const QJsonObject 
 
 
 
-ReportPalette adminWindow::getPalette(const QString &choice) {
-    if (choice == "Blue") {
-        return {
-            QColor("#2E86C1"), Qt::white, QColor("#EBF5FB"), Qt::white, Qt::black,
-            { QColor("#0D47A1"), QColor("#1565C0"), QColor("#1976D2"),
-             QColor("#1E88E5"), QColor("#42A5F5"), QColor("#64B5F6"),
-             QColor("#90CAF9"), QColor("#BBDEFB") }
-        };
-    } else if (choice == "Green") {
-        return {
-            QColor("#27AE60"), Qt::white, QColor("#E9F7EF"), Qt::white, Qt::black,
-            { QColor("#1B5E20"), QColor("#2E7D32"), QColor("#388E3C"),
-             QColor("#43A047"), QColor("#66BB6A"), QColor("#81C784"),
-             QColor("#A5D6A7"), QColor("#C8E6C9") }
-        };
-    } else if (choice == "Red") {
-        return {
-            QColor("#C0392B"), Qt::white, QColor("#FDEDEC"), Qt::white, Qt::black,
-            { QColor("#7B241C"), QColor("#922B21"), QColor("#A93226"),
-             QColor("#C0392B"), QColor("#CD6155"), QColor("#E6B0AA"),
-             QColor("#F5B7B1"), QColor("#FADBD8") }
-        };
-    } else { // Default (multi-color)
-        return {
-            QColor("#34495E"), Qt::white, QColor("#F4F6F7"), Qt::white, Qt::black,
-            { QColor("#1f77b4"), QColor("#ff7f0e"), QColor("#2ca02c"),
-             QColor("#d62728"), QColor("#9467bd"), QColor("#8c564b"),
-             QColor("#e377c2"), QColor("#7f7f7f"), QColor("#bcbd22"), QColor("#17becf") }
-        };
-    }
-}
-
-
 void adminWindow::updatePalettePreview(const QString &choice) {
-    ReportPalette palette = getPalette(choice);
+    ReportPalette palette = ReportController::getPalette(choice);
 
     QPixmap pix(200, 50);
     pix.fill(Qt::transparent);
@@ -2553,7 +1745,7 @@ void adminWindow::updateChartsPreview(const QJsonArray &data)
     layout->setSpacing(5); // Small gap between charts
 
     // Get palette
-    ReportPalette pal = getPalette(ui->paletteComboBox->currentText());
+    ReportPalette pal = ReportController::getPalette(ui->paletteComboBox->currentText());
     if (pal.chartColors.isEmpty()) {
         pal.chartColors = { QColor("#3498DB"), QColor("#E74C3C"), QColor("#2ECC71"),
                            QColor("#F39C12"), QColor("#9B59B6"), QColor("#1ABC9C") };
@@ -2722,33 +1914,6 @@ void adminWindow::optimizeChartForPreview(QChart *chart)
     }
 }
 
-// Fetch preview data from API
-void adminWindow::fetchPreviewData(const QJsonObject &filters)
-{
-    QUrl url = ApiConfig::endpoint("api.php/reports/data");  // ✅ Using API router
-    QNetworkRequest request(url);
-    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-
-    QNetworkReply *reply = networkManager->post(request, QJsonDocument(filters).toJson());
-
-    connect(reply, &QNetworkReply::finished, this, [=]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            qDebug() << "Preview fetch error:" << reply->errorString();
-            reply->deleteLater();
-            return;
-        }
-
-        QByteArray resp = reply->readAll();
-        reply->deleteLater();
-
-        QJsonDocument doc = QJsonDocument::fromJson(resp);
-        if (doc.isObject() && doc.object()["status"].toString() == "success") {
-            QJsonArray data = doc.object()["data"].toArray();
-            updateChartsPreview(data);
-        }
-    });
-}
-
 void adminWindow::connectFilterSignals()
 {
     // --- Department ---
@@ -2760,7 +1925,7 @@ void adminWindow::connectFilterSignals()
                 }
                 QJsonObject filters = collectReportFiltersForPreview();
                 if (!filters.isEmpty()) {
-                    fetchPreviewData(filters);
+                    m_reportController->fetchPreviewData(filters);
                 } else {
                     updateChartsPreview(QJsonArray());
                 }
@@ -2775,7 +1940,7 @@ void adminWindow::connectFilterSignals()
                 }
                 QJsonObject filters = collectReportFiltersForPreview();
                 if (!filters.isEmpty()) {
-                    fetchPreviewData(filters);
+                    m_reportController->fetchPreviewData(filters);
                 } else {
                     updateChartsPreview(QJsonArray());
                 }
@@ -2790,7 +1955,7 @@ void adminWindow::connectFilterSignals()
                 }
                 QJsonObject filters = collectReportFiltersForPreview();
                 if (!filters.isEmpty()) {
-                    fetchPreviewData(filters);
+                    m_reportController->fetchPreviewData(filters);
                 } else {
                     updateChartsPreview(QJsonArray());
                 }
@@ -2803,7 +1968,7 @@ void adminWindow::connectFilterSignals()
                 if (ui->filterDepartmentBox->currentIndex() > 0 && ui->durationTypeBox->currentIndex() >= 0) {
                     QJsonObject filters = collectReportFiltersForPreview();
                     if (!filters.isEmpty()) {
-                        fetchPreviewData(filters);
+                        m_reportController->fetchPreviewData(filters);
                     } else {
                         updateChartsPreview(QJsonArray());
                     }

@@ -22,7 +22,6 @@
 #include <QCheckBox>
 #include <QHttpMultiPart>
 #include <QHttpPart>
-#include <functional>
 
 #include <QtCharts/QChart>
 #include <QtCharts/QChartView>
@@ -43,6 +42,9 @@
 #include "importdata.h"
 #include "importcontroller.h"
 #include "studentcontroller.h"
+#include "reportdata.h"
+#include "reportcontroller.h"
+#include "reportrenderer.h"
 #include <QGraphicsOpacityEffect>
 #include <QPropertyAnimation>
 #include <QPagedPaintDevice>
@@ -50,16 +52,6 @@
 QT_BEGIN_NAMESPACE
 namespace Ui { class adminWindow; }
 QT_END_NAMESPACE
-
-struct ReportPalette {
-    QColor headerBg;
-    QColor headerText;
-    QColor rowEvenBg;
-    QColor rowOddBg;
-    QColor rowText;
-
-    QVector<QColor> chartColors;
-};
 
 class adminWindow : public QMainWindow
 {
@@ -105,13 +97,19 @@ private:
     StudentController *m_studentController;   // child of this, created in ctor
     bool m_studentSearchShowOverlay = true;   // View-side overlay-suppression flag for silent refreshes
     bool cancelUpload = false;
+
+    ReportController *m_reportController;   // child of this, created in ctor
+    ReportRenderer    m_reportRenderer;     // stateless value member
+
+    enum class ReportAction { None, Pdf, Excel, Print };
+    ReportAction m_pendingReportAction = ReportAction::None;
+    QJsonObject  m_pendingReportFilters;   // cached between fetchReportRows and onReportDataReady
+
     void populateFilters();
-    ReportPalette getPalette(const QString &choice);
     void closeEvent(QCloseEvent *event);
     void on_chartsBtn_clicked();
     void on_selectAllBtn_clicked();
     void updatePalettePreview(const QString &choice);
-    void fetchPreviewData(const QJsonObject &filters);
     void connectFilterSignals();
     void performStudentSearch(bool showOverlay=true);
     void displaySearchResults(const QList<StudentRecord> &students, const QString &highlightTerm);
@@ -138,20 +136,13 @@ private:
     QLabel *m_headerTitle = nullptr;
     void buildHeaderBar();
 
-    QImage renderChartToImage(QChart *chart, const QSize &targetSize);
-    void expandChartPlotArea(QChart *chart, const QSize &size);
-    void postReportData(const QJsonObject &filters,
-                        std::function<void(const QJsonArray &)> onData);
-    QJsonArray currentReportData;
-    QList<QPixmap> chartPixmaps;
     QJsonObject collectReportFilters(bool validateFilters = true);
     void updateChartsPreview(const QJsonArray &data);
     void optimizeChartForPreview(QChart *chart);
     // Add this in the private slots or private section of adminwindow.h
     QJsonObject collectReportFiltersForPreview();
-    QImage makeBarChartImage(const QJsonArray &data, QSize size, const ReportPalette &palette);
-    QImage makePieChartImage(const QJsonArray &data, QSize size, const ReportPalette &palette);
-    QImage makeLineChartImage(const QJsonArray &data, QSize size, const ReportPalette &palette);
+    ReportHeaderInfo collectHeaderInfo() const;
+    void printReport(const QJsonArray &data, const QJsonObject &filters);
 
 private slots:
     void onAttachFileBtnClicked();
@@ -195,17 +186,20 @@ private slots:
     void onClearAttendanceCheckBoxStateChanged(int state);
     void onCancelUploadBtnClicked();
     void loadDepartments();
-    void loadFilterDepartments();
     void onGeneratePDFBtnClicked();
     void onGenerateExcelBtnClicked();
     void onPrintReportBtnClicked();
     void onFilterDepartmentBoxCurrentIndexChanged(int index);
-    void fetchReportData(const QJsonObject &filters);
     void exportReportToPDF(const QJsonArray &data, const QJsonObject &filters);
     void exportReportToExcel(const QJsonArray &data, const QJsonObject &filters);
-    void loadAvailableYears();
-    bool paintReport(QPagedPaintDevice *device, int resolution,
-                     const QJsonArray &data, const QJsonObject &filters);
+
+    void onReportDepartmentsLoaded(const QStringList &departments);
+    void onReportYearsLoaded(const QStringList &years);
+    void onReportCoursesLoaded(const QStringList &courses);
+    void onReportDataReady(const QJsonArray &data);
+    void onReportError(const QString &message, bool critical);
+    void onPreviewDataReady(const QJsonArray &data);
+    void onReportLoadError(const QString &title, const QString &message, bool critical);
 };
 
 
