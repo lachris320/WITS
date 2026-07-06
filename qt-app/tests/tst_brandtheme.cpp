@@ -6,6 +6,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QPainter>
+#include <QRegularExpression>
+#include <QSettings>
 #include <QTemporaryDir>
 #include "brandcolormath.h"
 #include "brandtheme.h"
@@ -44,6 +46,14 @@ private slots:
     void twoToneLogoMapsPrimaryAndSecondary();
     void generatedPalettesMeetMinContrast();
     void greyscaleLogoFallsBack();
+
+    // Cache, freshness, Manual-mode hook, current palette (Task 3)
+    void cacheRoundTrip();
+    void cacheLoadNeverBranded();
+    void isNewerComparisons();
+    void manualModeSkipsRegeneration();
+    void autoModeRegenerates();
+    void currentDefaultsToFallbackAndSets();
 
 private:
     QString writePng(const QString &name, const QColor &fill);
@@ -346,6 +356,117 @@ void TestBrandTheme::greyscaleLogoFallsBack()
     const BrandPalette fb = BrandTheme::fallbackPalette();
     QVERIFY2(err.isEmpty(), qPrintable(err));
     QVERIFY(p == fb);
+}
+
+void TestBrandTheme::cacheRoundTrip()
+{
+    QSettings s(m_dir.path() + QStringLiteral("/branding.ini"), QSettings::IniFormat);
+
+    BrandingConfig c;
+    c.mode = ThemeMode::Manual;
+    // Extracted colors can carry a non-Rgb QColor spec (e.g. built via
+    // fromHsvF) that is visually identical but fails QColor::operator==
+    // against a hex-reconstructed color. Normalize through one JSON
+    // round-trip so `c.palette` reflects the same Rgb/hex precision the
+    // cache actually stores, matching what loadCachedConfig will return.
+    const BrandPalette extracted =
+        BrandTheme::extractPalette(writePng(QStringLiteral("cache-red.png"), QColor(Qt::red)), nullptr);
+    c.palette = BrandTheme::paletteFromJson(BrandTheme::paletteToJson(extracted));
+    c.logoHash = QStringLiteral("ab").repeated(32);
+    // Qt::ISODate (the cache's timestamp format, per spec) has second
+    // precision, so seed with a whole-second QDateTime to make the
+    // round-trip exact rather than truncating milliseconds away.
+    c.updatedAt = QDateTime::fromString(
+        QDateTime::currentDateTime().toString(Qt::ISODate), Qt::ISODate);
+
+    BrandTheme::saveCachedConfig(s, c);
+    const BrandingConfig back = BrandTheme::loadCachedConfig(s);
+
+    QCOMPARE(back.mode, c.mode);
+    QVERIFY(back.palette == c.palette);
+    QCOMPARE(back.logoHash, c.logoHash);
+    QCOMPARE(back.updatedAt, c.updatedAt);
+}
+
+void TestBrandTheme::cacheLoadNeverBranded()
+{
+    QSettings s(m_dir.path() + QStringLiteral("/branding-empty.ini"), QSettings::IniFormat);
+    const BrandingConfig c = BrandTheme::loadCachedConfig(s);
+    const BrandPalette fb = BrandTheme::fallbackPalette();
+    QCOMPARE(c.mode, ThemeMode::Auto);
+    QVERIFY(c.palette == fb);
+    QVERIFY(c.logoHash.isEmpty());
+    QVERIFY(!c.updatedAt.isValid());
+}
+
+void TestBrandTheme::isNewerComparisons()
+{
+    BrandingConfig remote;
+    BrandingConfig local;
+
+    remote.updatedAt = QDateTime::currentDateTime();
+    local.updatedAt = remote.updatedAt.addSecs(-60);
+    QVERIFY(BrandTheme::isNewer(remote, local));
+
+    local.updatedAt = remote.updatedAt;
+    QVERIFY(!BrandTheme::isNewer(remote, local));
+
+    BrandingConfig invalidRemote;
+    BrandingConfig validLocal;
+    validLocal.updatedAt = QDateTime::currentDateTime();
+    QVERIFY(!BrandTheme::isNewer(invalidRemote, validLocal));
+
+    BrandingConfig validRemote;
+    validRemote.updatedAt = QDateTime::currentDateTime();
+    BrandingConfig invalidLocal;
+    QVERIFY(BrandTheme::isNewer(validRemote, invalidLocal));
+}
+
+void TestBrandTheme::manualModeSkipsRegeneration()
+{
+    const QString path = writePng(QStringLiteral("manual-red.png"), QColor(Qt::red));
+    BrandingConfig cfg;
+    cfg.mode = ThemeMode::Manual;
+    cfg.palette = BrandTheme::fallbackPalette();
+
+    QString err;
+    const bool result = BrandTheme::regenerateFromLogo(cfg, path, &err);
+
+    QVERIFY(!result);
+    QVERIFY(err.isEmpty());
+    QVERIFY(cfg.palette == BrandTheme::fallbackPalette());
+    QVERIFY(cfg.logoHash.isEmpty());
+}
+
+void TestBrandTheme::autoModeRegenerates()
+{
+    const QString path = writePng(QStringLiteral("auto-red.png"), QColor(Qt::red));
+    BrandingConfig cfg;
+    cfg.mode = ThemeMode::Auto;
+    cfg.palette = BrandTheme::fallbackPalette();
+
+    QString err;
+    const bool result = BrandTheme::regenerateFromLogo(cfg, path, &err);
+
+    QVERIFY2(result, qPrintable(err));
+    QVERIFY(cfg.palette != BrandTheme::fallbackPalette());
+    QCOMPARE(cfg.logoHash.length(), 64);
+    QVERIFY(!cfg.logoHash.contains(QRegularExpression(QStringLiteral("[^0-9a-f]"))));
+    QVERIFY(cfg.updatedAt.isValid());
+}
+
+void TestBrandTheme::currentDefaultsToFallbackAndSets()
+{
+    const BrandPalette fb = BrandTheme::fallbackPalette();
+    QVERIFY(BrandTheme::current() == fb);
+
+    const QString path = writePng(QStringLiteral("current-red.png"), QColor(Qt::red));
+    const BrandPalette extracted = BrandTheme::extractPalette(path, nullptr);
+    BrandTheme::setCurrent(extracted);
+    QVERIFY(BrandTheme::current() == extracted);
+
+    BrandTheme::setCurrent(fb);
+    QVERIFY(BrandTheme::current() == fb);
 }
 
 QTEST_GUILESS_MAIN(TestBrandTheme)

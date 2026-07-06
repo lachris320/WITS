@@ -1,10 +1,12 @@
 #include "brandtheme.h"
 
+#include <QCryptographicHash>
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
 #include <QImage>
 #include <QImageReader>
+#include <QJsonDocument>
 #include <QJsonValue>
 #include <QPainter>
 #include <QSet>
@@ -358,26 +360,101 @@ BrandPalette extractPalette(const QString &logoPath, QString *errorMsg)
     return p;
 }
 
-// --- Placeholders replaced by Task 3 (cache + hooks) ---
-void saveCachedConfig(QSettings &, const BrandingConfig &) {}
-BrandingConfig loadCachedConfig(QSettings &)
+// --- Local cache (Task 3) ---
+namespace {
+const char *kGroup = "branding";
+} // namespace
+
+void saveCachedConfig(QSettings &store, const BrandingConfig &config)
 {
-    BrandingConfig c;
-    c.palette = fallbackPalette();
-    return c;
-}
-bool isNewer(const BrandingConfig &, const BrandingConfig &) { return false; }
-bool regenerateFromLogo(BrandingConfig &, const QString &, QString *errorMsg)
-{
-    if (errorMsg) *errorMsg = QStringLiteral("not implemented");
-    return false;
+    store.beginGroup(QLatin1String(kGroup));
+    store.setValue(QStringLiteral("mode"),
+                    config.mode == ThemeMode::Manual ? QStringLiteral("manual")
+                                                      : QStringLiteral("auto"));
+    store.setValue(QStringLiteral("palette"),
+                    QString::fromUtf8(QJsonDocument(paletteToJson(config.palette)).toJson(QJsonDocument::Compact)));
+    store.setValue(QStringLiteral("logoHash"), config.logoHash);
+    store.setValue(QStringLiteral("updatedAt"),
+                    config.updatedAt.isValid() ? config.updatedAt.toString(Qt::ISODate)
+                                               : QString());
+    store.endGroup();
+    store.sync();
 }
 
-const BrandPalette &current()
+BrandingConfig loadCachedConfig(QSettings &store)
+{
+    BrandingConfig c;
+    store.beginGroup(QLatin1String(kGroup));
+    const QString modeStr = store.value(QStringLiteral("mode")).toString().trimmed().toLower();
+    c.mode = modeStr == QLatin1String("manual") ? ThemeMode::Manual : ThemeMode::Auto;
+
+    const QString paletteJson = store.value(QStringLiteral("palette")).toString();
+    if (paletteJson.isEmpty()) {
+        c.palette = fallbackPalette();
+    } else {
+        const QJsonDocument doc = QJsonDocument::fromJson(paletteJson.toUtf8());
+        c.palette = doc.isObject() ? paletteFromJson(doc.object()) : fallbackPalette();
+    }
+
+    c.logoHash = store.value(QStringLiteral("logoHash")).toString();
+    c.updatedAt = QDateTime::fromString(store.value(QStringLiteral("updatedAt")).toString(),
+                                        Qt::ISODate);
+    store.endGroup();
+    return c;
+}
+
+bool isNewer(const BrandingConfig &remote, const BrandingConfig &local)
+{
+    return remote.updatedAt.isValid()
+        && (!local.updatedAt.isValid() || remote.updatedAt > local.updatedAt);
+}
+
+bool regenerateFromLogo(BrandingConfig &config, const QString &logoPath, QString *errorMsg)
+{
+    // Manual-mode hook (PRD condition 8): auto-regeneration is skipped
+    // entirely when the config is in Manual mode — config is left untouched.
+    if (config.mode == ThemeMode::Manual) {
+        if (errorMsg) errorMsg->clear();
+        return false;
+    }
+
+    QString err;
+    const BrandPalette palette = extractPalette(logoPath, &err);
+    if (!err.isEmpty()) {
+        if (errorMsg) *errorMsg = err;
+        return false;
+    }
+
+    QFile file(logoPath);
+    QString hash;
+    if (file.open(QIODevice::ReadOnly)) {
+        hash = QString::fromLatin1(
+            QCryptographicHash::hash(file.readAll(), QCryptographicHash::Sha256).toHex());
+    }
+
+    config.palette = palette;
+    config.logoHash = hash;
+    config.updatedAt = QDateTime::currentDateTime();
+    if (errorMsg) errorMsg->clear();
+    return true;
+}
+
+namespace {
+BrandPalette &currentStorage()
 {
     static BrandPalette s_current = fallbackPalette();
     return s_current;
 }
-void setCurrent(const BrandPalette &) {}
+} // namespace
+
+const BrandPalette &current()
+{
+    return currentStorage();
+}
+
+void setCurrent(const BrandPalette &palette)
+{
+    currentStorage() = palette;
+}
 
 } // namespace BrandTheme
