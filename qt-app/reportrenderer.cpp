@@ -15,6 +15,7 @@
 #include <QFont>
 #include <QFontMetrics>
 #include <QGraphicsLayout>
+#include <QLoggingCategory>
 #include <QMarginsF>
 #include <QPagedPaintDevice>
 #include <QPainter>
@@ -25,6 +26,11 @@
 
 #include "xlsxformat.h"     // QXlsx::Format  (match adminwindow.cpp's include)
 #include "xlsxcellrange.h"  // QXlsx::CellRange (mergeCells)
+
+// Diagnostic logging for the report renderer. Silent by default (QtInfoMsg
+// floor suppresses qCDebug); re-enable when troubleshooting with
+//   QT_LOGGING_RULES="wits.report.render.debug=true"
+Q_LOGGING_CATEGORY(lcReportRender, "wits.report.render", QtInfoMsg)
 
 // Factored out of make{Bar,Pie}ChartImage's aggregation loop (legacy cpp:125-131 / 193-199).
 QMap<QString, int> ReportRenderer::aggregateVisitsByCourse(const QJsonArray &data) {
@@ -260,7 +266,7 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
     auto finalize = qScopeGuard([&]() {
         if (painter.isActive()) {
             painter.end();
-            qDebug() << "Report paint finalized successfully.";
+            qCDebug(lcReportRender) << "Report paint finalized successfully.";
         }
     });
 
@@ -301,9 +307,9 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
     };
 
 
-    qDebug() << "Paint Width:" << pageWidth << "Height:" << pageHeight;
-    qDebug() << "Calculated margin:" << margin;
-    qDebug() << "Paint Resolution:" << resolution;
+    qCDebug(lcReportRender) << "Paint Width:" << pageWidth << "Height:" << pageHeight;
+    qCDebug(lcReportRender) << "Calculated margin:" << margin;
+    qCDebug(lcReportRender) << "Paint Resolution:" << resolution;
 
     // ===== HEADER =====
     auto drawHeader = [&](int &y) {
@@ -432,7 +438,7 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
     // ===== CHARTS: each chart placed on its own page and scaled to fill almost whole page =====
     auto drawFullscreenChart = [&](const QString &label, const QImage &img) {
         if (img.isNull()) {
-            qDebug() << label << "is null, skipping.";
+            qCDebug(lcReportRender) << label << "is null, skipping.";
             return;
         }
 
@@ -441,7 +447,7 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
         currentPage++;
         y = margin;        // reset Y for the new page
         drawHeader(y);
-        qDebug() << "New page created for chart (" << label << "), page:" << currentPage;
+        qCDebug(lcReportRender) << "New page created for chart (" << label << "), page:" << currentPage;
 
         // Compute area for chart (leave space for footer)
         const int bottomReserve = 60;
@@ -458,7 +464,7 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
         // Draw the image at the calculated rect
         painter.drawImage(drawRect, img);
 
-        qDebug() << "Chart" << label << "drawn at rect:" << drawRect
+        qCDebug(lcReportRender) << "Chart" << label << "drawn at rect:" << drawRect
                  << "from image size:" << img.size();
     };
 
