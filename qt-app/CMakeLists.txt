@@ -44,6 +44,9 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         importcontroller.h importcontroller.cpp
         studentdata.h
         studentcontroller.h studentcontroller.cpp
+        reportdata.h
+        reportcontroller.h reportcontroller.cpp
+        reportrenderer.h reportrenderer.cpp
     )
 else()
     if(ANDROID)
