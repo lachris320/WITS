@@ -46,6 +46,10 @@ if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
         reportdata.h
         reportcontroller.h reportcontroller.cpp
         reportrenderer.h reportrenderer.cpp
+        brandcolormath.h
+        brandthemedata.h
+        brandtheme.h brandtheme.cpp
+        brandingcontroller.h brandingcontroller.cpp
     )
 else()
     if(ANDROID)

@@ -32,6 +32,8 @@
 #include <QElapsedTimer>
 #include "rfidkeyboardfilter.h"
 #include "theme.h"
+#include "brandtheme.h"
+#include "brandingcontroller.h"
 
 
 MainWindow::MainWindow(QWidget *parent)
@@ -150,6 +152,24 @@ MainWindow::MainWindow(QWidget *parent)
         QChar firstChar = text.at(0);
         ui->username->setEchoMode(firstChar.isLetter() ? QLineEdit::Password : QLineEdit::Normal);
     });
+
+    // Branding: cache-first, then background sync. The cached palette is
+    // applied immediately (no network wait); the backend is fetched in the
+    // background and re-applied + re-cached only if strictly newer.
+    {
+        QSettings brandingStore(QLatin1String("MyCompany"), QLatin1String("MyApp"));
+        BrandTheme::setCurrent(BrandTheme::loadCachedConfig(brandingStore).palette);
+    }
+    m_brandingController = new BrandingController(networkManager, this);
+    connect(m_brandingController, &BrandingController::remoteConfigLoaded, this,
+            [](const BrandingConfig &remote) {
+        QSettings store(QLatin1String("MyCompany"), QLatin1String("MyApp"));
+        if (BrandTheme::isNewer(remote, BrandTheme::loadCachedConfig(store))) {
+            BrandTheme::setCurrent(remote.palette);
+            BrandTheme::saveCachedConfig(store, remote);
+        }
+    });
+    m_brandingController->fetchRemoteConfig();
 }
 
 MainWindow::~MainWindow()
