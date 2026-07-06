@@ -48,7 +48,6 @@ QMap<QString, QMap<int, int>> ReportRenderer::aggregateVisitsByCourseHour(
         const QString loginTime = obj["login_time"].toString();
         const QTime time = QTime::fromString(loginTime, "HH:mm:ss");
         if (!time.isValid()) {
-            qDebug() << "Invalid login_time format:" << loginTime;
             continue;
         }
         const int hour = time.hour();
@@ -391,12 +390,9 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
     painter.drawLine(margin, y, pageWidth - margin, y);
     y += 20;
 
-    qDebug() << "Starting to draw" << data.size() << "table rows";
-
     int rowIndex = 0;
     for (auto v : data) {
         QJsonObject row = v.toObject();
-        if (rowIndex < 3) qDebug() << "Drawing row" << rowIndex << ":" << row;
 
         QRect rowRect(margin, y - 15, usableWidth, 20);
         painter.fillRect(rowRect, (rowIndex % 2 == 0) ? palette.rowEvenBg : palette.rowOddBg);
