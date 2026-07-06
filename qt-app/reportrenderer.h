@@ -12,6 +12,7 @@
 #include "xlsxdocument.h"   // QXlsx::Document
 
 class QPagedPaintDevice;
+class QChart;
 
 // Stateless renderer. No QSettings, no ui->, no member state — every method is a
 // pure function of its arguments. Charts/PDF/Excel bodies are verbatim ports from
@@ -42,6 +43,10 @@ public:
                                   const QJsonArray &rows,
                                   const QJsonObject &filters,
                                   const ReportHeaderInfo &info);
+
+private:
+    // Renders a configured chart into an ARGB32 image of `size` (shared tail of the chart makers).
+    static QImage renderChartToImage(QChart *chart, QSize size);
 };
 
 #endif // REPORTRENDERER_H

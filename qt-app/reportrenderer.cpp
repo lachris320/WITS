@@ -48,7 +48,6 @@ QMap<QString, QMap<int, int>> ReportRenderer::aggregateVisitsByCourseHour(
         const QString loginTime = obj["login_time"].toString();
         const QTime time = QTime::fromString(loginTime, "HH:mm:ss");
         if (!time.isValid()) {
-            qDebug() << "Invalid login_time format:" << loginTime;
             continue;
         }
         const int hour = time.hour();
@@ -57,6 +56,24 @@ QMap<QString, QMap<int, int>> ReportRenderer::aggregateVisitsByCourseHour(
         courseTimeCounts[course][hour] += 1;
     }
     return courseTimeCounts;
+}
+
+// Shared render tail of the three chart makers: paint a configured QChart into
+// an ARGB32 QImage of the requested size. A local QChartView owns `chart` and
+// deletes it when this returns — same ownership as the inline versions it replaces.
+QImage ReportRenderer::renderChartToImage(QChart *chart, QSize size) {
+    QImage chartImage(size, QImage::Format_ARGB32);
+    chartImage.fill(Qt::white);
+    QPainter painter(&chartImage);
+
+    QChartView view(chart);
+    view.setRenderHint(QPainter::Antialiasing);
+    view.resize(size);
+    view.show();
+    view.chart()->resize(size);
+    view.render(&painter);
+
+    return chartImage;
 }
 
 // --- Bar Chart ---
@@ -107,19 +124,7 @@ QImage ReportRenderer::makeBarChartImage(const QJsonArray &data, QSize size, con
     chart->layout()->setContentsMargins(0, 0, 0, 0);
     chart->setBackgroundRoundness(0);
 
-    // Render to image
-    QImage chartImage(size, QImage::Format_ARGB32);
-    chartImage.fill(Qt::white);
-    QPainter painter(&chartImage);
-
-    QChartView view(chart);
-    view.setRenderHint(QPainter::Antialiasing);
-    view.resize(size);
-    view.show();
-    view.chart()->resize(size);
-    view.render(&painter);
-
-    return chartImage;
+    return renderChartToImage(chart, size);
 }
 
 
@@ -157,19 +162,7 @@ QImage ReportRenderer::makePieChartImage(const QJsonArray &data, QSize size, con
     chart->layout()->setContentsMargins(0, 0, 0, 0);
     chart->setBackgroundRoundness(0);
 
-    // Render chart into image
-    QImage chartImage(size, QImage::Format_ARGB32);
-    chartImage.fill(Qt::white);
-    QPainter painter(&chartImage);
-
-    QChartView view(chart);
-    view.setRenderHint(QPainter::Antialiasing);
-    view.resize(size);
-    view.show();                 // ensures layout calculates
-    view.chart()->resize(size);  // force resize of chart
-    view.render(&painter);
-
-    return chartImage;
+    return renderChartToImage(chart, size);
 }
 
 
@@ -243,19 +236,7 @@ QImage ReportRenderer::makeLineChartImage(const QJsonArray &data, QSize size, co
     chart->layout()->setContentsMargins(0, 0, 0, 0);
     chart->setBackgroundRoundness(0);
 
-    // Render to QImage (your working approach)
-    QImage chartImage(size, QImage::Format_ARGB32);
-    chartImage.fill(Qt::white);
-    QPainter painter(&chartImage);
-
-    QChartView view(chart);
-    view.setRenderHint(QPainter::Antialiasing);
-    view.resize(size);
-    view.show();
-    view.chart()->resize(size);
-    view.render(&painter);
-
-    return chartImage;
+    return renderChartToImage(chart, size);
 }
 
 // Verbatim port of adminWindow::paintReport (legacy adminwindow.cpp:2018-2291), with:
@@ -409,12 +390,9 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
     painter.drawLine(margin, y, pageWidth - margin, y);
     y += 20;
 
-    qDebug() << "Starting to draw" << data.size() << "table rows";
-
     int rowIndex = 0;
     for (auto v : data) {
         QJsonObject row = v.toObject();
-        if (rowIndex < 3) qDebug() << "Drawing row" << rowIndex << ":" << row;
 
         QRect rowRect(margin, y - 15, usableWidth, 20);
         painter.fillRect(rowRect, (rowIndex % 2 == 0) ? palette.rowEvenBg : palette.rowOddBg);
