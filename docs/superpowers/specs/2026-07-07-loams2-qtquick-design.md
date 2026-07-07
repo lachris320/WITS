@@ -59,17 +59,26 @@ qt-app/
       theme/                 Theme singleton bound to the C++ brand engine
     tests/                   Qt Quick Test targets (tst_qml_*)
   tests/           existing 12 unit-test targets — permanent regression baseline
-  (legacy Widgets sources keep building the WITS app until parity; deleted in Phase 5)
+  (legacy Widgets sources keep building the WITS app until parity; deleted in Phase 6)
 ```
 
 Rules:
-- `witscore` has zero QML/Widgets dependencies; both apps link it during transition.
+- `witscore`'s business-logic core (controllers, brand engine, RFID state machine,
+  `apiconfig`) has zero QML/Widgets dependencies. `reportrenderer` is the one
+  exception: it links `Qt::Charts` + `Qt::Widgets` + `QXlsx` because `QChart`
+  derives from `QGraphicsWidget` in Qt 6 — both apps accept this transitive
+  dependency on the reports/export path during the parallel-rebuild window
+  (see Risk #2).
 - **ViewModels are the only QML-facing C++.** They own controllers, expose
   Q_PROPERTY/signals, and translate record lists into models. QML never calls
   controllers directly.
 - A C++ `Navigator` singleton owns surface/page/modal state so flow is testable and
   keyboard shortcuts are centralized.
-- The RFID keyboard filter installs at the QGuiApplication level, as today.
+- The `RfidScanDetector` state machine (already Widgets-free) is reused verbatim.
+  Its current install layer (`RfidKeyboardFilter`) is Widgets-coupled — installed
+  on a `QApplication` and gated on `QApplication::activeWindow()`/`focusWidget()` —
+  so that layer is **re-authored**, not reused as-is, against `QQuickWindow` focus
+  semantics; the Phase 1 spike (Risk #1) is where this gets proven out.
 - Future modules (inventory, borrow/return, AI) plug in as new
   viewmodel + qml/module + core-service triples; nothing in 2.0 may assume the
   admin sidebar is a closed set.
@@ -125,7 +134,10 @@ contrast guaranteed by the engine's math.
 ## 8. Verification model
 
 - The **12 existing unit-test targets stay green in every phase** (core move is
-  `git mv` + CMake, not a rewrite).
+  `git mv` + CMake path updates, not a rewrite — each target keeps compiling its
+  controller `.cpp` directly rather than linking a monolithic `witscore`, so its
+  dependency surface stays as lean as today; e.g. `tst_reportcontroller` still
+  omits `reportrenderer.cpp`).
 - New layers: ViewModel unit tests (plain QtTest, synthetic payloads, no live network —
   house rule), Qt Quick Test for components/screens (offscreen), per-module parity
   checklists (legacy behaviors enumerated, checked off against the new screen).
@@ -139,25 +151,28 @@ contrast guaranteed by the engine's math.
 | Phase | Deliverable | Gate |
 |---|---|---|
 | **0** | **Comprehensive modernization proposal** (20 sections per owner brief: repo/debt/design/UX assessments, migration strategy, architecture, folder structure, ViewModels, component library, design/theme/navigation/animation systems, backend reuse+hardening plan, screen-by-screen redesigns, risks, roadmap). No implementation. | **Owner approval — hard stop** |
-| 1 | `witscore` extraction (both apps build, 12/12 green); AppShell + Theme singleton (light/dark + brand engine) + core components; **RFID-in-QML spike** | build/tests/review |
+| 1 | `witscore` extraction (both apps build, 12/12 green); AppShell + Theme singleton (light/dark + brand engine) + core components; **RFID-in-QML spike** (detector state machine reused, filter/install layer re-authored against `QQuickWindow`) | build/tests/review |
 | 2 | Kiosk surface parity (student/RFID/admin/guest login, feed, hero, stats) | parity checklist + gates |
 | 3 | Admin part 1: dashboard, visit logs (Today/This-Week), search | parity checklist + gates |
 | 4 | Admin part 2: database + import, reports (reportrenderer reuse), settings incl. live logo re-theming | parity checklist + gates |
-| 5 | Dark-mode polish, a11y pass, PHP targeted hardening, delete Widgets app, final branch review | full gates + human walkthrough |
+| 5 | Dark-mode polish, a11y pass | full gates + human walkthrough |
+| 6 | Backend targeted hardening (contract fixtures across all ~30 `deliverables/loams_api/` endpoints, then parameterize/harden; remove debug-only endpoints — `phpinfo.php`, `testupload.php` — and resolve `hash_admin.php`'s status; revisit the hardcoded `http://localhost` base URL in `apiconfig.h` now that auth endpoints are in scope); delete Widgets app; final whole-branch review | full gates + human walkthrough |
 
 ## 10. Risks
 
 1. **RFID under QML focus** — event delivery differs from Widgets; de-risked by the
    Phase 1 spike before anything depends on it.
 2. **Charts** — QtCharts QML styling fights the design; build the dashboard's simple
-   bars as custom QML, keep QtCharts only inside `reportrenderer` exports.
+   bars as custom QML, keep QtCharts only inside `reportrenderer` exports (accepted
+   trade-off: this keeps a `Qt::Widgets` link on the reports/export path even in the
+   Qt Quick app, since `QChart` derives from `QGraphicsWidget`).
 3. **Dark mode has no design reference** — derived via contrast math; budget a human
    review round.
 4. **Deployment hardware performance** — validate Qt Quick rendering on the actual
    library PC in Phase 1; document software-rendering fallback.
 5. **PHP hardening regressions** — contract fixtures before touching any endpoint.
 6. **Two apps in one repo** — `-DBUILD_LEGACY_WIDGETS=ON` (default) keeps the rollback
-   alive until Phase 5 removes it.
+   alive until Phase 6 removes it.
 
 ## 11. Out of scope for 2.0
 
