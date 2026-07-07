@@ -13,6 +13,7 @@
 Every task's requirements implicitly include this section. Copy these verbatim into each worker's brief.
 
 - **This is a documentation deliverable. Write ZERO application code.** Do not create, modify, or delete any `.cpp`, `.h`, `.qml`, `.ui`, `.php`, `.sql`, `CMakeLists.txt`, or resource file. The only file this plan writes is the proposal Markdown document (and this is enforced in review). The owner brief is explicit: "Do not start implementing the migration immediately."
+- **Known pre-existing, unrelated working-tree drift at plan start:** `qt-app/adminwindow.ui` has the owner's own in-progress edit, and `uploads/` is an untracked runtime artifact directory. Neither is ever touched by this plan. Every task's "verify grounding" step excludes exactly these two paths by name when checking that only the proposal doc changed — don't broaden that exclusion to anything else.
 - **Every factual claim about the current codebase MUST cite `file:line` (or a filename for whole-file claims).** Generic advice is a failure. The owner brief: "reference specific modules/classes/services/files instead of generic advice." A claim a reviewer cannot trace to a real line is a defect.
 - **Do not relitigate the locked decisions** in `docs/superpowers/specs/2026-07-07-loams2-qtquick-design.md` §2. The proposal *elaborates within* them (scope = existing modules only; Phase 1 branding engine retained; one app / two surfaces; brand engine + light/dark; targeted backend hardening; migration Strategy A; business logic in C++; Phase 0 → owner approval → phased implementation). If evidence genuinely contradicts a locked decision, flag it in a clearly-marked "⚠ Decision tension" callout — do not silently override.
 - **Stay within 2.0 scope.** Inventory, Borrow/Return, and AI Assistant are OUT of 2.0. They appear in the proposal only as *forward-compatibility seams* (where the architecture must not close a door), never as work to be built now.
@@ -86,7 +87,7 @@ Read every controller (`settingscontroller`, `visitorcontroller`, `importcontrol
 
 - [ ] **Step 3: Write Section 2 — Repository architecture assessment**
 
-Cover, with `file:line` citations throughout: the module inventory and layering as it exists today; the single flat `qt_add_executable(WITS ...)` target (`qt-app/CMakeLists.txt:31-53`) and the absence of any library split; the controller extraction already achieved (the five controllers + `reportrenderer` are UI-free) vs. logic still embedded in `mainwindow.cpp`/`adminwindow.cpp`; the injected-`QNetworkAccessManager` convention; the RFID input path (`mainwindow.cpp:95` installs `RfidKeyboardFilter` on `qApp`, a `QApplication`; the filter gates on `QApplication::activeWindow()`/`focusWidget()` at `rfidkeyboardfilter.cpp:25,33-35`); the theming layers (`theme.h` fallback constants + `resources/wits.qss` + the merged brand engine); the test baseline (12 ctest targets, each direct-compiling its controller `.cpp`, per `tests/CMakeLists.txt`). State plainly what is already well-positioned for MVVM reuse and what is not. Do NOT propose the target architecture here (that is Section 7) — this section is diagnosis only.
+Cover, with `file:line` citations throughout: the module inventory and layering as it exists today; the single flat `qt_add_executable(WITS ...)` target (`qt-app/CMakeLists.txt:31-53`) and the absence of any library split; the controller extraction already achieved (the five controllers + `reportrenderer` are UI-free) vs. logic still embedded in `mainwindow.cpp`/`adminwindow.cpp`; the injected-`QNetworkAccessManager` convention; the RFID input path (`mainwindow.cpp:95` installs `RfidKeyboardFilter` on `qApp`, a `QApplication`; the filter gates on `QApplication::activeWindow()`/`focusWidget()` at `rfidkeyboardfilter.cpp:25,33-35`); the theming layers (`theme.h` fallback constants + `resources/wits.qss` + the merged brand engine); the test baseline (12 ctest targets — most direct-compile the class under test's `.cpp` alongside the test binary, e.g. `tst_visitorcontroller`, `tst_reportrenderer`, `tst_brandtheme`; `tst_apiconfig` is header-only and `tst_theme`/`tst_responsive_ui` compile no extra business-logic source at all — per `tests/CMakeLists.txt`). State plainly what is already well-positioned for MVVM reuse and what is not. Do NOT propose the target architecture here (that is Section 7) — this section is diagnosis only.
 
 - [ ] **Step 4: Write Section 3 — Technical debt assessment**
 
@@ -98,13 +99,14 @@ Run the checks below. Every one must pass before commit.
 
 ```bash
 cd "<repo-root>"
-# (a) No application-code files were touched by this task:
-git status --porcelain | grep -Ev '^\?\?|docs/superpowers/proposals/' || echo "OK: only the proposal doc is staged/modified"
+# (a) No application-code files were touched by this task (excludes the two known
+# pre-existing, unrelated dirty paths from Global Constraints):
+git status --porcelain | grep -v '^ M qt-app/adminwindow\.ui$' | grep -v '^?? uploads/$' | grep -v 'docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal\.md$' || echo "OK: only the proposal doc changed beyond known pre-existing drift"
 # (b) No placeholder text left in the two written sections (skeleton stubs for OTHER sections are allowed):
 grep -nE 'TBD|TODO|FIXME|XXX' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md || echo "OK: no debt-markers"
 # (c) Spot-check 5 cited file:line refs actually exist and say what the doc claims (manual: open each cited line).
-# (d) No secrets/PII/personal paths:
-grep -nE 'C:\\\\Users|[0-9]{2}-[0-9]{4}|ADMIN_KEY *= *[^<]' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md || echo "OK: no obvious secrets/PII/personal-path"
+# (d) No secrets/PII/personal paths (matches a single backslash, e.g. C:\Users, or the Mac form):
+grep -nE 'C:\\Users|/Users/|[0-9]{2}-[0-9]{4}|ADMIN_KEY *= *[^<]' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md || echo "OK: no obvious secrets/PII/personal-path"
 ```
 Expected: each line prints its `OK:` message (or lists only intended, justified hits). Manually confirm (c): pick 5 `file:line` citations from Sections 2–3 and open them; each must support the sentence citing it.
 
@@ -145,10 +147,11 @@ Walk each existing screen/workflow (cite the `.ui` file and the driving slots in
 
 ```bash
 cd "<repo-root>"
-git status --porcelain | grep -Ev '^\?\?|docs/superpowers/proposals/' || echo "OK: only the proposal doc changed"
+git status --porcelain | grep -v '^ M qt-app/adminwindow\.ui$' | grep -v '^?? uploads/$' | grep -v 'docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal\.md$' || echo "OK: only the proposal doc changed beyond known pre-existing drift"
 grep -nE 'TBD|TODO|FIXME|XXX' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md || echo "OK: no debt-markers"
+grep -A1 -E '^## (4|5)\.' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md | grep -F '[to be written' || echo "OK: Task 2's assigned sections (4, 5) are filled"
 ```
-Expected: `OK:` on both. Manually confirm the design tokens quoted in §4 match the `.dc.html` sources (spot-check 3), and that every current-screen claim in §5 cites a real `.ui` file or slot.
+Expected: `OK:` on all three. Manually confirm the design tokens quoted in §4 match the `.dc.html` sources (spot-check 3), and that every current-screen claim in §5 cites a real `.ui` file or slot.
 
 - [ ] **Step 5: Commit**
 
@@ -168,12 +171,12 @@ The proposed target-state technical design: architecture, folder structure, modu
 - Inspect (read-only): spec §4/§6; `qt-app/CMakeLists.txt`, `tests/CMakeLists.txt`; every controller header (for the exact public API a ViewModel would wrap); `reportrenderer.h` (for the Charts/Widgets dependency); `apiconfig.h`.
 
 **Interfaces:**
-- Consumes: Task 1's §2 diagnosis (what's already UI-free vs. coupled).
+- Consumes: Task 1's §2 diagnosis (what's already UI-free vs. coupled); Task 2's §5 screen inventory and naming (so the module list in §9 and the ViewModel names in §10 stay aligned with the screen vocabulary already on disk).
 - Produces: the canonical directory tree, the `witscore` library boundary, and the ViewModel↔controller mapping that Sections 11–15 (UI systems) and Section 20 (roadmap) both depend on. Name the ViewModels concretely (e.g. `KioskViewModel`, `DashboardViewModel`, `StudentsViewModel`, `VisitLogsViewModel`, `ReportsViewModel`, `SettingsViewModel`, `ThemeViewModel`, plus a `Navigator`) and keep those names identical wherever later sections reference them.
 
 - [ ] **Step 1: Write Section 7 — Proposed project architecture**
 
-Present the shared-core + Qt Quick shell design (spec §4) at implementation depth: the `witscore` static library boundary and its *precise* dependency envelope — business-logic core is Widgets-free, but `reportrenderer` transitively links `Qt::Charts` + `Qt::Widgets` + `QXlsx` because `QChart` derives from `QGraphicsWidget` in Qt 6 (cite `reportrenderer.h` and `tests/CMakeLists.txt:152-157`); the MVVM layering (QML → ViewModels → controllers → network/backend); the rule that ViewModels are the only QML-facing C++; the `Navigator` singleton owning surface/page/modal state; how both the legacy Widgets app and the new Quick app link `witscore` during the parallel-rebuild window; the AUTOMOC/AUTOUIC implications of splitting sources into a library. State the CMake surgery honestly (the current flat target at `CMakeLists.txt:31-53` must be split; each of the 12 test targets keeps direct-compiling its controller `.cpp` with updated `core/` paths rather than relinking a monolith).
+Present the shared-core + Qt Quick shell design (spec §4) at implementation depth: the `witscore` static library boundary and its *precise* dependency envelope — business-logic core is Widgets-free, but `reportrenderer` transitively links `Qt::Charts` + `Qt::Widgets` + `QXlsx` because `QChart` derives from `QGraphicsWidget` in Qt 6 (cite `reportrenderer.h` and `tests/CMakeLists.txt:152-157`); the MVVM layering (QML → ViewModels → controllers → network/backend); the rule that ViewModels are the only QML-facing C++; the `Navigator` singleton owning surface/page/modal state; how both the legacy Widgets app and the new Quick app link `witscore` during the parallel-rebuild window; the AUTOMOC/AUTOUIC implications of splitting sources into a library. State the CMake surgery honestly (the current flat target at `CMakeLists.txt:31-53` must be split; each of the 12 test targets keeps its current direct-compile-or-header-only shape, with updated `core/` paths where it compiles a moved source, rather than relinking a monolith).
 
 - [ ] **Step 2: Write Section 8 — Proposed folder structure**
 
@@ -191,10 +194,11 @@ For each named ViewModel, specify: which controller(s) it owns, the `Q_PROPERTY`
 
 ```bash
 cd "<repo-root>"
-git status --porcelain | grep -Ev '^\?\?|docs/superpowers/proposals/' || echo "OK: only the proposal doc changed"
+git status --porcelain | grep -v '^ M qt-app/adminwindow\.ui$' | grep -v '^?? uploads/$' | grep -v 'docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal\.md$' || echo "OK: only the proposal doc changed beyond known pre-existing drift"
 grep -nE 'TBD|TODO|FIXME|XXX' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md || echo "OK: no debt-markers"
+grep -A1 -E '^## (7|8|9|10)\.' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md | grep -F '[to be written' || echo "OK: Task 3's assigned sections (7-10) are filled"
 ```
-Expected: `OK:` on both. Manually confirm: every controller method cited in §10 exists in the real header; the ViewModel names introduced here are the exact strings later sections will reuse; the directory tree in §8 matches the spec §4 tree (no drift).
+Expected: `OK:` on all three. Manually confirm: every controller method cited in §10 exists in the real header; the ViewModel names introduced here are the exact strings later sections will reuse; the directory tree in §8 matches the spec §4 tree (no drift).
 
 - [ ] **Step 6: Commit**
 
@@ -241,10 +245,11 @@ Specify motion from the design files: durations (150–400 ms), easing, the name
 
 ```bash
 cd "<repo-root>"
-git status --porcelain | grep -Ev '^\?\?|docs/superpowers/proposals/' || echo "OK: only the proposal doc changed"
+git status --porcelain | grep -v '^ M qt-app/adminwindow\.ui$' | grep -v '^?? uploads/$' | grep -v 'docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal\.md$' || echo "OK: only the proposal doc changed beyond known pre-existing drift"
 grep -nE 'TBD|TODO|FIXME|XXX' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md || echo "OK: no debt-markers"
+grep -A1 -E '^## (11|12|13|14|15)\.' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md | grep -F '[to be written' || echo "OK: Task 4's assigned sections (11-15) are filled"
 ```
-Expected: `OK:` on both. Manually confirm: theme-engine claims cite real symbols in `brandtheme.h`/`brandingcontroller.h`; component names here are exactly those Section 18 will use; the `ThemeViewModel` referenced matches Task 3's §10 definition.
+Expected: `OK:` on all three. Manually confirm: theme-engine claims cite real symbols in `brandtheme.h`/`brandingcontroller.h`; component names here are exactly those Section 18 will use; the `ThemeViewModel` referenced matches Task 3's §10 definition.
 
 - [ ] **Step 7: Commit**
 
@@ -283,12 +288,13 @@ Within "targeted hardening" only: list concrete, cited hardening items — any s
 
 ```bash
 cd "<repo-root>"
-git status --porcelain | grep -Ev '^\?\?|docs/superpowers/proposals/' || echo "OK: only the proposal doc changed"
+git status --porcelain | grep -v '^ M qt-app/adminwindow\.ui$' | grep -v '^?? uploads/$' | grep -v 'docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal\.md$' || echo "OK: only the proposal doc changed beyond known pre-existing drift"
 grep -nE 'TBD|TODO|FIXME|XXX' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md || echo "OK: no debt-markers"
+grep -A1 -E '^## (16|17)\.' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md | grep -F '[to be written' || echo "OK: Task 5's assigned sections (16, 17) are filled"
 # Confirm the endpoint count claim:
 ls deliverables/loams_api/*.php | wc -l   # expect 30
 ```
-Expected: `OK:` on the first two; `30` on the count. Manually confirm each hardening item names a real file and that no proposed change alters an existing contract (reuse vs. harden is clearly separated).
+Expected: `OK:` on the first three; `30` on the count. Manually confirm each hardening item names a real file and that no proposed change alters an existing contract (reuse vs. harden is clearly separated).
 
 - [ ] **Step 5: Commit**
 
@@ -331,10 +337,11 @@ Reproduce and elaborate the spec §9 roadmap (Phase 0 hard stop → Phase 1 core
 
 ```bash
 cd "<repo-root>"
-git status --porcelain | grep -Ev '^\?\?|docs/superpowers/proposals/' || echo "OK: only the proposal doc changed"
+git status --porcelain | grep -v '^ M qt-app/adminwindow\.ui$' | grep -v '^?? uploads/$' | grep -v 'docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal\.md$' || echo "OK: only the proposal doc changed beyond known pre-existing drift"
 grep -nE 'TBD|TODO|FIXME|XXX' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md || echo "OK: no debt-markers"
+grep -A1 -E '^## (6|18|19|20)\.' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md | grep -F '[to be written' || echo "OK: Task 6's assigned sections (6, 18-20) are filled"
 ```
-Expected: `OK:` on both. Manually confirm: §18 uses the exact component names from §11 and screen names from §5; §20's phases match the spec §9 numbering (Phase 6 exists; no stray "Phase 5 deletes Widgets"); §19 covers all six spec risks plus any new ones.
+Expected: `OK:` on all three. Manually confirm: §18 uses the exact component names from §11 and screen names from §5; §20's phases match the spec §9 numbering (Phase 6 exists; no stray "Phase 5 deletes Widgets"); §19 covers all six spec risks plus any new ones.
 
 - [ ] **Step 6: Commit**
 
@@ -372,13 +379,13 @@ Update front matter status from `Draft — pending owner approval` to `Complete 
 
 ```bash
 cd "<repo-root>"
-git status --porcelain | grep -Ev '^\?\?|docs/superpowers/proposals/' || echo "OK: only the proposal doc changed"
+git status --porcelain | grep -v '^ M qt-app/adminwindow\.ui$' | grep -v '^?? uploads/$' | grep -v 'docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal\.md$' || echo "OK: only the proposal doc changed beyond known pre-existing drift"
 # No skeleton stubs and no debt-markers remain anywhere:
 grep -nE 'TBD|TODO|FIXME|XXX|\[to be written' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md || echo "OK: no stubs or debt-markers"
 # All 20 top-level sections present:
 grep -cE '^## [0-9]+\.' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md   # expect 20
-# No secrets/PII/personal paths:
-grep -nE 'C:\\\\Users|ADMIN_KEY *= *[^<]' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md || echo "OK: clean"
+# No secrets/PII/personal paths (matches a single backslash, e.g. C:\Users, or the Mac form):
+grep -nE 'C:\\Users|/Users/|ADMIN_KEY *= *[^<]' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md || echo "OK: clean"
 ```
 Expected: `OK:` messages; the section count prints `20`.
 
