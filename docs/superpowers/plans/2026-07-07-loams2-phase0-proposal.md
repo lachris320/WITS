@@ -149,7 +149,7 @@ Walk each existing screen/workflow (cite the `.ui` file and the driving slots in
 cd "<repo-root>"
 git status --porcelain | grep -v '^ M qt-app/adminwindow\.ui$' | grep -v '^?? uploads/$' | grep -v 'docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal\.md$' || echo "OK: only the proposal doc changed beyond known pre-existing drift"
 grep -nE 'TBD|TODO|FIXME|XXX' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md || echo "OK: no debt-markers"
-grep -A1 -E '^## (4|5)\.' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md | grep -F '[to be written' || echo "OK: Task 2's assigned sections (4, 5) are filled"
+grep -F '[to be written in Task 2]' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md || echo "OK: Task 2's assigned sections (4, 5) are filled"
 ```
 Expected: `OK:` on all three. Manually confirm the design tokens quoted in §4 match the `.dc.html` sources (spot-check 3), and that every current-screen claim in §5 cites a real `.ui` file or slot.
 
@@ -196,7 +196,7 @@ For each named ViewModel, specify: which controller(s) it owns, the `Q_PROPERTY`
 cd "<repo-root>"
 git status --porcelain | grep -v '^ M qt-app/adminwindow\.ui$' | grep -v '^?? uploads/$' | grep -v 'docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal\.md$' || echo "OK: only the proposal doc changed beyond known pre-existing drift"
 grep -nE 'TBD|TODO|FIXME|XXX' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md || echo "OK: no debt-markers"
-grep -A1 -E '^## (7|8|9|10)\.' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md | grep -F '[to be written' || echo "OK: Task 3's assigned sections (7-10) are filled"
+grep -F '[to be written in Task 3]' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md || echo "OK: Task 3's assigned sections (7-10) are filled"
 ```
 Expected: `OK:` on all three. Manually confirm: every controller method cited in §10 exists in the real header; the ViewModel names introduced here are the exact strings later sections will reuse; the directory tree in §8 matches the spec §4 tree (no drift).
 
@@ -247,7 +247,7 @@ Specify motion from the design files: durations (150–400 ms), easing, the name
 cd "<repo-root>"
 git status --porcelain | grep -v '^ M qt-app/adminwindow\.ui$' | grep -v '^?? uploads/$' | grep -v 'docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal\.md$' || echo "OK: only the proposal doc changed beyond known pre-existing drift"
 grep -nE 'TBD|TODO|FIXME|XXX' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md || echo "OK: no debt-markers"
-grep -A1 -E '^## (11|12|13|14|15)\.' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md | grep -F '[to be written' || echo "OK: Task 4's assigned sections (11-15) are filled"
+grep -F '[to be written in Task 4]' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md || echo "OK: Task 4's assigned sections (11-15) are filled"
 ```
 Expected: `OK:` on all three. Manually confirm: theme-engine claims cite real symbols in `brandtheme.h`/`brandingcontroller.h`; component names here are exactly those Section 18 will use; the `ThemeViewModel` referenced matches Task 3's §10 definition.
 
@@ -290,7 +290,7 @@ Within "targeted hardening" only: list concrete, cited hardening items — any s
 cd "<repo-root>"
 git status --porcelain | grep -v '^ M qt-app/adminwindow\.ui$' | grep -v '^?? uploads/$' | grep -v 'docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal\.md$' || echo "OK: only the proposal doc changed beyond known pre-existing drift"
 grep -nE 'TBD|TODO|FIXME|XXX' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md || echo "OK: no debt-markers"
-grep -A1 -E '^## (16|17)\.' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md | grep -F '[to be written' || echo "OK: Task 5's assigned sections (16, 17) are filled"
+grep -F '[to be written in Task 5]' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md || echo "OK: Task 5's assigned sections (16, 17) are filled"
 # Confirm the endpoint count claim:
 ls deliverables/loams_api/*.php | wc -l   # expect 30
 ```
@@ -339,7 +339,7 @@ Reproduce and elaborate the spec §9 roadmap (Phase 0 hard stop → Phase 1 core
 cd "<repo-root>"
 git status --porcelain | grep -v '^ M qt-app/adminwindow\.ui$' | grep -v '^?? uploads/$' | grep -v 'docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal\.md$' || echo "OK: only the proposal doc changed beyond known pre-existing drift"
 grep -nE 'TBD|TODO|FIXME|XXX' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md || echo "OK: no debt-markers"
-grep -A1 -E '^## (6|18|19|20)\.' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md | grep -F '[to be written' || echo "OK: Task 6's assigned sections (6, 18-20) are filled"
+grep -F '[to be written in Task 6]' docs/superpowers/proposals/2026-07-07-loams2-phase0-modernization-proposal.md || echo "OK: Task 6's assigned sections (6, 18-20) are filled"
 ```
 Expected: `OK:` on all three. Manually confirm: §18 uses the exact component names from §11 and screen names from §5; §20's phases match the spec §9 numbering (Phase 6 exists; no stray "Phase 5 deletes Widgets"); §19 covers all six spec risks plus any new ones.
 
