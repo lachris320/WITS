@@ -1018,19 +1018,570 @@ walk.
 
 ## 7. Proposed project architecture
 
-*[to be written in Task 3]*
+This section takes the spec's shared-core design (spec §4) to implementation
+depth: the concrete CMake library boundary, its precise (non-uniform)
+dependency envelope, the MVVM layering rule, the `Navigator` singleton, how
+the legacy and new executables co-exist during the rebuild, and the
+AUTOMOC/AUTOUIC/AUTORCC mechanics of splitting one flat target into several.
+
+### 7.1 The `witscore` boundary — what moves, what doesn't
+
+The spec's shared core becomes a concrete CMake static library, `witscore`
+(`add_library(witscore STATIC ...)`), that absorbs every file Section 2.8
+already certified as "well-positioned" — Widgets-free today and movable by
+`git mv`, not rewrite: the five domain controllers (`settingscontroller`,
+`visitorcontroller`, `importcontroller`, `studentcontroller`,
+`reportcontroller`, plus their `*data.h` structs), `reportrenderer`, the
+brand engine (`brandcolormath.h`, `brandthemedata.h`, `brandtheme.h/.cpp`,
+`brandingcontroller.h/.cpp`), `apiconfig.h`, and the `RfidScanDetector` state
+machine (`rfidscandetector.h/.cpp`, the pure `feedKey(QChar, qint64) ->
+std::optional<QString>` machine, `rfidscandetector.h:20`). Section 2.4
+already identified the one layer that does **not** qualify:
+`RfidKeyboardFilter` (`rfidkeyboardfilter.h/.cpp`) is `QApplication`-coupled
+at its core (`QApplication::activeWindow()`/`focusWidget()` gates,
+`rfidkeyboardfilter.cpp:25,33-36`), and the spec explicitly calls for it to
+be **re-authored** against `QQuickWindow` focus semantics, not moved (spec
+§4, "Rules"); it stays a legacy-Widgets-only file until its Phase 1 spike
+(spec §9/§10 Risk 1) produces its Quick-side replacement.
+
+`witscore`'s dependency envelope is deliberately *not* uniform across its own
+sources, and this document states that honestly rather than rounding it off:
+the controller layer, brand engine, `apiconfig.h`, and `RfidScanDetector`
+link only `Qt::Core`/`Qt::Network`/`Qt::Gui` — no `Qt::Widgets`, no
+`Qt::Quick`. `reportrenderer` is a named, spec-accepted exception (spec §4,
+"Rules": "`reportrenderer` is the one exception: it links `Qt::Charts` +
+`Qt::Widgets` + `QXlsx`"; this document's own Section 3.9). `QChart` derives
+from `QGraphicsWidget` in Qt 6, so anything that constructs a `QChart`
+transitively pulls in `Qt::Widgets` regardless of whether it ever shows a
+widget — `reportrenderer.h`'s three chart-image makers
+(`makeBarChartImage`/`makePieChartImage`/`makeLineChartImage`,
+`reportrenderer.h:29-35`) all route through the private
+`renderChartToImage(QChart *chart, QSize size)` helper (`reportrenderer.h:49`),
+and the existing `tst_reportrenderer` test target already pays this cost
+today — `tests/CMakeLists.txt:152-157` links `Qt::Test`, `Qt::Gui`,
+`Qt::Charts`, **`Qt::Widgets`**, and `QXlsx` for a target whose only public
+surface is `QImage`-returning static functions. `witscore` is therefore not
+one dependency-uniform target; in CMake terms it needs either (a) a single
+`witscore` target whose `target_link_libraries` includes
+`Qt::Charts`/`Qt::Widgets`/`QXlsx` as `PUBLIC` (simplest, but leaks
+`Qt::Widgets` into every consumer, including the new Quick executable — an
+accepted trade-off per spec §4/§10 Risk 2, not a defect to fix in Phase 0),
+or (b) splitting `reportrenderer.*` into a second library
+(`witscore_reports`) with the wider link set, keeping the base `witscore`
+genuinely Widgets-free. Section 8's tree assumes (a) for simplicity during
+the parallel-rebuild window, with (b) named as a Phase-6 cleanup candidate
+once the legacy Widgets app — whose own `Qt::Widgets` link is already
+unavoidable (`qt-app/CMakeLists.txt:65-72`) — is deleted and there is no
+longer a second consumer to protect from the leak.
+
+### 7.2 MVVM layering
+
+QML → ViewModels → controllers → network/backend, exactly as spec §4
+states, with one rule enforced at the architecture level rather than left as
+convention: **ViewModels are the only QML-facing C++.** No QML file calls a
+controller method, connects to a `*Controller` signal, or touches
+`reportdata.h`/`visitordata.h`/etc. structs directly — every controller
+signal is re-emitted (or translated into a `Q_PROPERTY` write) by exactly
+one owning ViewModel, and every `Q_INVOKABLE` a QML `onClicked` handler
+calls lives on a ViewModel, never a controller. This is the seam Section 2.8
+found missing today ("there is currently no `ReportsViewModel`-shaped seam
+between 'read the widgets' and 'call `computeDateRange`'"); Section 10 names
+each ViewModel and its owned controller(s) concretely.
+
+### 7.3 `Navigator`
+
+A `QObject` singleton, registered to QML (`qmlRegisterSingletonType` or
+`QML_SINGLETON`), owns surface (kiosk/admin) and page/modal state as
+`Q_PROPERTY`s — replacing today's hand-wired `QPushButton::clicked` →
+`ui->stackedWidget->setCurrentWidget(...)` connection per sidebar button
+(`adminwindow.cpp:292-311`, Section 2.5) with a data-driven `currentPage`
+property that `AppShell.qml`'s page host binds against. `Navigator` also
+centralizes keyboard shortcuts — the Ctrl+K quick search the spec requires
+(spec §7, "Keyboard & accessibility"; Section 5.8 already establishes there
+is no `QShortcut` for search anywhere in `adminwindow.cpp` today) — so a
+shortcut is wired once, application-wide, rather than per page. `Navigator`
+manages *which page/modal is current*, not screen data, so it owns no
+controller; Section 9 places it outside the module-triple pattern, as
+connective tissue between triples rather than a triple itself.
+
+### 7.4 Parallel linkage during the rebuild window
+
+Per migration Strategy A (spec §2, locked), both the legacy Widgets
+executable (`WITS`, today's `qt-app/CMakeLists.txt:31-53` block) and the new
+Quick executable link `witscore`: `target_link_libraries(WITS PRIVATE
+witscore)` and `target_link_libraries(<quick-executable> PRIVATE witscore)`,
+both against the one CMake-built static-library artifact — the controllers,
+brand engine, and `reportrenderer` are compiled exactly once per build, not
+duplicated per executable. `WITS`'s own `qt_add_executable(...)` source list
+shrinks accordingly: the eleven business-logic file-pairs currently listed
+inline (`settingscontroller.h/.cpp` through `brandingcontroller.h/.cpp`,
+`qt-app/CMakeLists.txt:38-52`) are removed from the `WITS` target's source
+list and replaced by the `witscore` link; only the genuinely Widgets-bound
+files (`mainwindow.*`, `adminwindow.*`, `guestwindow.*`,
+`attachfilesdialog.*`, `busyindicator.*`, `rfidkeyboardfilter.*`, the four
+`.ui` files, `resources.qrc`) remain directly in `WITS`'s own source list.
+Nothing about this changes `WITS`'s runtime behavior — it is a pure
+"move the compilation unit, keep the include path working" change, backed by
+the fact that all eleven moved files already build as standalone units today
+(Section 2.7/2.8's ctest evidence).
+
+### 7.5 AUTOMOC / AUTOUIC / AUTORCC implications
+
+`qt-app/CMakeLists.txt:5-7` sets `CMAKE_AUTOMOC`, `CMAKE_AUTOUIC`, and
+`CMAKE_AUTORCC` all `ON` as directory-scoped variables; a new `witscore`
+target created via `add_subdirectory(core)` inherits them unless the
+subdirectory overrides them. Three implications follow, stated honestly
+rather than assumed to "just work":
+
+- **AUTOMOC is required and free.** Six of `witscore`'s classes are
+  `Q_OBJECT`-derived (`SettingsController`, `VisitorController`,
+  `ImportController`, `StudentController`, `ReportController`,
+  `BrandingController` — the "injected, not owned" pattern Section 2.2
+  already cites) and need `moc` to run over them. Because `CMAKE_AUTOMOC` is
+  already `ON` at the point `witscore` is defined, this needs no extra CMake
+  ceremony — the same mechanism that moc's these classes inside the flat
+  `WITS` target today continues to work identically inside the library
+  target.
+- **AUTOUIC is a no-op for `witscore` and should be turned off there.** All
+  four `.ui` files (`mainwindow.ui`, `adminwindow.ui`, `guestwindow.ui`,
+  `attachFilesDialog.ui`) stay with the legacy Widgets sources; `witscore`
+  has zero `.ui` inputs, so `set_target_properties(witscore PROPERTIES
+  AUTOUIC OFF)` is a correctness no-op (nothing to generate) but avoids
+  CMake scanning a source list that will never contain one.
+- **AUTORCC needs two consumers, not one shared file.** `resources.qrc`
+  (icons/fonts used by the `.ui` files) stays exclusively with the legacy
+  `WITS` target — `witscore` has no UI assets to bundle. The new Quick
+  executable needs its own resource mechanism for QML/JS files (either its
+  own `.qrc` or Qt 6's `qt_add_qml_module` automatic resource embedding); the
+  two executables each run their own `AUTORCC` pass over their own resource
+  file with no shared or conflicting state.
+
+### 7.6 The CMake surgery, stated honestly
+
+This is real, non-trivial CMake work, not a relabeling exercise: the current
+flat `qt_add_executable(WITS MANUAL_FINALIZATION ...)` block
+(`qt-app/CMakeLists.txt:31-53` — the single target Section 3.1 already flags
+as the direct blocker to any shared-core architecture) must be split into at
+minimum three CMake targets: `witscore` (the new static library), `WITS`
+(the legacy executable, now linking `witscore` instead of compiling its
+sources inline), and the new Quick executable (also linking `witscore`).
+This is genuinely Phase 1 work, not Phase 0 — Phase 0 produces this
+document, not the CMake change itself (spec §2, "Process"; spec §9, Phase 1:
+"`witscore` extraction"). Crucially, the 12 existing ctest targets
+(Section 2.7's table) do **not** change shape: per the spec's own
+verification model ("each target keeps compiling its controller `.cpp`
+directly rather than linking a monolithic `witscore`... e.g.
+`tst_reportcontroller` still omits `reportrenderer.cpp`," spec §8), every
+target that today does `${CMAKE_SOURCE_DIR}/somecontroller.cpp` in its own
+`qt_add_executable(tst_somecontroller ...)` call continues to do exactly
+that after the move — only the path changes, from
+`${CMAKE_SOURCE_DIR}/reportcontroller.cpp` to (for example)
+`${CMAKE_SOURCE_DIR}/core/reportcontroller.cpp`. No test target is rewritten
+to `target_link_libraries(... witscore)` in place of its direct compile —
+that would trade today's lean, single-class dependency surface
+(Section 2.7: "`tst_reportcontroller` links only `reportcontroller.cpp`, not
+`reportrenderer.cpp`") for a monolithic one, the exact anti-pattern the
+spec's verification model rules out by name.
+
+The parallel-rebuild window is bounded by a build flag:
+`-DBUILD_LEGACY_WIDGETS=ON` (default `ON`) keeps `WITS` buildable and
+runnable as the rollback path for every phase before parity is declared;
+only when the roadmap (Section 20) reaches the Phase 6 deletion milestone
+does this flag's default flip to `OFF` and the legacy sources get removed,
+per Strategy A's own exit condition (spec §2, "Widgets app remains the
+rollback until parity, then is deleted").
 
 ## 8. Proposed folder structure
 
-*[to be written in Task 3]*
+This expands the spec's §4 tree (reproduced there in outline form) to the
+full target layout, annotating each directory with its one responsibility.
+It does not contradict the spec tree — every top-level entry the spec names
+(`core/`, `quick/` with `main.cpp`/`viewmodels/`/`models/`/`qml/`/`tests/`,
+the retained `tests/`, and legacy sources building until Phase 6) appears
+below, expanded to file level.
+
+```
+qt-app/
+  CMakeLists.txt                 top level: defines witscore, WITS (legacy), the Quick executable
+  core/                          witscore (static library) — Widgets-free business logic
+    apiconfig.h                  backend base-URL/endpoint builder (unchanged)
+    settingsdata.h
+    settingscontroller.h/.cpp
+    visitordata.h
+    visitorcontroller.h/.cpp
+    importdata.h
+    importcontroller.h/.cpp
+    studentdata.h
+    studentcontroller.h/.cpp
+    reportdata.h
+    reportcontroller.h/.cpp
+    reportrenderer.h/.cpp        the one Qt::Charts + Qt::Widgets + QXlsx exception (§7.1)
+    brandcolormath.h
+    brandthemedata.h
+    brandtheme.h/.cpp
+    brandingcontroller.h/.cpp
+    rfidscandetector.h/.cpp      pure state machine; RfidKeyboardFilter stays out (§7.1)
+  quick/                         NEW: LOAMS 2.0 Qt Quick app
+    main.cpp                     entry point; registers Navigator, ViewModels, models to QML
+    viewmodels/                  QObject ViewModels — one per screen/module (Section 10)
+      KioskViewModel.h/.cpp
+      DashboardViewModel.h/.cpp
+      StudentsViewModel.h/.cpp
+      VisitLogsViewModel.h/.cpp
+      ReportsViewModel.h/.cpp
+      SettingsViewModel.h/.cpp
+      ThemeViewModel.h/.cpp
+      Navigator.h/.cpp
+    models/                      QAbstractListModel wrappers
+      StudentListModel.h/.cpp
+      VisitLogModel.h/.cpp       backs both the kiosk live feed and the admin Visit Logs table (§10)
+      ReportRowModel.h/.cpp
+    qml/
+      AppShell.qml               window, surface switching, navigation host (Navigator-bound)
+      kiosk/
+        Login.qml
+        LiveFeed.qml
+        Guest.qml
+      admin/
+        Dashboard.qml
+        Database.qml
+        Reporting.qml
+        Search.qml
+        VisitLogs.qml
+        Settings.qml
+      components/                design-system library (Section 11)
+        LButton.qml, LCard.qml, LTable.qml, LSegmented.qml,
+        LSideNav.qml, LToast.qml, LDialog.qml, ...
+      theme/
+        Theme.qml                 singleton, backed by ThemeViewModel (Section 13)
+        qmldir
+    tests/                       Qt Quick Test targets (tst_qml_*) — additive, not part of the 12-target baseline
+  tests/                         existing 12 ctest targets (Section 2.7) — unchanged shape, core/ paths updated
+  # legacy Widgets sources — build WITS until Phase 6, gated by -DBUILD_LEGACY_WIDGETS=ON
+  main.cpp
+  mainwindow.h/.cpp/.ui
+  adminwindow.h/.cpp/.ui
+  guestwindow.h/.cpp/.ui
+  attachfilesdialog.h/.cpp, attachFilesDialog.ui
+  busyindicator.h/.cpp
+  rfidkeyboardfilter.h/.cpp      re-authored for Quick, not moved (§7.1)
+  theme.h                        legacy QPalette/QSS constants — superseded, not ported (see below)
+  resources.qrc, resources/wits.qss
+  libs/QXlsx/                    vendored, out of review scope per project instructions (unchanged)
+```
+
+One placement decision needs its own note because it looks inconsistent at
+first glance: `theme.h` (`qt-app/theme.h`) is, at the API level, genuinely
+Widgets-free — `lightPalette()` returns a `QPalette` (`QtGui`, not
+`QtWidgets`) and `loadStyleSheet()` (`theme.h:83-90`) just reads a file into
+a `QString`, so by the "Widgets-free means it can move" test alone it would
+qualify for `core/`. It stays with the legacy sources instead, because its
+*purpose* — feeding `.ui`/`.qss` styling (`theme.h:29-61,65-79`) — has no
+meaning inside a Quick scene tree; Section 13 defines `qml/theme/Theme.qml`
++ `ThemeViewModel` as `theme.h`'s replacement, not its port, so carrying
+`theme.h` into `core/` would create a second, unused copy of constants
+`Theme.qml` already re-derives from `brandtheme.h`'s fallback palette.
+`resources/wits.qss` and `resources.qrc` follow the same reasoning and stay
+legacy-only.
+
+The existing `qt-app/tests/` baseline (Section 2.7's 12-target table) keeps
+its exact target list and per-target shape — every target's `qt_add_executable`
+call still lists its class-under-test `.cpp` directly (Section 7.6);
+the only diff per target is a path prefix, e.g.
+`${CMAKE_SOURCE_DIR}/reportcontroller.cpp` becomes
+`${CMAKE_SOURCE_DIR}/core/reportcontroller.cpp`. The new `quick/tests/`
+Qt Quick Test targets are additive — they do not replace or absorb any of
+the 12 (spec §8, "New layers: ... Qt Quick Test for components/screens").
 
 ## 9. Feature / module organization
 
-*[to be written in Task 3]*
+Each in-scope module — kiosk, admin dashboard, students/database, reports,
+search, visit logs, settings, plus theme as cross-cutting connective
+tissue — is organized as a **ViewModel + `qml/` module + core-service
+triple**, per spec §4. The table below is the concrete mapping from
+Section 2.2's existing controllers to the canonical ViewModel names this
+document fixes for Sections 11-20:
+
+| Module | Owning ViewModel | QML module | Core service(s) it owns | Existing controller mapping |
+|---|---|---|---|---|
+| Kiosk (login, live feed, guest) | `KioskViewModel` | `qml/kiosk/{Login,LiveFeed,Guest}.qml` | net-new `AuthController` (Phase 2) — today's login network calls are ad hoc, not a controller (`MainWindow::handleLogin`/`handleRfidLogin`, `mainwindow.cpp:180-235,299-342`, Section 5.1); `RfidScanDetector` reused verbatim (`rfidscandetector.h:20`) | *none today* — this is the one module with no existing controller to reuse |
+| Admin dashboard | `DashboardViewModel` | `qml/admin/Dashboard.qml` | `ReportController` | `reportcontroller.h` — net-new screen over existing data (Section 5.4) |
+| Database/students | `StudentsViewModel` | `qml/admin/Database.qml` | `StudentController` + `ImportController` | `studentcontroller.h` + `importcontroller.h` |
+| Search | `StudentsViewModel` (shared class, search-only instance) | `qml/admin/Search.qml` | `StudentController` | `studentcontroller.h:33-35,44,47` |
+| Reporting | `ReportsViewModel` | `qml/admin/Reporting.qml` | `ReportController` + `ReportRenderer` | `reportcontroller.h` + `reportrenderer.h` |
+| Visit logs (+ guest log) | `VisitLogsViewModel` | `qml/admin/VisitLogs.qml` | `VisitorController` today; net-new student-attendance service (Section 16/17) | `visitorcontroller.h` — see the tension note under Section 10's worked example |
+| Settings | `SettingsViewModel` | `qml/admin/Settings.qml` | `SettingsController` | `settingscontroller.h` |
+| Theme (cross-cutting, not a screen) | `ThemeViewModel` | `qml/theme/Theme.qml` | `BrandTheme` free functions + `BrandingController` | `brandtheme.h` + `brandingcontroller.h` |
+
+`Navigator` (Section 7.3) sits outside this table by design — it has no
+owned controller and is not itself a screen; it is the mechanism the table's
+QML modules register against, not a triple.
+
+**Search and Database/students share one ViewModel class, not two.** Both
+screens ultimately call `StudentController::searchStudents`/
+`loadDepartments`/`loadCourses` (`studentcontroller.h:33-35,44,47`); the
+Database instance additionally owns an `ImportController` for the
+bulk-import path (Section 5.6), while the Search instance is a lighter,
+search-only `StudentsViewModel`. This keeps the canonical ViewModel list
+exact (no separate `SearchViewModel` is introduced) while still giving each
+screen its own ViewModel *instance* and independent network lifecycle.
+
+**The forward-seam contract is concrete, not aspirational.** Today's sidebar
+is five hand-wired `connect(ui->xBtn, &QPushButton::clicked, ...)` blocks
+(`adminwindow.cpp:292-311`, Section 2.5) — adding a sixth page today means
+adding a sixth hand-wired block. Under the triple pattern, `Navigator`
+(Section 7.3) exposes a data-driven list of registered pages that
+`AppShell.qml`'s sidebar repeats over; adding a module means adding one more
+triple (a ViewModel class, a `qml/admin/<Module>.qml` file, and a
+core-service) plus one more entry in that list — never a new hand-wired
+`connect()`. This is the literal mechanism behind spec §4's "nothing in 2.0
+may assume the admin sidebar is a closed set," and it is exactly the seam
+Section 5.10 requires for the confirmed-absent-today modules: `inventory`,
+`borrowreturn`, and `aiassistant` each plug in later as one more
+viewmodel + `qml/`-module + core-service triple, with no change to
+`Navigator`, `AppShell.qml`, or any existing triple required to add them.
+
+**Department-list duplication (Section 3.6) does not fully resolve under
+this mapping, and that is stated plainly rather than hidden.** Today three
+independent code paths fetch `get_departments.php`
+(`adminWindow::loadDepartments` at `adminwindow.cpp:1365-1399`,
+`ReportController::loadDepartments()`, `StudentController::loadDepartments()`).
+Under the table above, `adminWindow::loadDepartments`'s hand-rolled fetch has
+no ViewModel — it disappears entirely once `adminWindow` itself is deleted
+in Phase 6 — but `DashboardViewModel`/`ReportsViewModel` (via
+`ReportController`) and `StudentsViewModel` (via `StudentController`) each
+legitimately still own their own controller, so the duplication shrinks from
+three call sites to two, not one. A single shared department-list core
+service is a plausible further consolidation but is not mandated by this
+Phase 0 architecture — Section 3.6 already frames it as "a concrete case
+Section 9's module organization should account for, not a bug to fix in
+Phase 0," and this table is that accounting.
 
 ## 10. ViewModel architecture
 
-*[to be written in Task 3]*
+For each named ViewModel: which controller(s) it owns, the
+`Q_PROPERTY`/`Q_INVOKABLE`/signal surface it exposes to QML, and which
+`QAbstractListModel` (if any) it produces.
+
+### 10.1 `KioskViewModel`
+
+- **Owns:** a net-new `AuthController` (Phase 2 — Section 9 already flags
+  that no controller exists for login today) wrapping
+  `student_login.php`/`admin_login.php`/`rfid_login.php`, currently ad hoc
+  `QNetworkAccessManager` calls inside `MainWindow::handleLogin()`
+  (`mainwindow.cpp:180-235`) and `MainWindow::handleRfidLogin()`
+  (`mainwindow.cpp:299-342`); plus `RfidScanDetector` (`rfidscandetector.h:20`),
+  reused verbatim per spec §4.
+- **Surface:** `Q_PROPERTY(QString loginInput ...)`,
+  `Q_PROPERTY(bool isAdminMode ...)` (an explicit affordance replacing the
+  silent password-echo flip at `mainwindow.cpp:144-154`, Section 5.1's
+  friction point), `Q_PROPERTY(QString statusMessage ...)` (feeding the
+  design's inline status affordance in place of the current
+  `QMessageBox::warning`, `mainwindow.cpp:184,232`), `Q_PROPERTY(bool
+  guestLoginEnabled ...)` (mirrors `adminWin`'s `guestLoginToggled` signal,
+  `mainwindow.cpp:83-85,91`); `Q_INVOKABLE void submitLogin(const QString
+  &input)`, `Q_INVOKABLE void requestGuestLogin()`; signals
+  `loginSucceeded(...)`/`loginFailed(QString message)`.
+- **Model:** `VisitLogModel` (own instance) backing the live attendance
+  feed — replacing the five parallel, hand-named `QList<QLabel*>` arrays
+  capped at 9 (`MainWindow::refreshRightPanel`, `mainwindow.cpp:366-403`,
+  Section 5.2) with an unbounded/scrollable list model populated as each
+  login succeeds, the same conceptual source as today's in-memory
+  `recentLogins` (`mainwindow.cpp:272-274`) rebuilt on a real model instead
+  of named widgets.
+
+### 10.2 `DashboardViewModel`
+
+- **Owns:** `ReportController` (`reportcontroller.h`) for the existing
+  department/year/course lists and report-row data, plus
+  `ReportRenderer::aggregateVisitsByCourse`/`aggregateVisitsByCourseHour`
+  (`reportrenderer.h:25-27`) for the hourly/department bar tiles — Section
+  5.4 already confirms these numbers exist in the backend via
+  `ReportController` even though no screen surfaces them today.
+- **Surface:** `Q_PROPERTY(int visitorsToday ...)`, `Q_PROPERTY(int
+  visitorsThisWeek ...)`, `Q_PROPERTY(int registeredStudents ...)`,
+  `Q_PROPERTY(QString peakHour ...)`, `Q_PROPERTY(QVariantList hourlyBars
+  ...)`, `Q_PROPERTY(QVariantList departmentBars ...)`;
+  `Q_INVOKABLE void refresh()`; signals `dataReady()`/`loadFailed(QString)`.
+- **Model:** none required — the bar-tile data is small, fixed-shape
+  aggregate data, exposed as `QVariantList` properties rather than a list
+  model (a list model is reserved for genuinely scrolling record sets, per
+  Sections 10.1/10.3/10.4).
+
+### 10.3 `StudentsViewModel`
+
+- **Owns:** `StudentController` (`searchStudents`/`bulkUpdateStudents`/
+  `deleteStudents`/`loadDepartments`/`loadCourses`,
+  `studentcontroller.h:33-47`); the Database-page instance additionally owns
+  `ImportController` (`checkDuplicates`/`uploadStudents`/`parseCsv`/
+  `parseExcel`, `importcontroller.h:21,26,29,32`) for the bulk-import path
+  (Section 5.6); the Search-page instance omits it (Section 9).
+- **Surface:** `Q_PROPERTY(QString searchTerm ...)`, `Q_PROPERTY(QString
+  departmentFilter ...)`, `Q_PROPERTY(QString courseFilter ...)`,
+  `Q_PROPERTY(bool isImporting ...)` (Database instance only — Section 5.6's
+  "am I previewing an import" state, tracked explicitly instead of inferred
+  from which handler last ran); `Q_INVOKABLE void search()`,
+  `Q_INVOKABLE void bulkUpdate(...)`, `Q_INVOKABLE void
+  deleteSelected(QStringList schoolIds)`, `Q_INVOKABLE void
+  importFile(QString path)`; signals mirror the controller's
+  (`searchFinished`/`searchFailed`/`bulkUpdateFinished`/`bulkUpdateFailed`/
+  `deleteFinished`/`deleteFailed`, `studentcontroller.h:50-63`) translated
+  into property updates + a `QML`-facing `errorOccurred(QString)`.
+- **Model:** `StudentListModel` (`QAbstractListModel` wrapping
+  `QList<StudentRecord>`; role names track `StudentRecord`'s fields —
+  `code`, `schoolId`, `name`, `course`, `department`, `yearLevel`, `gender`,
+  `status`, `studentdata.h:13-20`).
+
+### 10.4 `VisitLogsViewModel` — worked example
+
+`VisitLogsViewModel` wraps `VisitorController` end-to-end:
+
+- **Owns:** `VisitorController` (`qt-app/visitorcontroller.h`) — the real
+  fetch/filter/export surface: `void fetchVisitors(const VisitorFilter
+  &filter)` (async, result via signals, `visitorcontroller.h:19`);
+  `bool exportToExcel(const QList<VisitorRecord> &records, const
+  VisitorFilter &filter, const QString &schoolName, const QString
+  &filePath)` (synchronous `QXlsx` export, `visitorcontroller.h:22-25`);
+  the pure statics `static QString wireDateType(DateFilterType t)`,
+  `static QPair<QString, QString> monthRange(int month, int year)`,
+  `static QString defaultExportFileName(const VisitorFilter &f)`
+  (`visitorcontroller.h:28-30`); and the signals `void
+  visitorsLoaded(const QList<VisitorRecord> &records, int totalCount)` /
+  `void fetchError(const QString &title, const QString &message)`
+  (`visitorcontroller.h:37-38`).
+- **Surface:** `Q_PROPERTY(RangeMode rangeMode READ rangeMode WRITE
+  setRangeMode NOTIFY rangeModeChanged)` — a two-value
+  `enum class RangeMode { Today, ThisWeek }` implementing the design's
+  Today/This-Week segmented control (`Admin Dashboard.dc.html:232-236`,
+  Section 4.4). `VisitorFilter`'s `DateFilterType`
+  (`All`/`SpecificDay`/`Month`/`DateRange`, `visitordata.h:5`) has no native
+  "this week" case, so the mapping happens *inside the ViewModel*, not in
+  the controller: `Today` sets `DateFilterType::SpecificDay` with
+  `startDate` = today; `ThisWeek` sets `DateFilterType::DateRange` with
+  `startDate`/`endDate` spanning the current ISO week. `VisitorController`'s
+  own surface is untouched — the spec's "moved, not rewritten" contract
+  holds even for this redesigned control. Also: `Q_PROPERTY(bool isLoading
+  ...)`, `Q_PROPERTY(QString searchTerm ...)` (backs `VisitorFilter::search`,
+  `visitordata.h:18`); `Q_INVOKABLE void refresh()`,
+  `Q_INVOKABLE QString suggestedExportFileName()` (delegates to
+  `VisitorController::defaultExportFileName`, `visitorcontroller.h:30`),
+  `Q_INVOKABLE bool exportToExcel(const QString &filePath)` (delegates to
+  `VisitorController::exportToExcel`, `visitorcontroller.h:22-25`; the
+  `schoolName` argument is read from `SettingsViewModel`, a small
+  cross-ViewModel dependency flagged here rather than hidden).
+- **Model:** `VisitLogModel` (`QAbstractListModel` wrapping
+  `QList<VisitorRecord>`; role names track `VisitorRecord`'s fields —
+  `name`, `company`, `purpose`, `date`, `time`, `visitordata.h:9-14`),
+  re-populated from `fetchVisitors`'s `visitorsLoaded` signal.
+
+> ⚠ Decision tension: Section 5.9 already disambiguates two different
+> things that share a name — the design's **Visit Logs** page (student
+> time-in/time-out history) versus today's **guest log**
+> (`visitorPage`/`VisitorController`, guest sign-ins only). This worked
+> example wraps `VisitorController` because that is the only one of the two
+> that exists as a controller today; until Section 16/17 defines a backend
+> surface for genuine student attendance history, `VisitLogsViewModel`'s
+> model surfaces guest-log rows only. When that backend surface lands, the
+> design's "Visit Logs" sidebar entry is intended to be powered by this same
+> `VisitLogsViewModel` with its model source widened or swapped — not a
+> second ViewModel — but that widening is Section 16/17's decision to make,
+> not this section's to pre-empt.
+
+### 10.5 `ReportsViewModel`
+
+- **Owns:** `ReportController` (`computeDateRange`/`getPalette`/
+  `fetchReportRows`/`loadDepartments`/`loadYears`/`loadCourses`,
+  `reportcontroller.h:23,34,42,45`) and `ReportRenderer`
+  (`makeBarChartImage`/`makePieChartImage`/`makeLineChartImage`/
+  `paintReport`/`writeReportToXlsx`, `reportrenderer.h:29-45`).
+- **Surface:** `Q_PROPERTY(int durationType ...)`, day/month/semester/
+  custom-range properties matching `ReportController::computeDateRange`'s
+  parameters (`reportcontroller.h:34-39`), `Q_PROPERTY(QString department
+  ...)`, `Q_PROPERTY(QString course ...)`, `Q_PROPERTY(QString palette
+  ...)`; `Q_INVOKABLE void generateReport()`, `Q_INVOKABLE bool
+  exportPdf(QString path)`, `Q_INVOKABLE bool exportExcel(QString path)`.
+  Unlike today's `collectReportFilters` (`adminwindow.cpp:1498-1605`,
+  Section 2.4), invalid filter combinations are surfaced as a bindable
+  `Q_PROPERTY(QString validationError ...)` rather than one of seven inline
+  `QMessageBox::warning` calls — one consistent inline-validation pattern
+  instead of seven ad hoc dialogs (Section 5.7's simplification note).
+- **Model:** `ReportRowModel` (optional; only needed if the redesigned
+  Reporting page keeps a raw-row table view alongside the charts).
+
+### 10.6 `SettingsViewModel`
+
+- **Owns:** `SettingsController` (`load`/`save`/`importLogo`/`importPoster`,
+  `settingscontroller.h:12-16`), consolidating both of the two current read
+  paths (`SettingsController::load()` and `adminWindow::collectHeaderInfo()`'s
+  separate ad hoc `QSettings` read, `adminwindow.cpp:1401-1412`, Section 2.4)
+  into the one controller call.
+- **Surface:** `Q_PROPERTY(QString schoolName ...)`, `Q_PROPERTY(QString
+  address ...)`, `Q_PROPERTY(QString logoPath ...)`, `Q_PROPERTY(QString
+  librarianName ...)`, `Q_PROPERTY(QString librarianPosition ...)`,
+  `Q_PROPERTY(int openHour ...)`, `Q_PROPERTY(int closeHour ...)`;
+  `Q_INVOKABLE bool save()`, `Q_INVOKABLE void importLogo(QString path)`,
+  `Q_INVOKABLE void importPoster(QString path)`. On a successful
+  `importLogo`, `SettingsViewModel` does not call `BrandTheme` itself — it
+  invokes `ThemeViewModel::regenerateFromImportedLogo(path)` (Section 10.7),
+  keeping all `BrandTheme` calls behind one ViewModel.
+- **Model:** none — a single-record settings form.
+
+### 10.7 `ThemeViewModel`
+
+Confirms the brief's requirement directly: `ThemeViewModel` wraps the
+free-function brand engine (`BrandTheme::current()`/`setCurrent()`,
+`brandtheme.h:67-68`) **without modifying `BrandTheme`** — no new function
+is added to `brandtheme.h`; `ThemeViewModel` only calls the engine's
+existing public API and emits its own `changed()` signal so QML property
+bindings re-evaluate, since `BrandTheme` is deliberately not a `QObject`
+(Section 2.3) and therefore has no signal of its own to relay.
+
+- **Owns:** `BrandingController` (`fetchRemoteConfig`/`saveBranding`,
+  `brandingcontroller.h:23,27`) for the cache-first startup sync — today
+  performed inline in `MainWindow` (`BrandingController` constructed
+  `mainwindow.cpp:163`; cached palette applied synchronously then
+  re-applied if newer, `mainwindow.cpp:159-172`); this logic moves into
+  `ThemeViewModel` so both surfaces (kiosk and admin) share one theme
+  source instead of kiosk-only startup wiring.
+- **Surface:** one `Q_PROPERTY` per `BrandPalette` role
+  (`brandthemedata.h:19-40`) — `adminPrimary`, `adminPrimaryHover`,
+  `adminOnPrimary`, `adminPrimarySoft`, `kioskPrimary`,
+  `kioskPrimaryHover`, `kioskOnPrimary`, `kioskPrimarySoft`, `secondary`,
+  `sidebarBase`, `card`, `appBackground`, `border`, `text`, `mutedText`,
+  `success`, `error` — each `NOTIFY changed`; `Q_PROPERTY(ThemeMode mode
+  ...)` (`brandthemedata.h:13`); `Q_INVOKABLE void
+  regenerateFromImportedLogo(QString path)` (calls
+  `BrandTheme::regenerateFromLogo(config, path, &err)` then, on success,
+  `BrandTheme::setCurrent(config.palette)` and emits `changed()` — the
+  Manual-mode hook, `return false` with a cleared error when
+  `config.mode == ThemeMode::Manual`, is unchanged, Section 2.3); signal
+  `void changed()`.
+- **Model:** none.
+
+### 10.8 Threading rule and the no-live-network test rule
+
+**Threading:** no ViewModel blocks the UI thread. Every controller's network
+call is already asynchronous (`QNetworkAccessManager` + signals — the
+pattern Section 2.2 documents across all five controllers); every ViewModel
+invokes the call and returns immediately, flips an `isLoading`-style
+property, and updates its `Q_PROPERTY`s / model rows only from the
+connected `*Finished`/`*Loaded`/`*Error` signal handler. The one exception
+already in the codebase, `ImportController::parseExcel`
+(synchronous `QXlsx` parse, `importcontroller.h:26`), stays synchronous at
+the controller level (it always has been) but is called from
+`StudentsViewModel` only in response to a direct user action (file picked),
+never on a path that blocks a already-rendered frame.
+
+**No-live-network test rule (house rule, spec §8):** every ViewModel unit
+test feeds synthetic payloads — either constructing model/record structs
+directly or running a captured `QByteArray` through the controller's own
+pure parser (e.g. `VisitorController::parseVisitorsResponse`,
+`visitorcontroller.h:31-34`) — never a live `QNetworkAccessManager` request.
+This mirrors the existing `tst_visitorcontroller`/`tst_studentcontroller`/
+`tst_reportcontroller` convention (Section 2.7's table) exactly; ViewModel
+tests add one more layer on top (asserting the `Q_PROPERTY`/model updates a
+synthetic signal emission produces) without changing how the underlying
+controller itself is tested.
 
 ## 11. QML component library
 
