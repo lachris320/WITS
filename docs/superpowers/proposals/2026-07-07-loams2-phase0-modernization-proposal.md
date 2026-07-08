@@ -1585,23 +1585,808 @@ controller itself is tested.
 
 ## 11. QML component library
 
-*[to be written in Task 4]*
+Ten reusable primitives live in `qml/components/` (§8's tree) and implement
+every control the design references need exactly once. **The standing
+rule: screens compose these components and never restyle primitives
+locally** — no per-screen `Rectangle { color: "#..." }` chrome, no one-off
+`border.width`/`radius` override on a specific page's card. A new visual
+need is solved by adding a property to the primitive (or, rarely, adding an
+eleventh primitive reviewed the same way) — never a local style override.
+This is the QML-era version of the same discipline Section 12.8 states for
+color literals, and it is what makes Section 18's screen-by-screen work
+composition rather than styling. The names below are fixed for this
+document and are reused verbatim by Section 18 (Task 6); no screen invents
+a new top-level component name outside this list without amending this
+section.
+
+Every property listed is a `Q_PROPERTY`/QML `property` on the component
+itself, not on a screen; every `Theme` reference is to Section 12/13's
+token surface; every `Accessible.role` is the nearest safe
+`QAccessible::Role` value — a couple of components note where the exact
+enum name should be re-verified against the Qt 6.11 Quick Controls
+`Accessible` attached-property surface at implementation time rather than
+assumed from this document alone.
+
+### `LButton`
+
+- **Purpose:** the one clickable-action primitive — brand-fill primary CTA,
+  gold "accent" CTA, outlined/ghost secondary, small row actions (EDIT/
+  DELETE-style), replacing every ad hoc `QPushButton` stylesheet rule today
+  (Section 4.3).
+- **Key properties:** `variant` (`Primary | Accent | Outline | Danger |
+  Ghost`), `text`, `icon`, `enabled`, `busy` (spinner state for an in-flight
+  `Q_INVOKABLE` call), `compact` (row-action sizing).
+- **Theme tokens:** `Theme.brand.admin`/`Theme.brand.kiosk` (surface-aware
+  `Primary` fill), `Theme.secondary` (`Accent`), `Theme.error`/
+  `Theme.errorSoft` (`Danger`), `Theme.radius.md`/`Theme.radius.sm2`,
+  `Theme.typography.control`, `Theme.elevation.ctaGold`/`ctaDark`,
+  `Theme.motion.hoverLift`/`Theme.motion.press` (translateY(-2px) hover,
+  scale(0.97) active — `Admin Dashboard.dc.html:136-137`,
+  `Library Kiosk v2.dc.html:48`).
+- **`Accessible.role`:** `Accessible.Button`; `Accessible.name` bound to
+  `text` (or an explicit `accessibleName` override when `text` is empty,
+  e.g. an icon-only compact action).
+
+### `LCard`
+
+- **Purpose:** the one bordered-container primitive — every stat-tile
+  substrate, dashboard/report/database panel, and list-section chrome;
+  replaces native `QGroupBox` chrome entirely (Section 4.3's "component
+  gap, not a color gap" finding).
+- **Key properties:** `padding` (defaults from `Theme.spacing`), `radius`
+  (`Theme.radius.card` = 16 by default, `Theme.radius.hero` = 18 via
+  `variant: "hero"`), `filled` (switches from the neutral `card`/`border`
+  surface to a brand-gradient fill for hero/stat cards), `elevated` (bool,
+  toggles the hover-lift shadow on/off per-instance).
+- **Theme tokens:** `Theme.card`, `Theme.border`, `Theme.brand.admin`/
+  `Theme.brand.adminHover` (hero-fill gradient), `Theme.elevation.resting`/
+  `hover`/`heroFill`/`reportHover`.
+- **`Accessible.role`:** `Accessible.Grouping` for an in-page card;
+  `Accessible.Pane` when a card is a whole scrollable page region (e.g. the
+  Database/Visit Logs table's outer frame).
+
+### `LTable`
+
+- **Purpose:** the row-grid primitive backing Database, Search, Visit Logs,
+  and the guest log — header row with the design's zebra tint, hairline
+  row separators, per-row entry animation, row-hover tint.
+- **Key properties:** `columns` (list of `{title, weight, align}` column
+  defs), `model` (one of Section 10's `QAbstractListModel`s —
+  `StudentListModel`, `VisitLogModel`, `ReportRowModel`), `rowDelegate`
+  (optional per-column override), `selectable`, `emptyStateText`.
+- **Theme tokens:** `Theme.card`, `Theme.tableHeaderBg`, `Theme.rowHairline`,
+  `Theme.text`, `Theme.mutedText`, `Theme.typography.eyebrow` (header
+  labels), `Theme.motion.rowIn` (Section 15).
+- **`Accessible.role`:** `Accessible.Table` on the component root; per-row
+  `Accessible.Row`, per-cell `Accessible.Cell`. Keyboard: arrow-key row
+  focus and Enter-to-activate, centralized per Section 14's "table focus"
+  shortcut requirement.
+
+### `LSegmented`
+
+- **Purpose:** the N-way segmented toggle — concretely, the design's
+  Today/This-Week visit-log control
+  (`Admin Dashboard.dc.html:232-236`, `logRanges`) that
+  `VisitLogsViewModel.rangeMode` (Section 10.4) binds to directly.
+- **Key properties:** `options` (list of `{value, label}`), `currentValue`
+  (bound two-way, e.g. to `RangeMode`), `onSelectionChanged` signal.
+- **Theme tokens:** `Theme.card`/`Theme.border` (track), `Theme.brand.admin`
+  (selected-pill fill/text, mirroring `lr.bg`/`lr.fg`'s binding pattern in
+  the reference), `Theme.radius.sm2`.
+- **`Accessible.role`:** `Accessible.PageTabList` on the track;
+  `Accessible.PageTab` per option; left/right arrow-key cycling between
+  options.
+
+### `LSideNav`
+
+- **Purpose:** the persistent left sidebar shared by `AppShell.qml`'s admin
+  surface and the kiosk brand panel — brand-gradient background, nav item
+  list, active-item highlight, admin-avatar footer (admin only).
+- **Key properties:** `items` (bound to `Navigator`'s registered-page list,
+  Section 14 — the data-driven replacement for today's five hand-wired
+  `connect()` blocks, `adminwindow.cpp:292-311`, Section 2.5/9),
+  `currentPage` (two-way bound to `Navigator.currentPage`), `footer`
+  (optional admin-avatar slot, kiosk instance omits it).
+- **Theme tokens:** `Theme.brand.admin`/`Theme.brand.adminHover` (gradient
+  background — Section 12.5 already establishes this component reads the
+  brand roles directly, not `Theme.sidebarBase`), `Theme.secondary`
+  (active-item dot/accent), `Theme.brand.onPrimary` (`#FFF6E8`-class text,
+  not raw white).
+- **`Accessible.role`:** `Accessible.List` on the nav; `Accessible.ListItem`
+  per entry; Up/Down arrow-key cycling centralized in `Navigator`
+  (Section 14), not re-implemented per instance.
+
+### `LToast`
+
+- **Purpose:** the one inline, non-blocking status surface — replaces
+  every validation-only `QMessageBox` this document has flagged as an
+  interruption for what should be inline feedback: kiosk login failures
+  (`mainwindow.cpp:184,232`, Section 5.1), three of the guest form's five
+  dialogs (`guestwindow.cpp:36,54,64`, Section 5.3), and the reporting
+  page's seven inline `QMessageBox::warning` calls
+  (`adminwindow.cpp:1498-1605`, Section 5.7). `MainWindow::showKioskStatus`
+  (`mainwindow.cpp:278-297`) is the direct current-state precedent — it
+  already exists for RFID failures; `LToast` is its generalized QML
+  successor, used consistently rather than only for one failure path.
+- **Key properties:** `message`, `severity` (`Info | Success | Warning |
+  Error`), `autoDismissMs` (defaults from `Theme.motion.toastIn`/`toastOut`,
+  Section 15), `visible`.
+- **Theme tokens:** `Theme.success`, `Theme.error`/`Theme.errorSoft`,
+  `Theme.card`/`Theme.border`, `Theme.motion.toastIn`/`toastOut`.
+- **`Accessible.role`:** `Accessible.AlertMessage` — assertive live-region
+  semantics so a screen reader announces it without stealing keyboard
+  focus from whatever the user was doing.
+
+### `LDialog`
+
+- **Purpose:** the only modal-interruption primitive 2.0 keeps — reserved
+  for genuine yes/no confirmations and real network-outcome messages (the
+  two guest-flow dialogs Section 5.3 says should survive:
+  `guestwindow.cpp:70,73`), never for field-level validation (that is
+  `LToast`'s job — see Section 5.3's "removes 3 of the 5 modal dialogs...
+  without touching the two genuine network-outcome dialogs").
+- **Key properties:** `title`, `message`, `buttons` (list of `{label,
+  role}`), `visible`.
+- **Theme tokens:** `Theme.card`, `Theme.border`,
+  `Theme.elevation.modal` (Section 12.7 — the one extrapolated elevation
+  tier), a semi-opaque scrim.
+- **`Accessible.role`:** `Accessible.Dialog`; traps focus while open and
+  returns it to the invoking control on close, coordinated with
+  `Navigator.activeModal` (Section 14) so only one modal can be open
+  application-wide.
+
+### `LStatTile`
+
+- **Purpose:** the dashboard's four "General" stat cards (visitors today/
+  week, registered students, peak hour — `Admin Dashboard.dc.html:74-95`)
+  and the kiosk's two stat cards (visitors today, this hour —
+  `Library Kiosk v2.dc.html:97-105`) — a label + value + caption card in
+  either the neutral bordered variant or the brand-gradient "hero" variant
+  used for the first/primary stat in each set.
+- **Key properties:** `label`, `value`, `caption`, `variant` (`Neutral |
+  Hero`), `valueFormat` (tabular-nums numeric display, per
+  `font-variant-numeric:tabular-nums` throughout both references).
+- **Theme tokens:** `Theme.card`/`Theme.border` (`Neutral`),
+  `Theme.brand.admin`/`Theme.brand.kiosk` + `Theme.secondary` (label color,
+  `Hero`), `Theme.mutedTextCaption` (the second, lighter muted tone,
+  Section 12.1), `Theme.typography.statValue`, `Theme.typography.eyebrow`
+  (label).
+- **`Accessible.role`:** `Accessible.Grouping` around the whole tile (label
+  read before value); inner text as `Accessible.StaticText`.
+
+### `LBarChart`
+
+- **Purpose:** the dashboard's two custom (non-`QtCharts`) bar
+  visualizations — vertical hourly bars with a grow-in
+  (`Admin Dashboard.dc.html:104-111`) and horizontal department bars with a
+  width-fill transition (`Admin Dashboard.dc.html:116-124`) — as **one**
+  parameterized primitive (`orientation: Vertical | Horizontal`) rather
+  than two components, per the spec's Risk #2 guidance to build the
+  dashboard's simple bars as custom QML and reserve `QtCharts` for
+  `reportrenderer`'s export path only (spec §10 Risk 2; this document's
+  Section 3.9/7.1 already accept that `reportrenderer` alone carries the
+  `Qt::Charts`/`Qt::Widgets` dependency).
+- **Key properties:** `orientation`, `model` (list of `{label, value,
+  color}` — fed by `DashboardViewModel.hourlyBars`/`departmentBars`,
+  Section 10.2's `QVariantList` properties), `maxValue`, `barRadius`.
+- **Theme tokens:** deliberately *not* a per-bar color — the ViewModel
+  supplies each bar's `color` (matching the reference's `{{ b.color }}`/
+  `{{ d.color }}` per-item binding), so the component only supplies
+  structural tokens: `Theme.rowHairline` (department-bar track color),
+  `Theme.radius.xs` (hourly-bar cap radius), `Theme.motion.barGrow`/
+  `deptBarFill` (Section 15).
+- **`Accessible.role`:** the chart container as `Accessible.Pane`; each bar
+  exposes an `Accessible.StaticText` fallback with a numeric description
+  (label + value), since the bars are otherwise a purely visual encoding —
+  verify the exact per-bar role against the Qt Quick Controls `Accessible`
+  surface in use at implementation time rather than assuming a dedicated
+  chart-element role exists.
+
+### `LPageHeader`
+
+- **Purpose:** the admin page-header region — title, subtitle, live clock
+  (`Admin Dashboard.dc.html:63-69`) — as a first-class component, replacing
+  `adminWindow::buildHeaderBar()`'s runtime C++ construction and its
+  `ui->stackedWidget` re-parenting trick (`adminwindow.cpp:85-127`,
+  Section 4.3's "bolted onto a `.ui` layout that was not designed to have
+  one" finding).
+- **Key properties:** `title`, `subtitle` (per-page, e.g.
+  `Admin Dashboard.dc.html:281-287`'s per-page subtitle map), `clockText`
+  (ticked by a shared clock source, not re-implemented per page), `actions`
+  (optional right-aligned slot — e.g. Visit Logs' EXPORT CSV/PRINT REPORT
+  buttons, `Admin Dashboard.dc.html:238-239`).
+- **Theme tokens:** `Theme.typography.pageTitle`, `Theme.mutedText`
+  (subtitle/clock date), `Theme.brand.admin` (clock time accent color, per
+  `Admin Dashboard.dc.html:68`'s `color:var(--brand)` on the clock time).
+- **`Accessible.role`:** title and subtitle/clock as `Accessible.StaticText`
+  — heading semantics are conveyed through the `Theme.typography.pageTitle`
+  token (visual weight/size), not a dedicated accessible heading role,
+  since `QAccessible::Role` has no universally-available "Heading" value to
+  rely on across Qt Quick Controls versions without checking the exact Qt
+  6.11 surface first.
+
+Smaller design elements the references also use — avatar/initial circles,
+filter chips, the "✓ LOGGED IN" status pill — are explicitly **not** new
+top-level primitives; they are compositions of `LCard`/`LButton`/
+`LSegmented` (e.g. a pill badge is an `LButton`-shaped, non-interactive
+`Ghost` variant, or a small `Rectangle` inside `LStatTile`/`LCard` bound to
+the same `Theme.radius.pill`/`Theme.secondarySoft` tokens). Keeping the
+catalog closed to these ten names is what lets Section 18 (Task 6) reuse
+them verbatim without inventing an eleventh name mid-redesign.
 
 ## 12. Design system
 
-*[to be written in Task 4]*
+This section catalogs the token set the spec's §5 already commits to
+("Tokens from the Claude Design files... derivations use the shipped
+`brandcolormath.h` rules... a QML `Theme` singleton... is the single source
+of every visual property"), sourced directly from the two built-out
+references (`Admin Dashboard.dc.html`, `Library Kiosk v2.dc.html` — both
+light-theme only, Section 4.1), and states it as the `Theme` singleton's
+property surface (the singleton's mechanics, brand-engine wiring, and
+light/dark behavior are Section 13's job; this section is the token catalog
+plus the one open decision Section 4.3 deferred here).
+
+### 12.1 Color tokens
+
+| `Theme` property | Light value | Source | `BrandPalette` field | Derivation |
+|---|---|---|---|---|
+| `Theme.brand.admin` / `Theme.brand.kiosk` | `#7E1A15` | `Admin Dashboard.dc.html:14`, `Library Kiosk v2.dc.html:14` (`--brand`) | `adminPrimary` / `kioskPrimary` | literal (shipped default — see 12.4) |
+| `Theme.brand.adminHover` / `Theme.brand.kioskHover` | `#5E0E0B` | `Admin Dashboard.dc.html:14,314` (`--brand-deep`, `this.shade(a, -0.28)`) | `adminPrimaryHover` / `kioskPrimaryHover` | `BrandColorMath::shade(brand, -0.28)` (`brandcolormath.h:39-44`) |
+| `Theme.brand.adminSoft` / `Theme.brand.kioskSoft` | `#F6E9E7` | `Admin Dashboard.dc.html:14,315` (`--brand-soft`, `this.mix(a, '#FFFFFF', 0.9)`) | `adminPrimarySoft` / `kioskPrimarySoft` | `BrandColorMath::mix(brand, white, 0.90)` (`brandcolormath.h:49-56`) |
+| `Theme.brand.onPrimary` | `#FFF6E8` | `Admin Dashboard.dc.html:30`, `Library Kiosk v2.dc.html:30` (sidebar text color) | `adminOnPrimary` / `kioskOnPrimary` | literal — see 12.4's note on the divergence from `extractPalette()`'s pure-white on-color |
+| `Theme.secondary` (accent) | `#E8B10E` | `Admin Dashboard.dc.html:14`, `Library Kiosk v2.dc.html:14` (`--gold`) | `secondary` | literal (shipped default) |
+| `Theme.secondarySoft` *(extra, no `BrandPalette` field)* | `#FDF3E0` | `Admin Dashboard.dc.html:14,317` (`--gold-soft`, `this.mix(g, '#FFFFFF', 0.88)`) | — | `BrandColorMath::mix(secondary, white, 0.88)` |
+| `Theme.appBackground` | `#FBF8F3` | `Admin Dashboard.dc.html:15`, `Library Kiosk v2.dc.html:15` | `appBackground` | literal — a neutral role `extractPalette()` never derives from a logo anyway (`brandtheme.cpp:350-357` copies every neutral role straight from `fallbackPalette()`) |
+| `Theme.card` | `#FFFFFF` | e.g. `Admin Dashboard.dc.html:80` | `card` | literal |
+| `Theme.border` (2px) | `#EFE5D4` | e.g. `Admin Dashboard.dc.html:80` | `border` | literal |
+| `Theme.text` | `#3A2C22` | `Admin Dashboard.dc.html:27`, `Library Kiosk v2.dc.html:27` | `text` | literal |
+| `Theme.mutedText` | `#8B7A62` | `Admin Dashboard.dc.html:66,81` | `mutedText` | literal |
+| `Theme.mutedTextCaption` *(extra)* | `#B0A08A` | `Library Kiosk v2.dc.html:99` ("VISITORS TODAY" stat-tile eyebrow) | — | literal; a second, lighter muted tone distinct from `mutedText`, reserved for stat-tile captions only (Section 4.1 already flags this second tone) |
+| `Theme.tableHeaderBg` *(extra)* | `#F7F1E6` | `Admin Dashboard.dc.html:140`, `Library Kiosk v2.dc.html:110` | — | literal |
+| `Theme.rowHairline` *(extra)* | `#F3ECDD` | `Admin Dashboard.dc.html:145` | — | literal |
+| `Theme.success` | `#10B981` | *(no design reference exists — carried from `fallbackPalette()`, `brandtheme.cpp:47`)* | `success` | literal — an explicit assumption, not a grounded design decision; flagged for the Phase-5 a11y/dark-mode review round (spec §10 Risk 3) to revisit if a success/confirmation state ships |
+| `Theme.error` (text) / `Theme.errorSoft` / `Theme.errorBorder` *(soft/border extra)* | `#A33B34` / `#FDF4F3` / `#F3D9D6` | `Admin Dashboard.dc.html:156` (the DELETE row action) | `error` (text only) | literal; recommended replacement for `fallbackPalette()`'s saturated `#EF4444` (`brandtheme.cpp:48`, `theme.h:78`) in the shipped default, so the error role stays tonally warm/maroon rather than clashing with the rest of the palette — see 12.4 |
+| `Theme.sidebarBase` | `#1E293B` (unchanged) | *(legacy — `theme.h:66`)* | `sidebarBase` | not consumed by any Quick component — see 12.5 |
+
+The `shade()`/`mix()` derivations above are not a re-invention of the
+design's math: `Admin Dashboard.dc.html:319-328`'s `shade`/`mix` JS bodies
+(a channel-wise multiply and linear interpolation) are the same operation
+`BrandColorMath::shade`/`BrandColorMath::mix` implement in C++
+(`brandcolormath.h:39-56`) — Section 4.1 already established this
+independently. `Theme.brand.*Hover`/`*Soft`/`Theme.secondarySoft` are
+therefore *computed* properties (derived once from `Theme.brand.admin`/
+`Theme.secondary` via the same math the engine already ships), not four
+more independently-authored literals to keep in sync by hand.
+
+### 12.2 Spacing scale
+
+The references do not use a perfectly uniform 8pt grid — 14px/18px/22px
+recur alongside 16px/24px — so the token scale below rounds to the nearest
+of a slightly denser ladder rather than forcing an artificial strict-8pt
+system onto values the design actually uses:
+
+`Theme.spacing = { xs: 4, sm: 8, md: 12, base: 14, lg: 16, xl: 18, xl2: 22, xxl: 24, xxxl: 28 }`
+
+Citations: `xs`/4 — `Admin Dashboard.dc.html:78` (`margin-top:4px`);
+`sm`/8 — `Admin Dashboard.dc.html:205` (chip padding `8px 14px`); `md`/12 —
+`Admin Dashboard.dc.html:135` (input padding `12px 16px`); `base`/14 —
+`Admin Dashboard.dc.html:97` (stat-row `gap:14px`); `lg`/16 —
+`Admin Dashboard.dc.html:73` (page-level `gap:16px`); `xl`/18 —
+`Admin Dashboard.dc.html:75` (stat-tile padding `18px 22px`); `xl2`/22 — the
+same stat-tile padding's second value; `xxl`/24 —
+`Admin Dashboard.dc.html:198` (search-card `padding:24px`); `xxxl`/28 —
+`Library Kiosk v2.dc.html:30` (kiosk brand-panel `gap:28px`).
+
+### 12.3 Radius scale
+
+`Theme.radius = { xs: 6, sm: 8, sm2: 10, md: 12, card: 16, hero: 18, pill: 999, circle: "50%" }`
+
+Citations: `xs`/6 (paired with an inner 3px) —
+`Admin Dashboard.dc.html:107` (hourly-bar cap, `border-radius:6px 6px 3px
+3px`); `sm`/8 — `Admin Dashboard.dc.html:155-156` (EDIT/DELETE row-action
+buttons); `sm2`/10 — `Admin Dashboard.dc.html:175,184` (the GENERATE CTA and
+the export-type icon chip); `md`/12 — the most common radius in the
+references, e.g. inputs and standard buttons at `Admin Dashboard.dc.html:
+135-137,200-201`; `card`/16 — the admin card family, e.g.
+`Admin Dashboard.dc.html:75,80,114,139`; `hero`/18 — the kiosk's larger
+hero/stat/feed cards, e.g. `Library Kiosk v2.dc.html:76,98,102,109`;
+`pill`/999 — filter chips and status badges, e.g.
+`Admin Dashboard.dc.html:205`, `Library Kiosk v2.dc.html:82` (the department
+progress-bar track uses `border-radius:99px` at `Admin Dashboard.dc.html:
+120-121`, functionally the same pill treatment at an 8px track height);
+`circle`/50% — avatars/logo roundels, e.g. `Admin Dashboard.dc.html:34,148,
+213`. This brackets the spec's stated 8-18px band (spec §5) correctly, with
+the pill/circle values named as the explicit exceptions outside that band
+rather than silently folded into it.
+
+### 12.4 Resolving Section 4.3's ⚠ Decision tension — the zero-config default palette
+
+> **Resolution.** The zero-config (never-branded) default for a fresh LOAMS
+> 2.0 install is the design's **maroon/gold identity** (`#7E1A15`/`#E8B10E`
+> and the rest of 12.1's table), not `BrandTheme::fallbackPalette()`'s
+> blue/green (`theme.h:65-79`, reproduced in `brandtheme.cpp:26-50`).
+> `fallbackPalette()` itself is **not changed** — it keeps its existing job
+> exactly as documented in `brandtheme.h:24-27`: the safety net
+> `extractPalette()` (`brandtheme.cpp:265-361`) falls back to when a logo
+> fails to decode/validate (`renderLogo` failure, `brandtheme.cpp:143-200`)
+> or contains no usable chromatic pixels (`brandtheme.cpp:291-294`), and the
+> value `loadCachedConfig()` (`brandtheme.h:51`, `brandtheme.cpp:384-404`)
+> returns when the local cache has never been populated. Both of those
+> remain blue/green, unchanged.
+>
+> What changes is a layer *above* the engine, not inside it:
+> `ThemeViewModel` (Section 10.7/13) — not `BrandTheme` — seeds its own
+> initial `Q_PROPERTY` values from a shipped maroon/gold `BrandPalette`
+> literal (12.1's table, itself internally consistent via the engine's own
+> `shade()`/`mix()` derivations) *before* the cache-first load
+> (`mainwindow.cpp:159-172`'s pattern, moved into `ThemeViewModel` per
+> Section 10.7) runs, and only defers to `loadCachedConfig()`'s literal
+> result — including its blue/green fallback — when the cached
+> `BrandingConfig` is genuinely "never branded"
+> (`config.updatedAt.isValid() == false`, the exact signal
+> `loadCachedConfig()` already produces when its `palette` key is empty,
+> `brandtheme.cpp:391-393`). Concretely: if `updatedAt` is invalid,
+> `ThemeViewModel` keeps its shipped maroon/gold values (and calls
+> `BrandTheme::setCurrent()` with them, so any other code path reading
+> `BrandTheme::current()` — e.g. a legacy Widgets consumer during the
+> parallel-rebuild window — sees the same shipped identity) instead of
+> adopting `config.palette`'s blue/green; if `updatedAt` *is* valid (the
+> install has been branded before, even if the backend now reports nothing
+> newer), the cached palette is used exactly as today, unchanged. The
+> background sync (`BrandingController::fetchRemoteConfig`/
+> `remoteConfigLoaded`, `isNewer()`, `brandtheme.h:55`) is untouched either
+> way — a real `branding_config` row always wins over the shipped default,
+> per `isNewer()`'s existing "a valid remote always beats a never-branded
+> local" contract (`brandtheme.h:54`).
+>
+> **Why this is the right default, not just a possible one:** the design
+> references are the visual source of truth for 2.0 (spec §3), both
+> built-out files ship the identical maroon/gold `:root` block with no
+> alternate branch (Section 4.1), and the three-way legacy theming split
+> (Section 2.6) that produced blue/green was never a deliberate visual
+> choice for 2.0 — it is `theme.h`'s pre-branding-engine palette, kept only
+> because `fallbackPalette()` was built (Phase 1) to *not* change what an
+> unbranded install already looked like at the time. 2.0 is a full
+> presentation-layer rebuild (spec §1); there is no shipped-look
+> continuity to protect for an install that has never imported a logo, so
+> nothing forces the new app's out-of-the-box identity to match the old
+> Widgets app's out-of-the-box identity. Shipping maroon/gold as the
+> zero-config default also means a school that never touches Settings still
+> gets the fully-designed, on-brand look the references show, rather than a
+> blue/green look that appears nowhere in any design reference.
+
+### 12.5 `sidebarBase` is legacy-only in the Quick app
+
+`BrandPalette::sidebarBase` is a neutral role `extractPalette()` never
+derives from a logo (`brandtheme.cpp:350` copies it straight from
+`fallbackPalette()` regardless of branding state) — today it backs
+`QFrame#sidebarFrame`'s background in `resources/wits.qss:132`. Neither
+design reference uses a separate neutral "sidebar" color at all: both
+`Admin Dashboard.dc.html:30` and `Library Kiosk v2.dc.html:30` paint the
+sidebar with `linear-gradient(180deg, var(--brand) 0%, var(--brand-deep)
+0%)` directly — i.e., the brand/hover roles themselves, not a distinct
+neutral. `LSideNav` (Section 11) therefore binds its background to
+`Theme.brand.admin`/`Theme.brand.adminHover` directly; `Theme.sidebarBase`
+stays in the `Theme` singleton only for `ThemeViewModel`/`BrandPalette`
+surface completeness (Section 10.7's property list is fixed and this
+document does not trim it) but has zero QML consumers in the component
+catalog below.
+
+### 12.6 Typography
+
+Both references load the same two families
+(`Admin Dashboard.dc.html:12`, `Library Kiosk v2.dc.html:12`:
+`Source+Serif+4:...600,700` + `Public+Sans:...400;500;600;700;800`) as app
+fonts (bundled, not a system/Google Fonts network fetch, in the Quick app).
+`Theme.typography` exposes a fixed size/weight scale rather than raw
+per-screen font declarations:
+
+| Token | Family / weight | Size | Citation |
+|---|---|---|---|
+| `Theme.typography.pageTitle` | Source Serif 4 / 700 | 30px | `Admin Dashboard.dc.html:65` |
+| `Theme.typography.heroName` | Source Serif 4 / 700 | 27px | `Library Kiosk v2.dc.html:84` (kiosk "now signed in" name) |
+| `Theme.typography.heroPlaceholder` | Source Serif 4 / 700 | 22px | `Library Kiosk v2.dc.html:93` ("Scan your ID to begin") |
+| `Theme.typography.brandWordmark` | Source Serif 4 / 700 | 19px | `Admin Dashboard.dc.html:36` ("Library Admin") |
+| `Theme.typography.cardTitle` | Source Serif 4 / 600 | 17px | `Admin Dashboard.dc.html:101,115,173,180` (chart/report/section card titles) |
+| `Theme.typography.statValue` | Public Sans / 800, tabular-nums | 34-36px | `Admin Dashboard.dc.html:77,82,87,92` (34px); `Library Kiosk v2.dc.html:100,104` (36px) |
+| `Theme.typography.body` | Public Sans / 600-700 | 13-14px | e.g. row text, `Admin Dashboard.dc.html:149-153` |
+| `Theme.typography.control` | Public Sans / 800 | 12-13px | button/CTA labels, e.g. `Admin Dashboard.dc.html:136,175` |
+| `Theme.typography.eyebrow` | Public Sans / 800, letter-spacing ~0.12em | 10-11px | stat-tile/table-header labels, e.g. `Admin Dashboard.dc.html:76,140` |
+
+The Source Serif 4 sizes are not a single uniform "heading" size —
+30/27/22/19/17px is a genuine five-step scale across page titles, kiosk
+hero text, and card titles, and the catalog above keeps them distinct
+rather than collapsing them into one `Theme.typography.heading` value.
+
+### 12.7 Elevation
+
+The references use elevation sparingly and consistently: bordered cards are
+flat at rest (no shadow, just the `#EFE5D4` 2px border) and gain a shadow
+only on hover or when brand-filled.
+
+| Token | Value | Citation |
+|---|---|---|
+| `Theme.elevation.resting` | none (border only) | e.g. `Admin Dashboard.dc.html:80` at rest |
+| `Theme.elevation.hover` | `0 12px 26px rgba(94,14,11,0.10)` | `Admin Dashboard.dc.html:80,85,90` (`style-hover`), `Library Kiosk v2.dc.html:98,102` |
+| `Theme.elevation.heroFill` | `0 10-12px 26-30px rgba(94,14,11,0.22-0.25)` | `Admin Dashboard.dc.html:75` (`0 10px 26px … 0.22`), `Library Kiosk v2.dc.html:76` (`0 12px 30px … 0.25`) |
+| `Theme.elevation.reportHover` | `0 14px 30px rgba(94,14,11,0.12)` | `Admin Dashboard.dc.html:171` (reporting card hover) |
+| `Theme.elevation.focusRing` | `0 0 0 4px rgba(126,26,21,0.10)` | `Admin Dashboard.dc.html:135,200` (identical value on both input fields) |
+| `Theme.elevation.ctaGold` | `0 5px 14px rgba(232,177,14,0.3)` | `Admin Dashboard.dc.html:201` (gold SEARCH CTA) |
+| `Theme.elevation.ctaDark` | `0 6px 18px rgba(0,0,0,0.28)` | `Library Kiosk v2.dc.html:48` (kiosk LOG IN CTA) |
+| `Theme.elevation.modal` *(extrapolated — no dialog reference exists in either file)* | a distinct, higher tier than `heroFill`, e.g. `0 24px 48px rgba(0,0,0,0.30)` | none — flagged as a Phase-1 human-review item, same caveat as the dark-mode risk (spec §10 Risk 3) |
+
+### 12.8 The grep-audit constraint carries forward
+
+Section 4.3 already established the current-state evidence for why this
+rule matters: "a grep for the design's tokens against `qt-app/` returns
+zero hits" today, across three independently-maintained color sources
+(`theme.h`, `wits.qss`, and ad hoc `.ui` literals). The spec's standing rule
+— "the PRD's 'no stray hardcoded colors' grep audit remains enforceable"
+(spec §5) — becomes concretely checkable for the Quick app the same way:
+every color literal in `qt-app/quick/qml/` should resolve through
+`Theme.*`, and a grep for a raw hex literal
+(`grep -rnE '#[0-9A-Fa-f]{3,6}' qt-app/quick/qml/`) should only ever match
+inside `qml/theme/Theme.qml` itself — any hit inside `qml/components/` or a
+screen file is the QML-era equivalent of today's `adminwindow.ui:2225-2236`
+inline-hex violation (Section 4.3) and should fail review the same way.
 
 ## 13. Theme system
 
-*[to be written in Task 4]*
+`qml/theme/Theme.qml` (§8's tree) is a `QML_SINGLETON`, and it is the
+**only** source of visual properties any component or screen reads —
+Section 12's full token catalog (color, spacing, radius, typography,
+elevation) plus `Theme.motion.*` (Section 15) and `Theme.mode`. It is
+backed 1:1 by `ThemeViewModel` (Section 10.7): every `Theme.*` property is
+a thin QML-facing mirror of a `ThemeViewModel` `Q_PROPERTY`, re-evaluated
+whenever `ThemeViewModel::changed()` fires. This section does not
+introduce a second definition of `ThemeViewModel` — its owned controller,
+`Q_PROPERTY` list, `Q_INVOKABLE`s, and `changed()` signal are exactly as
+Section 10.7 already fixed them; this section specifies how `Theme.qml`
+consumes that surface and the mechanics (brand-engine integration,
+light/dark, mode persistence) around it.
+
+### 13.1 Property role catalog
+
+`Theme.qml` exposes, grouped by origin:
+
+- **Brand roles (mirror `BrandPalette` exactly, one per `ThemeViewModel`
+  property, Section 10.7):** `Theme.brand.admin`/`adminHover`/
+  `adminOnPrimary`/`adminSoft`, `Theme.brand.kiosk`/`kioskHover`/
+  `kioskOnPrimary`/`kioskSoft`, `Theme.secondary`, `Theme.sidebarBase`,
+  `Theme.card`, `Theme.appBackground`, `Theme.border`, `Theme.text`,
+  `Theme.mutedText`, `Theme.success`, `Theme.error`.
+- **Extra design tokens layered on top (Section 12.1, no `BrandPalette`
+  field — computed once from the brand roles via
+  `BrandColorMath::mix`/`shade`, not independently stored):**
+  `Theme.secondarySoft`, `Theme.mutedTextCaption`, `Theme.tableHeaderBg`,
+  `Theme.rowHairline`, `Theme.errorSoft`, `Theme.errorBorder`.
+- **Structural scales (Section 12.2/12.3/12.6/12.7, fixed constants, not
+  brand-derived):** `Theme.spacing.*`, `Theme.radius.*`,
+  `Theme.typography.*`, `Theme.elevation.*`.
+- **Motion (Section 15):** `Theme.motion.*` durations/easing plus
+  `Theme.motion.enabled` (the reduce-motion switch).
+- **Mode:** `Theme.mode` (`Light | Dark | System`, 13.4) and
+  `Theme.isDark` (a resolved bool a component can bind to directly instead
+  of comparing `Theme.mode == System` plus an OS query itself).
+
+`Theme.qml` is intentionally a **superset** of `BrandPalette` — the extra
+tokens and the structural/motion scales exist only in `Theme`, never in
+`BrandPalette` or `ThemeViewModel`'s `Q_PROPERTY` list, so nothing here
+requires widening the engine's own data type.
+
+### 13.2 Brand-engine integration
+
+`ThemeViewModel` wraps the shipped brand engine without adding to its
+public API (Section 10.7 already states this constraint; this section
+describes the runtime flow that constraint produces):
+
+- **Source of truth:** `BrandTheme::current()`/`setCurrent()`
+  (`brandtheme.h:67-68`, implemented via a function-local static in
+  `brandtheme.cpp:442-458`) hold the process-wide palette exactly as they
+  do today; `ThemeViewModel` reads/writes through these two functions only.
+- **Cache-first startup, relocated:** today `MainWindow`'s constructor
+  applies the cached palette synchronously before any network I/O, then
+  re-applies it if the backend later reports something newer
+  (`mainwindow.cpp:159-172`: `BrandTheme::setCurrent(BrandTheme::
+  loadCachedConfig(brandingStore).palette)` runs first, then
+  `BrandingController::remoteConfigLoaded` calls `BrandTheme::isNewer()`
+  and re-applies+re-caches only on a strictly-newer remote config). Section
+  10.7 already moves this flow into `ThemeViewModel`'s construction path so
+  both surfaces (kiosk and admin) share one theme source instead of
+  kiosk-only startup wiring; 13.3 below states the one behavior change this
+  relocation carries (the zero-config default from Section 12.4).
+- **Live re-theme on logo import, no restart:** `SettingsViewModel`
+  (Section 10.6) calls `ThemeViewModel::regenerateFromImportedLogo(path)`
+  on a successful logo import, which calls
+  `BrandTheme::regenerateFromLogo(config, path, &err)`
+  (`brandtheme.h:62-63`, implemented `brandtheme.cpp:412-440`) and, on
+  success, `BrandTheme::setCurrent(config.palette)` followed by emitting
+  `changed()` (Section 10.7). Because every `LButton`/`LCard`/`LSideNav`/…
+  instance binds to `Theme.*` properties through ordinary QML property
+  bindings rather than reading a value once, Qt Quick's declarative binding
+  system re-evaluates every bound expression the moment the underlying
+  `Q_PROPERTY` changes — this *is* the "live re-theme via property
+  bindings (no restart)" mechanism spec §6 requires; nothing beyond
+  emitting `changed()` needs to happen for the whole UI to repaint with the
+  new brand.
+- **The Manual-mode hook, unchanged:** `regenerateFromLogo` skips
+  auto-regeneration entirely and returns `false` with a cleared error when
+  `config.mode == ThemeMode::Manual` (`brandtheme.cpp:414-419`) — the exact
+  "code hook only, no editor UI" behavior spec §6 locks in for 2.0.
+  `ThemeViewModel` does not add a theme-editor UI around this hook; it only
+  calls the existing function and surfaces whatever it returns.
+- **Persistence, unchanged:** `saveCachedConfig`/`loadCachedConfig`
+  (`brandtheme.h:50-51`, `brandtheme.cpp:368-404`) remain the local
+  `QSettings`-backed cache under the `"branding"` group
+  (`brandtheme.cpp:365`); `BrandingController::fetchRemoteConfig`/
+  `saveBranding` (`brandingcontroller.h:23,27`) remain the
+  `branding_config`-backend read/write path; `isNewer()`
+  (`brandtheme.h:55`, `brandtheme.cpp:406-409`) remains the sole freshness
+  rule ("remote wins if strictly newer").
+
+### 13.3 The zero-config default, restated as a mechanism (see Section 12.4 for the *values* and the rationale)
+
+`ThemeViewModel`'s constructor loads the cached `BrandingConfig` via
+`loadCachedConfig()` before doing anything else. If
+`config.updatedAt.isValid()` is `false` — the exact, already-existing
+signal for "never branded" (`brandtheme.cpp:391-393` returns
+`fallbackPalette()` precisely when the cache's `palette` key is empty) —
+`ThemeViewModel` seeds its own `Q_PROPERTY` values (and calls
+`BrandTheme::setCurrent()`) from the shipped maroon/gold literal instead of
+adopting `config.palette`'s blue/green. If `updatedAt` is valid, the cached
+palette is used exactly as today. The subsequent
+`BrandingController::fetchRemoteConfig()`/`remoteConfigLoaded`/`isNewer()`
+sync is unmodified in either branch: a genuine `branding_config` row from
+the backend always wins, per the engine's own existing contract.
+
+### 13.4 Light + dark
+
+Both design references are light-theme only (Section 4.1 confirms neither
+file defines a dark palette or a `prefers-color-scheme` branch) — dark
+values are **derived**, not designed, exactly as spec §6 states. The
+derivation reuses the engine's own math rather than inventing a second
+color pipeline:
+
+- Neutral surfaces invert in luminance while keeping the same hue family:
+  `Theme.appBackground`(dark) and `Theme.card`(dark) are computed via
+  `BrandColorMath::shade`/`mix` from the light values (e.g. a near-black
+  base rather than `#FBF8F3`, with `card`(dark) a step lighter than
+  `appBackground`(dark) to preserve the same figure/ground relationship the
+  light theme has); `Theme.text`(dark)/`Theme.mutedText`(dark) move toward
+  near-white/light-warm-grey.
+- Brand roles (`Theme.brand.admin`/`kiosk`, `Theme.secondary`) keep their
+  hue in dark mode — the maroon/gold identity should still read as
+  maroon/gold at night — but are **re-contrast-checked against the new
+  dark surfaces** using the engine's own WCAG machinery
+  (`BrandColorMath::contrastRatio`, `brandcolormath.h:28-35`) rather than
+  assumed to still pass: `MinContrast = 3.0` (`brandtheme.h:22`) for
+  UI-role fills against their surface, and the spec's 4.5 threshold for
+  body text (spec §6). Where a brand role fails against a dark surface, the
+  same iterative-darken/lighten pattern `enforceOnWhite()` already uses
+  against a *light* surface (`brandtheme.cpp:242-253`, "darken `c` until it
+  meets `MinContrast` against white, capped iterations") generalizes
+  directly: iterate `BrandColorMath::shade()` against the dark surface
+  color instead of white, capped the same way.
+- This derivation is explicitly named a Phase-5 human-review item, not a
+  mechanical guarantee this document can certify from a text description
+  alone — spec §10 Risk 3 ("Dark mode has no design reference — derived via
+  contrast math; budget a human review round") applies verbatim here.
+
+### 13.5 Theme mode (light/dark/system)
+
+`Theme.mode` is backed by a local `QSettings` key distinct from the
+`"branding"` group `saveCachedConfig`/`loadCachedConfig` use
+(`brandtheme.cpp:365`) — e.g. a separate `"ui"` group / `themeMode` key —
+so theme-mode is not conflated with the brand-palette cache; the two are
+independent axes (which palette vs. which light/dark variant of it).
+`System` mode should resolve via whatever OS color-scheme signal the Qt
+version in use exposes; **this document does not assert a specific Qt API
+here** (the exact mechanism — a live-updating signal vs. a
+launch-time-only read — needs verification against the Qt 6.11 patch level
+this project builds against, Phase 1 work, not a Phase 0 claim). Manual
+theme mode (`ThemeMode::Manual`, `brandthemedata.h:13`) remains, per spec
+§6 and Section 10.7, a **code hook only** — `regenerateFromLogo`'s existing
+skip-if-Manual branch (`brandtheme.cpp:414-419`) is exercised by nothing
+new in 2.0; there is no settings-screen affordance to *set* `ThemeMode::
+Manual` in `SettingsViewModel`'s surface (Section 10.6), matching spec
+§11's "no theme-editor UI in 2.0."
 
 ## 14. Navigation architecture
 
-*[to be written in Task 4]*
+`Navigator` (introduced Section 7.3, placed outside the module-triple
+pattern by Section 9) is a `QObject` singleton
+(`qmlRegisterSingletonType`/`QML_SINGLETON`) owning surface, page, and
+modal state as `Q_PROPERTY`s. This section elaborates its concrete surface;
+it is the same `Navigator` those sections already name, not a second one.
+
+### 14.1 Surface switching
+
+`Q_PROPERTY(Surface currentSurface READ currentSurface WRITE
+setCurrentSurface NOTIFY currentSurfaceChanged)` — a two-value
+`enum class Surface { Kiosk, Admin }`. `AppShell.qml` (§8's tree) binds its
+top-level scene selection to this property, replacing today's actual
+mechanism: `MainWindow` constructing an `adminWindow*` member
+(`mainwindow.h:42`) in its own constructor
+(`mainwindow.cpp:52`) and showing it as a second top-level `QMainWindow`
+on successful admin login (`mainwindow.cpp:226`, `adminWin->show();`).
+Under `Navigator`, this becomes one property flip inside the same running
+QML scene rather than a second window instantiation — the "one executable,
+two surfaces" topology (Section 2.1/7) stays intact, only the *mechanism*
+for switching between them changes from constructing a window to changing
+a bound enum.
+
+### 14.2 Page stack within admin
+
+`Q_PROPERTY(QString currentPage READ currentPage WRITE setCurrentPage
+NOTIFY currentPageChanged)`, valued from the canonical admin page set
+Section 9's table already fixes — `Dashboard`, `Database`, `Reporting`,
+`Search`, `VisitLogs`, `Settings` — plus
+`Q_PROPERTY(QVariantList registeredPages ...)`, a data-driven list
+`LSideNav` (Section 11) repeats over instead of Designer-time buttons. This
+is the literal mechanism behind Section 9's forward-seam contract: today
+adding a sixth admin page means adding a sixth hand-wired
+`connect(ui->xBtn, &QPushButton::clicked, ...)` block
+(`adminwindow.cpp:292-311`, Section 2.5); under `Navigator`, adding a
+module means appending one entry to `registeredPages` and providing its
+`qml/admin/<Module>.qml` + ViewModel + core-service triple — `Navigator`
+itself needs no change, matching spec §4's "nothing in 2.0 may assume the
+admin sidebar is a closed set" and Section 9's confirmed-absent-today
+modules (`inventory`, `borrowreturn`, `aiassistant`). A small
+`Q_PROPERTY(QStringList pageHistory ...)` (or an internal stack exposed via
+`Q_INVOKABLE bool goBack()`) backs simple back-navigation for flows that
+enter a page transiently (e.g. Ctrl+K jumping into Search from anywhere,
+14.4).
+
+### 14.3 Modal/dialog state
+
+`Q_PROPERTY(QVariant activeModal READ activeModal NOTIFY
+activeModalChanged)` — `null`/empty when nothing is open, otherwise a small
+payload (`{component: "LDialog", title, message, buttons}`) that the one
+`LDialog` instance `AppShell.qml` hosts binds its visibility and content
+to. `Q_INVOKABLE void openModal(const QVariantMap &spec)`/
+`Q_INVOKABLE void closeModal()`. Centralizing modal state here — rather
+than each screen owning its own `LDialog` instance — is what guarantees
+only one modal can be open application-wide, directly serving the
+dialog-consolidation goal Sections 5.3/5.7 already argue for (fewer,
+consistent interruptions instead of five/seven ad hoc `QMessageBox` call
+sites). `LToast` (Section 11) is deliberately **not** routed through
+`activeModal` — toasts are non-blocking and multiple/queued toasts are
+fine; only the blocking `LDialog` needs the single-instance guarantee.
+
+### 14.4 Centralized keyboard shortcuts
+
+`Navigator` owns every application-wide shortcut so each is wired once
+rather than per page:
+
+- **Ctrl+K quick search:** a QML `Shortcut` bound once at `AppShell.qml`
+  level calls `Navigator.navigateTo("Search")` then a
+  `Q_INVOKABLE void focusPrimaryControl()` that the Search page's ViewModel
+  or root item responds to by focusing its search field. This is the
+  direct fix for the gap Section 5.8 already confirms by grep: "no
+  `QShortcut` for search exists anywhere in `adminwindow.cpp`" — today
+  Search is reachable only by clicking the sidebar button
+  (`adminwindow.cpp:438`, `onSearchBtnClicked`).
+- **Sidebar cycling:** Up/Down (or number-key 1-6) cycling through
+  `registeredPages` while `LSideNav` has focus, implemented once in
+  `Navigator`/`LSideNav`'s interaction contract rather than per sidebar
+  button.
+- **Table focus:** a shortcut (e.g. Tab or a dedicated accelerator) that
+  moves focus into the current page's primary `LTable` instance, so
+  keyboard-only admin use (spec §7, "full keyboard navigation on admin")
+  does not require a mouse click to reach table rows after navigating to a
+  page.
+
+### 14.5 Testability
+
+`Navigator` is a plain `QObject` with no QML dependency of its own — the
+same shape Section 2.2 already documents for the five domain controllers
+("injected, not owned... async signals") and the same shape Section 7.3
+already commits to ("owns surface/page/modal state... so flow is
+testable"). A `QtTest` case constructs `Navigator` standalone, calls
+`navigateTo(...)`/`openModal(...)`/`goBack()`, and asserts on
+`currentPage`/`currentSurface`/`activeModal` without instantiating a
+`QQuickView` — the identical testing shape `tst_reportcontroller`/
+`tst_studentcontroller`/etc. already use (Section 2.7's table), just for
+navigation state instead of network/report data.
 
 ## 15. Animation guidelines
 
-*[to be written in Task 4]*
+Motion is specified from the design files' real CSS `@keyframes`, not
+prose invention — `Admin Dashboard.dc.html:19-23` defines `pageIn`, `rowIn`,
+`barGrow`; `Library Kiosk v2.dc.html:18-23` adds `cardIn`, `scanPulse`,
+`goldSweep`, plus `ringSpin`/`flashIn` used in both files (Section 4.1
+already catalogs these keyframe names). Every duration below routes through
+`Theme.motion.*` (Section 13.1) rather than a literal `Behavior on ...`
+duration inside a component or screen — the same "no stray literals"
+discipline Section 12.8 states for color.
+
+### 15.1 Duration/easing table
+
+| `Theme.motion` token | Duration | Easing | Citation |
+|---|---|---|---|
+| `pageIn` | 400ms | `cubic-bezier(.2,.8,.3,1)` | `Admin Dashboard.dc.html:73` (`animation:pageIn .4s cubic-bezier(.2,.8,.3,1)`) |
+| `rowIn` | 350-500ms (+ per-row stagger) | `cubic-bezier(.2,.8,.3,1)` | `Admin Dashboard.dc.html:145` (.4s), `:212` (.35s); `Library Kiosk v2.dc.html:115` (.5s) — each staggered via a per-row `animation-delay` |
+| `cardIn` | 450ms | `cubic-bezier(.2,.8,.3,1)` | `Library Kiosk v2.dc.html:76` (`animation:cardIn .45s cubic-bezier(.2,.8,.3,1)`) |
+| `barGrow` | 600ms (+ per-bar stagger) | `cubic-bezier(.2,.8,.3,1)` | `Admin Dashboard.dc.html:107` (`animation:barGrow .6s … animation-delay:{{b.delay}}`) |
+| `deptBarFill` | 800ms | `cubic-bezier(.2,.8,.3,1)` | `Admin Dashboard.dc.html:121` (`transition:width .8s cubic-bezier(.2,.8,.3,1)`) |
+| `hoverLift` | 150-200ms | ease (default) | `Admin Dashboard.dc.html:80` (`transition:transform .18s, box-shadow .18s`), `Library Kiosk v2.dc.html:98` (`transition:transform .15s, box-shadow .2s`) |
+| `scanPulse` | 1.6-3s, infinite | ease-in-out | `Library Kiosk v2.dc.html:44` (1.8s), `:71` (1.6s), `:69` (3s) |
+| `goldSweep` | 3.2s, infinite | ease-in-out | `Library Kiosk v2.dc.html:50` (`animation:goldSweep 3.2s ease-in-out infinite`) |
+| `flashIn` | 400-450ms | ease | `Library Kiosk v2.dc.html:66` (.45s), `:82` (.4s) |
+| `ringSpin` | 60s (decorative) / 1.6s (loading-ring variant), infinite | linear | `Library Kiosk v2.dc.html:31` (60s), `:90` (1.6s) |
+| `toastIn` / `toastOut` *(extrapolated — no toast exists in either reference file)* | ~200ms / ~150ms | `cubic-bezier(.2,.8,.3,1)` (reused, for consistency) | none — flagged as a Phase-1 human-review item alongside `Theme.elevation.modal` (Section 12.7) |
+
+Per the spec's stated "150-400ms" motion band (spec §7), most interaction
+transitions land inside it (`hoverLift`, `pageIn`, `rowIn`, `cardIn`,
+`flashIn`); the two explicit exceptions — `barGrow`/`deptBarFill` at
+600-800ms, and the multi-second ambient loops (`scanPulse`, `goldSweep`,
+`ringSpin`) — are named here rather than silently rounded into the band,
+since they are genuinely different motion categories (a one-shot
+data-reveal animation vs. a continuous idle affordance) and the reference
+files treat them differently on purpose. There is one shared easing curve,
+`cubic-bezier(0.2, 0.8, 0.3, 1)`, used across every one-shot transition in
+both files; the infinite ambient loops use plain `ease-in-out`/`linear`
+instead, and `Theme.motion` keeps that distinction (`Theme.motion.easing`
+for one-shot transitions vs. per-token easing for the ambient set) rather
+than forcing one curve onto both categories.
+
+### 15.2 Global reduce-motion switch
+
+`Theme.motion.enabled` (bool) gates every animation token above. When
+`false`: one-shot transitions (`pageIn`/`rowIn`/`cardIn`/`barGrow`/
+`deptBarFill`/`hoverLift`/`flashIn`) either run at zero duration or are
+skipped outright (state still changes, just without the animated
+transition); the ambient/infinite loops (`scanPulse`, `goldSweep`,
+`ringSpin`) are **suppressed entirely**, not merely shortened, since they
+communicate no state change and exist purely as decorative/idle
+affordances — a user who has opted out of motion should not see a
+perpetually-pulsing dot or a perpetually-sweeping CTA highlight regardless
+of how visually central that affordance is to the kiosk's idle-state
+design. `Theme.motion.enabled` should be seeded from the OS-level
+"prefers reduced motion" signal where the Qt version in use exposes one,
+with a manual override persisted locally (the same local-`QSettings`
+pattern as `Theme.mode`, Section 13.5) — as with System theme-mode
+detection, the exact OS-signal API is a Phase-1 verification item against
+the Qt 6.11 patch level in use, not asserted here as a specific call.
+
+### 15.3 Per-interaction guidance
+
+- **Live attendance feed (kiosk, Section 5.2):** `rowIn` plays once per row
+  on initial load (staggered), but a genuinely new arrival — a fresh row
+  inserted into `VisitLogModel` (Section 10.1) after a successful login —
+  plays `rowIn` **immediately, undelayed**, so the newest entry visibly
+  distinguishes itself the instant it appears. This directly targets
+  Section 5.2's named friction point: today `refreshRightPanel`
+  (`mainwindow.cpp:366-403`) overwrites label text with zero transition, so
+  a new login is visually indistinguishable from data that was always
+  there.
+- **Dashboard bar growth (Section 10.2):** `barGrow` plays once per
+  `DashboardViewModel.refresh()` call, staggered left-to-right across the
+  hourly bars (matching `hourBars`' per-item `{{ b.delay }}` in the
+  reference); the department bars use `deptBarFill` (a width transition),
+  never `barGrow` (a vertical scale) — they are visually and mechanically
+  different animations for two different bar shapes, not one animation
+  reused across both.
+- **Page transitions (Navigator, Section 14.2):** `pageIn` plays on the
+  incoming page's root item only when `Navigator.currentPage` changes —
+  `AppShell.qml`'s persistent chrome (`LSideNav`, `LPageHeader`) does not
+  re-animate on every navigation, only the page content region does. This
+  replaces today's instant `setCurrentWidget` swap
+  (`adminwindow.cpp:292-311`, Section 4.3) with the reference's actual
+  per-page entrance animation rather than a full-window fade.
+- **Kiosk ambient affordances:** `scanPulse` on the idle "waiting for
+  scan" state (`Library Kiosk v2.dc.html:69`) and `goldSweep` on the LOG IN
+  CTA (`Library Kiosk v2.dc.html:50`) are always-on, event-independent
+  motion — not triggered by a discrete action — and are exactly the
+  affordances Section 5.1 identifies as currently missing ("no visible
+  'scanning' affordance distinct from typing... no cue that RFID is even
+  an option"). They remain subject to 15.2's reduce-motion suppression.
+- **Toast in/out (Section 11's `LToast`):** since no toast exists in either
+  reference file, its motion is extrapolated (15.1's `toastIn`/`toastOut`
+  row) rather than measured from a keyframe — flagged, alongside dark mode
+  (Section 13.4) and the modal elevation tier (Section 12.7), as a Phase-1
+  human-judgment item rather than a value this document can cite a
+  `file:line` for.
 
 ## 16. Backend reuse plan
 
