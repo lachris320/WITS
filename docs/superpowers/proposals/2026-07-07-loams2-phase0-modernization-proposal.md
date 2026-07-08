@@ -1014,7 +1014,169 @@ walk.
 
 ## 6. Qt Widgets → Qt Quick migration strategy
 
-*[to be written in Task 6]*
+Strategy A — a **parallel rebuild on a shared core** — is locked (spec §2)
+and is not reopened here. This section states it at implementation depth:
+the two rejected alternatives and why they were rejected, what is preserved
+untouched, the UI-replacement approach per surface, how the missing
+ViewModel/model seam gets built, how the component library and theme migrate,
+the rollback posture, and the implementation order that keeps every gate
+green.
+
+### 6.1 The chosen strategy, and the two alternatives already rejected
+
+Strategy A rebuilds the presentation layer in Qt Quick **against the same
+business logic**, running the new Quick app and the legacy Widgets app side
+by side out of one repository (Section 7.4) until the Quick app reaches
+feature parity, at which point the Widgets app is deleted (Section 6.6). The
+two alternatives were considered during brainstorming and rejected as
+*already-decided* rationale, not live options:
+
+- **In-place port (re-skin the existing widgets).** Restyling `*.ui`/
+  `wits.qss` to the maroon/gold design without changing the architecture was
+  rejected because the design gap is structural, not chromatic: Section 4.3
+  establishes that `QGroupBox` native chrome "has no equivalent in the
+  design's card vocabulary at all" (a component-family gap), that every
+  `pageIn`/`rowIn`/`barGrow`/`scanPulse` motion is net-new rather than a
+  tweak, and that "a grep for the design's tokens against `qt-app/` returns
+  zero hits." An in-place re-skin also leaves the 45-widget fixed feed
+  (`mainwindow.cpp:366-403`, Section 2.4/5.2), the closed-set sidebar
+  (`adminwindow.cpp:292-311`, Section 2.5), and the runtime-reparented
+  page header (`adminwindow.cpp:85-127`, Section 4.3) exactly as they are —
+  none of which can meet the spec §4 forward-compat requirement ("nothing in
+  2.0 may assume the admin sidebar is a closed set") without the very MVVM
+  seam a re-skin declines to build.
+- **Big-bang rewrite (new app, backend and logic included, cut over once).**
+  Rejected because it discards the assets Section 2.8 certifies as already
+  reusable — the five domain controllers, `ReportRenderer`, the brand
+  engine, `RfidScanDetector` — and because it has no continuously-shippable
+  intermediate state: there is no phase at which the 12 tests (Section 2.7)
+  and a runnable app both exist until the very end, which is exactly the
+  verification posture spec §8 requires *every* phase to preserve. A rewrite
+  also reopens the locked "keep the PHP/MySQL backend" decision (Section 16),
+  which is out of scope.
+
+Strategy A is the only one of the three that (a) reuses the Widgets-free core
+by `git mv` rather than rewrite (Section 2.8/7.1), (b) keeps a runnable,
+test-green app at every phase boundary (Section 6.7), and (c) retains a
+working rollback until parity is proven (Section 6.6).
+
+### 6.2 What is preserved untouched: the backend and the core
+
+Two whole layers do **not** get rebuilt and are carried across verbatim:
+
+- **The backend.** The PHP/MySQL server, its 25 request-handling scripts,
+  and every request/response contract are reused as-is (Section 16). The
+  migration replaces the *caller* (widget method bodies → ViewModel/service
+  seams), never the wire contract; the only backend work in the whole plan
+  is the bounded, contract-tests-first Phase-6 hardening backlog of
+  Section 17, which is behavior-preserving by construction and does not block
+  the client migration.
+- **The Widgets-free C++ core.** The six units Section 2.8 lists as
+  "well-positioned today" — the five domain controllers, `ReportRenderer`,
+  the brand engine, `RfidScanDetector`, `apiconfig.h`, and `theme.h`'s
+  constants — move into the `witscore` static library (Section 7.1) by
+  `git mv` + CMake path update, not rewrite. Their unit tests move with them,
+  keeping the exact per-target shape Section 2.7 documents (Section 7.6/8).
+  The one layer that is explicitly **re-authored rather than moved** is
+  `RfidKeyboardFilter` (`rfidkeyboardfilter.*`), whose `QApplication`
+  coupling (`rfidkeyboardfilter.cpp:25,33-36`, Section 2.4) has no
+  `QQuickWindow` equivalent — the pure `RfidScanDetector` state machine
+  underneath it is reused verbatim (Section 7.1/10.1).
+
+### 6.3 The UI-replacement approach, per surface
+
+The replacement is **surface-by-surface, not screen-by-screen-in-place**:
+each of the two surfaces (kiosk, admin) is rebuilt as a set of QML screens
+hosted by one `AppShell.qml` (Section 8), and the legacy window that used to
+own that surface (`MainWindow`, `adminWindow`, `GuestWindow`) is retired only
+once its Quick replacement reaches parity. The "one executable, two surfaces"
+topology (Section 2.1/7) is preserved — surface switching changes from
+constructing a second `QMainWindow` (`mainwindow.cpp:52,226`, Section 14.1) to
+flipping one `Navigator.currentSurface` enum inside a single running QML
+scene. Section 18 gives the concrete redesign for each of the nine screens in
+the Section 5 inventory; Section 20 assigns each to a phase.
+
+### 6.4 ViewModel/model migration: building the seam that does not exist yet
+
+The core is reusable; the seam between it and QML is the net-new work
+(Section 2.8: "there is currently no `ReportsViewModel`-shaped seam between
+'read the widgets' and 'call `computeDateRange`'"). The migration builds, per
+module, exactly the ViewModel + `qml/` module + core-service triple Section 9
+fixes, with the eight canonical ViewModels of Section 10 — `KioskViewModel`,
+`DashboardViewModel`, `StudentsViewModel`, `VisitLogsViewModel`,
+`ReportsViewModel`, `SettingsViewModel`, `ThemeViewModel`, and `Navigator` as
+connective tissue outside the triple pattern. Widget-reading method bodies
+(`collectReportFilters`, `collectHeaderInfo`, `refreshRightPanel`, Section
+2.4) are not ported line-for-line: their *logic* already lives (or is being
+lifted) into a controller, and the ViewModel replaces the `ui->` reads with
+`Q_PROPERTY` bindings and the inline `QMessageBox` validation with bindable
+error state (Sections 10.3-10.6). Fixed-widget feeds become
+`QAbstractListModel`s (`StudentListModel`, `VisitLogModel`, `ReportRowModel`,
+Section 10) — this is where the 9-slot ceiling (Section 5.2) and the
+per-column parallel-array indexing disappear.
+
+### 6.5 Component-library and theme migration
+
+Two cross-cutting layers are built once, up front (Phase 1), and every screen
+composes them rather than re-inventing chrome:
+
+- **Component library.** The ten `L*` primitives of Section 11 (`LButton`,
+  `LCard`, `LTable`, `LSegmented`, `LSideNav`, `LToast`, `LDialog`,
+  `LStatTile`, `LBarChart`, `LPageHeader`) are the whole vocabulary Section
+  18's screens are built from. The standing rule (Section 11): screens
+  compose these and never restyle a primitive locally, which is what makes
+  Section 18 composition rather than styling.
+- **Theme.** The three legacy theming layers (`theme.h`, `wits.qss`, the
+  brand engine, Section 2.6) collapse into one `Theme.qml` singleton backed
+  by `ThemeViewModel` (Sections 12/13). This is a *replacement, not a port*
+  (Section 8): `theme.h`/`wits.qss` stay legacy-only and are retired as each
+  Quick screen ships, while the brand engine's own contract
+  (`BrandTheme::current()`/`setCurrent()`, cache-first sync, live
+  logo-regeneration) is reused unchanged behind `ThemeViewModel` (Section
+  10.7/13.2). The zero-config default palette question Section 4.3 flagged is
+  resolved in Section 12.4 (shipped maroon/gold), and is a `ThemeViewModel`
+  seeding behavior, not an engine change.
+
+### 6.6 Rollback posture: the Widgets app survives until parity
+
+Per Strategy A's own exit condition (spec §2: "Widgets app remains the
+rollback until parity, then is deleted"), the legacy `WITS` executable stays
+buildable and runnable for every phase before parity, gated by
+`-DBUILD_LEGACY_WIDGETS=ON` (default `ON`, Section 7.6). Both executables link
+the one `witscore` artifact (Section 7.4), so the core is compiled once and
+the rollback path exercises the *same* business logic the new app does — a
+rollback never means running stale logic. The flag's default flips to `OFF`
+and the legacy sources are deleted only at the **Phase 6** deletion milestone
+(Section 20), never earlier; there is no "Phase 5 deletes Widgets" step.
+
+### 6.7 Recommended implementation order (continuous verification)
+
+The order is the spec §9 roadmap (elaborated in Section 20), chosen so the
+verification model (spec §8) holds at every boundary — **the 12 existing
+ctest targets stay green in every phase**, because the core move is `git mv` +
+path update (Section 7.6), not a rewrite that would break them:
+
+1. **Phase 1 — core + shell first.** Extract `witscore` (both apps build,
+   12/12 green), stand up `AppShell.qml` + `Theme.qml` + the `L*` component
+   library, and run the RFID-in-QML spike (Section 19, Risk 1) and the
+   deployment-hardware render check (Risk 4) *before* any screen depends on
+   them. Nothing user-facing ships, but the two highest risks are retired.
+2. **Phases 2-4 — one surface/screen-group at a time**, each behind a parity
+   checklist (spec §8): kiosk (Phase 2), admin dashboard/visit-logs/search
+   (Phase 3), admin database/reports/settings (Phase 4). Each phase adds
+   ViewModel unit tests and Qt Quick Tests *on top of* the 12-target baseline
+   (Section 8), never replacing it.
+3. **Phase 5 — dark-mode + a11y polish**, the two items with no design
+   reference (Sections 13.4/12.7/15.1) and therefore a budgeted human-review
+   round (Risk 3).
+4. **Phase 6 — backend hardening (Section 17) + Widgets deletion + final
+   whole-branch review.**
+
+At every phase gate the same four checks apply — Debug+Release build clean,
+full ctest green, `/claude-review`, and a human visual walkthrough (premium
+look is a human judgment, spec §8). Because the rollback (Section 6.6) stays
+alive until Phase 6, a phase that fails its gate never leaves the project
+without a working app.
 
 ## 7. Proposed project architecture
 
@@ -2598,12 +2760,537 @@ against golden fixtures, not a backend project.
 
 ## 18. Screen-by-screen redesign recommendations
 
-*[to be written in Task 6]*
+One subsection per screen in the Section 5 canonical inventory — **Kiosk
+login, Live attendance feed, Guest flow, Admin dashboard, Database/students,
+Reporting, Search, Visit logs, Settings**. Each states *what changes*, *which
+ViewModel (Section 10) and `L*` components (Section 11) compose it*, and *the
+parity items that must be preserved* (verified against the per-module parity
+checklist, spec §8). Every component name and ViewModel name is reused
+verbatim from Sections 10-11; no screen invents a new one. Where a screen
+depends on RFID behavior, "RFID behaves exactly as today" is stated as
+**observable behavior to be verified in the parity checklist** (Section 19's
+forward-note), not as assumed code reuse — the `RfidKeyboardFilter` install
+layer is re-authored for `QQuickWindow`, only the `RfidScanDetector` state
+machine is reused verbatim (Sections 6.2/7.1).
+
+### 18.1 Kiosk login
+
+**Redesign (design: `Library Kiosk v2.dc.html`).** The maroon brand panel
+becomes an `LSideNav`-style brand region (kiosk instance, footer omitted —
+Section 11) with the school wordmark, live clock, and library hours. The
+single dual-purpose `QLineEdit` (`mainwindow.ui:143`, Section 5.1) is
+replaced by a bound input with an **explicit admin affordance**
+(`KioskViewModel.isAdminMode`, Section 10.1) instead of the silent
+password-echo flip (`mainwindow.cpp:144-154`), and a pulsing "SCAN OR TYPE
+YOUR ID" affordance (`Theme.motion.scanPulse`, Section 15.1/15.3, ambient) so
+a walk-up student sees that RFID is an option — the cue Section 5.1 flags as
+missing. The gold **LOG IN** CTA is an `LButton variant: Accent`
+(`Theme.secondary` gold fill, `Theme.elevation.ctaDark`, Section 11), with
+the `goldSweep` idle affordance (`Library Kiosk v2.dc.html:50`). Failed logins
+surface through **`LToast`** (`KioskViewModel.statusMessage`) rather than the
+blocking `QMessageBox::warning` (`mainwindow.cpp:184,232`) — making manual and
+RFID failures one consistent inline surface (Section 5.1's simplification).
+
+- **ViewModel / components:** `KioskViewModel`; `LSideNav` (brand panel),
+  `LButton` (Accent LOG IN), input field, `LToast`.
+- **Parity to preserve:** student-ID → `student_login.php` vs. admin-key →
+  `admin_login.php` shape-routing (`mainwindow.cpp:193-200`); RFID →
+  `rfid_login.php` with the 2.5-second same-card debounce
+  (`mainwindow.cpp:301-305`); submit on Enter and on button click;
+  full-screen kiosk presentation. **RFID behaves exactly as today** — an
+  observable parity item, since the install layer is re-authored (above).
+
+### 18.2 Live attendance feed
+
+**Redesign (design: `Library Kiosk v2.dc.html`).** The five parallel,
+hand-named 9-slot `QList<QLabel*>` arrays (`mainwindow.cpp:366-403`, Section
+5.2) are replaced by a model-driven, scrollable list backed by `VisitLogModel`
+(`KioskViewModel`'s own instance, Section 10.1) — removing the hard 9-row
+ceiling entirely (the 10th visitor of the day is no longer dropped). The "now
+signed in" hero becomes a genuinely separate element (`LCard variant: hero`,
+brand-gradient fill, Section 11) rather than an alias for feed row 0, so hero
+and feed can be timed/styled independently (Section 5.2). The kiosk's two stat
+cards (visitors today, this hour — `Library Kiosk v2.dc.html:97-105`) are
+`LStatTile`s (`Hero`/`Neutral` variants). A newly-arrived login plays
+`Theme.motion.rowIn` **undelayed** (Section 15.3) so it visibly distinguishes
+itself from data already on screen — the transition today's synchronous label
+overwrite lacks.
+
+- **ViewModel / components:** `KioskViewModel` + `VisitLogModel`;
+  `LCard` (hero), `LStatTile` (×2), a model-driven feed list.
+- **Parity to preserve:** each successful login prepends to the feed
+  (conceptually today's `recentLogins`, `mainwindow.cpp:272-274`); the
+  most-recent login is spotlighted as the hero; the 700ms photo fade-in
+  intent (`mainwindow.cpp:260-264`) survives as an `LCard` entrance
+  transition.
+
+### 18.3 Guest flow
+
+**Redesign (current: `guestwindow.ui`).** The modal four-field dialog
+(`guestwindow.cpp:30-33`, Section 5.3) becomes a single QML form composed of
+`LCard` + bound fields + an `LButton` submit, gated — as today — behind the
+admin-controlled toggle (`KioskViewModel.guestLoginEnabled` mirrors
+`adminWin`'s `guestLoginToggled`, `mainwindow.cpp:83-85,91`; guest login stays
+off-by-default). The three validation-only `QMessageBox` calls
+(`guestwindow.cpp:36,54,64`) collapse into inline `LToast` feedback with
+required-field markers (name/company/purpose required, contact optional —
+Section 5.3), and submit is disabled until valid. The **two genuine
+network-outcome dialogs** (`guestwindow.cpp:70,73`) survive as the one modal
+primitive 2.0 keeps, `LDialog` (Section 11) — matching Section 5.3's "removes
+3 of the 5 modal dialogs... without touching the two genuine network-outcome
+dialogs."
+
+- **ViewModel / components:** `KioskViewModel` (`requestGuestLogin`);
+  `LCard`, `LButton`, `LToast` (validation), `LDialog` (network outcome).
+- **Parity to preserve:** four fields with name/company/purpose required;
+  POST to `guest_login.php` (`guestwindow.cpp:40`); dialog dismisses on
+  success; the feature stays admin-gated and off by default.
+
+### 18.4 Admin dashboard
+
+**Redesign (design: `Admin Dashboard.dc.html:72-129`) — net-new UX over
+existing data.** This screen does not exist today (Section 4.4/5.4: the
+`generalBtn`/`generalPage` slot is a *settings* page, not a dashboard), so it
+is new construction, not a redesign of an existing screen. It is built as an
+`LPageHeader` (title + "Overview of library activity" subtitle + live clock,
+`Admin Dashboard.dc.html:63-69,282`) over four `LStatTile`s (visitors today,
+visitors this week, registered students, peak hour) and two `LBarChart`
+instances: vertical hourly bars with `barGrow` and horizontal department bars
+with `deptBarFill` (Section 15.3), built as **custom QML, not QtCharts** (per
+Risk 2 — QtCharts stays only in `reportrenderer`'s export path, Sections
+3.9/7.1/19). All figures come from `DashboardViewModel`
+(`ReportController` + `ReportRenderer` aggregates, Section 10.2) — the numbers
+Section 5.4 confirms already exist in the backend though no screen surfaces
+them.
+
+- **ViewModel / components:** `DashboardViewModel`; `LPageHeader`,
+  `LStatTile` (×4), `LBarChart` (×2), `LSideNav` (chrome).
+- **Parity to preserve:** none pre-existing (net-new screen) — the parity
+  criterion is instead that every displayed figure matches what
+  `ReportController`'s existing endpoints already compute for the Reporting
+  charts (no new backend needed).
+
+### 18.5 Database/students
+
+**Redesign (design: `Admin Dashboard.dc.html:132-164`).** Today's single
+`bulkTable` serving two mental models — staged-import review vs. live-record
+edit, distinguished only by which handler last ran (`adminwindow.cpp:825-857,
+858,2061`, Section 5.6) — becomes one always-live `LTable` (backed by
+`StudentListModel`, Section 10.3) with **import and add as explicit actions,
+not modes**: `+ ADD STUDENT` / `IMPORT CSV` `LButton`s
+(`Admin Dashboard.dc.html:136-137`) feeding it. "Am I previewing an import" is
+tracked as explicit `StudentsViewModel.isImporting` state (Section 10.3/5.6),
+not inferred. The file picker that today opens `AttachFilesDialog`
+(`adminwindow.cpp:827`) is an `LDialog`; import/duplicate/upload outcomes
+report through `LToast`.
+
+- **ViewModel / components:** `StudentsViewModel` (Database instance, owns
+  `StudentController` + `ImportController`, Section 10.3); `LPageHeader`,
+  `LTable`, `LButton`, `LDialog` (file pick), `LToast`.
+- **Parity to preserve:** CSV/Excel bulk import with duplicate check and
+  photo-ZIP upload (`importcontroller.h`, Section 2.2); inline per-cell edit;
+  the reviewed batch commits through the same `ImportController` path.
+
+### 18.6 Reporting
+
+**Redesign (current: `reportingPage`, `adminwindow.ui:1298`).** The
+duration-type switch, department/course filters, and palette selector stay,
+but `collectReportFilters`'s seven inline `QMessageBox::warning` calls
+(`adminwindow.cpp:1498-1605`, Section 5.7) collapse into one bindable
+`ReportsViewModel.validationError` surfaced via `LToast` (Section 10.5) — one
+inline-validation pattern instead of seven ad hoc dialogs. The
+mandatory-department gate (`adminwindow.cpp:1505-1509`, Section 5.7) is
+**removed**: an "all departments" report path is added as a required
+capability (not just a visual refresh, Section 5.7). `QGroupBox`-framed chart
+regions (`groupBox_3`/"VISUALIZATION", `adminwindow.ui:1705-1719`, Section 4.3)
+become flat `LCard`s. **Export reuses `reportrenderer` verbatim** —
+`ReportsViewModel` delegates PDF/Excel to `ReportRenderer`'s `QChart`-based
+static painters (`reportrenderer.h:29-45`, Section 10.5), the one
+spec-accepted `Qt::Charts`+`Qt::Widgets` link (Sections 3.9/7.1); any on-screen
+bar preview uses custom `LBarChart` (Section 18.4), not QtCharts.
+
+- **ViewModel / components:** `ReportsViewModel` (`ReportController` +
+  `ReportRenderer`); `LPageHeader`, `LCard`, `LButton` (GENERATE, export
+  PDF/Excel), `LToast`, `LBarChart` (on-screen preview only).
+- **Parity to preserve:** day/month/semester/custom duration modes and their
+  date-range math (`ReportController::computeDateRange`,
+  `reportcontroller.h:34-39`); department/course/palette filters; PDF and
+  Excel export producing the same documents `ReportRenderer` produces today.
+
+### 18.7 Search
+
+**Redesign (design: `Admin Dashboard.dc.html:196-227`).** The Enter-only
+search (`adminwindow.cpp:438`, Section 5.8) gains debounced live filtering and,
+critically, the **Ctrl+K** global quick-search shortcut (`Navigator`-owned,
+Sections 14.4/5.8 — there is no `QShortcut` for search anywhere today). The
+results grid becomes an `LTable` (`StudentListModel`), the gold SEARCH CTA an
+`LButton variant: Accent` (`Theme.elevation.ctaGold`,
+`Admin Dashboard.dc.html:201`). Per Section 9, Search reuses the
+`StudentsViewModel` class as a **search-only instance** (no `ImportController`)
+— it does not introduce a view-model class of its own.
+
+- **ViewModel / components:** `StudentsViewModel` (search-only instance);
+  `LPageHeader`, `LCard`, `LButton` (Accent), `LTable`, `LSegmented`/filter
+  controls.
+- **Parity to preserve:** department/course filter narrowing
+  (`studentcontroller.h`); the 9-column result set (`adminwindow.cpp:435-436`);
+  inline bulk-edit (the same `itemChanged`-driven capability as Database,
+  `adminwindow.cpp:2061`).
+
+### 18.8 Visit logs — the two distinct surfaces, resolved
+
+Section 5.9 established that two different things share the word "visit": the
+design's **Visit Logs** page shows **student attendance** (per-row
+time-in/time-out, `Admin Dashboard.dc.html:229-260`), while today's nearest
+analog, `visitorPage` (`adminwindow.ui:2214`), is a **guest sign-in log**
+(name/company/purpose/date/time, `adminwindow.cpp:2508-2532`) backed by
+`get_visitors.php`. Section 16.4 fixed the rule that a genuine
+student-attendance endpoint would be **additive** and left the product
+decision here. **This section makes it.** Both surfaces are designed
+explicitly; they are not collapsed into one:
+
+- **(a) Guest sign-in log — ships in 2.0, reuses `get_visitors.php`.** The
+  existing `visitorPage` is modernized in place: `VisitLogsViewModel` wraps
+  `VisitorController` end-to-end (the worked example of Section 10.4), the
+  four-mode `visitorDateFilterBox` combo (`adminwindow.cpp:2477-2506`,
+  Section 4.4) is replaced by an **`LSegmented` Today/This-Week control**
+  (`Admin Dashboard.dc.html:232-236`) two-way-bound to
+  `VisitLogsViewModel.rangeMode`, and rows render through `LTable`
+  (`VisitLogModel` over `QList<VisitorRecord>`). The Today→`SpecificDay` /
+  ThisWeek→`DateRange` mapping happens inside the ViewModel;
+  `VisitorController`'s own surface is untouched (Section 10.4). Excel export
+  reuses `VisitorController::exportToExcel` (`visitorcontroller.h:22-25`). This
+  is the surface the spec's "Today/This-Week visitor-log toggle... lands
+  natively here" (spec §7) refers to.
+
+- **(b) Student attendance "Visit Logs" — the design-target screen; backend
+  is net-new additive work, deferred, and not a 2.0 blocker.** The design's
+  time-in/time-out rows need student-attendance history, which
+  `get_visitors.php` does **not** provide (it is the guest log, Section
+  5.9/16.4). Serving it requires a **new additive endpoint** (e.g.
+  `get_visit_logs.php` reading the `library_visits` table the RFID flow
+  already writes — `rfid_login.php:32-35`, Section 16.1) reached through the
+  same `ApiConfig::endpoint(...)` seam with **no change to any existing
+  contract** (Section 16.4). That endpoint is **deferred backend work mapping
+  to Section 17's Phase-6 scope** (additive rather than a rewrite of
+  `get_visitors.php`), **not a dependency that blocks the 2.0 client
+  migration** — the client, `Theme`, components, and `VisitLogsViewModel` all
+  ship in Phase 3 regardless. When that endpoint lands, the design's Visit
+  Logs sidebar entry is powered by the **same `VisitLogsViewModel`** with its
+  model source widened/swapped from guest rows to attendance rows — **not a
+  second ViewModel** (Section 10.4's tension note). Until then, the Visit Logs
+  screen presents guest-log rows (surface (a))'s data.
+
+- **ViewModel / components:** `VisitLogsViewModel` + `VisitLogModel`;
+  `LPageHeader` (with EXPORT CSV / PRINT REPORT actions,
+  `Admin Dashboard.dc.html:238-239`), `LSegmented` (Today/This-Week),
+  `LTable`, `LButton`, `LToast`.
+- **Parity to preserve (surface (a)):** guest-log fetch/filter/export via
+  `VisitorController` (`fetchVisitors`/`exportToExcel`,
+  `visitorcontroller.h:19,22-25`); the export filename default
+  (`defaultExportFileName`); the guest-record columns
+  (`visitordata.h:9-14`). Terminology stays consistent with Section 5.9/16.4:
+  **Visit logs** (student attendance, design-target) vs. the current
+  narrower **guest log** (`visitorPage`/`VisitorController`).
+
+### 18.9 Settings
+
+**Redesign (current: folded into `generalPage`, Section 5.5).** Settings gets
+its **own sidebar entry**, split out from the (net-new) dashboard that now
+occupies the "General" slot (Section 5.4/5.5 — this is adding a sidebar entry
+via `Navigator.registeredPages`, Section 14.2, not renaming one). The
+school/admin/library fields, admin-key update, and library hours render as
+`LCard` sections over an `LPageHeader`; `SettingsViewModel` (Section 10.6)
+consolidates the two current read paths (`SettingsController::load()` and
+`collectHeaderInfo`'s separate `QSettings` read, `adminwindow.cpp:1401-1412`)
+into the one controller call. **Live logo re-theming** is preserved and made
+first-class: importing a logo calls
+`ThemeViewModel::regenerateFromImportedLogo(path)` (Sections 10.6/10.7), which
+runs the existing `BrandTheme::regenerateFromLogo` and emits `changed()`, so
+every `Theme.*`-bound component repaints with the new brand **without a
+restart** (Section 13.2's property-binding mechanism) — the "live re-theme via
+property bindings" spec §6 requires.
+
+- **ViewModel / components:** `SettingsViewModel` (+ `ThemeViewModel` for
+  logo re-theme); `LPageHeader`, `LCard`, `LButton` (import logo/poster,
+  save), `LToast`.
+- **Parity to preserve:** school-name/address/font, admin-key change
+  (`update_admin_key.php`, `adminwindow.cpp:780`), library open/close hours,
+  logo/poster import; the Manual-mode hook stays code-only with no editor UI
+  (Sections 10.7/13.5, spec §11); re-theme is gated on `ThemeMode::Auto`
+  exactly as today (`adminwindow.cpp:1174-1187`, Section 2.3).
 
 ## 19. Risk analysis
 
-*[to be written in Task 6]*
+This expands the spec's six named risks (spec §10) with an explicit
+likelihood / impact / mitigation / owner-check for each, and adds the new
+risks surfaced while writing Sections 2-18. "Owner-check" is the concrete
+thing the owner (or the per-phase gate) verifies to confirm the risk is
+retired — not a restatement of the mitigation.
+
+### 19.1 Spec §10 risks, expanded
+
+**R1 — RFID under QML focus (top risk).**
+The kiosk RFID path today is an application-wide event filter,
+`RfidKeyboardFilter`, gating on `QApplication::activeWindow()`/`focusWidget()`
+(`rfidkeyboardfilter.cpp:25,33-36`, Section 2.4) — both `QApplication`/
+`QWidget` APIs with no `QQuickWindow` equivalent. The pure `RfidScanDetector`
+state machine underneath is reused verbatim (`rfidscandetector.h:20`, Section
+7.1); the **install/focus layer is re-authored, not reused** (Sections 6.2/
+7.1). Event delivery and focus semantics differ between Widgets and Quick,
+which is why this is the top risk.
+- **Likelihood:** Medium (a known-different mechanism, but a bounded one).
+- **Impact:** High (RFID is the kiosk's primary walk-up input; a regression
+  here breaks the core flow).
+- **Mitigation:** de-risk with the **Phase 1 RFID-in-QML spike** *before*
+  Phase 2 depends on it (spec §9; Section 20). Reuse the detector state
+  machine as-is; re-author only the `QQuickWindow`-side capture/focus layer.
+- **Owner-check:** the Phase 2 kiosk **parity checklist verifies "RFID
+  behaves exactly as today" as observable behavior** — tap latency, the
+  2.5-second same-card debounce (`mainwindow.cpp:301-305`), and no
+  double-logging from propagated key events — **not** as assumed code reuse
+  (the reviewer's forward-note, Sections 6.2/18.1). This is the single most
+  important owner-check in the plan.
+
+**R2 — QtCharts vs. QML styling.**
+QtCharts' QML styling fights the maroon/gold design (spec §10 Risk 2). The
+dashboard's simple bars are therefore built as **custom QML** (`LBarChart`,
+Section 11/18.4), and QtCharts is confined to `reportrenderer`'s export path
+only.
+- **Likelihood:** Low (the decision is already made; the risk is only that
+  someone reaches for QtCharts on-screen out of habit).
+- **Impact:** Low-Medium (a styling mismatch on the dashboard, not a
+  functional failure).
+- **Mitigation:** `LBarChart` covers both dashboard bar shapes
+  (`orientation: Vertical|Horizontal`, Section 11); `reportrenderer` keeps its
+  `QChart`-based static painters for PDF/Excel export, carrying the accepted
+  transitive `Qt::Charts` + `Qt::Widgets` link (Sections 3.9/7.1 — `QChart`
+  derives from `QGraphicsWidget`; `tst_reportrenderer` already pays this cost
+  at `tests/CMakeLists.txt:152-157`).
+- **Owner-check:** the Section 12.8 grep audit — no raw QtCharts widget in any
+  `qml/` screen; charts on screen resolve through `LBarChart`, and the only
+  `Qt::Charts` link in the Quick app is on the `reportrenderer` export path.
+
+**R3 — Dark mode has no design reference.**
+Both built-out design files are light-theme only (Section 4.1); dark values
+are **derived, not designed** (Sections 6.5/13.4), using the engine's own WCAG
+math (`BrandColorMath::contrastRatio`, `brandcolormath.h:28-35`).
+- **Likelihood:** High that *some* derived pairing needs hand-tuning (there is
+  no reference to match).
+- **Impact:** Low-Medium (cosmetic/contrast, isolated to dark mode; light mode
+  is fully specified).
+- **Mitigation:** derive dark surfaces via `shade`/`mix`, re-contrast-check
+  brand roles against the new surfaces (`MinContrast = 3.0`, `brandtheme.h:22`;
+  4.5 for body text), and **budget a human review round in Phase 5** (Section
+  13.4).
+- **Owner-check:** the Phase 5 a11y/human-walkthrough gate signs off dark mode
+  visually and against the contrast thresholds; no dark-mode value is claimed
+  "done" from a text description alone.
+
+**R4 — Deployment-hardware rendering performance.**
+Qt Quick's scene-graph rendering may underperform the current Widgets app on
+the actual library PC (potentially older/integrated graphics).
+- **Likelihood:** Medium (unknown hardware; Quick is GPU-oriented).
+- **Impact:** High if it materializes (a sluggish kiosk is a visible
+  regression at the point of use).
+- **Mitigation:** **validate Qt Quick rendering on the real library PC in
+  Phase 1** (spec §9/§10 Risk 4), before any screen is built on the
+  assumption it renders smoothly; **document the software-rendering fallback**
+  (e.g. the Qt Quick software backend) as the contingency.
+- **Owner-check:** a Phase 1 sign-off that `AppShell.qml` + the animation set
+  (Section 15) run acceptably on the deployment machine, with the
+  software-rendering fallback documented and tested if the GPU path is
+  inadequate.
+
+**R5 — PHP hardening regressions.**
+The Phase-6 backend hardening (Section 17) could drift a request/response
+contract the frozen client depends on (Section 16.2).
+- **Likelihood:** Medium (nine hardening items, H1-H9, touch live endpoints).
+- **Impact:** High (a contract drift silently breaks a shipped 2.0 screen).
+- **Mitigation:** **contract-tests-first** (Section 17.1) — capture golden
+  request/response fixtures (synthetic data only) *before* touching any
+  endpoint; a hardening change that alters a JSON shape is out of scope by
+  definition. All of this is **Phase 6**, after the client migration, so it
+  never blocks it.
+- **Owner-check:** every H1-H9 item's golden fixture still matches after the
+  change; the Phase 6 gate runs the fixture suite green.
+
+**R6 — Two apps in one repo.**
+The legacy Widgets app and the new Quick app coexist during the rebuild
+(Section 7.4), risking confusion over which is authoritative or accidental
+edits to the wrong surface.
+- **Likelihood:** Low-Medium (a process/discipline risk, not a technical one).
+- **Impact:** Low (bounded by the build flag; both link the same `witscore`).
+- **Mitigation:** `-DBUILD_LEGACY_WIDGETS=ON` (default) keeps the rollback
+  alive and clearly delimited until **Phase 6 removes it** (Sections 6.6/7.6;
+  the flag default flips to `OFF` only at the Phase 6 deletion milestone —
+  never a "Phase 5 deletes Widgets" step).
+- **Owner-check:** at Phase 6, the flag defaults `OFF`, the legacy sources are
+  deleted, and the 12 ctest targets (now on `core/` paths) plus the new
+  ViewModel/Quick tests are all green with the Widgets app gone.
+
+### 19.2 New risks surfaced in Sections 2-18
+
+| # | Risk | Likelihood | Impact | Mitigation | Owner-check |
+|---|---|---|---|---|---|
+| N1 | **Zero-config default palette changes** from today's blue/green to maroon/gold (Section 12.4) — a school that never opens Settings gets a different out-of-the-box look than the old Widgets app. | Low | Low | Deliberate, reasoned decision (Section 12.4): 2.0 is a full presentation rebuild with no shipped-look continuity to protect for a never-branded install; `fallbackPalette()` itself is unchanged, only `ThemeViewModel`'s seeding differs. | Owner confirms in the Phase 0 sign-off that maroon/gold is the intended unbranded default; Phase 2 kiosk walkthrough shows it. |
+| N2 | **Department-list duplication does not fully resolve** — shrinks from three fetchers to two (`DashboardViewModel`/`ReportsViewModel` via `ReportController`, `StudentsViewModel` via `StudentController`), not one (Sections 3.6/9). | Low | Low | Accepted and documented (Section 9): a single shared department service is a plausible later consolidation, not mandated by this Phase 0 architecture; `adminWindow::loadDepartments`'s hand-rolled third fetcher disappears when `adminWindow` is deleted in Phase 6. | No owner action required in 2.0; noted so a future contributor does not read it as an oversight. |
+| N3 | **Extrapolated tokens have no design reference** — `Theme.elevation.modal` (Section 12.7), `toastIn`/`toastOut` motion (Section 15.1), and the `LToast`/`LDialog` treatments derived from them. | Medium | Low | Flagged as **Phase-1 human-review items** at the point the components are built, same posture as dark mode (R3); values are extrapolated from the existing one-shot easing curve, not invented wholesale. | Phase 1 component-library walkthrough signs off the modal/toast look explicitly. |
+| N4 | **Login has no controller today** — `KioskViewModel` owns a **net-new `AuthController`** (Section 10.1) wrapping the three login endpoints that are ad hoc `QNetworkAccessManager` calls in `MainWindow` today (`mainwindow.cpp:180-235,299-342`). This is the one module with no existing controller to reuse. | Medium | Medium | Build `AuthController` in Phase 2 following the established injected-`QNetworkAccessManager` + async-signals pattern (Section 2.2); it wraps existing frozen endpoints (`student_login.php`/`admin_login.php`/`rfid_login.php`, Section 16.2), so there is no new wire contract. | Phase 2 adds a `tst_authcontroller`-style unit test using synthetic payloads (the no-live-network house rule, Section 10.8); kiosk parity checklist covers all three login paths. |
+| N5 | **Student-attendance Visit Logs backend is deferred** — the design's time-in/time-out Visit Logs screen ships in Phase 3 presenting **guest-log data** until a net-new additive endpoint lands (Sections 5.9/16.4/18.8). | Medium | Low-Medium | Explicitly a product decision made in Section 18.8: surface (a) (guest log, `get_visitors.php`) ships now; surface (b) (student attendance) is additive Phase-6-scoped backend work behind the same `ApiConfig::endpoint(...)` seam, **not a 2.0 blocker**; the same `VisitLogsViewModel` widens when it lands (no second ViewModel). | Owner acknowledges in Phase 0 sign-off that the Visit Logs screen initially shows guest sign-ins; the student-attendance endpoint is tracked as additive backend work, not a migration dependency. |
+| N6 | **`Theme.success` (`#10B981`) has no design reference** — carried from `fallbackPalette()` (`brandtheme.cpp:47`), tonally green against a maroon/gold palette (Section 12.1). | Low | Low | Flagged for the Phase-5 a11y/dark-mode review round to revisit if a success/confirmation state actually ships; the recommended warm error role (`#A33B34`, Section 12.1) already addresses the analogous error case. | Phase 5 review confirms or replaces the success color if any `LToast severity: Success` surface is built. |
+
+The recurring theme across N3/N5/N6 and R3 is honest: wherever the design
+references do not answer a question (dark mode, modal/toast chrome, a success
+color, a student-attendance backend), this document names the gap and routes
+it to a **specific later gate** (Phase 1 component review, Phase 5 a11y round,
+or additive Phase-6 backend work) rather than papering over it with an
+invented value — consistent with the whole document's "cite it or flag it"
+discipline.
 
 ## 20. Phased implementation roadmap
 
-*[to be written in Task 6]*
+This reproduces and elaborates the spec §9 roadmap — **Phase 0 → 1 → 2 → 3 →
+4 → 5 → 6**, in that exact numbering — giving each phase its deliverables, its
+gate, and its parity/verification criteria. The phase boundaries are the spec's
+verbatim; this section adds the screen-to-phase mapping (Section 18), the
+risk-retirement mapping (Section 19), and the per-phase parity detail.
+
+**The per-phase gate is the same four checks at every boundary** (spec §8),
+stated once here and referenced as "the gate" below: (1) Debug **and** Release
+builds clean with no new warnings; (2) full `ctest` green — the **12 existing
+targets in every phase** (Section 2.7/8) plus that phase's new ViewModel/Quick
+tests; (3) `/claude-review` to APPROVE or the round cap; (4) a **human visual
+walkthrough** (premium look is a human judgment, spec §8). Phase 0 is the
+exception — its gate is owner approval, below.
+
+### Phase 0 — this document (hard stop at owner approval)
+
+- **Deliverable:** this comprehensive modernization proposal (Sections 1-20:
+  repo/debt/design/UX assessments, migration strategy, architecture, folder
+  structure, ViewModels, component library, design/theme/navigation/animation
+  systems, backend reuse + hardening plan, screen-by-screen redesigns, risks,
+  this roadmap). **No implementation code** (spec §2, "Process").
+- **Gate:** **owner approval — a hard stop.** Phase 1 does not begin until the
+  owner approves this document. This is the single gate that is not the
+  four-check build/test/review/walkthrough gate, because Phase 0 produces a
+  document, not a build.
+- **Verification criteria:** every codebase claim cites a real `file:line`
+  (the document's own standing rule); the locked decisions (spec §2) are
+  elaborated within, not relitigated; the open questions the design references
+  cannot answer are each routed to a named later gate (Section 19).
+
+### Phase 1 — `witscore` extraction + AppShell/Theme + RFID spike
+
+- **Deliverables:** (a) extract the Widgets-free core into the `witscore`
+  static library (Section 7.1) so **both apps build and 12/12 ctest stays
+  green** — the core move is `git mv` + CMake path update, not a rewrite
+  (Sections 6.2/7.6); (b) stand up `AppShell.qml`, the `Theme.qml` singleton
+  (light/dark + brand-engine wiring, Sections 12/13) and `ThemeViewModel`, and
+  the ten `L*` core components (Section 11); (c) the **RFID-in-QML spike** —
+  reuse `RfidScanDetector`, re-author the install/focus layer against
+  `QQuickWindow` (Section 19 R1); (d) the **deployment-hardware render check**
+  on the actual library PC, with the software-rendering fallback documented
+  (R4).
+- **Gate:** the gate. Nothing user-facing ships this phase.
+- **Parity/verification:** 12/12 green after the move with each target still
+  compiling its own controller `.cpp` directly (`tst_reportcontroller` still
+  omits `reportrenderer.cpp`, Section 7.6); the RFID spike demonstrates
+  detector behavior under Quick focus; render performance signed off on the
+  deployment machine. Retires the two highest risks (R1, R4) before any screen
+  depends on them, plus the N3 extrapolated-token review at component build.
+
+### Phase 2 — Kiosk surface parity
+
+- **Deliverables:** the kiosk surface — Kiosk login (18.1), Live attendance
+  feed + hero + stat tiles (18.2), Guest flow (18.3) — built on
+  `KioskViewModel` + `VisitLogModel`, including the net-new `AuthController`
+  (Section 10.1/19 N4) over the three frozen login endpoints.
+- **Gate:** the gate, **plus the kiosk parity checklist**.
+- **Parity/verification:** the checklist enumerates today's kiosk behaviors and
+  checks each against the new screen — student-ID vs. admin-key routing, the
+  guest toggle (off by default), the live feed, and above all **"RFID behaves
+  exactly as today" verified as observable behavior** (R1's owner-check), not
+  assumed from code reuse. Adds `KioskViewModel`/`AuthController` unit tests
+  (synthetic payloads, Section 10.8) on top of the 12-target baseline.
+
+### Phase 3 — Admin part 1: dashboard, visit logs, search
+
+- **Deliverables:** Admin dashboard (18.4, net-new over existing report data,
+  `DashboardViewModel` + `LStatTile`/`LBarChart`), Visit logs with the
+  Today/This-Week `LSegmented` (18.8, `VisitLogsViewModel` over the guest log —
+  surface (a)), and Search with Ctrl+K (18.7, `StudentsViewModel` search-only
+  instance + `Navigator` shortcut).
+- **Gate:** the gate, plus the per-module parity checklists.
+- **Parity/verification:** dashboard figures match `ReportController`'s existing
+  aggregates; the Visit Logs guest-log fetch/filter/export matches
+  `VisitorController` behavior with the segmented control replacing the
+  four-mode combo; Ctrl+K reaches Search from anywhere (the gap Section 5.8
+  confirms is absent today). **Surface (b)** — student-attendance Visit Logs —
+  is *not* a Phase 3 deliverable: it depends on the additive, Phase-6-scoped
+  endpoint (18.8/19 N5) and does not block this phase.
+
+### Phase 4 — Admin part 2: database + import, reports, settings
+
+- **Deliverables:** Database/students with import-as-action (18.5,
+  `StudentsViewModel` Database instance + `ImportController`), Reporting with
+  `reportrenderer` export reuse and the new all-departments path (18.6,
+  `ReportsViewModel`), and Settings with **live logo re-theming** (18.9,
+  `SettingsViewModel` + `ThemeViewModel`).
+- **Gate:** the gate, plus the per-module parity checklists.
+- **Parity/verification:** bulk import + duplicate check + photo-ZIP upload and
+  inline edit preserved; PDF/Excel exports match `ReportRenderer`'s current
+  output; logo import re-themes the whole UI live via property bindings with no
+  restart (Section 13.2). At this point every in-scope screen exists in Quick;
+  the Widgets app is still the rollback (R6).
+
+### Phase 5 — Dark-mode polish + a11y pass
+
+- **Deliverables:** the derived dark palette finalized (Sections 6.5/13.4), the
+  accessibility pass across the component library (`Accessible.*` roles,
+  keyboard navigation, reduce-motion, Sections 11/14.4/15.2).
+- **Gate:** the gate, **with the human walkthrough weighted heavily** — this is
+  the budgeted human-review round for the items with no design reference.
+- **Parity/verification:** dark-mode values pass the contrast thresholds
+  (`MinContrast = 3.0`; 4.5 for body text) and read as maroon/gold at night
+  (R3's owner-check); full keyboard navigation on admin (spec §7); the N6
+  success-color decision is confirmed or replaced. **This phase does not delete
+  the Widgets app** — deletion is Phase 6.
+
+### Phase 6 — Backend hardening + Widgets deletion + final review
+
+- **Deliverables:** (a) the Section 17 targeted backend hardening (H1-H9 +
+  §17.3), **contract-tests-first** across the endpoints — parameterize
+  `get_visitors.php`, add server-side `requireAdminAuth` to the destructive
+  endpoints, remove the debug scripts (`phpinfo.php`/`testupload.php`), resolve
+  `hash_admin.php` as a no-op, and revisit the hardcoded base URL; (b) **delete
+  the Widgets app** — `-DBUILD_LEGACY_WIDGETS` default flips to `OFF` and the
+  legacy sources (`mainwindow.*`, `adminwindow.*`, `guestwindow.*`,
+  `attachfilesdialog.*`, `rfidkeyboardfilter.*`, `theme.h`, `wits.qss`) are
+  removed (Sections 6.6/7.6); (c) final whole-branch `/claude-review`. The
+  optional `witscore`/`witscore_reports` split (Section 7.1 option (b)) becomes
+  available here once the second `Qt::Widgets` consumer is gone. If the
+  additive student-attendance endpoint (19 N5) is built, it lands in this
+  phase's additive backend scope.
+- **Gate:** the gate, plus the human walkthrough, plus **every H1-H9 golden
+  fixture still matching** (R5's owner-check).
+- **Parity/verification:** hardening is provably behavior-preserving (no
+  contract drift, Section 17.1); the 12 ctest targets (now on `core/` paths)
+  plus all ViewModel/Quick tests are green **with the Widgets app deleted**
+  (R6's owner-check) — the exit condition of Strategy A (spec §2).
+
+### Roadmap at a glance
+
+| Phase | Screens / deliverables (Section 18) | Gate | Risks retired (Section 19) |
+|---|---|---|---|
+| **0** | This proposal (Sections 1-20); no code | **Owner approval — hard stop** | Documents all; routes open questions to later gates |
+| 1 | `witscore` extraction (12/12 green); AppShell + Theme + `L*` components; RFID spike; hardware render check | the gate | R1, R4, N3 |
+| 2 | Kiosk: login (18.1), feed/hero/stats (18.2), guest (18.3); `AuthController` | the gate + kiosk parity checklist | R1 (owner-check), N4 |
+| 3 | Admin pt 1: dashboard (18.4), visit logs — guest surface (18.8a), search (18.7) | the gate + parity checklists | — (N5 deferred, not blocking) |
+| 4 | Admin pt 2: database + import (18.5), reports (18.6), settings + live re-theme (18.9) | the gate + parity checklists | — |
+| 5 | Dark-mode polish + a11y pass | the gate + weighted human walkthrough | R3, N6 |
+| 6 | Backend hardening (Section 17); **delete Widgets app**; final whole-branch review | the gate + fixtures + walkthrough | R5, R6; N5 additive endpoint (optional) |
+
+Phase 0 ends at owner approval before Phase 1 begins (spec §2/§9). Widgets
+deletion is **Phase 6**, never Phase 5; the legacy app survives behind
+`-DBUILD_LEGACY_WIDGETS` as the rollback until then (Sections 6.6/7.6).
