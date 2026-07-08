@@ -2390,11 +2390,211 @@ the Qt 6.11 patch level in use, not asserted here as a specific call.
 
 ## 16. Backend reuse plan
 
-*[to be written in Task 5]*
+**Locked decision (restated):** the 2.0 client keeps the existing PHP/MySQL
+backend. The modernization is a Qt Widgets → Qt Quick migration of the
+*client*; the server contracts are reused as-is. Nothing in this section
+proposes a backend rewrite, an ORM, a framework, or a schema change — those
+are explicitly out of scope (see Section 17's non-goals).
+
+### 16.1 What the backend actually is (inventory)
+
+`deliverables/loams_api/` holds **29 `.php` files**. Grouped by role:
+
+| Role | Count | Files |
+| --- | --- | --- |
+| Shared helpers (not HTTP-callable on their own) | 3 | `config.php`, `db.php`, `auth_helper.php` |
+| Single-entry dispatcher (alternate router) | 1 | `api.php` |
+| Debug/diagnostic scripts (retire — see §17) | 2 | `phpinfo.php`, `testupload.php` |
+| Application endpoints | 23 | the remainder listed in the table below |
+
+So the client-facing surface is **25 request-handling scripts** (23
+application endpoints + 2 debug scripts), sitting on **3 shared helpers**
+and **1 dispatcher**. This corrects the round-number "30 endpoints" figure
+some earlier planning notes carried — `ls deliverables/loams_api/*.php | wc
+-l` returns **29**, and four of those are infrastructure, not endpoints.
+
+The stack itself is reused verbatim: plain PHP with the `mysqli` driver, no
+framework, JSON over HTTP. The shared helpers are:
+
+- **`db.php`** — opens the `mysqli` connection every endpoint `include`s
+  (`db.php:11`). Note it hardcodes `localhost`/`root`/empty-password/`wits_app`
+  (`db.php:6-9`); `config.php` restates the same credentials as constants
+  (`config.php:8-11`). This is the same-machine XAMPP topology the project's
+  `security-hygiene.md` rule treats as illustrative rather than a live
+  secret; §17 flags the duplication, not a rewrite.
+- **`auth_helper.php`** — `requireAdminAuth($conn)` (`auth_helper.php:11-47`)
+  verifies a posted `admin_key` against the bcrypt hash in the `admin` table
+  with `password_verify` and exits `401` on failure. This is the sanctioned
+  admin-auth pattern and is reused unchanged.
+- **`config.php`** — environment/CORS/upload constants (`config.php:8-26`).
+
+Because the core schema (`students`, `library_visits`, `visitors`, `admin`
+tables) is **not checked into this repo** — `git ls-files '*.sql'` returns
+only `deliverables/sql/branding_config.sql` — the table/column facts below
+are read out of the endpoints' own SQL rather than a schema file. For
+example the RFID flow reads `students.code` and writes `library_visits`
+(`rfid_login.php:23,32-35`), the report join is `students LEFT JOIN
+library_visits ON s.school_id = v.student_id` (`get_report_data.php:42-45`),
+and the guest log is the `visitors` table (`get_visitors.php:37-40`,
+`guest_login.php:35`). The 2.0 client depends on these shapes, not on any
+`.sql` artifact.
+
+### 16.2 Contracts reused unchanged
+
+The 2.0 QML client calls the **same endpoints the current Widgets client
+already calls**, with the **same request bodies and response JSON**. The
+migration replaces the *caller* (widget method bodies → ViewModel/service
+seams per Sections 9-10), never the wire contract. Endpoints already wired
+through `ApiConfig::endpoint()` today:
+
+| Endpoint (relative to base URL) | Method | Server auth | Query style | Client call site (reused) |
+| --- | --- | --- | --- | --- |
+| `student_login.php` | POST | none (public kiosk) | prepared (`student_login.php:25`) | `mainwindow.cpp:195` |
+| `rfid_login.php` | POST | none (public kiosk) | prepared, transactional (`rfid_login.php:23,32-35,57`) | `mainwindow.cpp:309` |
+| `guest_login.php` | POST | none (public kiosk) | prepared (`guest_login.php:35`) | `guestwindow.cpp:40` |
+| `admin_login.php` | POST | verifies `admin_key` inline (`admin_login.php:12-17`) | prepared | `mainwindow.cpp:198` |
+| `update_admin_key.php` | POST | verifies `old_key` inline (`update_admin_key.php:18`) | prepared (`update_admin_key.php:14,20`) | `adminwindow.cpp:780` |
+| `get_departments.php` | GET | none | static query (`get_departments.php:15-16`) | `adminwindow.cpp:447,1366`, `studentcontroller.cpp:246`, `reportcontroller.cpp:197` |
+| `get_courses.php` | GET | none | prepared (`get_courses.php:25`) | `studentcontroller.cpp:262`, `reportcontroller.cpp:249` |
+| `get_years.php` | GET | none | static query (`get_years.php:17`) | `reportcontroller.cpp:224` |
+| `get_report_data.php` | POST | none | dynamic-but-parameterized (`get_report_data.php:90,103`) | `reportcontroller.cpp:280` |
+| `api.php/reports/data` | POST | none | dispatches `get_report_data.php` (`api.php:95-100`) | `reportcontroller.cpp:315` |
+| `search_students.php` | POST | none | prepared (`search_students.php:48`) | `studentcontroller.cpp:144` |
+| `register_student.php` | POST | none | prepared (`register_student.php:86-91`) | `adminwindow.cpp:728` |
+| `bulk_update_students.php` | POST | none (see §17) | prepared (`bulk_update_students.php:43`) | `studentcontroller.cpp:175` |
+| `delete_students.php` | POST | none (see §17) | prepared (`delete_students.php:19`) | `studentcontroller.cpp:214` |
+| `check_duplicates.php` | POST | none | prepared (`check_duplicates.php:16`) | `importcontroller.cpp:157` |
+| `upload_students_zip.php` | POST | none (see §17) | prepared insert (`upload_students_zip.php:73`) | `importcontroller.cpp:201` |
+| `deactivate_department.php` | POST | none (see §17) | prepared (`deactivate_department.php:14`) | `adminwindow.cpp:547` |
+| `delete_department.php` | POST | none (see §17) | prepared (`delete_department.php:21,30`) | `adminwindow.cpp:644` |
+| `reset_visits.php` | POST | none (see §17) | prepared (`reset_visits.php:17,23`) | `adminwindow.cpp:595` |
+| `get_visitors.php` | POST | none | **string-built (see §17)** (`get_visitors.php:19-33`) | `visitorcontroller.cpp:25` |
+| `get_branding.php` | GET | none | static query (`get_branding.php:5`) | `brandingcontroller.cpp:20` |
+| `save_branding.php` | POST | **`requireAdminAuth`** (`save_branding.php:6`) | prepared + validation (`save_branding.php:31-43`) | `brandingcontroller.cpp:43` |
+
+Two application endpoints exist server-side but are **not currently wired
+to the client**: `update_admin_info.php` (`update_admin_info.php:14`) and
+`get_courses_by_department.php` (`get_courses_by_department.php:10-13`).
+They are reused (left in place) but need no client change for 2.0; if a
+redesigned admin screen (Section 18) wants them, they call through the same
+`ApiConfig::endpoint()` seam.
+
+Every one of the reused contracts above is treated as **frozen** for the
+migration. The single most important consequence for §17: hardening must
+not change any of these request/response shapes (see the contract-tests-first
+method).
+
+### 16.3 The branding endpoints (Phase 1) are reused verbatim
+
+`get_branding.php` / `save_branding.php` and their backing table
+`branding_config` (`deliverables/sql/branding_config.sql:4-12`, a new
+singleton `id = 1` row that alters no existing table) were added in Phase 1
+for the brand-engine work. They are **already the model** the rest of the
+backend should look like: `save_branding.php` requires admin auth
+(`save_branding.php:6`), whitelists `theme_mode` to `auto`/`manual`
+(`save_branding.php:12`), rejects a non-object palette via `json_decode` +
+`is_array` (`save_branding.php:18-19`), validates `logo_hash` as a 64-char
+SHA-256 hex string (`save_branding.php:25`), and writes through a prepared
+`INSERT ... ON DUPLICATE KEY UPDATE` (`save_branding.php:31-43`). The 2.0
+`BrandingController` (`brandingcontroller.cpp:20,43`) consumes these
+unchanged; no reuse work is needed beyond keeping the QML `Theme` singleton
+(Section 13) reading the same JSON.
+
+### 16.4 New endpoints are additive off one base URL
+
+`apiconfig.h` is the single source of truth for the backend base URL
+(`apiconfig.h:18-21`) and `ApiConfig::endpoint()` (`apiconfig.h:27-34`)
+builds every request path relative to it — already unit-tested
+(`qt-app/tests/tst_apiconfig.cpp:17-37`). Any endpoint a redesigned 2.0
+screen needs that does not exist today (for example the **student Visit
+Logs** screen that Section 5.9 establishes is *net-new* and distinct from
+the existing guest log — `get_visitors.php` is the guest-sign-in log, not a
+student-attendance endpoint) is added **additively**: a new `.php` file
+reached through the same `ApiConfig::endpoint("new_endpoint.php")` seam, with
+no change to any existing contract. The product decision on whether such a
+student-attendance endpoint is built is left to Section 18; §16 only fixes
+the rule that it would be additive, not a rework of `get_visitors.php`.
 
 ## 17. Backend refactoring plan
 
-*[to be written in Task 5]*
+**Scope fence.** This section is **targeted hardening only**. It does not
+propose — and explicitly excludes — a backend redesign, a framework/ORM
+adoption, a migration off `mysqli`, a schema redesign, or any change to the
+request/response contracts reused in Section 16. Every item below is a
+bounded, cited fix to the *existing* code. Anything larger is out of scope
+for Phase 0's proposal and is not relitigated here. All of this work maps to
+the spec's **Phase 6** backend-hardening entry (spec §9, Phase 6); it is not
+Phase 1 work and it does not block the client migration.
+
+### 17.1 Method: contract-tests-first (zero contract drift)
+
+Because Section 16 freezes the wire contracts, hardening must be provably
+behavior-preserving. The method, per endpoint, is:
+
+1. **Capture a fixture.** Record the current request (method + body) and the
+   current response JSON for each endpoint, using **synthetic data only** —
+   no real student names, school IDs, photos, or visit logs (per
+   `security-hygiene.md`). A captured `visitors`/`students` row in a fixture
+   must be invented, e.g. `{"name":"Test User","company":"ACME","school_id":"S0001"}`.
+2. **Pin it as a golden test.** A PHP-side contract test (or a captured
+   `QByteArray` replayed through the client's JSON decoders, the same
+   isolation the workflow rule already prescribes for network logic) asserts
+   the response shape stays identical.
+3. **Harden against the pinned fixture.** Apply the change (parameterize,
+   add auth, etc.) and require the golden test to still pass — same JSON keys,
+   same status strings. If the shape must change, it is no longer "targeted
+   hardening" and is out of scope.
+
+This gives each item below an objective done-condition: the fixture still
+matches. `ApiConfig` is already unit-tested (`qt-app/tests/tst_apiconfig.cpp`),
+so the client half of this harness has a home; the server half is new Phase-6
+work.
+
+### 17.2 Hardening backlog (cited)
+
+| # | Item | Evidence (file:line) | Disposition |
+| --- | --- | --- | --- |
+| H1 | **String-built SQL in the guest log.** `get_visitors.php` interpolates the search term via `real_escape_string` into a `LIKE` and interpolates the raw `start_date`/`end_date` **unescaped** into the `WHERE` | `get_visitors.php:19-33` (dates at lines 27, 30, 33) then `$conn->query($sql)` at `:42` | Parameterize with `prepare`/`bind_param`, matching the pattern `get_report_data.php:90-103` already uses for its dynamic query. This is the one clear injection surface; every other endpoint audited already uses prepared statements. |
+| H2 | **Destructive endpoints are unauthenticated at the server.** `requireAdminAuth` exists but is wired to exactly **one** endpoint (`save_branding.php:6`). The mutating/destructive endpoints do not call it | `delete_students.php` (no auth), `reset_visits.php:8-9`, `bulk_update_students.php`, `deactivate_department.php:14`, `delete_department.php`, `upload_students_zip.php` — grep for `requireAdminAuth`/`admin_key` hits only `admin_login.php`, `auth_helper.php`, `save_branding.php` | Add `include "auth_helper.php"; requireAdminAuth($conn);` to each destructive endpoint. Admin gating is currently **client-side only** (the Qt UI hides the buttons), which is not a server control. |
+| H3 | **Doc/code drift on H2.** `deliverables/loams_api/SECURITY_UPDATES.md` claims auth was *already* added to `delete_students.php`, `bulk_update_students.php`, `reset_visits.php`, and `upload_students_zip.php` | `SECURITY_UPDATES.md:53-89` vs. the actual files (which contain no `admin_key` check) | Treat the doc as the intended spec and actually apply it; then the doc is true. Do **not** trust `SECURITY_UPDATES.md` as a description of current state. |
+| H4 | **A credentials copy that bypasses `db.php`.** `delete_students.php` opens its own inline `new mysqli("localhost","root","","wits_app")` instead of `include "db.php"` | `delete_students.php:11` | Route it through the shared `db.php` (`db.php:11`) so credentials live in one place — a mechanical change, no contract impact. |
+| H5 | **Duplicated DB credentials in source.** `db.php` and `config.php` both hardcode `root`/empty-password/`wits_app` | `db.php:6-9`, `config.php:8-11` | Collapse to one source (have `db.php` read `config.php`, which `SECURITY_UPDATES.md:36-43` claims was done but the committed `db.php` does not do). Illustrative XAMPP creds per `security-hygiene.md`; keep placeholders in any doc example. |
+| H6 | **Debug/diagnostic endpoints shipped.** `phpinfo.php` dumps the full PHP runtime config to any caller; `testupload.php` echoes ini limits and probes `uploads/` writability | `phpinfo.php:1-3`, `testupload.php:1-24` (both established in Section 3.5) | **Remove** both. Neither is referenced by any `ApiConfig::endpoint(...)` call in `qt-app/`. This is the spec's Phase 6 line item verbatim ("remove debug-only endpoints"). |
+| H7 | **`hash_admin.php` decision.** | Section 3.5; a directory listing of `deliverables/loams_api/` (29 `.php` files) contains no such file | **No-op.** The file does not exist in this repo, so there is nothing to remove or refactor. Recording the decision *is* the resolution the spec's Phase 6 note asked for. |
+| H8 | **Plaintext transport.** The single base URL is `http://localhost/loams_api/` — plaintext HTTP, no TLS, compile-time constant | `apiconfig.h:20` | Track the transport question: make the base URL configurable (env/config/`QSettings` override) and support `https://` for any non-localhost deployment. Fine as a same-machine default; a hardening item once auth endpoints carry an admin key over the wire. Ties to Section 3.4. |
+| H9 | **CORS wildcard.** `Access-Control-Allow-Origin: *` is emitted both in the dispatcher and via config | `api.php:9`, `config.php:20` | Lock to the deployed origin for production (`config.php:22` already documents this). Config change, no contract impact. |
+
+### 17.3 Validation looseness — extend the branding pattern
+
+The branding endpoints already validate input strictly (`save_branding.php:12-29`
+— whitelist, `is_array` JSON check, regex on the hash). Most read endpoints
+take no user-controlled input worth validating, but the write endpoints that
+accept free-form fields (`register_student.php:8-16`, `bulk_update_students.php`,
+`update_admin_info.php:14`) currently rely on `trim()` plus the prepared
+statement. Prepared statements neutralize injection, so this is a
+**defense-in-depth / data-quality** item, not an injection fix: apply the
+same whitelist/format-check discipline `save_branding.php` demonstrates
+(e.g. constrain `gender`/`status`/`year_level` to known enums). Low
+priority; grouped here so the pattern is named, not scattered.
+
+### 17.4 Explicit non-goals
+
+To keep the scope fence unambiguous, the following are **out of scope** for
+this plan and are called out so a future contributor does not read them into
+it:
+
+- **No backend redesign / rewrite.** The PHP + `mysqli` + MySQL stack stays.
+- **No framework, ORM, router replacement, or migration tooling.** `api.php`
+  stays as-is (the client uses both the direct `.php` paths and the one
+  `api.php/reports/data` route — `reportcontroller.cpp:315`).
+- **No schema redesign.** The unversioned core schema (§16.1) is not
+  restructured; the only tracked DDL remains `branding_config.sql`.
+- **No contract changes.** Every item in §17.2 is behavior-preserving by the
+  §17.1 method; anything that would alter a response shape is rejected as
+  out of scope.
+
+Net: §17 is a short, bounded Phase-6 checklist (H1-H9 + §17.3) executed
+against golden fixtures, not a backend project.
 
 ## 18. Screen-by-screen redesign recommendations
 
