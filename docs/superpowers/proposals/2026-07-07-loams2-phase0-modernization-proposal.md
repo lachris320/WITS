@@ -1831,7 +1831,7 @@ plus the one open decision Section 4.3 deferred here).
 | `Theme` property | Light value | Source | `BrandPalette` field | Derivation |
 |---|---|---|---|---|
 | `Theme.brand.admin` / `Theme.brand.kiosk` | `#7E1A15` | `Admin Dashboard.dc.html:14`, `Library Kiosk v2.dc.html:14` (`--brand`) | `adminPrimary` / `kioskPrimary` | literal (shipped default — see 12.4) |
-| `Theme.brand.adminHover` / `Theme.brand.kioskHover` | `#5E0E0B` | `Admin Dashboard.dc.html:14,314` (`--brand-deep`, `this.shade(a, -0.28)`) | `adminPrimaryHover` / `kioskPrimaryHover` | `BrandColorMath::shade(brand, -0.28)` (`brandcolormath.h:39-44`) |
+| `Theme.brand.adminHover` / `Theme.brand.kioskHover` | `#5E0E0B` | `Admin Dashboard.dc.html:14,314` (`--brand-deep`, `this.shade(a, -0.28)`) | `adminPrimaryHover` / `kioskPrimaryHover` | `BrandColorMath::shade(brand, -0.28)` (`brandcolormath.h:39-45`) |
 | `Theme.brand.adminSoft` / `Theme.brand.kioskSoft` | `#F6E9E7` | `Admin Dashboard.dc.html:14,315` (`--brand-soft`, `this.mix(a, '#FFFFFF', 0.9)`) | `adminPrimarySoft` / `kioskPrimarySoft` | `BrandColorMath::mix(brand, white, 0.90)` (`brandcolormath.h:49-56`) |
 | `Theme.brand.onPrimary` | `#FFF6E8` | `Admin Dashboard.dc.html:30`, `Library Kiosk v2.dc.html:30` (sidebar text color) | `adminOnPrimary` / `kioskOnPrimary` | literal — see 12.4's note on the divergence from `extractPalette()`'s pure-white on-color |
 | `Theme.secondary` (accent) | `#E8B10E` | `Admin Dashboard.dc.html:14`, `Library Kiosk v2.dc.html:14` (`--gold`) | `secondary` | literal (shipped default) |
@@ -1867,7 +1867,7 @@ system onto values the design actually uses:
 
 `Theme.spacing = { xs: 4, sm: 8, md: 12, base: 14, lg: 16, xl: 18, xl2: 22, xxl: 24, xxxl: 28 }`
 
-Citations: `xs`/4 — `Admin Dashboard.dc.html:78` (`margin-top:4px`);
+Citations: `xs`/4 — `Admin Dashboard.dc.html:77` (`margin-top:4px`);
 `sm`/8 — `Admin Dashboard.dc.html:205` (chip padding `8px 14px`); `md`/12 —
 `Admin Dashboard.dc.html:135` (input padding `12px 16px`); `base`/14 —
 `Admin Dashboard.dc.html:97` (stat-row `gap:14px`); `lg`/16 —
@@ -2265,7 +2265,7 @@ rather than per page:
   direct fix for the gap Section 5.8 already confirms by grep: "no
   `QShortcut` for search exists anywhere in `adminwindow.cpp`" — today
   Search is reachable only by clicking the sidebar button
-  (`adminwindow.cpp:438`, `onSearchBtnClicked`).
+  (`adminwindow.cpp:304-307`, `studentSearchBtn`).
 - **Sidebar cycling:** Up/Down (or number-key 1-6) cycling through
   `registeredPages` while `LSideNav` has focus, implemented once in
   `Navigator`/`LSideNav`'s interaction contract rather than per sidebar
