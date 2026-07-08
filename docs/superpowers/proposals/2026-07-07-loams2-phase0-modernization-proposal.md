@@ -1260,10 +1260,14 @@ ctest targets stay green in every phase**, because the core move is `git mv` +
 path update (Section 7.6), not a rewrite that would break them:
 
 1. **Phase 1 — core + shell first.** Extract `witscore` (both apps build,
-   12/12 green), stand up `AppShell.qml` + `Theme.qml` + the `L*` component
-   library, and run the RFID-in-QML spike (Section 19, Risk 1) and the
-   deployment-hardware render check (Risk 4) *before* any screen depends on
-   them. Nothing user-facing ships, but the two highest risks are retired.
+   12/12 green), confirm the installed Qt 6.11 kit ships the `QtQuick` /
+   `QtQuick.Controls` / `QtQuick.Layouts` modules the whole architecture
+   depends on (the one unstated build-feasibility precondition; almost
+   certainly present, but verified here rather than assumed), stand up
+   `AppShell.qml` + `Theme.qml` + the `L*` component library, and run the
+   RFID-in-QML spike (Section 19, Risk 1) and the deployment-hardware render
+   check (Risk 4) *before* any screen depends on them. Nothing user-facing
+   ships, but the two highest risks are retired.
 2. **Phases 2-4 — one surface/screen-group at a time**, each behind a parity
    checklist (spec §8): kiosk (Phase 2), admin dashboard/visit-logs/search
    (Phase 3), admin database/reports/settings (Phase 4). Each phase adds
@@ -2824,7 +2828,7 @@ work.
 | H1 | **String-built SQL in the guest log.** `get_visitors.php` interpolates the search term via `real_escape_string` into a `LIKE` and interpolates the raw `start_date`/`end_date` **unescaped** into the `WHERE` | `get_visitors.php:19-33` (dates at lines 26, 30, 33) then `$conn->query($sql)` at `:42` | Parameterize with `prepare`/`bind_param`, matching the pattern `get_report_data.php:90-103` already uses for its dynamic query. This is the one clear injection surface; every other endpoint audited already uses prepared statements. |
 | H2 | **Destructive endpoints are unauthenticated at the server.** `requireAdminAuth` exists but is wired to exactly **one** endpoint (`save_branding.php:6`). The mutating/destructive endpoints do not call it | `delete_students.php` (no auth), `reset_visits.php:8-9`, `bulk_update_students.php`, `deactivate_department.php:14`, `delete_department.php`, `upload_students_zip.php` — a grep for `requireAdminAuth` hits only `auth_helper.php` and `save_branding.php` | Add `include "auth_helper.php"; requireAdminAuth($conn);` to each destructive endpoint. Admin gating is currently **client-side only** (the Qt UI hides the buttons), which is not a server control. |
 | H3 | **Doc/code drift on H2.** `deliverables/loams_api/SECURITY_UPDATES.md` claims auth was *already* added to `delete_students.php`, `bulk_update_students.php`, `reset_visits.php`, and `upload_students_zip.php` | `SECURITY_UPDATES.md:53-89` vs. the actual files (which contain no `admin_key` check) | Treat the doc as the intended spec and actually apply it; then the doc is true. Do **not** trust `SECURITY_UPDATES.md` as a description of current state. |
-| H4 | **A credentials copy that bypasses `db.php`.** `delete_students.php` opens its own inline `new mysqli("localhost","root","","wits_app")` instead of `include "db.php"` | `delete_students.php:11` | Route it through the shared `db.php` (`db.php:11`) so credentials live in one place — a mechanical change, no contract impact. |
+| H4 | **A credentials copy that bypasses `db.php`.** At least two destructive endpoints open their own inline `new mysqli("localhost","root","","wits_app")` instead of `include "db.php"` | `delete_students.php:11`, `bulk_update_students.php:27` | Route both through the shared `db.php` (`db.php:11`) so credentials live in one place — a mechanical change, no contract impact. |
 | H5 | **Duplicated DB credentials in source.** `db.php` and `config.php` both hardcode `root`/empty-password/`wits_app` | `db.php:6-9`, `config.php:8-11` | Collapse to one source (have `db.php` read `config.php`, which `SECURITY_UPDATES.md:36-43` claims was done but the committed `db.php` does not do). Illustrative XAMPP creds per `security-hygiene.md`; keep placeholders in any doc example. |
 | H6 | **Debug/diagnostic endpoints shipped.** `phpinfo.php` dumps the full PHP runtime config to any caller; `testupload.php` echoes ini limits and probes `uploads/` writability | `phpinfo.php:1-3`, `testupload.php:1-24` (both established in Section 3.5) | **Remove** both. Neither is referenced by any `ApiConfig::endpoint(...)` call in `qt-app/`. This is the spec's Phase 6 line item verbatim ("remove debug-only endpoints"). |
 | H7 | **`hash_admin.php` decision.** | Section 3.5; a directory listing of `deliverables/loams_api/` (29 `.php` files) contains no such file | **No-op.** The file does not exist in this repo, so there is nothing to remove or refactor. Recording the decision *is* the resolution the spec's Phase 6 note asked for. |
@@ -3230,6 +3234,14 @@ edits to the wrong surface.
   alive and clearly delimited until **Phase 6 removes it** (Sections 6.6/7.6;
   the flag default flips to `OFF` only at the Phase 6 deletion milestone —
   never a "Phase 5 deletes Widgets" step).
+- **Deploy/launch selection (not just edit confusion):** the two-app window
+  also raises *which binary the kiosk actually launches* — a live concern on
+  this project, which has a documented history of stale/wrong-build confusion.
+  Until a surface passes its parity checklist (spec §8), the deployed kiosk
+  keeps launching the legacy `WITS` executable; the new Quick app is validated
+  alongside but is not made the launched binary until its explicit cutover.
+  Each phase's gate names the authoritative binary, so a stale/wrong-build
+  launch cannot pass silently.
 - **Owner-check:** at Phase 6, the flag defaults `OFF`, the legacy sources are
   deleted, and the 12 ctest targets (now on `core/` paths) plus the new
   ViewModel/Quick tests are all green with the Widgets app gone.
