@@ -1,7 +1,7 @@
 # LOAMS 2.0 — Modernization Proposal (Phase 0)
 
 **Date:** 2026-07-07
-**Status:** Draft — pending owner approval
+**Status:** Complete — awaiting owner review
 **Supersedes / builds on:** `docs/superpowers/specs/2026-07-07-loams2-qtquick-design.md` (the locked-decision spec)
 
 ## How to read this document
@@ -27,7 +27,109 @@ directly against the repository.
 
 ## 1. Executive summary
 
-*[to be written in Task 7]*
+**What LOAMS 2.0 is.** LOAMS 2.0 is a full modernization of the *presentation
+layer* of WITS — the library monitoring system — migrating its user interface
+from Qt Widgets to Qt Quick (QML) while keeping the existing PHP/MySQL backend
+and the existing C++ business logic. It is a client rebuild, not a system
+rewrite: the same two surfaces the app has today (a walk-up kiosk and an admin
+console) are rebuilt against the maroon/gold design system in the Claude Design
+references (Section 4), with a proper MVVM architecture, a live-brandable theme,
+light/dark support, and the motion and accessibility the current Widgets UI
+lacks. The scope is **the modules that exist today only** — Inventory,
+Borrow/Return, and an AI Assistant are explicitly out of 2.0 and are treated as
+forward-seams the architecture must leave room for, never build-now work
+(Sections 5.10, 9).
+
+**The locked decisions this document builds within (not relitigated).** Per the
+design spec's §2: 2.0 migrates existing modules only; the Phase 1 branding
+engine is retained and reused unchanged; the app stays one executable presenting
+two surfaces; a design-token system with a single QML `Theme` singleton and a
+derived dark mode; targeted (not wholesale) backend hardening; migration
+**Strategy A** — a parallel rebuild on a shared core; business logic stays
+resident in C++; and a Phase 0 → owner-approval → phased-implementation process.
+Where codebase evidence creates tension with a locked decision, this document
+flags it in a **⚠ Decision tension** callout rather than overriding it silently
+(e.g. the zero-config default palette, raised in Section 4.3 and resolved in
+Section 12.4).
+
+**The strategy — Strategy A, parallel rebuild on a shared core.** The new Qt
+Quick UI is built *beside* the existing Widgets app, both linking one shared
+`witscore` C++ static library, until the Quick app reaches feature parity — at
+which point the Widgets app is deleted (Section 6). The two rejected
+alternatives (an in-place re-skin, and a big-bang rewrite) are documented as
+already-decided in Section 6.1. What makes Strategy A viable is the central
+finding of the repository assessment: the business logic is *already*
+substantially UI-free and reusable (Section 2.8), so the core moves by `git mv`,
+not rewrite, and the 12 existing ctest targets stay green through every phase
+(Section 8).
+
+**The four assessments, one line each.**
+
+- **Repository architecture (Section 2):** the app is one flat CMake target with
+  no library boundary, but its five domain controllers, the report renderer, the
+  brand engine, and the RFID state machine are already Widgets-free and
+  unit-tested — well-positioned for a `git mv` into `witscore`; the net-new work
+  is the missing ViewModel seam between that logic and QML.
+- **Technical debt (Section 3):** the debt that actually impedes the migration
+  is small and cited — the flat CMake target (High) and the UI/logic coupling
+  still inside the window classes (High); the rest (ad hoc `QSettings`,
+  duplicated department fetches, a plaintext base URL, the three-way theming
+  split) is Medium/Low and is absorbed by the migration rather than needing a
+  pre-emptive fix.
+- **Design (Section 4):** the gap between today's blue/green Widgets UI and the
+  maroon/gold design references is structural, not merely chromatic — a grep for
+  the design's tokens against `qt-app/` returns zero hits, native `QGroupBox`
+  chrome has no equivalent in the design's card vocabulary, and nearly all the
+  motion is net-new — which is why an in-place re-skin cannot meet the goal.
+- **Product UX (Section 5):** each existing screen is walked and its friction
+  named (the dual-purpose login field, the hard 9-row live feed, five/seven
+  modal validation dialogs, the mandatory-department report gate, no
+  quick-search); two design-target screens — the Admin dashboard and a student
+  Visit Logs screen — do not exist yet and are called out as net-new rather than
+  described as if shipped.
+
+**The roadmap at a glance.** Phase 0 (this document) → Phase 1 (extract
+`witscore`, stand up `AppShell`/`Theme`/the `L*` component library, run the
+RFID-in-QML spike and the deployment-hardware render check) → Phase 2 (kiosk
+surface parity) → Phase 3 (admin dashboard, visit logs, search) → Phase 4
+(database/import, reports, settings) → Phase 5 (dark-mode + accessibility polish)
+→ Phase 6 (targeted backend hardening, delete the Widgets app, final review).
+Every phase after 0 clears the same four-check gate — clean Debug+Release builds,
+full ctest green, `/claude-review`, and a human visual walkthrough — and the
+Widgets app survives as the rollback until Phase 6 (Section 20). **Phase 0's gate
+is different and absolute: owner approval. No implementation begins until this
+proposal is approved — the Phase 0 hard stop.**
+
+**Top three risks (Section 19).**
+
+1. **RFID under QML focus (R1) — the headline risk.** The kiosk's RFID capture
+   is an application-wide event filter gating on `QApplication`/`QWidget` focus
+   APIs that have no `QQuickWindow` equivalent; the pure detector state machine
+   is reused verbatim, but the install/focus layer is re-authored. Mitigated by a
+   Phase 1 spike *before* any kiosk screen depends on it, and verified in Phase 2
+   by a parity checklist that treats "RFID behaves exactly as today" as
+   observable behavior — the single most important owner-check in the plan.
+2. **Deployment-hardware rendering (R4).** Qt Quick's GPU-oriented scene graph
+   may underperform the current Widgets app on the actual (possibly older)
+   library PC; mitigated by validating rendering on the real machine in Phase 1,
+   with a documented software-rendering fallback.
+3. **PHP hardening regressions (R5).** The Phase-6 backend hardening could drift
+   a request/response contract the frozen client depends on; mitigated by a
+   contract-tests-first method (golden fixtures, synthetic data) that rejects any
+   change altering a JSON shape, and confined to Phase 6 *after* the client
+   migration.
+
+**What we are asking you to approve.** Approval of **this Phase 0 proposal** —
+the strategy (Strategy A), the target architecture (`witscore` + MVVM + QML), the
+design-system / theme / navigation / animation specifications, the backend
+reuse-and-hardening plan, the screen-by-screen redesigns, and the seven-phase
+roadmap with its per-phase gates. This is a decision to proceed into Phase 1, not
+to ship any code today: **Phase 0 produces this document and nothing else, and no
+implementation begins until you approve it.** The specific judgment calls that
+need your explicit acknowledgement at sign-off are itemized in Section 19 —
+chiefly that the unbranded default look becomes maroon/gold (N1, Section 12.4)
+and that the Visit Logs screen initially shows guest sign-ins until an additive
+student-attendance endpoint lands (N5, Section 18.8).
 
 ## 2. Repository architecture assessment
 
@@ -230,7 +332,8 @@ Three independent theming mechanisms currently coexist:
    `loadStyleSheet()` (`theme.h:83-90`).
 2. **`resources/wits.qss`** (282 lines) — the central Qt stylesheet, loaded
    via `WitsTheme::loadStyleSheet()`, with its own repeated hex literals
-   (e.g. `#1E293B`, `#F1F5F9`, `#E2E8F0` at `resources/wits.qss:6-12`) that
+   (e.g. `#1E293B` at `resources/wits.qss:7`, `#F1F5F9` at `:11`, `#E2E8F0`
+   at `:17`) that
    happen to match `theme.h`'s constants today but are not generated from
    them — they are two independently hand-maintained copies of the same
    palette.
@@ -418,7 +521,7 @@ shape, but each has its own combo-box-population glue and (per
 `reportcontroller.cpp`'s own comment on `parseDepartments`) at least one
 subtle behavioral difference already exists between the report and
 student variants regarding whether an "all" sentinel is filtered. This is
-exactly the kind of duplication a single `DepartmentsViewModel`/shared
+exactly the kind of duplication a single `StudentsViewModel`/shared
 service call would eliminate; flagged here as a concrete case Section 9's
 module organization should account for, not a bug to fix in Phase 0.
 
@@ -884,7 +987,7 @@ simpler mental model than today's dual-mode single table.
 preview" from "live student table" into two distinct visual states (even
 before any QML work) would remove the current implicit-mode ambiguity; this
 maps directly onto the design's add/import-as-actions-not-modes pattern and
-is a natural `DatabaseViewModel` responsibility (Section 10) — track "am I
+is a natural `StudentsViewModel` responsibility (Section 10) — track "am I
 previewing an import" as explicit state rather than inferring it from which
 handler last ran.
 
@@ -1275,16 +1378,18 @@ witscore)` and `target_link_libraries(<quick-executable> PRIVATE witscore)`,
 both against the one CMake-built static-library artifact — the controllers,
 brand engine, and `reportrenderer` are compiled exactly once per build, not
 duplicated per executable. `WITS`'s own `qt_add_executable(...)` source list
-shrinks accordingly: the eleven business-logic file-pairs currently listed
-inline (`settingscontroller.h/.cpp` through `brandingcontroller.h/.cpp`,
-`qt-app/CMakeLists.txt:38-52`) are removed from the `WITS` target's source
+shrinks accordingly: the eight core business-logic `.h`/`.cpp` pairs plus
+seven data-struct headers currently listed inline
+(`settingsdata.h`/`settingscontroller.h/.cpp` through
+`brandingcontroller.h/.cpp`, `qt-app/CMakeLists.txt:38-52`) are removed from
+the `WITS` target's source
 list and replaced by the `witscore` link; only the genuinely Widgets-bound
 files (`mainwindow.*`, `adminwindow.*`, `guestwindow.*`,
 `attachfilesdialog.*`, `busyindicator.*`, `rfidkeyboardfilter.*`, the four
 `.ui` files, `resources.qrc`) remain directly in `WITS`'s own source list.
 Nothing about this changes `WITS`'s runtime behavior — it is a pure
 "move the compilation unit, keep the include path working" change, backed by
-the fact that all eleven moved files already build as standalone units today
+the fact that these moved files already build as standalone units today
 (Section 2.7/2.8's ctest evidence).
 
 ### 7.5 AUTOMOC / AUTOUIC / AUTORCC implications
@@ -2716,15 +2821,15 @@ work.
 
 | # | Item | Evidence (file:line) | Disposition |
 | --- | --- | --- | --- |
-| H1 | **String-built SQL in the guest log.** `get_visitors.php` interpolates the search term via `real_escape_string` into a `LIKE` and interpolates the raw `start_date`/`end_date` **unescaped** into the `WHERE` | `get_visitors.php:19-33` (dates at lines 27, 30, 33) then `$conn->query($sql)` at `:42` | Parameterize with `prepare`/`bind_param`, matching the pattern `get_report_data.php:90-103` already uses for its dynamic query. This is the one clear injection surface; every other endpoint audited already uses prepared statements. |
-| H2 | **Destructive endpoints are unauthenticated at the server.** `requireAdminAuth` exists but is wired to exactly **one** endpoint (`save_branding.php:6`). The mutating/destructive endpoints do not call it | `delete_students.php` (no auth), `reset_visits.php:8-9`, `bulk_update_students.php`, `deactivate_department.php:14`, `delete_department.php`, `upload_students_zip.php` — grep for `requireAdminAuth`/`admin_key` hits only `admin_login.php`, `auth_helper.php`, `save_branding.php` | Add `include "auth_helper.php"; requireAdminAuth($conn);` to each destructive endpoint. Admin gating is currently **client-side only** (the Qt UI hides the buttons), which is not a server control. |
+| H1 | **String-built SQL in the guest log.** `get_visitors.php` interpolates the search term via `real_escape_string` into a `LIKE` and interpolates the raw `start_date`/`end_date` **unescaped** into the `WHERE` | `get_visitors.php:19-33` (dates at lines 26, 30, 33) then `$conn->query($sql)` at `:42` | Parameterize with `prepare`/`bind_param`, matching the pattern `get_report_data.php:90-103` already uses for its dynamic query. This is the one clear injection surface; every other endpoint audited already uses prepared statements. |
+| H2 | **Destructive endpoints are unauthenticated at the server.** `requireAdminAuth` exists but is wired to exactly **one** endpoint (`save_branding.php:6`). The mutating/destructive endpoints do not call it | `delete_students.php` (no auth), `reset_visits.php:8-9`, `bulk_update_students.php`, `deactivate_department.php:14`, `delete_department.php`, `upload_students_zip.php` — a grep for `requireAdminAuth` hits only `auth_helper.php` and `save_branding.php` | Add `include "auth_helper.php"; requireAdminAuth($conn);` to each destructive endpoint. Admin gating is currently **client-side only** (the Qt UI hides the buttons), which is not a server control. |
 | H3 | **Doc/code drift on H2.** `deliverables/loams_api/SECURITY_UPDATES.md` claims auth was *already* added to `delete_students.php`, `bulk_update_students.php`, `reset_visits.php`, and `upload_students_zip.php` | `SECURITY_UPDATES.md:53-89` vs. the actual files (which contain no `admin_key` check) | Treat the doc as the intended spec and actually apply it; then the doc is true. Do **not** trust `SECURITY_UPDATES.md` as a description of current state. |
 | H4 | **A credentials copy that bypasses `db.php`.** `delete_students.php` opens its own inline `new mysqli("localhost","root","","wits_app")` instead of `include "db.php"` | `delete_students.php:11` | Route it through the shared `db.php` (`db.php:11`) so credentials live in one place — a mechanical change, no contract impact. |
 | H5 | **Duplicated DB credentials in source.** `db.php` and `config.php` both hardcode `root`/empty-password/`wits_app` | `db.php:6-9`, `config.php:8-11` | Collapse to one source (have `db.php` read `config.php`, which `SECURITY_UPDATES.md:36-43` claims was done but the committed `db.php` does not do). Illustrative XAMPP creds per `security-hygiene.md`; keep placeholders in any doc example. |
 | H6 | **Debug/diagnostic endpoints shipped.** `phpinfo.php` dumps the full PHP runtime config to any caller; `testupload.php` echoes ini limits and probes `uploads/` writability | `phpinfo.php:1-3`, `testupload.php:1-24` (both established in Section 3.5) | **Remove** both. Neither is referenced by any `ApiConfig::endpoint(...)` call in `qt-app/`. This is the spec's Phase 6 line item verbatim ("remove debug-only endpoints"). |
 | H7 | **`hash_admin.php` decision.** | Section 3.5; a directory listing of `deliverables/loams_api/` (29 `.php` files) contains no such file | **No-op.** The file does not exist in this repo, so there is nothing to remove or refactor. Recording the decision *is* the resolution the spec's Phase 6 note asked for. |
 | H8 | **Plaintext transport.** The single base URL is `http://localhost/loams_api/` — plaintext HTTP, no TLS, compile-time constant | `apiconfig.h:20` | Track the transport question: make the base URL configurable (env/config/`QSettings` override) and support `https://` for any non-localhost deployment. Fine as a same-machine default; a hardening item once auth endpoints carry an admin key over the wire. Ties to Section 3.4. |
-| H9 | **CORS wildcard.** `Access-Control-Allow-Origin: *` is emitted both in the dispatcher and via config | `api.php:9`, `config.php:20` | Lock to the deployed origin for production (`config.php:22` already documents this). Config change, no contract impact. |
+| H9 | **CORS wildcard.** `Access-Control-Allow-Origin: *` is emitted both in the dispatcher and via config | `api.php:9`, `config.php:20` | Lock to the deployed origin for production (`config.php:18-19` already documents this). Config change, no contract impact. |
 
 ### 17.3 Validation looseness — extend the branding pattern
 
@@ -3294,3 +3399,14 @@ exception — its gate is owner approval, below.
 Phase 0 ends at owner approval before Phase 1 begins (spec §2/§9). Widgets
 deletion is **Phase 6**, never Phase 5; the legacy app survives behind
 `-DBUILD_LEGACY_WIDGETS` as the rollback until then (Sections 6.6/7.6).
+
+---
+
+**Closing — the Phase 0 hard stop.** This document is the entire Phase 0
+deliverable, and it contains no implementation code by design. **No
+implementation begins — no `witscore` extraction, no QML, no CMake surgery, no
+backend change — until the owner approves this proposal.** Approval is the
+single gate between this document and Phase 1; it is a hard stop, not a
+formality. Once approved, work proceeds one phase at a time through the roadmap
+above, each phase clearing its four-check gate, with the Widgets app retained as
+the rollback until Phase 6.
