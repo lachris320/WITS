@@ -41,6 +41,7 @@ This is a **refactor**, so the "test" is the existing 12-target ctest suite as a
 - Move (`git mv`, bodies unchanged) from `qt-app/` → `qt-app/core/`: `apiconfig.h`; `settingsdata.h`, `settingscontroller.h`, `settingscontroller.cpp`; `visitordata.h`, `visitorcontroller.h`, `visitorcontroller.cpp`; `importdata.h`, `importcontroller.h`, `importcontroller.cpp`; `studentdata.h`, `studentcontroller.h`, `studentcontroller.cpp`; `reportdata.h`, `reportcontroller.h`, `reportcontroller.cpp`; `reportrenderer.h`, `reportrenderer.cpp`; `brandcolormath.h`; `brandthemedata.h`, `brandtheme.h`, `brandtheme.cpp`; `brandingcontroller.h`, `brandingcontroller.cpp`; `rfidscandetector.h`, `rfidscandetector.cpp`
 - Modify: `qt-app/CMakeLists.txt`, `qt-app/tests/CMakeLists.txt`
 - Do NOT move / stays at root: `main.cpp`, `mainwindow.*`, `adminwindow.*`, `guestwindow.*`, `attachfilesdialog.*`, `attachFilesDialog.ui`, `busyindicator.*`, `rfidkeyboardfilter.*`, `theme.h`, `resources.qrc`, `resources/wits.qss`, the four `.ui` files.
+- Note on `apiconfig.h`: it is header-only and was **never** a listed source in `qt_add_executable(WITS ...)` (the committed `PROJECT_SOURCES` never named it). So its relocation into `core/` is a pure **file move**, not a removal of a compiled source from `WITS`. The `core/` PUBLIC include dir keeps `tst_apiconfig` and every other `#include "apiconfig.h"` consumer resolving it unchanged.
 
 **Interfaces:**
 - Produces: CMake target `witscore` (STATIC) with `PUBLIC` include dir `qt-app/core` and `PUBLIC` link set `Qt::Core Qt::Network Qt::Gui Qt::Charts Qt::Widgets Qt::Svg QXlsx`.
@@ -144,6 +145,13 @@ Steps:
   find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Network Charts Test UiTools PrintSupport Svg Qml Quick QuickControls2 QuickTest)
   find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Network Charts Test UiTools PrintSupport Svg Qml Quick QuickControls2 QuickTest)
 
+  # Enable CTest BEFORE any add_subdirectory that registers tests. CMake only
+  # honours add_test()/set_tests_properties() in a subdirectory if enable_testing()
+  # ran in an ancestor scope FIRST; otherwise the add_test() calls inside quick/
+  # (and tests/) register nothing and ctest silently reports only the 12 legacy
+  # tests. This must precede core/, quick/, and tests/ below.
+  enable_testing()
+
   # --- Add QXlsx (must precede witscore, which links it) ---
   add_subdirectory(libs/QXlsx)
 
@@ -218,7 +226,6 @@ Steps:
       endif()
   endif()
 
-  enable_testing()
   add_subdirectory(tests)
   ```
   Note: `add_subdirectory(quick)` is referenced here but its `CMakeLists.txt` is created in Task 2. To keep the tree building after THIS step, create a one-line placeholder `qt-app/quick/CMakeLists.txt` containing only `# WITSQuick — populated in Task 2` for now, or defer adding the `add_subdirectory(quick)` line until Task 2. Prefer the placeholder so the top-level file is written once.
@@ -597,7 +604,7 @@ Steps:
 
 - [ ] **Build and watch the test go red→green.** `cmake --build qt-app/build` builds `witsquick`, `WITSQuick`, and `tst_appshell`. Run `ctest --test-dir qt-app/build --output-on-failure -R tst_appshell` — expected PASS (one root object, zero QML warnings). Then the full `ctest` — expected `13 tests passed`.
 
-- [ ] **Manual smoke test:** run `qt-app/build/WITSQuick.exe` (or `qt-app/build/quick/WITSQuick.exe`) — an empty 1280×800 window titled "LOAMS 2.0" appears. Close it.
+- [ ] **Manual smoke test:** run `qt-app/build/quick/WITSQuick.exe` — an empty 1280×800 window titled "LOAMS 2.0" appears. Close it. (With Ninja single-config and no `RUNTIME_OUTPUT_DIRECTORY` override, the binary lands in the target's build dir, `qt-app/build/quick/`.)
 
 - [ ] **Commit** via the `commit` skill. Stage `qt-app/quick/main.cpp`, `qt-app/quick/qml/AppShell.qml`, `qt-app/quick/CMakeLists.txt`, `qt-app/quick/tests/tst_appshell.cpp`. Suggested message: `feat: add minimal WITSQuick Qt Quick executable with AppShell`.
 
@@ -828,6 +835,10 @@ Steps:
           RfidQuickFilter.h RfidQuickFilter.cpp
   )
   ```
+  Then expose the `quick/` root on `witsquick`'s PUBLIC include path so the test can find `RfidQuickFilter.h` (see the note below for why this is required, analogous to Task 5's `viewmodels/` include line):
+  ```cmake
+  target_include_directories(witsquick PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+  ```
   and append:
   ```cmake
   # --- RFID-in-QML spike test (C++ QtTest, offscreen) ---
@@ -843,7 +854,9 @@ Steps:
       ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1;QT_QPA_PLATFORM=offscreen"
   )
   ```
-  Note: `witsquick`'s `target_include_directories` must expose `core/` so `RfidQuickFilter.h` resolves `"rfidscandetector.h"`. It already does transitively — `witsquick` links `witscore` PUBLIC, whose PUBLIC include dir is `core/`. No extra include line needed.
+  Note: two distinct include-path resolutions are in play here.
+  1. `RfidQuickFilter.h` includes `"rfidscandetector.h"` (from `core/`). This already resolves transitively — `witsquick` links `witscore` PUBLIC, whose PUBLIC include dir is `core/`. No extra line needed for this one.
+  2. `tst_rfidquickfilter.cpp` (in `quick/tests/`) does `#include "RfidQuickFilter.h"`, but `RfidQuickFilter.h` lives at the `quick/` root. Quote-includes search the including file's own directory (`quick/tests/`) then the `-I` paths; the `quick/` root is on neither — `witscore`'s PUBLIC include is `core/`, not `quick/`. So the test target would fail to compile. The `target_include_directories(witsquick PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})` line above puts the `quick/` root on `witsquick`'s PUBLIC include path, and because `tst_rfidquickfilter` links `witsquick` it inherits it and `#include "RfidQuickFilter.h"` resolves. This is the analogue of Task 5's `viewmodels/` include line for `ThemeViewModel.h`.
 
 - [ ] **Build and watch red→green.** `cmake --build qt-app/build`, then `ctest --test-dir qt-app/build --output-on-failure -R tst_rfidquickfilter` — expected PASS. Full `ctest` — expected `14 tests passed`.
 
@@ -903,8 +916,8 @@ Steps:
 
 - [ ] **Build and verify both backend paths launch on the dev machine** (a proxy check before the on-device gate). `cmake --build qt-app/build`, then:
   ```
-  qt-app/build/WITSQuick.exe                 # default (hardware/RHI) — window appears
-  qt-app/build/WITSQuick.exe --software      # forced software backend — window appears
+  qt-app/build/quick/WITSQuick.exe                 # default (hardware/RHI) — window appears
+  qt-app/build/quick/WITSQuick.exe --software      # forced software backend — window appears
   ```
   Both must show the empty AppShell window. Re-run full `ctest` — still `14 tests passed` (the `tst_appshell` load test is unaffected).
 
@@ -1268,7 +1281,12 @@ Steps:
   #include "tst_qml_theme.moc"
   ```
 
-- [ ] **Update `qt-app/quick/CMakeLists.txt`** — add the VM to the module `SOURCES`, `Theme.qml` to `QML_FILES`, and register both tests. The `qt_add_qml_module` becomes:
+- [ ] **Update `qt-app/quick/CMakeLists.txt`** — add the VM to the module `SOURCES`, `Theme.qml` to `QML_FILES`, and register both tests. **`Theme.qml` is a `pragma Singleton`, and with `qt_add_qml_module` the `pragma` alone is NOT sufficient** — Qt 6 requires the source-file property `QT_QML_SINGLETON_TYPE TRUE` so the generated `qmldir` emits `singleton Theme` (without it, `import LOAMS; Theme.spacing.lg` fails to resolve the singleton). Set that property **before** `Theme.qml` is listed in the module:
+  ```cmake
+  set_source_files_properties(qml/theme/Theme.qml PROPERTIES
+      QT_QML_SINGLETON_TYPE TRUE)
+  ```
+  Then the `qt_add_qml_module` becomes:
   ```cmake
   qt_add_qml_module(witsquick
       URI LOAMS
@@ -1883,7 +1901,7 @@ Steps:
   ```
   Expected: no `WITS` target built; `witscore`/`witsquick`/`WITSQuick`/tests build. Then restore the default (`ON`) build for the walkthrough.
 
-- [ ] **Manual visual walkthrough (human gate — premium look is a human judgment, spec §8).** Run `qt-app/build/WITSQuick.exe`: the empty AppShell window opens. This phase ships no screens, so the walkthrough scope is: window launches, no console QML warnings (`QT_LOGGING_RULES="qt.qml.binding.removal.info=false"` not needed — expect a clean log), `--software` path also launches. Record observations in the proof doc.
+- [ ] **Manual visual walkthrough (human gate — premium look is a human judgment, spec §8).** Run `qt-app/build/quick/WITSQuick.exe`: the empty AppShell window opens. This phase ships no screens, so the walkthrough scope is: window launches, no console QML warnings (`QT_LOGGING_RULES="qt.qml.binding.removal.info=false"` not needed — expect a clean log), `--software` path also launches. Record observations in the proof doc.
 
 - [ ] **Write `docs/superpowers/proofs/2026-07-09-loams2-phase1-proof.md`** — the assembled Phase 1 gate evidence. Include:
   - **Check 1 — witscore extraction:** 12/12 ctest green before and after the move; each of the 12 still direct-compiles its class-under-test `.cpp` (list them); `WITS` still launches. Confirms proposal §20 Phase 1 deliverable (a).
@@ -1920,7 +1938,7 @@ I performed the required self-review passes against this plan and the source fil
 - Test env flags (`WIN32_EXECUTABLE FALSE`, `QT_FORCE_STDERR_LOGGING=1`, `QT_QPA_PLATFORM=offscreen` for GUI/Quick) applied to every new target, matching the existing 12 and the verified-environment facts. ✅
 
 **Two documented, deliberate divergences from the proposal's literal §8 tree (flagged, not silent):**
-1. The proposal §8 tree shows hand-written `theme/qmldir` and `components/qmldir`. This plan uses a single `qt_add_qml_module(witsquick URI LOAMS ...)`, whose **generated** module manifest subsumes those hand-authored `qmldir` files (the modern Qt 6 CMake QML-module mechanism the proposal's tree pre-dates). The `pragma Singleton` in `Theme.qml` is auto-registered as a module singleton. This is a faithful modernization of the same structure, not a design change.
+1. The proposal §8 tree shows hand-written `theme/qmldir` and `components/qmldir`. This plan uses a single `qt_add_qml_module(witsquick URI LOAMS ...)`, whose **generated** module manifest subsumes those hand-authored `qmldir` files (the modern Qt 6 CMake QML-module mechanism the proposal's tree pre-dates). Under this CMake path the `pragma Singleton` in `Theme.qml` is **not** auto-registered as a module singleton on its own — the generated `qmldir` only emits `singleton Theme` when the source-file property `QT_QML_SINGLETON_TYPE TRUE` is set on `Theme.qml` (Task 5), which the plan does. This is a faithful modernization of the same structure, not a design change.
 2. Full cache-first `BrandingController` startup sync inside `ThemeViewModel` (§13.2/13.3) is scoped to Phase 2 (where the branding network path actually runs with the kiosk); Phase 1's `ThemeViewModel` reads the engine's process-wide default (`current()`), which already defaults to `fallbackPalette()`. Task 5 states this scoping explicitly. Consistent with §20's Phase 1 being scaffolding + the RFID/render risk retirements, with kiosk parity (and its network wiring) in Phase 2.
 
-**Ordering safety (Task 1):** steps move all files, then write all three CMakeLists changes (with a `quick/` placeholder so the tree configures before Task 2), then verify green — the tree never fails to build at a commit boundary. `add_subdirectory(libs/QXlsx)` is ordered before `add_subdirectory(core)` so `witscore`'s `QXlsx` link resolves.
+**Ordering safety (Task 1):** steps move all files, then write all three CMakeLists changes (with a `quick/` placeholder so the tree configures before Task 2), then verify green — the tree never fails to build at a commit boundary. `add_subdirectory(libs/QXlsx)` is ordered before `add_subdirectory(core)` so `witscore`'s `QXlsx` link resolves. `enable_testing()` is hoisted to immediately after `find_package(...)`, before **every** `add_subdirectory` — `core/`, `quick/`, and `tests/` — because CMake only registers a subdirectory's `add_test()` calls when `enable_testing()` ran in an ancestor scope first; leaving it just above `add_subdirectory(tests)` (its original spot) would silently drop the `quick/` tests from ctest.
