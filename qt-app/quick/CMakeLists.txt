@@ -17,6 +17,8 @@ qt_add_qml_module(witsquickmodule
     VERSION 1.0
     QML_FILES
         qml/AppShell.qml
+    SOURCES
+        RfidQuickFilter.h RfidQuickFilter.cpp
 )
 
 target_link_libraries(witsquickmodule PUBLIC
@@ -26,6 +28,14 @@ target_link_libraries(witsquickmodule PUBLIC
     Qt${QT_VERSION_MAJOR}::QuickControls2
     Qt${QT_VERSION_MAJOR}::Gui
 )
+
+# Exposes the quick/ root on witsquickmodule's PUBLIC include path so
+# tst_rfidquickfilter (in quick/tests/) can #include "RfidQuickFilter.h" by
+# quote-include, which searches the including file's own directory then the
+# -I paths. witscore's PUBLIC include dir is core/, not quick/, so without
+# this line the header would not resolve. Analogous to Task 5's viewmodels/
+# include line for ThemeViewModel.h.
+target_include_directories(witsquickmodule PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # qt_add_qml_module's automatic static-plugin import (qmlimportscanner, run
 # via a deferred call at the end of this directory) only fires when a target
@@ -56,5 +66,18 @@ target_link_libraries(tst_appshell PRIVATE
 )
 add_test(NAME tst_appshell COMMAND tst_appshell)
 set_tests_properties(tst_appshell PROPERTIES
+    ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1;QT_QPA_PLATFORM=offscreen"
+)
+
+# --- RFID-in-QML spike test (C++ QtTest, offscreen) ---
+qt_add_executable(tst_rfidquickfilter tests/tst_rfidquickfilter.cpp)
+set_target_properties(tst_rfidquickfilter PROPERTIES WIN32_EXECUTABLE FALSE)
+target_link_libraries(tst_rfidquickfilter PRIVATE
+    witsquickmodule
+    Qt${QT_VERSION_MAJOR}::Test
+    Qt${QT_VERSION_MAJOR}::Quick
+)
+add_test(NAME tst_rfidquickfilter COMMAND tst_rfidquickfilter)
+set_tests_properties(tst_rfidquickfilter PROPERTIES
     ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1;QT_QPA_PLATFORM=offscreen"
 )
