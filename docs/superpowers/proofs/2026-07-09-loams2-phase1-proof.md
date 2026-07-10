@@ -293,18 +293,30 @@ and are **not** satisfied by this proof document:
 
 ## `/claude-review` verdict
 
-**PENDING — to be run and recorded by the orchestrator after this commit.**
+**APPROVE — round 1 of 3.** External Claude, PHASE mode. No Critical, no
+Important findings.
 
-This proof document intentionally does not contain a `/claude-review` verdict:
-per this task's dispatch scope, the review pass is run by the orchestrating
-agent (not this task), against the full Phase 1 branch, after this proof
-commit lands so the tree is clean going into review. The orchestrator will
-amend this section (or a follow-up commit will) with:
-- The round number(s) run (cap: 3).
-- The final verdict (APPROVE, or capped-with-findings).
-- Any Critical/Important findings and their fixes.
-- Any Minor findings carried forward (see below) that the review either
-  confirms as still-open or resolves.
+- One Low: `witsquickmodule`'s QML URI `LOAMS` does not match its
+  `OUTPUT_DIRECTORY quick/` — a qmllint-tooling-only configure warning, no
+  runtime effect. Deferred to Phase 2, with a suggested one-line fix
+  (`OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/LOAMS`).
+
+## Final whole-branch review verdict
+
+**Ready to merge: YES.** Fable 5, SDD final gate. No Critical, no Important
+findings.
+
+- Verified cross-cutting invariants held across the branch: the `witscore`
+  boundary is respected by all consumers; both CMake workarounds are applied
+  to exactly the 4 runtime-`loadFromModule` consumers; the token system is
+  coherent with zero hex outside `Theme.qml`; no lost sources or double
+  registrations; the security baseline is clean.
+- All deferred Minor findings (see below) were triaged safe-to-defer to
+  Phase 2.
+- Note: the `ThemeViewModel::refresh()` palette re-sync (re-syncing
+  `m_config.palette` to `BrandTheme::current()`, closing a stale-cache trap
+  ahead of Phase 2's `BrandingController`) was landed as a follow-up fix after
+  this review.
 
 ---
 
@@ -367,7 +379,8 @@ only assembles evidence).
 | Release build, 0 new warnings | **DONE** |
 | Rollback build (`BUILD_LEGACY_WIDGETS=OFF`) | **DONE** |
 | Full ctest, 17/17 | **DONE** (all three configurations) |
-| `/claude-review` | **PENDING** — orchestrator runs this next |
+| `/claude-review` | **APPROVE** (round 1/3; 1 deferred Low) |
+| Final whole-branch review | **Ready to merge: YES** (Fable 5, SDD final gate) |
 | Legacy `WITS.exe` visual kiosk smoke (worktree build) | **PENDING** — human gate |
 | `WITSQuick.exe` manual visual walkthrough | **PENDING** — human gate |
 | On-device render check | **PENDING** — human gate |
