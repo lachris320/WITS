@@ -22,8 +22,8 @@ Item {
             delegate: Rectangle {
                 Layout.fillWidth: true
                 Layout.alignment: Qt.AlignBottom
-                height: chart.maxValue > 0
-                        ? (parent.height * (modelData.value / chart.maxValue)) : 0
+                Layout.preferredHeight: chart.maxValue > 0
+                        ? (chart.height * (modelData.value / chart.maxValue)) : 0
                 radius: chart.barRadius
                 color: modelData.color !== undefined ? modelData.color : Theme.brand.admin
                 Accessible.role: Accessible.StaticText
