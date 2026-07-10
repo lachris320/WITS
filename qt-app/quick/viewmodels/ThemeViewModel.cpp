@@ -12,6 +12,7 @@ ThemeViewModel::ThemeViewModel(QObject *parent)
 
 void ThemeViewModel::refresh()
 {
+    m_config.palette = BrandTheme::current();
     emit changed();
 }
 
