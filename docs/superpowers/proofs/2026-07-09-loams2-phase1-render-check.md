@@ -38,10 +38,10 @@ Record the following about the machine actually used for this check:
 
 | Item | Value |
 |---|---|
-| Windows version (`winver` or `systeminfo`) | |
-| GPU model | |
-| GPU driver version | |
-| Date of check | |
+| Windows version (`winver` or `systeminfo`) | Windows 11 Pro |
+| GPU model | Intel(R) Iris(R) Xe Graphics (integrated, active adapter) + NVIDIA GeForce MX330 (discrete, present, not used for this swapchain) — hybrid-graphics laptop |
+| GPU driver version | 32.0.101.7080 |
+| Date of check | 2026-07-11 |
 
 Run the app once with `QSG_INFO=1` set in the environment before launch, and
 record the scene-graph backend line Qt prints to the console (it identifies
@@ -49,47 +49,64 @@ which RHI backend — e.g. Direct3D 11/12, OpenGL, or a software fallback —
 actually initialized):
 
 ```
+# cmd.exe:
 set QSG_INFO=1
 WITSQuick.exe
+
+# PowerShell:
+$env:QSG_INFO = "1"
+.\WITSQuick.exe
 ```
 
-- [ ] Chosen backend line recorded verbatim below:
+- [x] Chosen backend line recorded verbatim below:
 
   ```
-  <paste the QSG_INFO backend line here>
+  qt.scenegraph.general: Creating QRhi with backend D3D11 for window 0x22e37b1b900 (wflags 0x1)
+  qt.rhi.general: Adapter 0: 'Intel(R) Iris(R) Xe Graphics' (vendor 0x8086 device 0x9A49 flags 0x0)
+  qt.rhi.general:   using this adapter
+  qt.rhi.general: Adapter 1: 'NVIDIA GeForce MX330' (vendor 0x10DE device 0x1D16 flags 0x0)
+  qt.rhi.general: Adapter 2: 'Microsoft Basic Render Driver' (vendor 0x1414 device 0x8C flags 0x2)
   ```
+
+  Qt selected D3D11 on the integrated Intel Iris Xe adapter; the swapchain,
+  pipeline cache, and texture atlas all initialized without error, and the
+  process exited cleanly (`finished successfully`).
 
 ### 2. Default-backend launch result
 
 Launch `WITSQuick.exe` with no arguments (the default/hardware-RHI path).
 
-- [ ] **Result:** PASS / FAIL
+- [x] **Result:** PASS
 - Window renders (the "LOAMS 2.0" window appears and paints), no freeze, no
   crash, no black/garbled window.
 - Notes:
 
   ```
-  <free-form notes: render artifacts, delay before first paint, crash dialog, etc.>
+  Window opens cleanly on the D3D11/Intel-Iris-Xe path with a plain, uniform
+  light-gray background (the expected appearance of Phase 1's empty AppShell
+  — no screens ship this phase, so a blank content area is correct, not a
+  rendering defect). No freeze, no crash, no black or garbled output.
   ```
 
 ### 3. `--software` launch result
 
 Launch `WITSQuick.exe --software` (the forced software-rasterizer path).
 
-- [ ] **Result:** PASS / FAIL
+- [x] **Result:** PASS
 - Window renders (the "LOAMS 2.0" window appears and paints), no freeze, no
   crash.
 - Notes:
 
   ```
-  <free-form notes>
+  Same plain light-gray blank shell as the default path (§2) — opens cleanly,
+  no freeze, no crash.
   ```
 
 ### 4. Decision
 
-- [ ] Does the library PC need `--software` as the **default** launch mode
+- [x] Does the library PC need `--software` as the **default** launch mode
   (i.e. did step 2 fail or render incorrectly while step 3 succeeded)?
-  - **YES / NO**
+  - **NO** — the default hardware (D3D11) path passed cleanly.
 - If **YES**: the deployment shortcut/launcher must invoke
   `WITSQuick.exe --software`, or set `QT_QUICK_BACKEND=software` in the
   shortcut's environment, so the software path is used every time the app
@@ -100,12 +117,12 @@ Launch `WITSQuick.exe --software` (the forced software-rasterizer path).
 
 ### 5. Sign-off
 
-- **Date run:** \_\_\_\_\_\_\_\_\_\_\_\_
-- **Run by:** \_\_\_\_\_\_\_\_\_\_\_\_ (name/role of the person who executed this on the
-  real deployment hardware)
-- **Machine used:** deployment PC / equivalent test machine (circle one) —
-  described generically above in the environment table; no machine-local file
-  paths or personal identifiers recorded here.
+- **Date run:** 2026-07-11
+- **Run by:** Laurence Christopher Tormis — Developer
+- **Machine used:** equivalent test machine (a hybrid-graphics laptop — Intel
+  Iris Xe + NVIDIA MX330 — used as a stand-in for the deployment PC's GPU/
+  driver stack; described generically above in the environment table, no
+  machine-local file paths or personal identifiers recorded).
 
 This sign-off is the **R4 retirement evidence** referenced by Task 7's
 consolidated Phase 1 proof. Until this section is filled in and signed off by
