@@ -36,6 +36,16 @@ qt_add_qml_module(witsquickmodule
     QML_FILES
         qml/AppShell.qml
         qml/theme/Theme.qml
+        qml/components/LButton.qml
+        qml/components/LCard.qml
+        qml/components/LTable.qml
+        qml/components/LSegmented.qml
+        qml/components/LSideNav.qml
+        qml/components/LToast.qml
+        qml/components/LDialog.qml
+        qml/components/LStatTile.qml
+        qml/components/LBarChart.qml
+        qml/components/LPageHeader.qml
     SOURCES
         RfidQuickFilter.h RfidQuickFilter.cpp
         viewmodels/ThemeViewModel.h viewmodels/ThemeViewModel.cpp
@@ -144,5 +154,29 @@ target_compile_definitions(tst_qml_theme PRIVATE
     QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
 add_test(NAME tst_qml_theme COMMAND tst_qml_theme)
 set_tests_properties(tst_qml_theme PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_FORCE_STDERR_LOGGING=1"
+)
+
+# --- L* component skeletons Quick test (offscreen) ---
+# Same escape hatch as tst_qml_theme above, and for the same reason: the
+# literal "import LOAMS" lives only in tst_qml_components.qml (a
+# QUICK_TEST_MAIN data file qmlimportscanner never scans), so the automatic
+# static-plugin import never fires. Link the generated plugin target and its
+# Q_IMPORT_PLUGIN "_init" object explicitly. Also note the CMake target is
+# "witsquickmodule", not "witsquick" (see the comment atop this file).
+qt_add_executable(tst_qml_components tests/tst_qml_components.cpp)
+set_target_properties(tst_qml_components PROPERTIES WIN32_EXECUTABLE FALSE)
+target_link_libraries(tst_qml_components PRIVATE
+    witsquickmodule
+    witsquickmoduleplugin
+    witsquickmoduleplugin_init
+    Qt${QT_VERSION_MAJOR}::QuickTest
+    Qt${QT_VERSION_MAJOR}::Qml
+    Qt${QT_VERSION_MAJOR}::Quick
+)
+target_compile_definitions(tst_qml_components PRIVATE
+    QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
+add_test(NAME tst_qml_components COMMAND tst_qml_components)
+set_tests_properties(tst_qml_components PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_FORCE_STDERR_LOGGING=1"
 )
