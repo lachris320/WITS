@@ -1,10 +1,10 @@
 qt_add_executable(tst_rfidscandetector
     tst_rfidscandetector.cpp
-    ${CMAKE_SOURCE_DIR}/rfidscandetector.cpp
-    ${CMAKE_SOURCE_DIR}/rfidscandetector.h
+    ${CMAKE_SOURCE_DIR}/core/rfidscandetector.cpp
+    ${CMAKE_SOURCE_DIR}/core/rfidscandetector.h
 )
 set_target_properties(tst_rfidscandetector PROPERTIES WIN32_EXECUTABLE FALSE)
-target_include_directories(tst_rfidscandetector PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(tst_rfidscandetector PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/core)
 target_link_libraries(tst_rfidscandetector PRIVATE Qt${QT_VERSION_MAJOR}::Test)
 add_test(NAME tst_rfidscandetector COMMAND tst_rfidscandetector)
 set_tests_properties(tst_rfidscandetector PROPERTIES
@@ -15,11 +15,11 @@ qt_add_executable(tst_rfidkeyboardfilter
     tst_rfidkeyboardfilter.cpp
     ${CMAKE_SOURCE_DIR}/rfidkeyboardfilter.cpp
     ${CMAKE_SOURCE_DIR}/rfidkeyboardfilter.h
-    ${CMAKE_SOURCE_DIR}/rfidscandetector.cpp
-    ${CMAKE_SOURCE_DIR}/rfidscandetector.h
+    ${CMAKE_SOURCE_DIR}/core/rfidscandetector.cpp
+    ${CMAKE_SOURCE_DIR}/core/rfidscandetector.h
 )
 set_target_properties(tst_rfidkeyboardfilter PROPERTIES WIN32_EXECUTABLE FALSE)
-target_include_directories(tst_rfidkeyboardfilter PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(tst_rfidkeyboardfilter PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/core)
 target_link_libraries(tst_rfidkeyboardfilter PRIVATE Qt${QT_VERSION_MAJOR}::Test Qt${QT_VERSION_MAJOR}::Widgets)
 add_test(NAME tst_rfidkeyboardfilter COMMAND tst_rfidkeyboardfilter)
 set_tests_properties(tst_rfidkeyboardfilter PROPERTIES
@@ -30,7 +30,7 @@ qt_add_executable(tst_apiconfig
     tst_apiconfig.cpp
 )
 set_target_properties(tst_apiconfig PROPERTIES WIN32_EXECUTABLE FALSE)
-target_include_directories(tst_apiconfig PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(tst_apiconfig PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/core)
 target_link_libraries(tst_apiconfig PRIVATE Qt${QT_VERSION_MAJOR}::Test)
 add_test(NAME tst_apiconfig COMMAND tst_apiconfig)
 set_tests_properties(tst_apiconfig PROPERTIES
@@ -41,7 +41,7 @@ qt_add_executable(tst_theme
     tst_theme.cpp
 )
 set_target_properties(tst_theme PROPERTIES WIN32_EXECUTABLE FALSE)
-target_include_directories(tst_theme PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(tst_theme PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/core)
 target_compile_definitions(tst_theme PRIVATE WITS_QSS_PATH="${CMAKE_SOURCE_DIR}/resources/wits.qss")
 target_link_libraries(tst_theme PRIVATE Qt${QT_VERSION_MAJOR}::Test Qt${QT_VERSION_MAJOR}::Widgets)
 add_test(NAME tst_theme COMMAND tst_theme)
@@ -53,7 +53,7 @@ qt_add_executable(tst_responsive_ui
     tst_responsive_ui.cpp
 )
 set_target_properties(tst_responsive_ui PROPERTIES WIN32_EXECUTABLE FALSE)
-target_include_directories(tst_responsive_ui PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(tst_responsive_ui PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/core)
 target_compile_definitions(tst_responsive_ui PRIVATE WITS_UI_DIR="${CMAKE_SOURCE_DIR}")
 target_link_libraries(tst_responsive_ui PRIVATE
     Qt${QT_VERSION_MAJOR}::Test
@@ -67,12 +67,12 @@ set_tests_properties(tst_responsive_ui PROPERTIES
 
 qt_add_executable(tst_visitorcontroller
     tst_visitorcontroller.cpp
-    ${CMAKE_SOURCE_DIR}/visitorcontroller.cpp
-    ${CMAKE_SOURCE_DIR}/visitorcontroller.h
-    ${CMAKE_SOURCE_DIR}/visitordata.h
+    ${CMAKE_SOURCE_DIR}/core/visitorcontroller.cpp
+    ${CMAKE_SOURCE_DIR}/core/visitorcontroller.h
+    ${CMAKE_SOURCE_DIR}/core/visitordata.h
 )
 set_target_properties(tst_visitorcontroller PROPERTIES WIN32_EXECUTABLE FALSE)
-target_include_directories(tst_visitorcontroller PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(tst_visitorcontroller PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/core)
 target_link_libraries(tst_visitorcontroller PRIVATE
     Qt${QT_VERSION_MAJOR}::Test
     Qt${QT_VERSION_MAJOR}::Network
@@ -85,12 +85,12 @@ set_tests_properties(tst_visitorcontroller PROPERTIES
 
 qt_add_executable(tst_importcontroller
     tst_importcontroller.cpp
-    ${CMAKE_SOURCE_DIR}/importcontroller.cpp
-    ${CMAKE_SOURCE_DIR}/importcontroller.h
-    ${CMAKE_SOURCE_DIR}/importdata.h
+    ${CMAKE_SOURCE_DIR}/core/importcontroller.cpp
+    ${CMAKE_SOURCE_DIR}/core/importcontroller.h
+    ${CMAKE_SOURCE_DIR}/core/importdata.h
 )
 set_target_properties(tst_importcontroller PROPERTIES WIN32_EXECUTABLE FALSE)
-target_include_directories(tst_importcontroller PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(tst_importcontroller PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/core)
 target_link_libraries(tst_importcontroller PRIVATE
     Qt${QT_VERSION_MAJOR}::Test
     Qt${QT_VERSION_MAJOR}::Network
@@ -103,12 +103,12 @@ set_tests_properties(tst_importcontroller PROPERTIES
 
 qt_add_executable(tst_studentcontroller
     tst_studentcontroller.cpp
-    ${CMAKE_SOURCE_DIR}/studentcontroller.cpp
-    ${CMAKE_SOURCE_DIR}/studentcontroller.h
-    ${CMAKE_SOURCE_DIR}/studentdata.h
+    ${CMAKE_SOURCE_DIR}/core/studentcontroller.cpp
+    ${CMAKE_SOURCE_DIR}/core/studentcontroller.h
+    ${CMAKE_SOURCE_DIR}/core/studentdata.h
 )
 set_target_properties(tst_studentcontroller PROPERTIES WIN32_EXECUTABLE FALSE)
-target_include_directories(tst_studentcontroller PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(tst_studentcontroller PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/core)
 target_link_libraries(tst_studentcontroller PRIVATE
     Qt${QT_VERSION_MAJOR}::Test
     Qt${QT_VERSION_MAJOR}::Network
@@ -118,17 +118,15 @@ set_tests_properties(tst_studentcontroller PROPERTIES
     ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1"
 )
 
-# 9th — Core+Network+Gui, NO offscreen. Gui is required because getPalette
-# returns a ReportPalette (QColor / QVector<QColor>), and QColor is a Qt::Gui
-# type — but a QColor *value* under QTEST_GUILESS_MAIN needs no QPA plugin.
+# 9th — Core+Network+Gui, NO offscreen. Still omits reportrenderer.cpp.
 qt_add_executable(tst_reportcontroller
     tst_reportcontroller.cpp
-    ${CMAKE_SOURCE_DIR}/reportcontroller.cpp
-    ${CMAKE_SOURCE_DIR}/reportcontroller.h
-    ${CMAKE_SOURCE_DIR}/reportdata.h
+    ${CMAKE_SOURCE_DIR}/core/reportcontroller.cpp
+    ${CMAKE_SOURCE_DIR}/core/reportcontroller.h
+    ${CMAKE_SOURCE_DIR}/core/reportdata.h
 )
 set_target_properties(tst_reportcontroller PROPERTIES WIN32_EXECUTABLE FALSE)
-target_include_directories(tst_reportcontroller PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(tst_reportcontroller PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/core)
 target_link_libraries(tst_reportcontroller PRIVATE
     Qt${QT_VERSION_MAJOR}::Test
     Qt${QT_VERSION_MAJOR}::Network
@@ -139,16 +137,15 @@ set_tests_properties(tst_reportcontroller PROPERTIES
     ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1"
 )
 
-# 10th — Gui+Charts+Widgets+QXlsx, offscreen. Does not link reportcontroller.cpp:
-# the test builds ReportPalette literals directly and never calls getPalette.
+# 10th — Gui+Charts+Widgets+QXlsx, offscreen. Does not link reportcontroller.cpp.
 qt_add_executable(tst_reportrenderer
     tst_reportrenderer.cpp
-    ${CMAKE_SOURCE_DIR}/reportrenderer.cpp
-    ${CMAKE_SOURCE_DIR}/reportrenderer.h
-    ${CMAKE_SOURCE_DIR}/reportdata.h
+    ${CMAKE_SOURCE_DIR}/core/reportrenderer.cpp
+    ${CMAKE_SOURCE_DIR}/core/reportrenderer.h
+    ${CMAKE_SOURCE_DIR}/core/reportdata.h
 )
 set_target_properties(tst_reportrenderer PROPERTIES WIN32_EXECUTABLE FALSE)
-target_include_directories(tst_reportrenderer PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(tst_reportrenderer PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/core)
 target_link_libraries(tst_reportrenderer PRIVATE
     Qt${QT_VERSION_MAJOR}::Test
     Qt${QT_VERSION_MAJOR}::Gui
@@ -161,18 +158,17 @@ set_tests_properties(tst_reportrenderer PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_FORCE_STDERR_LOGGING=1"
 )
 
-# 11th — brand-theme engine: pure color math, extraction, cache. Gui for
-# QColor/QImage, Svg for QSvgRenderer logo rendering, offscreen because it
-# never shows a widget but paints QImages.
+# 11th — brand-theme engine. Compiles brandtheme.cpp (which includes root theme.h),
+# so it keeps BOTH ${CMAKE_SOURCE_DIR} and ${CMAKE_SOURCE_DIR}/core on its include path.
 qt_add_executable(tst_brandtheme
     tst_brandtheme.cpp
-    ${CMAKE_SOURCE_DIR}/brandtheme.cpp
-    ${CMAKE_SOURCE_DIR}/brandtheme.h
-    ${CMAKE_SOURCE_DIR}/brandthemedata.h
-    ${CMAKE_SOURCE_DIR}/brandcolormath.h
+    ${CMAKE_SOURCE_DIR}/core/brandtheme.cpp
+    ${CMAKE_SOURCE_DIR}/core/brandtheme.h
+    ${CMAKE_SOURCE_DIR}/core/brandthemedata.h
+    ${CMAKE_SOURCE_DIR}/core/brandcolormath.h
 )
 set_target_properties(tst_brandtheme PROPERTIES WIN32_EXECUTABLE FALSE)
-target_include_directories(tst_brandtheme PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(tst_brandtheme PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/core)
 target_link_libraries(tst_brandtheme PRIVATE
     Qt${QT_VERSION_MAJOR}::Test
     Qt${QT_VERSION_MAJOR}::Gui
@@ -183,19 +179,17 @@ set_tests_properties(tst_brandtheme PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_FORCE_STDERR_LOGGING=1"
 )
 
-# 12th — branding network controller: pure parser tests over synthetic
-# payloads (no live HTTP). Links brandtheme.cpp for JSON/fallback, hence
-# Gui+Svg alongside Network.
+# 12th — branding network controller. Compiles brandtheme.cpp too (root theme.h).
 qt_add_executable(tst_brandingcontroller
     tst_brandingcontroller.cpp
-    ${CMAKE_SOURCE_DIR}/brandingcontroller.cpp
-    ${CMAKE_SOURCE_DIR}/brandingcontroller.h
-    ${CMAKE_SOURCE_DIR}/brandtheme.cpp
-    ${CMAKE_SOURCE_DIR}/brandtheme.h
-    ${CMAKE_SOURCE_DIR}/brandthemedata.h
+    ${CMAKE_SOURCE_DIR}/core/brandingcontroller.cpp
+    ${CMAKE_SOURCE_DIR}/core/brandingcontroller.h
+    ${CMAKE_SOURCE_DIR}/core/brandtheme.cpp
+    ${CMAKE_SOURCE_DIR}/core/brandtheme.h
+    ${CMAKE_SOURCE_DIR}/core/brandthemedata.h
 )
 set_target_properties(tst_brandingcontroller PROPERTIES WIN32_EXECUTABLE FALSE)
-target_include_directories(tst_brandingcontroller PRIVATE ${CMAKE_SOURCE_DIR})
+target_include_directories(tst_brandingcontroller PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/core)
 target_link_libraries(tst_brandingcontroller PRIVATE
     Qt${QT_VERSION_MAJOR}::Test
     Qt${QT_VERSION_MAJOR}::Network
