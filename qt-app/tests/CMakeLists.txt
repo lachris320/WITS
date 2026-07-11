@@ -15,6 +15,8 @@ qt_add_executable(tst_rfidkeyboardfilter
     tst_rfidkeyboardfilter.cpp
     ${CMAKE_SOURCE_DIR}/rfidkeyboardfilter.cpp
     ${CMAKE_SOURCE_DIR}/rfidkeyboardfilter.h
+    ${CMAKE_SOURCE_DIR}/core/rfideventfilterbase.cpp
+    ${CMAKE_SOURCE_DIR}/core/rfideventfilterbase.h
     ${CMAKE_SOURCE_DIR}/core/rfidscandetector.cpp
     ${CMAKE_SOURCE_DIR}/core/rfidscandetector.h
 )
