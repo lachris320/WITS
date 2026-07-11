@@ -53,6 +53,8 @@ qt_add_qml_module(witsquickmodule
         RfidQuickFilter.h RfidQuickFilter.cpp
         viewmodels/ThemeViewModel.h viewmodels/ThemeViewModel.cpp
         viewmodels/Navigator.h viewmodels/Navigator.cpp
+        viewmodels/KioskViewModel.h viewmodels/KioskViewModel.cpp
+        models/RecentLoginsModel.h models/RecentLoginsModel.cpp
 )
 
 target_link_libraries(witsquickmodule PUBLIC
@@ -74,6 +76,11 @@ target_include_directories(witsquickmodule PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # Module include dir so "ThemeViewModel.h" (in viewmodels/) resolves for
 # Theme.qml's generated registration and for tests that quote-include it.
 target_include_directories(witsquickmodule PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/viewmodels)
+
+# models/ on the include path (analogous to the viewmodels/ line above), so
+# KioskViewModel.h's #include "RecentLoginsModel.h" and the test's
+# quote-includes resolve.
+target_include_directories(witsquickmodule PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/models)
 
 # qt_add_qml_module's automatic static-plugin import (qmlimportscanner, run
 # via a deferred call at the end of this directory) only fires when a target
@@ -128,6 +135,12 @@ wits_add_qttest(tst_qml_theme
 wits_add_qttest(tst_navigator
     SOURCES tests/tst_navigator.cpp
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Qml
+    OFFSCREEN)
+
+# --- KioskViewModel + RecentLoginsModel unit test (C++ QtTest, offscreen) ---
+wits_add_qttest(tst_kioskviewmodel
+    SOURCES tests/tst_kioskviewmodel.cpp
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Quick Qt${QT_VERSION_MAJOR}::Network
     OFFSCREEN)
 
 # --- L* component skeletons Quick test (offscreen) ---
