@@ -255,12 +255,11 @@ launches — lives in a dedicated checklist:
 
 **`docs/superpowers/proofs/2026-07-09-loams2-phase1-render-check.md`**
 
-That checklist is currently **unfilled** (a template) — it is explicitly a
-human, on-device gate that cannot be satisfied by a CI/build-machine run, and
-it has not yet been executed on the real library deployment PC. Risk 4 (R4)
-remains **open** until that checklist's sign-off section is completed by
-someone running it on the actual deployment hardware (or a faithful GPU/driver
-stand-in).
+That checklist has been executed and signed off on an equivalent-GPU/driver
+test machine (Intel Iris Xe + NVIDIA MX330 hybrid laptop, Windows 11 Pro):
+both the default (D3D11-on-Iris-Xe) and `--software` launch paths passed
+cleanly, and the decision is that `--software` is not needed as the default
+launch mode. **Risk 4 (R4) is retired** — see the checklist for full details.
 
 Confirms proposal §20 Phase 1 deliverable (d) at the level Phase 1 is scoped to
 prove; the human on-device portion is explicitly deferred, not silently
@@ -268,26 +267,31 @@ skipped.
 
 ---
 
-## Pending HUMAN gates (must clear before Phase 1 sign-off)
+## HUMAN gates — all cleared
 
-These three items are outside the scope of automated build/test verification
-and are **not** satisfied by this proof document:
+All three items below were outside the scope of automated build/test
+verification and are not satisfied by CI/build alone. All three are now
+**DONE**:
 
 1. **Legacy `WITS.exe` visual kiosk smoke** after the `witscore` relink (Task
-   1) — verify the app still launches and behaves correctly as a kiosk app.
-   **Must be run against the worktree build** (`qt-app/build/WITS.exe` as
-   built in this task, timestamped from this checkout), not a Qt-Creator build
-   from the main WITS-main checkout — the project has multiple stale WITS.exe
-   builds floating around this machine, and testing the wrong one would give a
-   false signal.
-2. **`WITSQuick.exe` manual visual walkthrough** (Task 7 scope, human-performed):
-   confirm the empty `AppShell` window opens, no console QML warnings appear,
-   and the `--software` path also launches correctly. Not performed by this
-   task by design — this task is the mechanical/automated portion only.
-3. **On-device render check** executed on the real library deployment PC (Task
-   4 checklist, referenced above) — GPU/driver capture, default-backend launch
+   1) — run against the worktree build (`qt-app/build/WITS.exe`), not a
+   Qt-Creator build from the main WITS-main checkout (the project has
+   multiple stale `WITS.exe` builds on this machine, and testing the wrong
+   one would give a false signal). **Result: PASS** — the app launches and
+   all kiosk functionality/features behave correctly post-relink.
+2. **`WITSQuick.exe` manual visual walkthrough** (Task 7 scope,
+   human-performed): confirm the empty `AppShell` window opens, no console
+   QML warnings appear, and the `--software` path also launches correctly.
+   **Result: PASS** — see the render-check checklist (item 3) for the
+   detailed launch observations, which cover this walkthrough.
+3. **On-device render check** executed on an equivalent-GPU/driver test
+   machine (Task 4 checklist) — GPU/driver capture, default-backend launch
    result, `--software` launch result, and the decision on whether the
-   deployment launcher needs to force `--software` by default.
+   deployment launcher needs to force `--software` by default. **Result:
+   PASS, decision NO** — full sign-off recorded in
+   `docs/superpowers/proofs/2026-07-09-loams2-phase1-render-check.md`
+   (D3D11 on Intel Iris Xe; both launch paths clean; `--software` not
+   needed as default). **Risk 4 (R4) is retired.**
 
 ---
 
@@ -374,13 +378,13 @@ only assembles evidence).
 | (a) `witscore` extraction, 12/12 green, both apps build | **DONE** — verified above |
 | (b) AppShell + Theme + ThemeViewModel + 10 `L*` components | **DONE** — verified above |
 | (c) RFID spike (wiring-level) | **DONE** — wiring retired; observable-behavior deferred to Phase 2 |
-| (d) Render check (dev-machine build/launch) | **DONE** (build); on-device execution **PENDING** (human gate) |
+| (d) Render check (dev-machine build/launch + on-device) | **DONE** — build and on-device execution both PASS |
 | Debug build, 0 new warnings | **DONE** |
 | Release build, 0 new warnings | **DONE** |
 | Rollback build (`BUILD_LEGACY_WIDGETS=OFF`) | **DONE** |
 | Full ctest, 17/17 | **DONE** (all three configurations) |
 | `/claude-review` | **APPROVE** (round 1/3; 1 deferred Low) |
 | Final whole-branch review | **Ready to merge: YES** (Fable 5, SDD final gate) |
-| Legacy `WITS.exe` visual kiosk smoke (worktree build) | **PENDING** — human gate |
-| `WITSQuick.exe` manual visual walkthrough | **PENDING** — human gate |
-| On-device render check | **PENDING** — human gate |
+| Legacy `WITS.exe` visual kiosk smoke (worktree build) | **DONE** — human gate, PASS |
+| `WITSQuick.exe` manual visual walkthrough | **DONE** — human gate, PASS |
+| On-device render check | **DONE** — human gate, PASS (R4 retired) |
