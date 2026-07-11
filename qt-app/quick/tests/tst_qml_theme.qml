@@ -14,4 +14,11 @@ TestCase {
         verify(Theme.brand.admin.a === 1.0);
         verify(Theme.brand.admin !== Theme.card);
     }
+
+    function test_kioskTokensExposed() {
+        verify(Theme.motion.toastHold >= 1000);
+        verify(Theme.brand.onKiosk.a === 1.0);
+        compare(Theme.onBrandMuted.toString().length, 7);   // "#RRGGBB"
+        verify(Theme.scrim.a > 0 && Theme.scrim.a < 1);
+    }
 }

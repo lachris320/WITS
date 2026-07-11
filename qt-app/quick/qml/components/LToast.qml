@@ -6,7 +6,8 @@ Rectangle {
     id: toast
     property string message: ""
     property string severity: "Info"   // Info | Success | Warning | Error
-    property int autoDismissMs: Theme.motion.toastIn
+    property int autoDismissMs: Theme.motion.toastHold
+    signal dismissed()
 
     visible: message.length > 0
     color: severity === "Error" ? Theme.errorSoft : Theme.card
@@ -15,6 +16,15 @@ Rectangle {
     border.color: severity === "Error" ? Theme.errorBorder : Theme.border
     implicitHeight: 40
     implicitWidth: contentText.implicitWidth + Theme.spacing.xxl
+
+    // Auto-dismiss: (re)start whenever a non-empty message is shown.
+    onMessageChanged: if (message.length > 0 && autoDismissMs > 0) dismissTimer.restart()
+    Timer {
+        id: dismissTimer
+        interval: toast.autoDismissMs
+        repeat: false
+        onTriggered: { toast.message = ""; toast.dismissed() }
+    }
 
     Text {
         id: contentText
