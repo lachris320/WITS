@@ -23,6 +23,9 @@ find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Network Charts Te
 # tests. This must precede core/, quick/, and tests/ below.
 enable_testing()
 
+# Shared test-target helper (Phase 2): console QtTest exe + ctest reg + house env.
+include(${CMAKE_SOURCE_DIR}/cmake/WitsTest.cmake)
+
 # --- Add QXlsx (must precede witscore, which links it) ---
 add_subdirectory(libs/QXlsx)
 
