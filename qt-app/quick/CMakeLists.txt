@@ -37,6 +37,8 @@ qt_add_qml_module(witsquickmodule
     QML_FILES
         qml/AppShell.qml
         qml/theme/Theme.qml
+        qml/kiosk/KioskScreen.qml
+        qml/admin/AdminScreen.qml
         qml/components/LButton.qml
         qml/components/LCard.qml
         qml/components/LTable.qml
@@ -50,6 +52,7 @@ qt_add_qml_module(witsquickmodule
     SOURCES
         RfidQuickFilter.h RfidQuickFilter.cpp
         viewmodels/ThemeViewModel.h viewmodels/ThemeViewModel.cpp
+        viewmodels/Navigator.h viewmodels/Navigator.cpp
 )
 
 target_link_libraries(witsquickmodule PUBLIC
@@ -117,6 +120,14 @@ wits_add_qttest(tst_qml_theme
     LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
          Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
     DEFINES QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
+    OFFSCREEN)
+
+# --- Navigator unit test (C++ QtTest, offscreen: house consistency with the
+# other quick tests — witsquickmodule PUBLIC-propagates Qt::Gui, which would
+# otherwise make QTEST_MAIN build a QGuiApplication) ---
+wits_add_qttest(tst_navigator
+    SOURCES tests/tst_navigator.cpp
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Qml
     OFFSCREEN)
 
 # --- L* component skeletons Quick test (offscreen) ---
