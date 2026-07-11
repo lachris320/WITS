@@ -22,6 +22,7 @@ add_library(witscore STATIC
     brandtheme.h brandtheme.cpp
     brandingcontroller.h brandingcontroller.cpp
     rfidscandetector.h rfidscandetector.cpp
+    loginparser.h loginparser.cpp
 )
 
 # AUTOMOC required (6 Q_OBJECT classes: the five *Controller + BrandingController)

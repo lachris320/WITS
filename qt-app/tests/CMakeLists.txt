@@ -200,3 +200,12 @@ add_test(NAME tst_brandingcontroller COMMAND tst_brandingcontroller)
 set_tests_properties(tst_brandingcontroller PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_FORCE_STDERR_LOGGING=1"
 )
+
+# 13th — pure kiosk login decode/decision logic. Core-only (no Gui/Widgets),
+# so QTEST_MAIN expands to the QCoreApplication variant; no offscreen needed.
+wits_add_qttest(tst_loginparser
+    SOURCES
+        tst_loginparser.cpp
+        ${CMAKE_SOURCE_DIR}/core/loginparser.cpp
+        ${CMAKE_SOURCE_DIR}/core/loginparser.h
+    INCLUDES ${CMAKE_SOURCE_DIR}/core)
