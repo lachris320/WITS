@@ -4,6 +4,7 @@
 #include "busyindicator.h"
 #include "theme.h"
 #include "attachfilesdialog.h"
+#include "brandtheme.h"
 #include <QGraphicsDropShadowEffect>
 #include <QGraphicsLayout>
 #include <QStyle>
@@ -1170,6 +1171,20 @@ void adminWindow::bindSettingsSignals()
             this,                 &adminWindow::onSettingsSaved);
     connect(m_settingsController, &SettingsController::logoChanged,
             this,                 &adminWindow::onLogoChanged);
+    // Branding engine: a newly imported logo regenerates the palette in
+    // Auto mode (Manual mode skips regeneration — the v1 code hook).
+    connect(m_settingsController, &SettingsController::logoChanged, this,
+            [](const QString &destinationPath) {
+        QSettings store(QLatin1String("MyCompany"), QLatin1String("MyApp"));
+        BrandingConfig config = BrandTheme::loadCachedConfig(store);
+        QString errorMsg;
+        if (BrandTheme::regenerateFromLogo(config, destinationPath, &errorMsg)) {
+            BrandTheme::setCurrent(config.palette);
+            BrandTheme::saveCachedConfig(store, config);
+        } else if (!errorMsg.isEmpty()) {
+            qWarning() << "Branding regeneration skipped:" << errorMsg;
+        }
+    });
     connect(m_settingsController, &SettingsController::posterChanged,
             this,                 &adminWindow::onPosterChanged);
     connect(m_settingsController, &SettingsController::importError,

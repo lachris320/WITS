@@ -12,6 +12,7 @@
 
 class RfidKeyboardFilter;
 class QLabel;
+class BrandingController;
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -41,6 +42,7 @@ private:
     adminWindow *adminWin;   // Admin dashboard window
     QNetworkAccessManager *networkManager;
     QList<QJsonObject> recentLogins;
+    BrandingController *m_brandingController = nullptr;
 
     void refreshRightPanel();
     void updateTimeandDate();
