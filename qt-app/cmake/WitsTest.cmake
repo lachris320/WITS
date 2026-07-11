@@ -23,6 +23,17 @@ function(wits_add_qttest name)
     add_test(NAME ${name} COMMAND ${name})
     if(T_OFFSCREEN)
         set(_env "QT_QPA_PLATFORM=offscreen;QT_FORCE_STDERR_LOGGING=1")
+        # This Qt SDK install has no bundled lib/fonts directory, so the
+        # offscreen platform's font backend logs "QFontDatabase: Cannot find
+        # font directory ...lib/fonts" the first time ANY text is rendered in
+        # a process — regardless of font family, and unrelated to app/QML
+        # correctness. Point it at the real system font directory instead so
+        # offscreen tests see genuine fonts, same as a properly-deployed
+        # environment would. Windows-only path; harmless no-op elsewhere
+        # since this whole toolchain is MinGW/Windows (see project docs).
+        if(WIN32)
+            string(APPEND _env ";QT_QPA_FONTDIR=C:/Windows/Fonts")
+        endif()
     else()
         set(_env "QT_FORCE_STDERR_LOGGING=1")
     endif()
