@@ -43,5 +43,16 @@ int main(int argc, char *argv[])
     if (engine.rootObjects().isEmpty())
         return -1;
 
+    // Go-live parity (parity proof item 3.6): the legacy WITS.exe always calls
+    // showFullScreen() unconditionally. Here it's opt-in via "--fullscreen" or
+    // WITS_FULLSCREEN so the dev loop stays windowed (window controls, alt-tab)
+    // by default; kiosk-hardware fullscreen becomes a launch-flag decision
+    // instead of a code change before go-live.
+    if (args.contains(QStringLiteral("--fullscreen"))
+        || qEnvironmentVariableIsSet("WITS_FULLSCREEN")) {
+        if (auto *window = qobject_cast<QQuickWindow *>(engine.rootObjects().first()))
+            window->showFullScreen();
+    }
+
     return app.exec();
 }
