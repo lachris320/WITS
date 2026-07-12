@@ -49,18 +49,56 @@ Item {
             }
         }
 
-        // Hero + stat tiles.
+        // Hero (Student Info Card) + Visitors Today.
         RowLayout {
             Layout.fillWidth: true
             spacing: Theme.spacing.md
-            LCard {
+
+            // Signed-in hero: NOT an LCard { filled: true } — that hard-codes
+            // Theme.brand.admin (maroon meant for the admin brand), which left
+            // this kiosk-brand-themed text (onKiosk/onBrandMuted/secondary)
+            // low-contrast against the wrong fill. Built as its own themed
+            // Rectangle filled with the kiosk brand gradient instead, mirroring
+            // the reference's signed-in card (Library Kiosk v2.dc.html ~L76).
+            Rectangle {
                 id: hero
                 Layout.fillWidth: true
-                Layout.preferredWidth: 2
+                // Ratio verified by live render, not just reading the code: a
+                // bare `Layout.preferredWidth: 2` is a literal 2px baseline,
+                // not a stretch weight, so with only one sibling left in the
+                // row (THIS HOUR removed) the hero collapsed to a near-invisible
+                // sliver and Visitors Today claimed almost the whole row.
+                // horizontalStretchFactor (Qt 6.5+) is the correct mechanism
+                // for a fill-width ratio; give both items the same preferred
+                // baseline as LStatTile's implicitWidth (200) and let the
+                // 2:1 stretch weight do the emphasis.
+                Layout.preferredWidth: 200
+                Layout.horizontalStretchFactor: 2
                 Layout.preferredHeight: 120
-                filled: true
+                radius: Theme.radius.card
+                clip: true
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: Theme.brand.kiosk }
+                    GradientStop { position: 1.0; color: Theme.brand.kioskHover }
+                }
+                Accessible.role: Accessible.Grouping
+
+                // Decorative corner ring, matching the reference's accent ring.
+                Rectangle {
+                    width: 150; height: 150
+                    radius: width / 2
+                    anchors.top: parent.top
+                    anchors.right: parent.right
+                    anchors.topMargin: -50
+                    anchors.rightMargin: -50
+                    color: "transparent"
+                    border.width: 24
+                    border.color: Qt.alpha(Theme.secondary, 0.15)
+                }
+
                 ColumnLayout {
                     anchors.fill: parent
+                    anchors.margins: Theme.spacing.xl
                     spacing: Theme.spacing.xs
                     Text {
                         text: qsTr("NOW SIGNED IN")
@@ -99,15 +137,17 @@ Item {
             LStatTile {
                 id: todayTile
                 Layout.fillWidth: true
+                // Explicit factor, not left implicit: mixing an explicit
+                // horizontalStretchFactor on one RowLayout sibling with an
+                // implicit (preferredWidth-derived) one on another produces a
+                // wildly lopsided split in practice — verified by live render,
+                // where the hero swallowed ~100% of the row width and this
+                // tile collapsed to nothing. Setting 1 here (vs hero's 2)
+                // keeps both on the same explicit scale for the ~2:1 emphasis.
+                Layout.horizontalStretchFactor: 1
                 Layout.preferredHeight: 120
                 label: qsTr("VISITORS TODAY")
                 value: mainArea.vm ? String(mainArea.vm.visitorsToday) : "0"
-            }
-            LStatTile {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 120
-                label: qsTr("THIS HOUR")
-                value: mainArea.vm ? String(mainArea.vm.visitorsThisHour) : "0"
             }
         }
 

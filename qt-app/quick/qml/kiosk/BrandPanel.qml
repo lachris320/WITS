@@ -13,15 +13,23 @@ Rectangle {
     function submit() { if (vm) vm.submitLogin(idField.text); idField.clear() }
 
     implicitWidth: 390
+    clip: true
     gradient: Gradient {
         GradientStop { position: 0.0; color: Theme.brand.kiosk }
         GradientStop { position: 1.0; color: Theme.brand.kioskHover }
     }
 
+    // The reference (Library Kiosk v2.dc.html ~L30) lays the three blocks out
+    // as a vertically-centered group with an even 28px gap between them
+    // (justify-content:center; gap:28px), not one pinned to the bottom by a
+    // fillHeight spacer. Theme.spacing.xxxl (28) matches that gap exactly.
     ColumnLayout {
-        anchors.fill: parent
-        anchors.margins: Theme.spacing.xxxl
-        spacing: Theme.spacing.xxl
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.verticalCenter: parent.verticalCenter
+        anchors.leftMargin: Theme.spacing.xxxl
+        anchors.rightMargin: Theme.spacing.xxxl
+        spacing: Theme.spacing.xxxl
 
         // Brand block: logo + titles.
         RowLayout {
@@ -61,9 +69,13 @@ Rectangle {
             }
         }
 
-        // Scan/type block.
+        // Scan/type block. Capped at 340px (reference's max-width:340px,
+        // Library Kiosk v2.dc.html ~L42) and centered so the field/buttons sit
+        // inside the panel with margin instead of touching/overflowing the edge.
         ColumnLayout {
             Layout.fillWidth: true
+            Layout.maximumWidth: 340   // reference max-width; no Theme token at this scale
+            Layout.alignment: Qt.AlignHCenter
             spacing: Theme.spacing.sm
             RowLayout {
                 spacing: Theme.spacing.sm
@@ -120,8 +132,6 @@ Rectangle {
                 onClicked: if (panel.vm) panel.vm.requestGuest()
             }
         }
-
-        Item { Layout.fillHeight: true }   // push the clock to the bottom
 
         // Clock block.
         ColumnLayout {
