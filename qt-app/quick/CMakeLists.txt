@@ -52,11 +52,13 @@ qt_add_qml_module(witsquickmodule
         qml/components/LStatTile.qml
         qml/components/LBarChart.qml
         qml/components/LPageHeader.qml
+        qml/kiosk/GuestDialog.qml
     SOURCES
         RfidQuickFilter.h RfidQuickFilter.cpp
         viewmodels/ThemeViewModel.h viewmodels/ThemeViewModel.cpp
         viewmodels/Navigator.h viewmodels/Navigator.cpp
         viewmodels/KioskViewModel.h viewmodels/KioskViewModel.cpp
+        viewmodels/GuestViewModel.h viewmodels/GuestViewModel.cpp
         models/RecentLoginsModel.h models/RecentLoginsModel.cpp
 )
 
@@ -144,6 +146,12 @@ wits_add_qttest(tst_navigator
 wits_add_qttest(tst_kioskviewmodel
     SOURCES tests/tst_kioskviewmodel.cpp
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Quick Qt${QT_VERSION_MAJOR}::Network
+    OFFSCREEN)
+
+# --- GuestViewModel unit test (C++ QtTest, offscreen) ---
+wits_add_qttest(tst_guestviewmodel
+    SOURCES tests/tst_guestviewmodel.cpp
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network
     OFFSCREEN)
 
 # --- L* component skeletons Quick test (offscreen) ---

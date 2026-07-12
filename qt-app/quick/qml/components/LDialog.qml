@@ -1,26 +1,64 @@
 import QtQuick
-import QtQuick.Controls
+import QtQuick.Layouts
 import LOAMS
 
-// The only modal-interruption primitive 2.0 keeps (§11).
-Dialog {
+// The only modal-interruption primitive 2.0 keeps (§11). A self-contained
+// overlay (scrim + centered card) — NOT a Controls.Dialog — so screens drop
+// arbitrary content into it and drive it with plain `visible`.
+Item {
     id: dlg
+    property string title: ""
     property string message: ""
-    modal: true
+    default property alias content: body.data
 
-    background: Rectangle {
+    anchors.fill: parent
+    visible: false
+
+    Rectangle {                                   // scrim: dim + swallow clicks
+        anchors.fill: parent
+        color: Theme.scrim
+        MouseArea { anchors.fill: parent }
+    }
+
+    Rectangle {
+        anchors.centerIn: parent
+        width: Math.min(parent.width - Theme.spacing.xxxl * 2, 460)
+        implicitHeight: card.implicitHeight + Theme.spacing.xxl * 2
         color: Theme.card
         radius: Theme.radius.card
         border.width: 2
         border.color: Theme.border
-    }
-    contentItem: Text {
-        text: dlg.message
-        color: Theme.text
-        font.family: Theme.typography.sans
-        font.pixelSize: Theme.typography.body
-        wrapMode: Text.WordWrap
+
+        ColumnLayout {
+            id: card
+            anchors.fill: parent
+            anchors.margins: Theme.spacing.xxl
+            spacing: Theme.spacing.lg
+            Text {
+                visible: dlg.title.length > 0
+                text: dlg.title
+                color: Theme.text
+                font.family: Theme.typography.serif
+                font.pixelSize: Theme.typography.cardTitle
+                font.weight: Font.Bold
+            }
+            Text {
+                visible: dlg.message.length > 0
+                text: dlg.message
+                color: Theme.text
+                font.family: Theme.typography.sans
+                font.pixelSize: Theme.typography.body
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+            Item {                                 // consumer content lands here
+                id: body
+                Layout.fillWidth: true
+                implicitHeight: childrenRect.height
+            }
+        }
     }
 
     Accessible.role: Accessible.Dialog
+    Accessible.name: dlg.title
 }
