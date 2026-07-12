@@ -14,6 +14,7 @@ private slots:
     void encodeEmptyListIsEmptyBody();
     void encodeSingleField();
     void encodeMultipleFieldsPreserveOrder();
+    void encodeEmptyValueKeepsKeyAndEquals();
     void encodeSpecialCharsAreFullyEncoded();
     void formRequestSetsContentType();
     void formRequestUrlRoundTrips();
@@ -40,6 +41,24 @@ void TestHttpForm::encodeMultipleFieldsPreserveOrder()
         {QStringLiteral("purpose"), QStringLiteral("Meeting")},
     });
     QCOMPARE(body, QByteArray("name=Ana&company=Acme&contact=0917&purpose=Meeting"));
+}
+
+void TestHttpForm::encodeEmptyValueKeepsKeyAndEquals()
+{
+    // An empty value must still emit "key=" (name, '=', no value) — this is a
+    // live path: the Guest form's optional 'contact' field can be blank, so
+    // encodeForm is called with an empty value in production. The value is an
+    // empty-but-non-null QString (what QLineEdit::text() returns for a blank
+    // field); a *null* QString would drop the '=', so this must be non-null.
+    QCOMPARE(HttpForm::encodeForm({{QStringLiteral("contact"), QStringLiteral("")}}),
+             QByteArray("contact="));
+
+    // Mixed with a populated field, the empty value keeps its bare "a=" slot.
+    const QByteArray mixed = HttpForm::encodeForm({
+        {QStringLiteral("a"), QStringLiteral("")},
+        {QStringLiteral("b"), QStringLiteral("x")},
+    });
+    QCOMPARE(mixed, QByteArray("a=&b=x"));
 }
 
 void TestHttpForm::encodeSpecialCharsAreFullyEncoded()

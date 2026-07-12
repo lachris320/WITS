@@ -9,6 +9,10 @@ Item {
     readonly property int feedCount: feed.count
     readonly property bool heroShowsStudent: vm ? vm.hasStudent : false
     readonly property string visitorsTodayShown: todayTile.value
+    // Exposed for QuickTest structural verification only (no pixel-diff
+    // harness in this repo — see tst_qml_kiosk.qml's test_feedTransitionsAssigned).
+    readonly property Transition feedAddTransition: feed.add
+    readonly property Transition feedDisplacedTransition: feed.displaced
 
     ColumnLayout {
         anchors.fill: parent
@@ -32,20 +36,8 @@ Item {
             }
             RowLayout {
                 spacing: Theme.spacing.sm
-                Rectangle {
-                    width: 7; height: 7; radius: 3.5; color: Theme.brand.kiosk
-                    SequentialAnimation on opacity {
-                        running: Theme.motion.enabled; loops: Animation.Infinite
-                        NumberAnimation { to: 1.0; duration: 800 }
-                        NumberAnimation { to: 0.45; duration: 800 }
-                    }
-                }
-                Text {
-                    text: qsTr("LIVE FEED"); color: Theme.brand.kiosk
-                    font.family: Theme.typography.sans
-                    font.pixelSize: Theme.typography.eyebrow
-                    font.weight: Font.ExtraBold; font.letterSpacing: 1.4
-                }
+                LPulseDot { color: Theme.brand.kiosk; pulseDuration: 800 }
+                LEyebrow { text: qsTr("LIVE FEED"); color: Theme.brand.kiosk }
             }
         }
 
@@ -77,10 +69,7 @@ Item {
                 Layout.preferredHeight: 120
                 radius: Theme.radius.card
                 clip: true
-                gradient: Gradient {
-                    GradientStop { position: 0.0; color: Theme.brand.kiosk }
-                    GradientStop { position: 1.0; color: Theme.brand.kioskHover }
-                }
+                gradient: LKioskGradient {}
                 Accessible.role: Accessible.Grouping
 
                 // Decorative corner ring, matching the reference's accent ring.
@@ -100,13 +89,7 @@ Item {
                     anchors.fill: parent
                     anchors.margins: Theme.spacing.xl
                     spacing: Theme.spacing.xs
-                    Text {
-                        text: qsTr("NOW SIGNED IN")
-                        color: Theme.secondary
-                        font.family: Theme.typography.sans
-                        font.pixelSize: Theme.typography.eyebrow
-                        font.weight: Font.ExtraBold; font.letterSpacing: 1.4
-                    }
+                    LEyebrow { text: qsTr("NOW SIGNED IN"); color: Theme.secondary }
                     Text {
                         visible: mainArea.vm ? mainArea.vm.hasStudent : false
                         text: mainArea.vm ? mainArea.vm.currentFullName : ""
@@ -170,6 +153,18 @@ Item {
                     rowTime: model.time
                     rowInitials: model.initials
                     rowFresh: model.fresh
+                }
+                // New rows fade + slide up into place; existing rows that get
+                // displaced by a prepend glide smoothly to their new slot
+                // instead of snapping. Both respect the reduced-motion switch.
+                add: Transition {
+                    enabled: Theme.motion.enabled
+                    NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.motion.rowIn }
+                    NumberAnimation { property: "y"; from: ViewTransition.item.y + 14; duration: Theme.motion.rowIn; easing.type: Easing.OutCubic }
+                }
+                displaced: Transition {
+                    enabled: Theme.motion.enabled
+                    NumberAnimation { property: "y"; duration: Theme.motion.rowIn; easing.type: Easing.OutCubic }
                 }
             }
         }

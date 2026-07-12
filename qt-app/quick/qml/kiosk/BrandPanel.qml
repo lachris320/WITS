@@ -14,10 +14,7 @@ Rectangle {
 
     implicitWidth: 390
     clip: true
-    gradient: Gradient {
-        GradientStop { position: 0.0; color: Theme.brand.kiosk }
-        GradientStop { position: 1.0; color: Theme.brand.kioskHover }
-    }
+    gradient: LKioskGradient {}
 
     // The reference (Library Kiosk v2.dc.html ~L30) lays the three blocks out
     // as a vertically-centered group with an even 28px gap between them
@@ -85,20 +82,10 @@ Rectangle {
             spacing: Theme.spacing.sm
             RowLayout {
                 spacing: Theme.spacing.sm
-                Rectangle {
-                    width: 7; height: 7; radius: 3.5; color: Theme.secondary
-                    SequentialAnimation on opacity {
-                        running: Theme.motion.enabled; loops: Animation.Infinite
-                        NumberAnimation { to: 1.0; duration: 900 }
-                        NumberAnimation { to: 0.45; duration: 900 }
-                    }
-                }
-                Text {
+                LPulseDot { color: Theme.secondary; pulseDuration: 900 }
+                LEyebrow {
                     text: qsTr("SCAN OR TYPE YOUR ID")
                     color: Theme.secondary
-                    font.family: Theme.typography.sans
-                    font.pixelSize: Theme.typography.eyebrow
-                    font.weight: Font.ExtraBold
                     font.letterSpacing: 1.6
                 }
             }

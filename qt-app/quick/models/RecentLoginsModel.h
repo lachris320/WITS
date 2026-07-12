@@ -33,7 +33,7 @@ public:
 private:
     struct Row {
         QString name, course, yearShort, dept, time, initials;
-        bool fresh;
+        bool fresh = false;
     };
     static QString shortenYear(const QString &year);   // "3rd Year" -> "3rd Yr"
     static QString initialsOf(const QString &name);    // "Maria Santos" -> "MS"
