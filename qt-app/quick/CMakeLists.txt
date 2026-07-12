@@ -38,6 +38,7 @@ qt_add_qml_module(witsquickmodule
         qml/AppShell.qml
         qml/theme/Theme.qml
         qml/kiosk/KioskScreen.qml
+        qml/kiosk/BrandPanel.qml
         qml/admin/AdminScreen.qml
         qml/components/LButton.qml
         qml/components/LCard.qml
@@ -149,6 +150,17 @@ wits_add_qttest(tst_kioskviewmodel
 # explicitly.
 wits_add_qttest(tst_qml_components
     SOURCES tests/tst_qml_components.cpp
+    LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
+         Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
+    DEFINES QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
+    OFFSCREEN)
+
+# --- Kiosk screens Quick test (offscreen) ---
+# Same escape hatch as tst_qml_theme/tst_qml_components above: "import LOAMS"
+# lives only in the QUICK_TEST_MAIN data file, so the plugin + "_init" object
+# must be linked explicitly.
+wits_add_qttest(tst_qml_kiosk
+    SOURCES tests/tst_qml_kiosk.cpp
     LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
          Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
     DEFINES QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
