@@ -16,9 +16,13 @@ Rectangle {
         // the guest Connections below set severity imperatively, which would
         // permanently destroy such a binding and leave later kiosk-login
         // toasts showing a stale guest severity. Every raise-site sets both.
-        onStatusChanged: if (statusMessage.length > 0) {
-            statusToast.severity = kioskVm.statusSeverity;
-            statusToast.message = statusMessage;
+        onStatusChanged: {
+            if (statusMessage.length > 0) {
+                statusToast.severity = kioskVm.statusSeverity;
+                statusToast.message = statusMessage;
+            } else {
+                statusToast.message = "";   // clear a lingering error on success
+            }
         }
     }
     GuestViewModel { id: guestVm }
