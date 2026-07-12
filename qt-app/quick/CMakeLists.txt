@@ -54,6 +54,7 @@ qt_add_qml_module(witsquickmodule
         qml/components/LPageHeader.qml
         qml/kiosk/GuestDialog.qml
     SOURCES
+        HttpForm.h HttpForm.cpp
         RfidQuickFilter.h RfidQuickFilter.cpp
         viewmodels/ThemeViewModel.h viewmodels/ThemeViewModel.cpp
         viewmodels/Navigator.h viewmodels/Navigator.cpp
@@ -151,6 +152,12 @@ wits_add_qttest(tst_kioskviewmodel
 # --- GuestViewModel unit test (C++ QtTest, offscreen) ---
 wits_add_qttest(tst_guestviewmodel
     SOURCES tests/tst_guestviewmodel.cpp
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network
+    OFFSCREEN)
+
+# --- HttpForm pure-helper unit test (C++ QtTest, offscreen) ---
+wits_add_qttest(tst_httpform
+    SOURCES tests/tst_httpform.cpp
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network
     OFFSCREEN)
 

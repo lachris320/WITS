@@ -1,12 +1,10 @@
 #include "GuestViewModel.h"
 
 #include <QNetworkAccessManager>
-#include <QNetworkRequest>
-#include <QNetworkReply>
-#include <QUrlQuery>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include "apiconfig.h"
+#include "HttpForm.h"
 
 GuestViewModel::GuestViewModel(QObject *parent)
     : QObject(parent)
@@ -30,27 +28,18 @@ void GuestViewModel::submitGuest(const QString &name, const QString &contact,
         return;
     }
 
-    QNetworkRequest request(ApiConfig::endpoint(QStringLiteral("guest_login.php")));
-    request.setHeader(QNetworkRequest::ContentTypeHeader,
-                      QStringLiteral("application/x-www-form-urlencoded"));
-    QUrlQuery form;
-    form.addQueryItem(QStringLiteral("name"), name.trimmed());
-    form.addQueryItem(QStringLiteral("company"), company.trimmed());
-    form.addQueryItem(QStringLiteral("contact"), contact.trimmed());
-    form.addQueryItem(QStringLiteral("purpose"), purpose.trimmed());
-
-    QNetworkReply *reply =
-        m_nam->post(request, form.toString(QUrl::FullyEncoded).toUtf8());
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        const QByteArray body = reply->readAll();
-        const bool netErr = reply->error() != QNetworkReply::NoError;
-        reply->deleteLater();
-        if (netErr) {
+    const QList<QPair<QString, QString>> fields = {
+        {QStringLiteral("name"), name.trimmed()},
+        {QStringLiteral("company"), company.trimmed()},
+        {QStringLiteral("contact"), contact.trimmed()},
+        {QStringLiteral("purpose"), purpose.trimmed()},
+    };
+    HttpForm::submit(m_nam, ApiConfig::endpoint(QStringLiteral("guest_login.php")),
+                     fields, this,
+        [this](const QByteArray &body) { applyGuestResponse(body); },
+        [this]() {
             emit guestFailed(QStringLiteral("Network error. Please try again."));
-            return;
-        }
-        applyGuestResponse(body);
-    });
+        });
 }
 
 void GuestViewModel::applyGuestResponse(const QByteArray &json)
