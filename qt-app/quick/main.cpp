@@ -1,7 +1,10 @@
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
+#include <QQuickStyle>
 #include <QQuickWindow>
+#include <QSettings>
 #include <QSGRendererInterface>
+#include "brandtheme.h"
 
 int main(int argc, char *argv[])
 {
@@ -15,6 +18,20 @@ int main(int argc, char *argv[])
     if (args.contains(QStringLiteral("--software"))
         || qEnvironmentVariable("QT_QUICK_BACKEND") == QLatin1String("software")) {
         QQuickWindow::setGraphicsApi(QSGRendererInterface::Software);
+    }
+
+    // Use the "Basic" Controls style (not the native Windows style) so the
+    // LButton/TextField `background`/`contentItem` customizations in the
+    // component library actually apply — the native style ignores them and
+    // emits a QWARN per customized control otherwise. Must precede the first
+    // Controls type instantiation.
+    QQuickStyle::setStyle(QStringLiteral("Basic"));
+
+    // Cache-first branding (spec §6): apply the cached palette before the first
+    // frame so there is no unbranded flash. Background re-sync lands in Phase 4.
+    {
+        QSettings brandingStore(QStringLiteral("MyCompany"), QStringLiteral("MyApp"));
+        BrandTheme::setCurrent(BrandTheme::loadCachedConfig(brandingStore).palette);
     }
 
     QQmlApplicationEngine engine;

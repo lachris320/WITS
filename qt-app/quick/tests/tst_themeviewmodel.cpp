@@ -14,6 +14,7 @@ private slots:
     void mapsCurrentBrandRole();
     void refreshEmitsChangedAfterExternalSetCurrent();
     void regenerateFromLogoRethemesAndNotifies();
+    void getterIsLiveNotCached();
 
 private:
     QString writeSolidPng(const QString &path, const QColor &fill);
@@ -63,6 +64,19 @@ void TestThemeViewModel::regenerateFromLogoRethemesAndNotifies()
     QCOMPARE(spy.count(), 1);
     // A chromatic logo yields a branded admin role distinct from the fallback.
     QVERIFY(vm.adminPrimary() != BrandTheme::fallbackPalette().adminPrimary);
+}
+
+void TestThemeViewModel::getterIsLiveNotCached()
+{
+    BrandTheme::setCurrent(BrandTheme::fallbackPalette());
+    ThemeViewModel vm;
+
+    BrandPalette custom = BrandTheme::fallbackPalette();
+    custom.adminPrimary = QColor(0x0A, 0x0B, 0x0C);
+    BrandTheme::setCurrent(custom);   // change the engine, do NOT call vm.refresh()
+
+    // Single source of truth: the getter reflects the engine immediately.
+    QCOMPARE(vm.adminPrimary(), QColor(0x0A, 0x0B, 0x0C));
 }
 
 QTEST_MAIN(TestThemeViewModel)

@@ -17,6 +17,7 @@ QtObject {
         readonly property color kioskHover:   root._vm.kioskPrimaryHover
         readonly property color kioskSoft:    root._vm.kioskPrimarySoft
         readonly property color onPrimary:    root._vm.adminOnPrimary
+        readonly property color onKiosk:      root._vm.kioskOnPrimary
     }
 
     readonly property color secondary:     root._vm.secondary
@@ -36,6 +37,8 @@ QtObject {
     readonly property color rowHairline:      "#F3ECDD"
     readonly property color errorSoft:        "#FDF4F3"
     readonly property color errorBorder:      "#F3D9D6"
+    readonly property color scrim:            Qt.rgba(15/255, 23/255, 42/255, 0.45)
+    readonly property color onBrandMuted:     "#EFC9A8"
 
     // Structural scales (§12.2/12.3).
     readonly property QtObject spacing: QtObject {
@@ -90,6 +93,7 @@ QtObject {
         readonly property int hoverLift: 180
         readonly property int toastIn: 200
         readonly property int toastOut: 150
+        readonly property int toastHold: 2500
         readonly property var easing: [0.2, 0.8, 0.3, 1.0]
     }
 

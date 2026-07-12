@@ -33,9 +33,15 @@ endif()
 qt_add_qml_module(witsquickmodule
     URI LOAMS
     VERSION 1.0
+    OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/LOAMS
     QML_FILES
         qml/AppShell.qml
         qml/theme/Theme.qml
+        qml/kiosk/KioskScreen.qml
+        qml/kiosk/BrandPanel.qml
+        qml/kiosk/KioskMain.qml
+        qml/kiosk/KioskFeedRow.qml
+        qml/admin/AdminScreen.qml
         qml/components/LButton.qml
         qml/components/LCard.qml
         qml/components/LTable.qml
@@ -46,9 +52,14 @@ qt_add_qml_module(witsquickmodule
         qml/components/LStatTile.qml
         qml/components/LBarChart.qml
         qml/components/LPageHeader.qml
+        qml/kiosk/GuestDialog.qml
     SOURCES
         RfidQuickFilter.h RfidQuickFilter.cpp
         viewmodels/ThemeViewModel.h viewmodels/ThemeViewModel.cpp
+        viewmodels/Navigator.h viewmodels/Navigator.cpp
+        viewmodels/KioskViewModel.h viewmodels/KioskViewModel.cpp
+        viewmodels/GuestViewModel.h viewmodels/GuestViewModel.cpp
+        models/RecentLoginsModel.h models/RecentLoginsModel.cpp
 )
 
 target_link_libraries(witsquickmodule PUBLIC
@@ -71,6 +82,11 @@ target_include_directories(witsquickmodule PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # Theme.qml's generated registration and for tests that quote-include it.
 target_include_directories(witsquickmodule PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/viewmodels)
 
+# models/ on the include path (analogous to the viewmodels/ line above), so
+# KioskViewModel.h's #include "RecentLoginsModel.h" and the test's
+# quote-includes resolve.
+target_include_directories(witsquickmodule PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/models)
+
 # qt_add_qml_module's automatic static-plugin import (qmlimportscanner, run
 # via a deferred call at the end of this directory) only fires when a target
 # statically analyzable QML/C++ source contains a literal "import LOAMS"
@@ -88,95 +104,74 @@ target_link_libraries(WITSQuick PRIVATE
 set_target_properties(WITSQuick PROPERTIES WIN32_EXECUTABLE TRUE)
 
 # --- AppShell load test (C++ QtTest, offscreen) ---
-qt_add_executable(tst_appshell tests/tst_appshell.cpp)
-set_target_properties(tst_appshell PROPERTIES WIN32_EXECUTABLE FALSE)
-target_link_libraries(tst_appshell PRIVATE
-    witsquickmodule
-    witsquickmoduleplugin
-    witsquickmoduleplugin_init
-    Qt${QT_VERSION_MAJOR}::Test
-    Qt${QT_VERSION_MAJOR}::Qml
-    Qt${QT_VERSION_MAJOR}::Quick
-)
-add_test(NAME tst_appshell COMMAND tst_appshell)
-set_tests_properties(tst_appshell PROPERTIES
-    ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1;QT_QPA_PLATFORM=offscreen"
-)
+wits_add_qttest(tst_appshell
+    SOURCES tests/tst_appshell.cpp
+    LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
+         Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
+    OFFSCREEN)
 
 # --- RFID-in-QML spike test (C++ QtTest, offscreen) ---
-qt_add_executable(tst_rfidquickfilter tests/tst_rfidquickfilter.cpp)
-set_target_properties(tst_rfidquickfilter PROPERTIES WIN32_EXECUTABLE FALSE)
-target_link_libraries(tst_rfidquickfilter PRIVATE
-    witsquickmodule
-    Qt${QT_VERSION_MAJOR}::Test
-    Qt${QT_VERSION_MAJOR}::Quick
-)
-add_test(NAME tst_rfidquickfilter COMMAND tst_rfidquickfilter)
-set_tests_properties(tst_rfidquickfilter PROPERTIES
-    ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1;QT_QPA_PLATFORM=offscreen"
-)
+wits_add_qttest(tst_rfidquickfilter
+    SOURCES tests/tst_rfidquickfilter.cpp
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Quick
+    OFFSCREEN)
 
 # --- ThemeViewModel unit test (C++ QtTest, offscreen: paints QImages) ---
-qt_add_executable(tst_themeviewmodel tests/tst_themeviewmodel.cpp)
-set_target_properties(tst_themeviewmodel PROPERTIES WIN32_EXECUTABLE FALSE)
-target_link_libraries(tst_themeviewmodel PRIVATE
-    witsquickmodule
-    Qt${QT_VERSION_MAJOR}::Test
-    Qt${QT_VERSION_MAJOR}::Gui
-    Qt${QT_VERSION_MAJOR}::Svg
-)
-add_test(NAME tst_themeviewmodel COMMAND tst_themeviewmodel)
-set_tests_properties(tst_themeviewmodel PROPERTIES
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_FORCE_STDERR_LOGGING=1"
-)
+wits_add_qttest(tst_themeviewmodel
+    SOURCES tests/tst_themeviewmodel.cpp
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Svg
+    OFFSCREEN)
 
 # --- Theme singleton Quick test (offscreen) ---
-# Escape hatch (same precedent as WITSQuick/tst_appshell above): the literal
-# "import LOAMS" lives only in tst_qml_theme.qml, a QUICK_TEST_MAIN data file
-# that qmlimportscanner never scans (it only scans tst_qml_theme.cpp, which
-# has no import statement) — so the automatic static-plugin import never
-# fires and the module fails to resolve at runtime ("plugin
-# witsquickmoduleplugin not found", confirmed by running this target before
-# adding the two lines below). Link the generated plugin target and its
-# Q_IMPORT_PLUGIN "_init" object explicitly so the statically-embedded LOAMS
-# module (and its Theme singleton) actually registers.
-qt_add_executable(tst_qml_theme tests/tst_qml_theme.cpp)
-set_target_properties(tst_qml_theme PROPERTIES WIN32_EXECUTABLE FALSE)
-target_link_libraries(tst_qml_theme PRIVATE
-    witsquickmodule
-    witsquickmoduleplugin
-    witsquickmoduleplugin_init
-    Qt${QT_VERSION_MAJOR}::QuickTest
-    Qt${QT_VERSION_MAJOR}::Qml
-    Qt${QT_VERSION_MAJOR}::Quick
-)
-target_compile_definitions(tst_qml_theme PRIVATE
-    QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
-add_test(NAME tst_qml_theme COMMAND tst_qml_theme)
-set_tests_properties(tst_qml_theme PROPERTIES
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_FORCE_STDERR_LOGGING=1"
-)
+# The literal "import LOAMS" lives only in tst_qml_theme.qml (a QUICK_TEST_MAIN
+# data file qmlimportscanner never scans), so the automatic static-plugin import
+# never fires — link witsquickmoduleplugin + its Q_IMPORT_PLUGIN "_init" object
+# explicitly or the statically-embedded LOAMS module never registers.
+wits_add_qttest(tst_qml_theme
+    SOURCES tests/tst_qml_theme.cpp
+    LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
+         Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
+    DEFINES QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
+    OFFSCREEN)
+
+# --- Navigator unit test (C++ QtTest, offscreen: house consistency with the
+# other quick tests — witsquickmodule PUBLIC-propagates Qt::Gui, which would
+# otherwise make QTEST_MAIN build a QGuiApplication) ---
+wits_add_qttest(tst_navigator
+    SOURCES tests/tst_navigator.cpp
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Qml
+    OFFSCREEN)
+
+# --- KioskViewModel + RecentLoginsModel unit test (C++ QtTest, offscreen) ---
+wits_add_qttest(tst_kioskviewmodel
+    SOURCES tests/tst_kioskviewmodel.cpp
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Quick Qt${QT_VERSION_MAJOR}::Network
+    OFFSCREEN)
+
+# --- GuestViewModel unit test (C++ QtTest, offscreen) ---
+wits_add_qttest(tst_guestviewmodel
+    SOURCES tests/tst_guestviewmodel.cpp
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network
+    OFFSCREEN)
 
 # --- L* component skeletons Quick test (offscreen) ---
-# Same escape hatch as tst_qml_theme above, and for the same reason: the
-# literal "import LOAMS" lives only in tst_qml_components.qml (a
-# QUICK_TEST_MAIN data file qmlimportscanner never scans), so the automatic
-# static-plugin import never fires. Link the generated plugin target and its
-# Q_IMPORT_PLUGIN "_init" object explicitly. Also note the CMake target is
-# "witsquickmodule", not "witsquick" (see the comment atop this file).
-qt_add_executable(tst_qml_components tests/tst_qml_components.cpp)
-set_target_properties(tst_qml_components PROPERTIES WIN32_EXECUTABLE FALSE)
-target_link_libraries(tst_qml_components PRIVATE
-    witsquickmodule
-    witsquickmoduleplugin
-    witsquickmoduleplugin_init
-    Qt${QT_VERSION_MAJOR}::QuickTest
-    Qt${QT_VERSION_MAJOR}::Qml
-    Qt${QT_VERSION_MAJOR}::Quick
-)
-target_compile_definitions(tst_qml_components PRIVATE
-    QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
-add_test(NAME tst_qml_components COMMAND tst_qml_components)
-set_tests_properties(tst_qml_components PROPERTIES
-    ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_FORCE_STDERR_LOGGING=1"
-)
+# Same escape hatch as tst_qml_theme above: "import LOAMS" lives only in the
+# QUICK_TEST_MAIN data file, so the plugin + "_init" object must be linked
+# explicitly.
+wits_add_qttest(tst_qml_components
+    SOURCES tests/tst_qml_components.cpp
+    LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
+         Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
+    DEFINES QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
+    OFFSCREEN)
+
+# --- Kiosk screens Quick test (offscreen) ---
+# Same escape hatch as tst_qml_theme/tst_qml_components above: "import LOAMS"
+# lives only in the QUICK_TEST_MAIN data file, so the plugin + "_init" object
+# must be linked explicitly.
+wits_add_qttest(tst_qml_kiosk
+    SOURCES tests/tst_qml_kiosk.cpp
+    LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
+         Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
+    DEFINES QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
+    OFFSCREEN)

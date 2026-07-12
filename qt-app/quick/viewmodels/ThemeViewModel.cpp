@@ -4,20 +4,23 @@
 ThemeViewModel::ThemeViewModel(QObject *parent)
     : QObject(parent)
 {
-    // Phase 1: read the engine's process-wide default (current() defaults to
-    // fallbackPalette(), brandtheme.h:67). Cache-first BrandingController sync
-    // (§13.2/13.3) lands in Phase 2 with the kiosk branding network path.
-    m_config.palette = BrandTheme::current();
+    // Single source of truth for colors is BrandTheme::current(); every getter
+    // reads it live. No palette cache here — a cached copy would only drift.
+    // m_config is scratch for regenerateFromImportedLogo (below).
 }
 
 void ThemeViewModel::refresh()
 {
-    m_config.palette = BrandTheme::current();
+    // Re-notify QML after an external BrandTheme::setCurrent. Nothing to cache —
+    // the getters already read the engine live; this just fires the binding.
     emit changed();
 }
 
 bool ThemeViewModel::regenerateFromImportedLogo(const QString &path)
 {
+    // Seed the scratch config from the live palette so regeneration starts from
+    // whatever is current, then let the engine overwrite it.
+    m_config.palette = BrandTheme::current();
     QString err;
     const bool ok = BrandTheme::regenerateFromLogo(m_config, path, &err);
     if (ok) {

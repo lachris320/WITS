@@ -22,10 +22,13 @@ add_library(witscore STATIC
     brandtheme.h brandtheme.cpp
     brandingcontroller.h brandingcontroller.cpp
     rfidscandetector.h rfidscandetector.cpp
+    loginparser.h loginparser.cpp
+    rfideventfilterbase.h rfideventfilterbase.cpp
 )
 
-# AUTOMOC required (6 Q_OBJECT classes: the five *Controller + BrandingController)
-# and free — it is already ON at directory scope. AUTOUIC OFF: zero .ui inputs.
+# AUTOMOC required (7 Q_OBJECT classes: the five *Controller + BrandingController
+# + RfidEventFilterBase) and free — it is already ON at directory scope.
+# AUTOUIC OFF: zero .ui inputs.
 set_target_properties(witscore PROPERTIES
     AUTOMOC ON
     AUTOUIC OFF

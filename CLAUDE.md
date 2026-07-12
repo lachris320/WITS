@@ -15,6 +15,23 @@
 - `qt-app/build/` — generated build output (gitignored). Never edit or commit.
 - `deliverables/` — project deliverables/docs.
 
+## qt-app/quick/ conventions (LOAMS 2.0)
+
+- **QML module target is `witsquickmodule`** (URI `LOAMS`), NOT `witsquick` — the
+  latter collides on case-insensitive NTFS with the `WITSQuick` executable's
+  autogen dir. Runtime `loadFromModule` consumers link `witsquickmoduleplugin`
+  + `witsquickmoduleplugin_init`.
+- **File naming:** QML types and C++ ViewModel/model classes are `PascalCase`
+  (`KioskViewModel.h`, `BrandPanel.qml`); C++ member variables are `m_camelCase`.
+- **MVVM:** ViewModels (`quick/viewmodels/`) are the ONLY QML-facing C++; QML
+  never calls a `witscore` controller directly. Screens receive their VM as a
+  `property var vm` so QuickTests can inject a plain-QML stub.
+- **Theming:** `Theme.qml` (pragma Singleton) is the single source of every
+  visual token. ZERO raw hex outside `Theme.qml`; opacity variants use
+  `Qt.alpha(Theme.<token>, a)`, never a literal color.
+- **Tests:** register via `wits_add_qttest()` (`qt-app/cmake/WitsTest.cmake`);
+  add `OFFSCREEN` for any GUI/Quick/painting test.
+
 ## Build & run
 
 - Configure: `cmake -S qt-app -B qt-app/build`

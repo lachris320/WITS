@@ -68,7 +68,7 @@ signals:
     void changed();
 
 private:
-    BrandingConfig m_config;
+    BrandingConfig m_config; // scratch for regenerateFromImportedLogo only; NOT a palette cache
 };
 
 #endif // THEMEVIEWMODEL_H
