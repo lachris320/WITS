@@ -78,13 +78,11 @@ Rectangle {
         }
     }
 
-    // rowIn: slide-up + fade on insertion.
-    opacity: 0
-    Component.onCompleted: rowIn.start()
-    ParallelAnimation {
-        id: rowIn
-        running: false
-        NumberAnimation { target: row; property: "opacity"; from: 0; to: 1; duration: Theme.motion.rowIn }
-        NumberAnimation { target: row; property: "y"; from: row.y + 14; to: row.y; duration: Theme.motion.rowIn; easing.type: Easing.OutCubic }
-    }
+    // Entry animation (fade + slide-up) is driven by the ListView's own
+    // `add`/`displaced` transitions (see KioskMain.qml) so that rows
+    // displaced by a prepend also animate, not just the newly-inserted row.
+    // Note: `add:` does not fire for the initial population of the view (only
+    // `populate:` would), so the first batch of rows on load renders instantly
+    // with no animation — intentional, not an oversight; only later inserts
+    // (a real login) get the fade/slide.
 }

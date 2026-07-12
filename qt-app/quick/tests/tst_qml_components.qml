@@ -16,6 +16,9 @@ Item {
     LStatTile  { id: st; label: "L"; value: "1" }
     LBarChart  { id: bc }
     LPageHeader{ id: ph; title: "P" }
+    LPulseDot  { id: pd; color: Theme.secondary; pulseDuration: 900 }
+    LEyebrow   { id: eb; text: "EYEBROW"; color: Theme.secondary }
+    Rectangle  { id: gr; width: 10; height: 10; gradient: LKioskGradient {} }
 
     TestCase {
         name: "ComponentsInstantiateAndBindTheme"
@@ -31,6 +34,28 @@ Item {
         }
         function test_cardBindsCardToken() {
             compare(c.color, Theme.card);
+        }
+        function test_pulseDotCreatedWithColorAndDuration() {
+            verify(pd !== null);
+            compare(pd.color, Theme.secondary);
+            compare(pd.pulseDuration, 900);
+        }
+        function test_eyebrowDefaultsAndOverrides() {
+            verify(eb !== null);
+            compare(eb.text, "EYEBROW");
+            compare(eb.color, Theme.secondary);
+            // QFont stores letterSpacing in 26.6 fixed-point (1/64px), so a
+            // literal 1.4 round-trips as 1.390625 regardless of call site —
+            // fuzzyCompare tolerates that quirk without weakening the check.
+            fuzzyCompare(eb.font.letterSpacing, 1.4, 0.02);
+            compare(eb.font.weight, Font.ExtraBold);
+            compare(eb.font.pixelSize, Theme.typography.eyebrow);
+        }
+        function test_kioskGradientStopsMatchBrandTokens() {
+            verify(gr.gradient !== null);
+            compare(gr.gradient.stops.length, 2);
+            compare(gr.gradient.stops[0].color, Theme.brand.kiosk);
+            compare(gr.gradient.stops[1].color, Theme.brand.kioskHover);
         }
     }
 }

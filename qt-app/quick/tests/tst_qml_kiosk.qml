@@ -95,6 +95,16 @@ Item {
         function test_statTilesBound() {
             compare(main.visitorsTodayShown, "27");
         }
+        // Structural-only check: this repo has no pixel-diff harness, so the
+        // actual fade/slide motion of the ListView's add/displaced
+        // transitions is verified by code inspection, not by this test. This
+        // just proves the ListView delegate feed carries its own add and
+        // displaced Transition objects (rather than the removed per-delegate
+        // Component.onCompleted animation).
+        function test_feedTransitionsAssigned() {
+            verify(main.feedAddTransition !== null);
+            verify(main.feedDisplacedTransition !== null);
+        }
     }
 
     // --- KioskScreen fixture ---
