@@ -17,6 +17,6 @@ ApplicationWindow {
                          ? adminSurface : kioskSurface
     }
 
-    Component { id: kioskSurface; KioskScreen {} }
+    Component { id: kioskSurface; KioskScreen { appWindow: appShell } }
     Component { id: adminSurface; AdminScreen {} }
 }

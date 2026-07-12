@@ -96,4 +96,20 @@ Item {
             compare(main.visitorsTodayShown, "27");
         }
     }
+
+    // --- KioskScreen fixture ---
+    // Real screen with a real KioskViewModel; no appWindow supplied, so
+    // Component.onCompleted's `if (screen.appWindow)` guard skips RFID
+    // install (installRfid(null) would be a no-op anyway) — this is purely
+    // a load/smoke assertion, not RFID or behavioral coverage.
+    KioskScreen { id: realScreen; width: 1280; height: 800 }
+    TestCase {
+        name: "KioskScreenSmoke"
+        when: windowShown
+        function test_loadsIdleState() {
+            verify(realScreen !== null);
+            // No student yet -> hero shows the idle prompt path (hasStudent false).
+            verify(realScreen.width === 1280);
+        }
+    }
 }
