@@ -1,15 +1,13 @@
 #include "KioskViewModel.h"
 
 #include <QNetworkAccessManager>
-#include <QNetworkRequest>
-#include <QNetworkReply>
-#include <QUrlQuery>
 #include <QTimer>
 #include <QSettings>
 #include <QDateTime>
 #include <QQuickWindow>   // complete type: installRfid() calls window->installEventFilter()
 #include "apiconfig.h"
 #include "loginparser.h"
+#include "HttpForm.h"
 #include "RfidQuickFilter.h"
 
 KioskViewModel::KioskViewModel(QObject *parent)
@@ -87,35 +85,23 @@ void KioskViewModel::applyStudentLogin(const QJsonObject &student)
 void KioskViewModel::postForm(const QUrl &url, const QString &key,
                               const QString &value, bool rfid)
 {
-    QNetworkRequest request(url);
-    request.setHeader(QNetworkRequest::ContentTypeHeader,
-                      QStringLiteral("application/x-www-form-urlencoded"));
-    QUrlQuery form;
-    form.addQueryItem(key, value);
-    QNetworkReply *reply =
-        m_nam->post(request, form.toString(QUrl::FullyEncoded).toUtf8());
-
-    connect(reply, &QNetworkReply::finished, this, [this, reply, rfid]() {
-        const QByteArray body = reply->readAll();
-        const bool netErr = reply->error() != QNetworkReply::NoError;
-        reply->deleteLater();
-
-        if (netErr) {
+    HttpForm::submit(m_nam, url, {{key, value}}, this,
+        [this, rfid](const QByteArray &body) {
+            if (rfid) {
+                const LoginParser::RfidResult r = LoginParser::parseRfidResponse(body);
+                if (r.ok) applyStudentLogin(r.student);
+                else      setStatus(r.message, QStringLiteral("Error"));
+                return;
+            }
+            const LoginParser::LoginResult r = LoginParser::parseLoginResponse(body);
+            if (r.ok && r.isStudent)      applyStudentLogin(r.student);
+            else if (r.ok && r.isAdmin)   emit adminRequested();
+            else                          setStatus(r.message, QStringLiteral("Error"));
+        },
+        [this]() {
             setStatus(QStringLiteral("Network error. Please try again."),
                       QStringLiteral("Error"));
-            return;
-        }
-        if (rfid) {
-            const LoginParser::RfidResult r = LoginParser::parseRfidResponse(body);
-            if (r.ok) applyStudentLogin(r.student);
-            else      setStatus(r.message, QStringLiteral("Error"));
-            return;
-        }
-        const LoginParser::LoginResult r = LoginParser::parseLoginResponse(body);
-        if (r.ok && r.isStudent)      applyStudentLogin(r.student);
-        else if (r.ok && r.isAdmin)   emit adminRequested();
-        else                          setStatus(r.message, QStringLiteral("Error"));
-    });
+        });
 }
 
 void KioskViewModel::submitLogin(const QString &input)
