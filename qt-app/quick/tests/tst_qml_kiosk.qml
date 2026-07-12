@@ -60,4 +60,40 @@ Item {
             return null;
         }
     }
+
+    // --- KioskMain fixture ---
+    ListModel {
+        id: feedModel
+        ListElement { name: "Maria Santos"; course: "BSCE"; yearShort: "3rd Yr"; dept: "Civil Engineering"; time: "8:04 AM"; initials: "MS"; fresh: true }
+        ListElement { name: "Jose Ramirez"; course: "BSEE"; yearShort: "2nd Yr"; dept: "Electrical Engineering"; time: "7:58 AM"; initials: "JR"; fresh: false }
+    }
+    QtObject {
+        id: stubMainVm
+        property bool hasStudent: true
+        property string greeting: "Good morning"
+        property string currentName: "Maria"
+        property string currentFullName: "Maria Santos"
+        property string currentCourse: "BSCE"
+        property string currentYear: "3rd Year"
+        property string currentDept: "Civil Engineering"
+        property string currentTime: "8:04 AM"
+        property int visitorsToday: 27
+        property int visitorsThisHour: 4
+        property var recentLogins: feedModel
+    }
+    KioskMain { id: main; width: 800; height: 800; vm: stubMainVm }
+
+    TestCase {
+        name: "KioskMain"
+        when: windowShown
+        function test_feedRowCountMatchesModel() {
+            compare(main.feedCount, 2);
+        }
+        function test_heroShowsCurrentWhenHasStudent() {
+            verify(main.heroShowsStudent === true);
+        }
+        function test_statTilesBound() {
+            compare(main.visitorsTodayShown, "27");
+        }
+    }
 }

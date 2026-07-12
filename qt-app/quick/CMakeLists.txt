@@ -39,6 +39,8 @@ qt_add_qml_module(witsquickmodule
         qml/theme/Theme.qml
         qml/kiosk/KioskScreen.qml
         qml/kiosk/BrandPanel.qml
+        qml/kiosk/KioskMain.qml
+        qml/kiosk/KioskFeedRow.qml
         qml/admin/AdminScreen.qml
         qml/components/LButton.qml
         qml/components/LCard.qml
