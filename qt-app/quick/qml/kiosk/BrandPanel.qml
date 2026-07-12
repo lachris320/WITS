@@ -31,8 +31,14 @@ Rectangle {
         anchors.rightMargin: Theme.spacing.xxxl
         spacing: Theme.spacing.xxxl
 
-        // Brand block: logo + titles.
-        RowLayout {
+        // Brand block: logo ON TOP of the titles, stacked vertically and
+        // left-aligned (reference brandDir:'column' in wide mode, Library
+        // Kiosk v2.dc.html ~L34). A horizontal logo-beside-title layout made
+        // the block logo(96) + the wide serif pageTitle title exceed the
+        // 390px panel content width, so with the panel's clip the title was
+        // cut off at the right edge. Stacking narrows the block to the
+        // title's own width, fitting inside 390px with margin.
+        ColumnLayout {
             spacing: Theme.spacing.xl
             Rectangle {
                 Layout.preferredWidth: 96; Layout.preferredHeight: 96
