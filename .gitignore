@@ -87,3 +87,7 @@ Thumbs.db
 # hash_admin.php hardcodes the plaintext admin key. Keep these on the local machine.
 deliverables/sql/wits_app.sql
 deliverables/loams_api/hash_admin.php
+
+# Backend runtime upload storage (logos + pasted images written by the app).
+# Local-only artifacts, may contain an institution logo or PII screenshots.
+uploads/
