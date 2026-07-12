@@ -42,7 +42,12 @@ LDialog {
     }
 
     ColumnLayout {
-        Layout.fillWidth: true
+        // width (not Layout.fillWidth): this ColumnLayout lands inside
+        // LDialog's plain `Item body` via the default content alias, not
+        // inside a Layout — Layout.fillWidth is a no-op there. Bind directly
+        // to body's width (exposed here as `parent.width`) so the guest
+        // fields stretch to the card instead of rendering at implicit width.
+        width: parent.width
         spacing: Theme.spacing.md
 
         Field { id: nameField;    label: qsTr("Full name *") }

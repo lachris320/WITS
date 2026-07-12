@@ -22,7 +22,15 @@ function(wits_add_qttest name)
     endif()
     add_test(NAME ${name} COMMAND ${name})
     if(T_OFFSCREEN)
-        set(_env "QT_QPA_PLATFORM=offscreen;QT_FORCE_STDERR_LOGGING=1")
+        # QT_QUICK_CONTROLS_STYLE=Basic: the OFFSCREEN platform still resolves
+        # the native Windows Controls style by default, which ignores
+        # LButton/TextField's `background`/`contentItem` customizations and
+        # emits a QWARN ("does not support customization of this control")
+        # per customized control instantiated. Force Basic uniformly so every
+        # Quick test that instantiates a component-library control (BrandPanel,
+        # GuestDialog, KioskMain, ...) both applies the intended styling and
+        # runs QWARN-clean — this is also what WITSQuick.exe sets at runtime.
+        set(_env "QT_QPA_PLATFORM=offscreen;QT_FORCE_STDERR_LOGGING=1;QT_QUICK_CONTROLS_STYLE=Basic")
         # This Qt SDK install has no bundled lib/fonts directory, so the
         # offscreen platform's font backend logs "QFontDatabase: Cannot find
         # font directory ...lib/fonts" the first time ANY text is rendered in

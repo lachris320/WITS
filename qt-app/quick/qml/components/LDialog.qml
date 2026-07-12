@@ -53,7 +53,14 @@ Item {
             }
             Item {                                 // consumer content lands here
                 id: body
-                Layout.fillWidth: true
+                // Explicit width binding (not just Layout.fillWidth) so the
+                // slotted content itself has something concrete to bind to:
+                // Layout.fillWidth only sizes `body` within `card` — it does
+                // NOT propagate to body's own children (the default `content`
+                // alias just parents them into body's data list, outside the
+                // Layout machinery). Consumers bind their root layout to
+                // `width: parent.width` to stretch into this.
+                width: card.width
                 implicitHeight: childrenRect.height
             }
         }
