@@ -9,8 +9,8 @@ Item {
     // Stub VM: same property/method surface BrandPanel consumes.
     QtObject {
         id: stubVm
-        property string schoolName: "Maryknoll School of Lupon, Inc."
-        property string schoolAddress: "Lupon, Davao Oriental"
+        property string schoolName: "Example Library"
+        property string schoolAddress: "Test City"
         property string libraryHours: "6 AM – 5 PM"
         property string clockTime: "8:04:11"
         property string clockMeridiem: "AM"
@@ -29,7 +29,7 @@ Item {
         when: windowShown
 
         function test_bindsSchoolInfo() {
-            verify(findText(panel, "Maryknoll School of Lupon, Inc.") !== null);
+            verify(findText(panel, "Example Library") !== null);
         }
         function test_ctaSubmitsIdField() {
             panel.idText = "202300123";
