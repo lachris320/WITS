@@ -67,7 +67,8 @@ router switch.
 required for the Phase 3 UI.** Backend hardening/auth stays in Phase 6 (parent spec §9). The
 owner has explicitly approved deploying the two new read-only endpoints to the library server.
 Everything added in §5 is additive and read-only; no existing endpoint's contract changes
-except the one-line `visits` addition to `search_students.php`.
+except the additive `visits` field on `search_students.php` (whose client-side plumbing is
+detailed in §5.3).
 
 ## 4. Scope — deliverables
 
