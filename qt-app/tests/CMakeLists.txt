@@ -220,3 +220,12 @@ wits_add_qttest(tst_dashboardparser
         ${CMAKE_SOURCE_DIR}/core/dashboardparser.h
         ${CMAKE_SOURCE_DIR}/core/dashboarddata.h
     INCLUDES ${CMAKE_SOURCE_DIR}/core)
+
+# --- get_library_visits.php response parser (pure core, no offscreen) ---
+wits_add_qttest(tst_visitlogparser
+    SOURCES
+        tst_visitlogparser.cpp
+        ${CMAKE_SOURCE_DIR}/core/visitlogparser.cpp
+        ${CMAKE_SOURCE_DIR}/core/visitlogparser.h
+        ${CMAKE_SOURCE_DIR}/core/visitlogdata.h
+    INCLUDES ${CMAKE_SOURCE_DIR}/core)
