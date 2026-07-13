@@ -66,6 +66,8 @@ qt_add_qml_module(witsquickmodule
         viewmodels/DashboardViewModel.h viewmodels/DashboardViewModel.cpp
         models/RecentLoginsModel.h models/RecentLoginsModel.cpp
         models/BarsModel.h models/BarsModel.cpp
+        models/VisitLogRowsModel.h models/VisitLogRowsModel.cpp
+        viewmodels/VisitLogsViewModel.h viewmodels/VisitLogsViewModel.cpp
 )
 
 target_link_libraries(witsquickmodule PUBLIC
@@ -197,5 +199,11 @@ wits_add_qttest(tst_qml_kiosk
 # --- DashboardViewModel unit test (C++ QtTest, offscreen) ---
 wits_add_qttest(tst_dashboardviewmodel
     SOURCES tests/tst_dashboardviewmodel.cpp
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    OFFSCREEN)
+
+# --- VisitLogsViewModel unit test (C++ QtTest, offscreen) ---
+wits_add_qttest(tst_visitlogsviewmodel
+    SOURCES tests/tst_visitlogsviewmodel.cpp
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
     OFFSCREEN)
