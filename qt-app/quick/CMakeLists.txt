@@ -64,6 +64,7 @@ qt_add_qml_module(witsquickmodule
         viewmodels/KioskViewModel.h viewmodels/KioskViewModel.cpp
         viewmodels/GuestViewModel.h viewmodels/GuestViewModel.cpp
         models/RecentLoginsModel.h models/RecentLoginsModel.cpp
+        models/BarsModel.h models/BarsModel.cpp
 )
 
 target_link_libraries(witsquickmodule PUBLIC
@@ -162,6 +163,12 @@ wits_add_qttest(tst_guestviewmodel
 wits_add_qttest(tst_httpform
     SOURCES tests/tst_httpform.cpp
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network
+    OFFSCREEN)
+
+# --- BarsModel unit test (C++ QtTest, offscreen) ---
+wits_add_qttest(tst_barsmodel
+    SOURCES tests/tst_barsmodel.cpp
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Gui
     OFFSCREEN)
 
 # --- L* component skeletons Quick test (offscreen) ---
