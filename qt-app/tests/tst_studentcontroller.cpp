@@ -21,6 +21,10 @@ private slots:
     void parseSearchNotSuccessWithoutMessageDefaults();
     void parseSearchNonObjectIsInvalid();
 
+    // parseSearchResponse — visits
+    void parseSearchReadsVisits();
+    void parseSearchDefaultsVisitsToZero();
+
     // parseBulkUpdateResponse
     void parseBulkSuccessWithErrors();
     void parseBulkSuccessNoErrors();
@@ -216,6 +220,37 @@ void TestStudentController::parseDeleteResponse_invalidJson_returnsFalseEmptyMes
     const bool ok = StudentController::parseDeleteResponse("not json", msg);
     QVERIFY(!ok);
     QVERIFY(msg.isEmpty());
+}
+
+void TestStudentController::parseSearchReadsVisits()
+{
+    const QByteArray raw = R"({
+        "status":"success",
+        "students":[{"school_id":"2023-0001","name":"Maria Santos","course":"BSCE",
+                     "department":"CE","year_level":"3rd Year","gender":"Female",
+                     "status":"Regular","visits":42}],
+        "searchTerm":"Maria"
+    })";
+    QList<StudentRecord> recs; QString msg, term;
+    const SearchOutcome outcome = StudentController::parseSearchResponse(raw, recs, msg, term);
+    QCOMPARE(outcome, SearchOutcome::Results);
+    QCOMPARE(recs.size(), 1);
+    QCOMPARE(recs.at(0).visits, 42);
+}
+
+void TestStudentController::parseSearchDefaultsVisitsToZero()
+{
+    const QByteArray raw = R"({
+        "status":"success",
+        "students":[{"school_id":"2023-0002","name":"Jose Ramirez","course":"BSEE",
+                     "department":"EE","year_level":"2nd Year","gender":"Male",
+                     "status":"Regular"}],
+        "searchTerm":"Jose"
+    })";
+    QList<StudentRecord> recs; QString msg, term;
+    StudentController::parseSearchResponse(raw, recs, msg, term);
+    QCOMPARE(recs.size(), 1);
+    QCOMPARE(recs.at(0).visits, 0);   // field absent -> QJsonValue::toInt() default
 }
 
 QTEST_MAIN(TestStudentController)

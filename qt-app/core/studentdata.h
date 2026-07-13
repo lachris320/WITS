@@ -6,8 +6,9 @@
 
 // One search-result row. Field names track the JSON keys the backend
 // returns/consumes: code, school_id, name, course, department, year_level,
-// gender, status. A single type serves both the search-result direction
-// (fill the table) and the bulk-update direction (serialize back).
+// gender, status, visits (search direction only, not serialized back). A
+// single type serves both the search-result direction (fill the table) and
+// the bulk-update direction (serialize back).
 struct StudentRecord
 {
     QString code;
@@ -18,6 +19,7 @@ struct StudentRecord
     QString yearLevel;
     QString gender;
     QString status;
+    int     visits = 0;   // lifetime library visit count (search read-only, §5.3)
 };
 
 // Decoded bulk_update_students.php response.

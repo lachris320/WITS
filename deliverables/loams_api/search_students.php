@@ -80,7 +80,8 @@ while ($row = $result->fetch_assoc()) {
         "course" => $row['course'],
         "year_level" => $row['year_level'],
         "status" => $row['status'],
-        "gender" => $row['gender']
+        "gender" => $row['gender'],
+        "visits" => isset($row['visits']) ? intval($row['visits']) : 0
     ];
 }
 

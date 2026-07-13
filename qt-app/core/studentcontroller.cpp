@@ -65,6 +65,7 @@ SearchOutcome StudentController::parseSearchResponse(const QByteArray &raw,
         rec.yearLevel  = s["year_level"].toString();
         rec.gender     = s["gender"].toString();
         rec.status     = s["status"].toString();
+        rec.visits     = s["visits"].toInt();
         outRecords.append(rec);
     }
     outSearchTerm = obj["searchTerm"].toString();      // line 3242
