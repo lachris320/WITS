@@ -842,7 +842,7 @@ $conn->close();
 - Modify: `qt-app/quick/CMakeLists.txt`
 
 **Interfaces:**
-- Produces: `class BarsModel : public QAbstractListModel` with `struct Bar { QString label; double value; }`, roles `LabelRole`(`"label"`)/`ValueRole`(`"value"`), `void setBars(const QList<Bar> &)`, `double maxValue() const`. No color role — colors are applied in QML from Theme (Global Constraints). Used by `DashboardViewModel` (Task 6) and `LBarChart` (Task 11).
+- Produces: `class BarsModel : public QAbstractListModel` with `struct Bar { QString label; double value; }`, roles `LabelRole`(`"label"`)/`ValueRole`(`"value"`), `void setBars(const QList<Bar> &)`, and a QML-readable `Q_PROPERTY(double maxValue READ maxValue NOTIFY maxValueChanged)` (emitted from `setBars`). No color role — colors are applied in QML from Theme (Global Constraints). Used by `DashboardViewModel` (Task 6) and `LBarChart` (Task 11).
 
 - [ ] **Step 1: Write the failing test** — `qt-app/quick/tests/tst_barsmodel.cpp`:
 
@@ -916,6 +916,12 @@ QTEST_MAIN(TestBarsModel)
 class BarsModel : public QAbstractListModel
 {
     Q_OBJECT
+    // maxValue MUST be a Q_PROPERTY with NOTIFY: LBarChart binds
+    // `maxValue: vm.hourlyModel.maxValue` from QML, and the data arrives
+    // asynchronously via setBars() long after the binding is created — a plain
+    // C++ accessor is unreadable from QML and a non-notifying property would
+    // latch the pre-data value (0) forever.
+    Q_PROPERTY(double maxValue READ maxValue NOTIFY maxValueChanged)
 public:
     struct Bar { QString label; double value = 0.0; };
     enum Roles { LabelRole = Qt::UserRole + 1, ValueRole };
@@ -928,6 +934,9 @@ public:
 
     void setBars(const QList<Bar> &bars);
     double maxValue() const { return m_maxValue; }
+
+signals:
+    void maxValueChanged();
 
 private:
     QList<Bar> m_bars;
@@ -975,6 +984,7 @@ void BarsModel::setBars(const QList<Bar> &bars)
         if (b.value > m_maxValue)
             m_maxValue = b.value;
     endResetModel();
+    emit maxValueChanged();
 }
 ```
 
@@ -1304,7 +1314,7 @@ Expected: PASS (4 functions).
 - Modify: `qt-app/quick/CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: `VisitLogParser::parse` + `StudentVisitRecord` (Task 4); `VisitorController::parseVisitorsResponse` + `VisitorRecord` (`qt-app/core/visitorcontroller.h:31`, `visitordata.h`); `HttpForm::submit` + `ApiConfig::endpoint`.
+- Consumes: `VisitLogParser::parse` + `StudentVisitRecord` (Task 4); `VisitorController::parseVisitorsResponse` + `VisitorRecord` (`qt-app/core/visitorcontroller.h:31`, `visitordata.h`); `ApiConfig::endpoint`. Student range uses `QNetworkAccessManager::get` (query string); guest uses `QNetworkAccessManager::post` with an **`application/json`** body (get_visitors.php reads a JSON request body, not form-urlencoded) — **not** `HttpForm::submit`.
 - Produces: `VisitLogRowsModel` (roles `date`/`name`/`course`/`department`/`timeIn`/`timeOut`/`company`/`purpose`). `VisitLogsViewModel` with `Mode { Student, Guest }` (Q_ENUM), `Range { Today, Week }` (Q_ENUM), `mode`/`range` (read+write), `count` (int), `rangeLabel` (QString), `rows` (`VisitLogRowsModel*`), `loading`/`errorText`; `Q_INVOKABLE void refresh()`; seams `applyStudentVisits(QByteArray)` / `applyGuestVisits(QByteArray)`; pure static `QString formatWeekLabel(const QDate &monday)`.
 
 - [ ] **Step 1: Write the failing test** — `qt-app/quick/tests/tst_visitlogsviewmodel.cpp`:
@@ -1582,13 +1592,14 @@ private:
 ```cpp
 #include "VisitLogsViewModel.h"
 
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QUrl>
 #include <QUrlQuery>
 #include "apiconfig.h"
-#include "HttpForm.h"
 #include "visitlogparser.h"
 #include "visitorcontroller.h"
 #include "visitordata.h"
@@ -1662,6 +1673,13 @@ void VisitLogsViewModel::refresh()
 
     // Guest (§5.4): POST get_visitors.php with APP-GENERATED ISO dates only —
     // never free-text on the date path. range -> date_type + start/end.
+    //
+    // CRITICAL: get_visitors.php reads its params via
+    // json_decode(file_get_contents("php://input")) — i.e. a JSON REQUEST BODY,
+    // NOT form-urlencoded. So this must post an application/json body (matching
+    // VisitorController::fetchVisitors), NOT HttpForm::submit — a form body
+    // fails json_decode, the endpoint falls back to date_type="all", and the
+    // range filter is silently ignored (returns every guest row as "success").
     const QDate today = QDate::currentDate();
     QString dateType, startDate, endDate;
     if (m_range == Week) {
@@ -1674,15 +1692,22 @@ void VisitLogsViewModel::refresh()
         startDate = today.toString(Qt::ISODate);
         endDate   = today.toString(Qt::ISODate);
     }
-    const QList<QPair<QString, QString>> fields = {
-        {QStringLiteral("date_type"), dateType},
-        {QStringLiteral("start_date"), startDate},
-        {QStringLiteral("end_date"), endDate},
-    };
-    HttpForm::submit(m_nam, ApiConfig::endpoint(QStringLiteral("get_visitors.php")),
-                     fields, this,
-        [this](const QByteArray &body) { setLoading(false); applyGuestVisits(body); },
-        [this]() { setLoading(false); setError(QStringLiteral("Network error. Please try again.")); });
+    QJsonObject payload;
+    payload[QStringLiteral("date_type")]  = dateType;
+    payload[QStringLiteral("start_date")] = startDate;
+    payload[QStringLiteral("end_date")]   = endDate;
+
+    QNetworkRequest req(ApiConfig::endpoint(QStringLiteral("get_visitors.php")));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    QNetworkReply *reply = m_nam->post(req, QJsonDocument(payload).toJson());
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const bool netErr = reply->error() != QNetworkReply::NoError;
+        const QByteArray body = reply->readAll();
+        reply->deleteLater();
+        setLoading(false);
+        if (netErr) { setError(QStringLiteral("Network error. Please try again.")); return; }
+        applyGuestVisits(body);
+    });
 }
 
 void VisitLogsViewModel::applyStudentVisits(const QByteArray &raw)
@@ -1808,7 +1833,7 @@ Expected: PASS (6 functions). If the guest test fails on `date`/`time`, reconcil
 
 **Interfaces:**
 - Consumes: `StudentController` (`searchStudents`, `searchFinished`/`searchFailed`, `loadCourses`/`coursesLoaded`, `qt-app/core/studentcontroller.h`); `StudentRecord` incl. `visits` (Task 2).
-- Produces: `SearchResultsModel` (roles incl. `visits` → rendered as "Total Visits: N"). `SearchViewModel` with `results` (`SearchResultsModel*`), `courses` (QStringList), `loading`/`errorText`; `Q_INVOKABLE void search(const QString &search, const QString &course)`; public slots `onSearchFinished`/`onSearchFailed`/`onCoursesLoaded` (network-free test seams).
+- Produces: `SearchResultsModel` (roles incl. `visits` → rendered as "Total Visits: N"; plus a QML-readable `count` property). `SearchViewModel` with `results` (`SearchResultsModel*`), `courses` (QStringList), `loading`/`errorText`; `Q_INVOKABLE void search(const QString &search, const QString &course)`; `Q_INVOKABLE void refresh()` (loads course chips on navigation — no network in the constructor); public slots `onSearchFinished`/`onSearchFailed`/`onCoursesLoaded` (network-free test seams).
 
 - [ ] **Step 1: Write the failing test** — `qt-app/quick/tests/tst_searchviewmodel.cpp`:
 
@@ -1884,6 +1909,10 @@ QTEST_MAIN(TestSearchViewModel)
 class SearchResultsModel : public QAbstractListModel
 {
     Q_OBJECT
+    // A QAbstractListModel has no `count` property; SearchScreen reads
+    // `vm.results.count` from QML, so expose one explicitly (a raw model would
+    // read `undefined` at runtime and only "work" against a QML ListModel stub).
+    Q_PROPERTY(int count READ count NOTIFY countChanged)
 public:
     enum Roles {
         NameRole = Qt::UserRole + 1,
@@ -1901,7 +1930,11 @@ public:
     QVariant data(const QModelIndex &index, int role) const override;
     QHash<int, QByteArray> roleNames() const override;
 
+    int count() const { return m_records.size(); }
     void setRecords(const QList<StudentRecord> &records);
+
+signals:
+    void countChanged();
 
 private:
     QList<StudentRecord> m_records;
@@ -1953,6 +1986,7 @@ void SearchResultsModel::setRecords(const QList<StudentRecord> &records)
     beginResetModel();
     m_records = records;
     endResetModel();
+    emit countChanged();
 }
 ```
 
@@ -1993,6 +2027,12 @@ public:
 
     // Empty course => no course filter. department is left empty in Phase 3.
     Q_INVOKABLE void search(const QString &search, const QString &course);
+
+    // Load-on-navigation hook (called by AdminScreen when the Search page is
+    // shown). Populates the course filter chips; does NOT auto-run a search.
+    // Kept out of the constructor so constructing the VM issues no network
+    // (unit tests + the shell smoke test stay network-free).
+    Q_INVOKABLE void refresh();
 
 public slots:
     // Wired to StudentController; public so tests drive them network-free.
@@ -2043,6 +2083,12 @@ SearchViewModel::SearchViewModel(QObject *parent)
             this, &SearchViewModel::onSearchFailed);
     connect(m_controller, &StudentController::coursesLoaded,
             this, &SearchViewModel::onCoursesLoaded);
+    // NOTE: no network in the constructor — the filter chips load in refresh(),
+    // triggered when the Search page is navigated to (AdminScreen autoLoad).
+}
+
+void SearchViewModel::refresh()
+{
     m_controller->loadCourses(QString());   // populate the filter chips
 }
 
@@ -2848,7 +2894,10 @@ Rectangle {
 
     color: Theme.appBackground
 
-    Component.onCompleted: if (vm) vm.refresh()
+    // Initial fetch is triggered by AdminScreen's Loader.onLoaded (gated by
+    // AdminScreen.autoLoad), NOT here — so this screen instantiated directly
+    // (the standalone QuickTest, the shell smoke test) issues no network unless
+    // a caller opts in. The Retry button still calls vm.refresh() explicitly.
 
     ColumnLayout {
         anchors.fill: parent
@@ -3230,7 +3279,10 @@ Rectangle {
 
     color: Theme.appBackground
 
-    Component.onCompleted: if (vm) vm.refresh()
+    // Initial fetch is triggered by AdminScreen's Loader.onLoaded (gated by
+    // AdminScreen.autoLoad), NOT here — so this screen instantiated directly
+    // (the standalone QuickTest, the shell smoke test) issues no network unless
+    // a caller opts in. The Retry button still calls vm.refresh() explicitly.
 
     ColumnLayout {
         anchors.fill: parent
@@ -3305,12 +3357,14 @@ Expected: PASS (Dashboard + Search + VisitLogs cases).
 
 **Interfaces:**
 - Consumes: `Navigator` (`adminPage`, `showAdminPage`, `showKiosk`, `Navigator.Dashboard`/`Search`/`VisitLogs`); the three real VMs (`DashboardViewModel`/`SearchViewModel`/`VisitLogsViewModel`); the three screens; `LSideNav`/`LPageHeader`.
-- Produces: the functional admin surface — sidebar shell + header with a live clock + a `Loader` keyed on `Navigator.adminPage`, plus a Back-to-Kiosk footer affordance.
+- Produces: the functional admin surface — sidebar shell + header with a live clock + a `Loader` keyed on `Navigator.adminPage`, plus a Back-to-Kiosk footer affordance. Owns one instance of each screen VM and fires the active page's `refresh()` on load, gated by `property bool autoLoad` (default true; the shell smoke test sets it false to stay network-free).
 
 - [ ] **Step 1: Add the failing test** — in `tst_qml_admin.qml`, add a real shell instance + `TestCase`. (The shell uses the singleton `Navigator`, so drive it directly.)
 
 ```qml
-    AdminScreen { id: shell; width: 1100; height: 720 }
+    // autoLoad:false so the real VMs the shell instantiates issue no network
+    // (no localhost GET/POST) during the smoke test — keeps it network-free.
+    AdminScreen { id: shell; width: 1100; height: 720; autoLoad: false }
 
     TestCase {
         name: "AdminScreenShell"
@@ -3348,6 +3402,12 @@ import LOAMS
 Rectangle {
     id: admin
     color: Theme.appBackground
+
+    // Load-on-navigation gate. Default true (production fetches when a page is
+    // shown). The shell QuickTest sets this false so the real VMs issue NO
+    // network — honoring the house "no live network in tests" rule (spec §5),
+    // which instantiating the real VMs would otherwise break.
+    property bool autoLoad: true
 
     // Test hooks (mirror the click/footer paths).
     function activatePage(page) { Navigator.showAdminPage(page) }
@@ -3420,6 +3480,11 @@ Rectangle {
                     default:                  return dashboardComponent;
                     }
                 }
+                // Fetch once when a page is shown (spec §5.1 "fetch on
+                // navigation"). Each of the three VMs exposes Q_INVOKABLE
+                // refresh(); gated by autoLoad so tests can suppress network.
+                onLoaded: if (admin.autoLoad && item && item.vm && item.vm.refresh)
+                              item.vm.refresh()
             }
         }
     }
