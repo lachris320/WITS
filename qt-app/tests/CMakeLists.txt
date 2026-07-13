@@ -211,3 +211,12 @@ wits_add_qttest(tst_loginparser
         ${CMAKE_SOURCE_DIR}/core/loginparser.cpp
         ${CMAKE_SOURCE_DIR}/core/loginparser.h
     INCLUDES ${CMAKE_SOURCE_DIR}/core)
+
+# --- dashboard_summary.php response parser (pure core, no offscreen) ---
+wits_add_qttest(tst_dashboardparser
+    SOURCES
+        tst_dashboardparser.cpp
+        ${CMAKE_SOURCE_DIR}/core/dashboardparser.cpp
+        ${CMAKE_SOURCE_DIR}/core/dashboardparser.h
+        ${CMAKE_SOURCE_DIR}/core/dashboarddata.h
+    INCLUDES ${CMAKE_SOURCE_DIR}/core)
