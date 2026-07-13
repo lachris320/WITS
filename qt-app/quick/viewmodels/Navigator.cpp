@@ -15,3 +15,11 @@ void Navigator::setSurface(Surface s)
 
 void Navigator::showKiosk() { setSurface(Kiosk); }
 void Navigator::showAdmin() { setSurface(Admin); }
+
+void Navigator::showAdminPage(AdminPage page)
+{
+    if (m_adminPage == page)
+        return;                      // idempotent — mirrors setSurface's guard
+    m_adminPage = page;
+    emit adminPageChanged();
+}
