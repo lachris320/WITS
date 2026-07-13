@@ -104,12 +104,23 @@ pattern. See §5.4 for how the reused endpoint's pre-existing exposure is bounde
 - **"today"** = the server-local calendar date of `login_time`, i.e. `DATE(login_time) = CURDATE()`.
   The deployment is a single on-prem library server, so its local time is authoritative (no
   client-side timezone reconciliation).
-- **"week"** = the current **Mon–Fri** school week (matches the reference's "Mon – Fri" card
-  subtitle and its "June 29 – July 3" range label). *Owner-confirmable* — if a Mon–Sun or
-  rolling-7-day window is preferred instead, it must be decided before the fixtures freeze.
+- **"week"** = the current **Monday–Sunday calendar week** — Monday 00:00 through Sunday 23:59
+  of the week containing "today" (ISO week). Chosen over the reference's Mon–Fri card subtitle:
+  a full calendar week is more universally correct, and — critically — it **keeps the endpoint
+  contract stable** when the future admin-configurable operational-week setting (below) lands.
+  Narrowing/widening operational days then becomes a *filter over a fixed weekly window* rather
+  than a change to what "week" means at the endpoint, so no fixture re-capture is forced. The
+  reference's "Mon – Fri" subtitle is **superseded** by this decision; the This-Week card and
+  the Visit Logs range label should show the Mon–Sun range.
 
 Both definitions apply identically to `dashboard_summary.php` (`today`/`week`) and to
 `get_library_visits.php` (`range=today|week`).
+
+**Deferred (post-Phase-3) — admin-configurable operational days.** Making the operational week
+configurable by the admin (e.g. institutions with Saturday operations) is a planned future
+enhancement, **not Phase 3**. Phase 3 ships the fixed Mon–Sun calendar week deliberately so the
+setting can be added later without re-capturing fixtures or changing endpoint semantics — it
+lands naturally alongside the Settings screen (Phase 4+). See §11.
 
 ### 5.1 `dashboard_summary.php` (NEW, read-only)
 
@@ -332,6 +343,7 @@ The global **Ctrl+K quick-search palette** and the full `Accessible.*` sweep are
 | Deferred item | Goes to |
 |---|---|
 | Database CRUD + import, Reporting/exports, Settings | Phase 4 (parent spec §9 row 4) |
+| Admin-configurable operational days / week window (Phase 3 hardcodes Mon–Sun; §5) | Phase 4+ (with Settings) |
 | Global Ctrl+K quick-search palette; full `Accessible.*` sweep | Phase 5 |
 | Backend auth/hardening; the hardcoded `http://localhost` base (`apiconfig.h:18-21`) | Phase 6 |
 | Time-out / logout tracking | Out of scope — not in the schema (`library_visits` is login-only, §3) |
