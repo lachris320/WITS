@@ -5,8 +5,8 @@ Status: Approved by owner 2026-07-13; ready for implementation-plan (writing-pla
 Summary: Replace the Phase-2 admin placeholder with a real admin surface — a maroon sidebar
 shell, a page header with a live clock, and three functional screens (Dashboard, Search,
 Visit Logs) — driven by per-screen ViewModels over `witscore`, and backed by two new
-read-only PHP endpoints (plus one one-line change) that the current backend does not yet
-provide. This is Phase 3 of the roadmap in the parent spec
+read-only PHP endpoints (plus a small extension to one existing endpoint) that the current
+backend does not yet provide. This is Phase 3 of the roadmap in the parent spec
 (`2026-07-07-loams2-qtquick-design.md` §9, row 3).
 
 ## 1. Goal
@@ -53,9 +53,13 @@ today. The evidence:
 
 `library_visits` columns present (from the insert): `student_id`, `course`, `login_time`,
 `yearlog`, `year_level`, `department`, `name`, `gender`, `status`, `photo`
-(`student_login.php:34-37`). `api.php` is only a thin router that `require_once`s these same
-PHP files (`deliverables/loams_api/api.php:31-119`) and does not itself add any of the missing
-queries.
+(`student_login.php:34-37`). `api.php` is only a thin router, and it routes just a **subset**
+of the backend — `get_report_data.php` (via `reports/data`) plus register / departments /
+courses / years / admin (`deliverables/loams_api/api.php:31-119`); it does **not** route
+`get_visitors.php`, `search_students.php`, `student_login.php`, or `rfid_login.php` (those are
+called directly by filename), and it adds none of the missing aggregate queries. The two new
+endpoints are likewise called by filename via `ApiConfig::endpoint(...)`, not added to the
+router switch.
 
 ### Owner decision on the gap
 
@@ -78,7 +82,7 @@ Replace the `AdminScreen.qml` placeholder with a real admin surface:
   `Navigator::showKiosk()` already exists (`Navigator.h:24`) but is currently unreachable
   from the admin UI.
 
-## 5. Backend — two new read-only endpoints + one one-line change
+## 5. Backend — two new read-only endpoints + one existing-endpoint extension
 
 Contract-fixtures-first (parent spec §8): each new endpoint gets a captured request/response
 **contract fixture** that feeds a pure C++ parser unit test; **no live network in tests**
@@ -88,6 +92,23 @@ The JSON shapes below are the **proposed** contract; the exact field names are *
 the fixtures are captured** during implementation. The two new endpoints are called directly by
 filename via `ApiConfig::endpoint("…​.php")` (as all existing endpoints are) — they are **not**
 added to `api.php`'s router switch.
+
+**SQL-safety mandate (both new endpoints).** `get_report_data.php` is the model to follow:
+build every query with **prepared statements + `bind_param`**, never string interpolation. This
+is called out because the reused `get_visitors.php` interpolates its date parameters unescaped
+(`get_visitors.php:26-33`; only `search` is escaped) — the new files must **not** copy that
+pattern. See §5.4 for how the reused endpoint's pre-existing exposure is bounded in Phase 3.
+
+**Date-window semantics (frozen with the fixtures).** To avoid baking an unintended window:
+- **"today"** = the server-local calendar date of `login_time`, i.e. `DATE(login_time) = CURDATE()`.
+  The deployment is a single on-prem library server, so its local time is authoritative (no
+  client-side timezone reconciliation).
+- **"week"** = the current **Mon–Fri** school week (matches the reference's "Mon – Fri" card
+  subtitle and its "June 29 – July 3" range label). *Owner-confirmable* — if a Mon–Sun or
+  rolling-7-day window is preferred instead, it must be decided before the fixtures freeze.
+
+Both definitions apply identically to `dashboard_summary.php` (`today`/`week`) and to
+`get_library_visits.php` (`range=today|week`).
 
 ### 5.1 `dashboard_summary.php` (NEW, read-only)
 
@@ -108,7 +129,13 @@ Feeds the Dashboard stat cards and charts. Sourced from `library_visits` (attend
 Peak hour is **derived client-side** from `hourly` (the endpoint does not compute it), keeping
 the endpoint a straight aggregation and the "which hour is the peak" presentation choice in
 the ViewModel. `today` and `week` are counts of `library_visits` rows over the respective
-date ranges; `students` is the row count of the `students` table.
+date ranges (§5 date-window semantics); `students` is the row count of the `students` table.
+
+**Cost & refresh.** The endpoint runs the today/week counts plus the hourly and department
+`GROUP BY`s on `library_visits` per call — acceptable at single-library scale; an index on
+`login_time` covers the date-bounded scans if needed. The Dashboard **fetches once on
+navigation to it** (and offers a manual refresh affordance); there is no live polling in
+Phase 3, so a dashboard viewed for a long time is a point-in-time snapshot by design.
 
 ### 5.2 `get_library_visits.php` (NEW, read-only)
 
@@ -129,18 +156,37 @@ Parameter `range=today|week` (or explicit `start`/`end`). A time-out field is **
 design** because the system is login-only — `library_visits` has no logout column
 (`student_login.php:34-37`).
 
-### 5.3 `search_students.php` — add `visits` (one-line change)
+### 5.3 `search_students.php` — surface the lifetime `visits` count (a **multi-layer** change)
 
-The query already selects every column (`SELECT * FROM students …`,
-`search_students.php:22`), but the response map omits `visits` (`search_students.php:74-84`).
-Add `"visits" => isset($row['visits']) ? $row['visits'] : 0` to that map so the Search screen
-can show the lifetime count. This is the only change to an existing contract; the fixture for
-the parser test captures the extended shape.
+The Search "Total Visits: N" stat is **not** a one-line PHP edit — it threads through four
+layers, and all four must change together or the number silently never appears:
 
-### 5.4 `get_visitors.php` — reused unchanged
+1. **PHP** — the query already `SELECT *`s every column (`search_students.php:22`) but the
+   response map omits `visits` (`search_students.php:74-84`). Add
+   `"visits" => isset($row['visits']) ? intval($row['visits']) : 0` to that map.
+2. **Struct** — `StudentRecord` (`qt-app/core/studentdata.h:11-21`) has **no `visits` field**;
+   add one (e.g. `int visits = 0;`). This is the struct `parseSearchResponse` fills, so without
+   it the PHP field is dropped on the floor.
+3. **Parser** — extend `StudentController::parseSearchResponse`
+   (`qt-app/core/studentcontroller.h:21-24`) to read `visits` into the new field; the captured
+   fixture uses the extended shape and the parser test asserts the value round-trips.
+4. **VM / screen** — `SearchViewModel` exposes it as `totalVisits`; the result card renders the
+   explicit **"Total Visits: N"** label (§6.2).
+
+Because `StudentRecord` is shared with the bulk-update path (`studentdata.h:8-10`), the new
+field is read-only for Search and simply ignored on the serialize-back direction — no contract
+change to bulk update.
+
+### 5.4 `get_visitors.php` — reused unchanged (with a bounded, known exposure)
 
 The existing GUEST-log endpoint (`get_visitors.php:37-40`) is reused verbatim as the
-**secondary** GUEST toggle inside Visit Logs. No change.
+**secondary** GUEST toggle inside Visit Logs. It **interpolates its date parameters unescaped**
+(`get_visitors.php:26-33`) — a pre-existing SQL-injection exposure this phase does not create.
+Phase 3 bounds it by driving the guest toggle only with **app-generated ISO date strings** from
+the Today/This-Week control (never free-text user input on the date path), and the `search`
+field is left unused by the toggle. Full parameterization of this endpoint is deferred to the
+Phase 6 backend hardening pass (parent spec §9), recorded here as a forward-note rather than a
+silent reuse. The two **new** endpoints do not inherit this pattern (§5 SQL-safety mandate).
 
 ## 6. Screen behavior
 
@@ -151,17 +197,22 @@ Net-new (no legacy equivalent — see §12). Composition:
 - **Stat cards** via `LStatTile` (reused as-is): visitors today, visitors this week,
   registered students, peak hour. `peakHourLabel` is derived in the ViewModel from the
   `hourly` array (§5.1).
-- **Hourly bar chart** — a **vertical** `LBarChart` with bar labels (the hour). Custom QML,
-  **not QtCharts** (parent spec Risk 2).
-- **Department bars** — a **horizontal** `LBarChart`.
+- **Hourly bar chart** — **vertical** columns. `LBarChart` **already renders this shape**
+  (bottom-aligned rects whose height ∝ value, `LBarChart.qml:17-34`); the hourly chart largely
+  **reuses** it and only needs **per-bar hour labels** added. Custom QML, **not QtCharts**
+  (parent spec Risk 2).
+- **Department bars** — **horizontal** (a label + a width-proportional track). This is the
+  variant `LBarChart` does **not** yet have (its `orientation` property is declared but unused,
+  `LBarChart.qml:9`); building it is the real chart work here — see §8.
 - Motion: `barGrow` / `pageIn` / `rowIn` via `Theme.motion.*` (parent spec §7).
 
 ### 6.2 Search
 
 - Reuse `StudentController::searchStudents(search, department, course)`
   (`qt-app/core/studentcontroller.h:33-35`, async → `searchFinished` / `searchFailed`,
-  `:50-54`). No new backend for the query itself; the `visits` column added in §5.3 feeds the
-  stat.
+  `:50-54`). No new *endpoint* for the query itself, but the "Total Visits" stat requires the
+  **four-layer `visits` plumbing** of §5.3 (PHP field → `StudentRecord.visits` →
+  `parseSearchResponse` → `SearchViewModel.totalVisits`), not a bare PHP tweak.
 - Show the lifetime visit count **relabeled explicitly as "Total Visits: N"** (owner
   decision) — never a bare number — to avoid this-month-vs-lifetime ambiguity, since the
   backend has no per-month count (§3).
@@ -172,9 +223,19 @@ Net-new (no legacy equivalent — see §12). Composition:
 - **Student attendance is the PRIMARY / DEFAULT view** (owner decision), fed by
   `get_library_visits.php` (§5.2). The **GUEST** log (`get_visitors.php`) is a **SECONDARY
   toggle** — not an equally-prominent tab.
+- **The two feeds have different columns**, so the `LTable` **column set switches on `mode`**
+  (not just the row data):
+  - **Student (default):** Date · Name · Course · Department · Time In · Time Out (always "—").
+  - **Guest:** Name · Company · Purpose · Time In. (No course/department — the guest
+    `visitors` table has none; `get_visitors.php` returns only `name`/`company`/`purpose`/
+    `time_in`, so a date column, if shown, is derived from the `time_in` datetime.)
+  `VisitLogsViewModel` exposes the active-mode rows through one `QAbstractListModel` whose roles
+  cover the **union** of both column sets (unused roles are empty per mode); the
+  `VisitLogsScreen` selects the column list from `mode`. See §7.3.
 - **Today / This-Week** segmented control via `LSegmented` (reused as-is). This is the
   Today/This-Week visitor-log toggle the parent spec §7 says "lands natively here."
-- The **time-out column shows "—" always** (login-only; §3, §5.2).
+- The **time-out column shows "—" always** (login-only; §3, §5.2), and applies only to the
+  student view (the guest column set has no Time Out).
 
 ## 7. Architecture — MVVM, extend `Navigator`
 
@@ -213,10 +274,19 @@ Additions to `Navigator`:
 
 | ViewModel | Exposes | Row model(s) |
 |---|---|---|
-| `DashboardViewModel` | `statToday`, `statWeek`, `statStudents`, `peakHourLabel` | `hourlyModel`, `departmentModel` |
-| `VisitLogsViewModel` | `mode` (Student\|Guest), `range` (Today\|Week), count / range label | row model |
-| `SearchViewModel` | results incl. `totalVisits` | results model |
+| `DashboardViewModel` | `statToday`, `statWeek`, `statStudents`, `peakHourLabel` + **state** | `hourlyModel`, `departmentModel` |
+| `VisitLogsViewModel` | `mode` (Student\|Guest), `range` (Today\|Week), count / range label + **state** | row model |
+| `SearchViewModel` | results incl. `totalVisits` + **state** | results model |
 
+- **Fetch state is a first-class part of every data VM.** Each of the three fetches over the
+  network, so each exposes a **status surface** — a `loading` bool and an `errorText` (or a
+  single `status` enum: `Idle` / `Loading` / `Ready` / `Error`), following the Phase 2 kiosk
+  pattern where `HttpForm::submit(...)` splits `onSuccess` / `onNetworkError`
+  (`qt-app/quick/HttpForm.h`). The screens render accordingly:
+  - **Loading** — a busy indicator (cards/table dimmed); no stale data flashed.
+  - **Empty** — `LTable.emptyStateText` for the tables; a "no data yet" state for the Dashboard.
+  - **Error** — an inline error message with a **retry** action; a failed fetch never silently
+    renders as an empty result. Error strings must not leak backend internals (security-hygiene).
 - **Pure JSON parsers** (one per endpoint) live in `core/` or as VM statics so they unit-test
   **without widgets and without network** — the same pattern Phase 2 used for `LoginParser`.
 - **Row lists are `QAbstractListModel`s** following the `RecentLoginsModel` pattern
@@ -237,7 +307,7 @@ the screens need may be added to `Theme.qml`, but **ZERO raw hex outside `Theme.
 |---|---|---|
 | `LSideNav.qml` | Text-only `Repeater`, no interaction (`qt-app/quick/qml/components/LSideNav.qml:21-30`) | Active state, gold dot, click handling, disabled "soon" items, footer slot. |
 | `LTable.qml` | Header rect only; "full column/model wiring lands with Database/Visit Logs screens" (`qt-app/quick/qml/components/LTable.qml:5-6,21-27`) | Columns + model rows + hover + empty state. |
-| `LBarChart.qml` | Horizontal-only `RowLayout` (`qt-app/quick/qml/components/LBarChart.qml:17-34`) | Add a **vertical** variant + bar labels for the hourly chart. |
+| `LBarChart.qml` | Already renders **vertical** columns (bottom-aligned rects, height ∝ value, `LBarChart.qml:17-34`); the `orientation` property is declared but **unused** (`:9`). | Add the **horizontal** variant (department bars: label + width-proportional track) and **per-bar labels** for the hourly (vertical) chart. The vertical shape is reused, not rebuilt. |
 | `LPageHeader.qml` | Shows subtitle **OR** clock, not both (`qt-app/quick/qml/components/LPageHeader.qml:29-35`) | Extend to show subtitle under the title **and** a right-aligned clock together. |
 | `LSegmented`, `LStatTile`, `LCard` | — | Reused as-is. |
 
