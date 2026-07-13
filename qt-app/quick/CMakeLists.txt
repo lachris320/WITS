@@ -63,6 +63,7 @@ qt_add_qml_module(witsquickmodule
         viewmodels/Navigator.h viewmodels/Navigator.cpp
         viewmodels/KioskViewModel.h viewmodels/KioskViewModel.cpp
         viewmodels/GuestViewModel.h viewmodels/GuestViewModel.cpp
+        viewmodels/DashboardViewModel.h viewmodels/DashboardViewModel.cpp
         models/RecentLoginsModel.h models/RecentLoginsModel.cpp
         models/BarsModel.h models/BarsModel.cpp
 )
@@ -191,4 +192,10 @@ wits_add_qttest(tst_qml_kiosk
     LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
          Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
     DEFINES QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
+    OFFSCREEN)
+
+# --- DashboardViewModel unit test (C++ QtTest, offscreen) ---
+wits_add_qttest(tst_dashboardviewmodel
+    SOURCES tests/tst_dashboardviewmodel.cpp
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
     OFFSCREEN)
