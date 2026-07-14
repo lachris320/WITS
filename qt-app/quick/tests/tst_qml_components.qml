@@ -37,7 +37,19 @@ Item {
     LToast     { id: to; message: "hi" }
     LDialog    { id: dg; title: "T" }
     LStatTile  { id: st; label: "L"; value: "1" }
-    LBarChart  { id: bc }
+    ListModel {
+        id: barsFixture
+        ListElement { label: "8"; value: 12 }
+        ListElement { label: "9"; value: 34 }
+        ListElement { label: "10"; value: 41 }
+    }
+    LBarChart {
+        id: bc
+        width: 320; height: 160
+        model: barsFixture
+        maxValue: 41
+        highlightIndex: 2
+    }
     LPageHeader{ id: ph; title: "P" }
     LPulseDot  { id: pd; color: Theme.secondary; pulseDuration: 900 }
     LEyebrow   { id: eb; text: "EYEBROW"; color: Theme.secondary }
@@ -113,6 +125,29 @@ Item {
             t.model = null;
             compare(t.rowCount, 0);
             verify(t.emptyVisible === true);
+        }
+    }
+
+    TestCase {
+        name: "LBarChartRenders"
+        when: windowShown
+        // TestCase runs test_ functions in alphabetical order (not declaration
+        // order), so test_horizontalOrientationAccepted (h) executes before
+        // test_orientationDefaultsVertical (o) and mutates the shared bc
+        // instance's orientation. Reset it before every test in this case.
+        function init() {
+            bc.orientation = "Vertical";
+        }
+        function test_barCountMatchesModel() {
+            compare(bc.barCount, 3);
+        }
+        function test_orientationDefaultsVertical() {
+            compare(bc.orientation, "Vertical");
+        }
+        function test_horizontalOrientationAccepted() {
+            bc.orientation = "Horizontal";
+            compare(bc.orientation, "Horizontal");
+            compare(bc.barCount, 3);
         }
     }
 }
