@@ -50,7 +50,13 @@ Item {
         maxValue: 41
         highlightIndex: 2
     }
-    LPageHeader{ id: ph; title: "P" }
+    LPageHeader {
+        id: ph
+        width: 480
+        title: "Dashboard"
+        subtitle: "Library activity overview"
+        clockText: "8:04:11 AM"
+    }
     LPulseDot  { id: pd; color: Theme.secondary; pulseDuration: 900 }
     LEyebrow   { id: eb; text: "EYEBROW"; color: Theme.secondary }
     Rectangle  { id: gr; width: 10; height: 10; gradient: LKioskGradient {} }
@@ -148,6 +154,24 @@ Item {
             bc.orientation = "Horizontal";
             compare(bc.orientation, "Horizontal");
             compare(bc.barCount, 3);
+        }
+    }
+
+    TestCase {
+        name: "LPageHeaderShowsBoth"
+        when: windowShown
+        function test_subtitleAndClockBothPresent() {
+            verify(findText(ph, "Library activity overview") !== null);
+            verify(findText(ph, "8:04:11 AM") !== null);
+        }
+        function findText(root, s) {
+            if (root.text !== undefined && root.text !== null && root.text.indexOf(s) !== -1)
+                return root;
+            for (var i = 0; i < root.children.length; i++) {
+                var f = findText(root.children[i], s);
+                if (f !== null) return f;
+            }
+            return null;
         }
     }
 }
