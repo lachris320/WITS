@@ -8,7 +8,21 @@ Item {
 
     LButton    { id: b;  text: "OK" }
     LCard      { id: c }
-    LTable     { id: t }
+    ListModel {
+        id: tableFixture
+        ListElement { date: "2026-07-13"; name: "Maria Santos"; timeIn: "08:14" }
+        ListElement { date: "2026-07-13"; name: "Jose Ramirez"; timeIn: "08:31" }
+    }
+    LTable {
+        id: t
+        width: 480; height: 240
+        columns: [
+            { key: "date",   title: "Date" },
+            { key: "name",   title: "Name" },
+            { key: "timeIn", title: "Time In" }
+        ]
+        model: tableFixture
+    }
     LSegmented { id: sg }
     LSideNav {
         id: sn
@@ -86,6 +100,19 @@ Item {
             sn.pageActivated.connect(function(p) { count++; });
             sn.activate("database");          // disabled -> ignored
             compare(count, 0);
+        }
+    }
+
+    TestCase {
+        name: "LTableRendersRows"
+        when: windowShown
+        function test_rowCountMatchesModel() {
+            compare(t.rowCount, 2);
+        }
+        function test_showsEmptyStateWhenNoRows() {
+            t.model = null;
+            compare(t.rowCount, 0);
+            verify(t.emptyVisible === true);
         }
     }
 }
