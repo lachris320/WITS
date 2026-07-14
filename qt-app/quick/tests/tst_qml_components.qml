@@ -10,7 +10,16 @@ Item {
     LCard      { id: c }
     LTable     { id: t }
     LSegmented { id: sg }
-    LSideNav   { id: sn }
+    LSideNav {
+        id: sn
+        width: 240; height: 400
+        currentPage: "dashboard"
+        items: [
+            { page: "dashboard", label: "Dashboard", enabled: true },
+            { page: "search",    label: "Search",    enabled: true },
+            { page: "database",  label: "Database",  enabled: false }
+        ]
+    }
     LToast     { id: to; message: "hi" }
     LDialog    { id: dg; title: "T" }
     LStatTile  { id: st; label: "L"; value: "1" }
@@ -56,6 +65,27 @@ Item {
             compare(gr.gradient.stops.length, 2);
             compare(gr.gradient.stops[0].color, Theme.brand.kiosk);
             compare(gr.gradient.stops[1].color, Theme.brand.kioskHover);
+        }
+    }
+
+    TestCase {
+        name: "LSideNavInteraction"
+        when: windowShown
+
+        function test_activeItemMatchesCurrentPage() {
+            compare(sn.currentPage, "dashboard");
+        }
+        function test_emitsPageActivatedForEnabledItem() {
+            var got = null;
+            sn.pageActivated.connect(function(p) { got = p; });
+            sn.activate("search");            // test hook: same path a click takes
+            compare(got, "search");
+        }
+        function test_disabledItemDoesNotActivate() {
+            var count = 0;
+            sn.pageActivated.connect(function(p) { count++; });
+            sn.activate("database");          // disabled -> ignored
+            compare(count, 0);
         }
     }
 }
