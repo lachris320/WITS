@@ -11,6 +11,7 @@ private slots:
     void showKioskSwitchesBack();
     void defaultsToDashboardPage();
     void showAdminPageSwitchesAndSignals();
+    void showAdminResetsPageToDashboard();
 };
 
 void TestNavigator::defaultsToKiosk()
@@ -53,6 +54,21 @@ void TestNavigator::showAdminPageSwitchesAndSignals()
     QCOMPARE(spy.count(), 1);
     nav.showAdminPage(Navigator::VisitLogs);   // idempotent — no redundant signal
     QCOMPARE(spy.count(), 1);
+}
+
+// Re-entering admin must always land on Dashboard, even if a prior admin
+// session left a different sub-page selected — the user wants a predictable
+// Dashboard-first landing rather than resuming wherever they left off.
+void TestNavigator::showAdminResetsPageToDashboard()
+{
+    Navigator nav;
+    nav.showAdmin();
+    nav.showAdminPage(Navigator::VisitLogs);
+    nav.showKiosk();
+
+    nav.showAdmin();
+
+    QCOMPARE(nav.adminPage(), Navigator::Dashboard);
 }
 
 QTEST_MAIN(TestNavigator)

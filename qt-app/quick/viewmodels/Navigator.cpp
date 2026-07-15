@@ -14,7 +14,15 @@ void Navigator::setSurface(Surface s)
 }
 
 void Navigator::showKiosk() { setSurface(Kiosk); }
-void Navigator::showAdmin() { setSurface(Admin); }
+
+void Navigator::showAdmin()
+{
+    setSurface(Admin);
+    // Entering admin always lands on Dashboard, even if a prior admin
+    // session left a different sub-page selected — the user wants a
+    // predictable Dashboard-first landing, not to resume where they left off.
+    showAdminPage(Dashboard);
+}
 
 void Navigator::showAdminPage(AdminPage page)
 {
