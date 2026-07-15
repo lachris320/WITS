@@ -1,6 +1,7 @@
 <?php
 header('Content-Type: application/json');
 include 'db.php';
+include 'date_window.php';
 
 if ($conn->connect_error) {
     echo json_encode(["status" => "error", "message" => "Database connection failed"]);
@@ -36,13 +37,7 @@ function parse_strict_date($value) {
 
 // Resolve a half-open [start, end) datetime window (spec §5 date semantics).
 if ($range === 'week') {
-    // Current Mon–Sun calendar week as a half-open [start, end) datetime range
-    // (spec §5). date('N') = 1(Mon)..7(Sun); server-local time is authoritative.
-    $dow = (int)date('N');
-    $monday = new DateTime('today');
-    $monday->modify('-' . ($dow - 1) . ' days');
-    $startDt = $monday->format('Y-m-d 00:00:00');
-    $endDt   = (clone $monday)->modify('+7 days')->format('Y-m-d 00:00:00');
+    [$startDt, $endDt] = week_window();
 } elseif ($start !== '' && $end !== '') {
     $startParsed = parse_strict_date($start);
     $endParsed   = parse_strict_date($end);

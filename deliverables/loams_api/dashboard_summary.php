@@ -1,6 +1,7 @@
 <?php
 header('Content-Type: application/json');
 include 'db.php';
+include 'date_window.php';
 
 if ($conn->connect_error) {
     echo json_encode(["status" => "error", "message" => "Database connection failed"]);
@@ -8,12 +9,9 @@ if ($conn->connect_error) {
 }
 
 // Current Mon–Sun calendar week as a half-open [weekStart, weekEnd) datetime range
-// (spec §5). date('N') = 1(Mon)..7(Sun); server-local time is authoritative.
-$dow = (int)date('N');
-$monday = new DateTime('today');
-$monday->modify('-' . ($dow - 1) . ' days');
-$weekStart = $monday->format('Y-m-d 00:00:00');
-$weekEnd   = (clone $monday)->modify('+7 days')->format('Y-m-d 00:00:00');
+// (spec §5). Shared with get_library_visits.php via date_window.php so the two
+// "this week" definitions cannot silently drift apart.
+[$weekStart, $weekEnd] = week_window();
 
 $response = ["status" => "success"];
 
