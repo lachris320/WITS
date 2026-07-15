@@ -42,6 +42,7 @@ qt_add_qml_module(witsquickmodule
         qml/kiosk/KioskMain.qml
         qml/kiosk/KioskFeedRow.qml
         qml/admin/AdminScreen.qml
+        qml/admin/DashboardScreen.qml
         qml/components/LButton.qml
         qml/components/LCard.qml
         qml/components/LTable.qml
@@ -214,4 +215,13 @@ wits_add_qttest(tst_visitlogsviewmodel
 wits_add_qttest(tst_searchviewmodel
     SOURCES tests/tst_searchviewmodel.cpp
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    OFFSCREEN)
+
+# --- Admin screens Quick test (offscreen). "import LOAMS" lives only in the
+# QUICK_TEST_MAIN data file, so link the plugin + "_init" object explicitly. ---
+wits_add_qttest(tst_qml_admin
+    SOURCES tests/tst_qml_admin.cpp
+    LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
+         Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
+    DEFINES QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
     OFFSCREEN)
