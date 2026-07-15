@@ -19,6 +19,7 @@ class SearchViewModel : public QObject
     QML_ELEMENT
     Q_PROPERTY(SearchResultsModel *results READ results CONSTANT)
     Q_PROPERTY(QStringList courses READ courses NOTIFY coursesChanged)
+    Q_PROPERTY(QString department READ department NOTIFY departmentChanged)
     Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged)
     Q_PROPERTY(QString errorText READ errorText NOTIFY errorTextChanged)
 
@@ -27,11 +28,30 @@ public:
 
     SearchResultsModel *results() { return &m_results; }
     QStringList courses() const { return m_courses; }
+    QString department() const { return m_department; }
     bool loading() const { return m_loading; }
     QString errorText() const { return m_errorText; }
 
-    // Empty course => no course filter. department is left empty in Phase 3.
+    // Empty course => no course filter. Uses the currently-set department
+    // (see setDepartment) — empty department => no department filter.
     Q_INVOKABLE void search(const QString &search, const QString &course);
+
+    // Sets the active department filter and re-scopes `courses` to it via
+    // StudentController::loadCourses (JSON POST get_courses_by_department.php).
+    // Empty string (or a placeholder like "All"/"All Departments", which
+    // StudentController::normalizeFilter reduces to empty) re-scopes back to
+    // every course. No-op if `department` is already the current value —
+    // does not re-issue the courses request on a redundant call.
+    //
+    // Course-reset semantics: this method does NOT track or clear a
+    // previously-selected course itself (SearchViewModel has never owned that
+    // state — search()'s `course` argument is caller-supplied per call, same
+    // as before this change). The contract for the QML caller: `coursesChanged`
+    // fires with the new, department-scoped list; if the chip the user had
+    // selected is no longer present in it, the caller must reset its course
+    // selection (e.g. back to "All Courses") before the next search() call,
+    // the same way it already must handle "courses" changing on refresh().
+    Q_INVOKABLE void setDepartment(const QString &department);
 
     // Load-on-navigation hook (called by AdminScreen when the Search page is
     // shown). Populates the course filter chips; does NOT auto-run a search.
@@ -53,6 +73,7 @@ public slots:
 
 signals:
     void coursesChanged();
+    void departmentChanged();
     void loadingChanged();
     void errorTextChanged();
     void resultsChanged();
@@ -69,6 +90,7 @@ private:
     StudentController *m_controller = nullptr;
     SearchResultsModel m_results;
     QStringList m_courses;
+    QString m_department;
     bool m_loading = false;
     QString m_errorText;
 

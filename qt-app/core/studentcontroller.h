@@ -51,6 +51,12 @@ public:
     void loadDepartments();
 
     // Async — result arrives via coursesLoaded (empty on error/!success).
+    // Posts a JSON body {"department": <normalized department>} to
+    // get_courses_by_department.php (NOT get_courses.php — that endpoint is
+    // GET-only and errors on an empty department). An empty department (or
+    // "All"/placeholder text, which normalizeFilter reduces to empty) is
+    // treated server-side as "every course" — that's how the initial,
+    // no-department-selected course-chip load is scoped.
     void loadCourses(const QString &department);
 
 signals:

@@ -27,7 +27,16 @@ void SearchViewModel::search(const QString &search, const QString &course)
 {
     setError(QString());
     setLoading(true);
-    m_controller->searchStudents(search, QString(), course);
+    m_controller->searchStudents(search, m_department, course);
+}
+
+void SearchViewModel::setDepartment(const QString &department)
+{
+    if (m_department == department)
+        return;
+    m_department = department;
+    emit departmentChanged();
+    m_controller->loadCourses(department);   // re-scope the course filter chips
 }
 
 void SearchViewModel::onSearchFinished(SearchOutcome outcome,

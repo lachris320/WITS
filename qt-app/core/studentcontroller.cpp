@@ -7,8 +7,6 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
-#include <QUrl>
-#include <QUrlQuery>
 
 StudentController::StudentController(QNetworkAccessManager *nam, QObject *parent)
     : QObject(parent)
@@ -265,12 +263,20 @@ void StudentController::loadDepartments()
 
 void StudentController::loadCourses(const QString &department)
 {
-    QUrl url = ApiConfig::endpoint(QStringLiteral("get_courses.php"));
-    QUrlQuery query;
-    query.addQueryItem(QStringLiteral("department"), department);
-    url.setQuery(query);
+    // get_courses_by_department.php reads a JSON request body
+    // (json_decode(file_get_contents("php://input")), key "department") —
+    // NOT a query string. A GET or form-POST falls through its own
+    // empty/absent-department branch and silently returns every course
+    // regardless of what was asked for, so this must be a JSON POST.
+    QNetworkRequest request(
+        ApiConfig::endpoint(QStringLiteral("get_courses_by_department.php")));
+    request.setHeader(QNetworkRequest::ContentTypeHeader,
+                      QStringLiteral("application/json"));
 
-    QNetworkReply *reply = m_nam->get(QNetworkRequest(url));
+    QJsonObject payload;
+    payload["department"] = normalizeFilter(department);   // placeholder/empty -> "" -> "all courses"
+
+    QNetworkReply *reply = m_nam->post(request, QJsonDocument(payload).toJson());
 
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         const QStringList courses =

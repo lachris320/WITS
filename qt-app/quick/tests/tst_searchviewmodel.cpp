@@ -14,6 +14,8 @@ private slots:
     void coursesLoadedExposesChips();
     void supersededSearchFinishedReplyIsDropped();
     void supersededSearchFailedReplyIsDropped();
+    void setDepartmentUpdatesPropertyAndEmits();
+    void setDepartmentSameValueIsNoop();
 };
 
 void TestSearchViewModel::resultsPopulateWithVisits()
@@ -129,6 +131,31 @@ void TestSearchViewModel::supersededSearchFailedReplyIsDropped()
 
     QCOMPARE(vm.results()->rowCount(), 1);   // newer result untouched
     QVERIFY(vm.errorText().isEmpty());       // no stale error banner
+}
+
+// setDepartment() fires a real StudentController::loadCourses() network
+// request as a side effect (fire-and-forget, same pattern already used by
+// tst_visitlogsviewmodel's setRangeUpdatesRangeLabelImmediately); no
+// QTest::qWait, so no reply can have arrived by the time these assertions
+// run — property/signal state is checked synchronously.
+void TestSearchViewModel::setDepartmentUpdatesPropertyAndEmits()
+{
+    SearchViewModel vm;
+    QSignalSpy spy(&vm, &SearchViewModel::departmentChanged);
+    vm.setDepartment(QStringLiteral("CE"));
+    QCOMPARE(vm.department(), QStringLiteral("CE"));
+    QCOMPARE(spy.count(), 1);
+}
+
+// A redundant setDepartment() call (same value as current) must not re-fire
+// departmentChanged (and, by extension, must not re-issue a courses request).
+void TestSearchViewModel::setDepartmentSameValueIsNoop()
+{
+    SearchViewModel vm;
+    vm.setDepartment(QStringLiteral("CE"));
+    QSignalSpy spy(&vm, &SearchViewModel::departmentChanged);
+    vm.setDepartment(QStringLiteral("CE"));
+    QCOMPARE(spy.count(), 0);
 }
 
 QTEST_MAIN(TestSearchViewModel)
