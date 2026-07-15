@@ -43,6 +43,7 @@ qt_add_qml_module(witsquickmodule
         qml/kiosk/KioskFeedRow.qml
         qml/admin/AdminScreen.qml
         qml/admin/DashboardScreen.qml
+        qml/admin/SearchScreen.qml
         qml/components/LButton.qml
         qml/components/LCard.qml
         qml/components/LTable.qml

@@ -4,7 +4,10 @@ import LOAMS
 
 Item {
     id: host
-    width: 1100; height: 760
+    // Tall enough to host both DashboardScreen (0..760) and SearchScreen
+    // (760..1460) side by side without overlap — QTest mouse synthesis is
+    // window-local, and the window tracks this root item's size.
+    width: 1100; height: 1460
 
     // --- Dashboard stub VM ---
     // maxValue is declared on the stubs because the screen binds
@@ -36,11 +39,39 @@ Item {
         property int refreshCount: 0
         function refresh() { refreshCount++ }
     }
-    DashboardScreen { id: dash; anchors.fill: parent; vm: dashStub }
+    // Fixed geometry (not anchors.fill: parent) so dash occupies only the top
+    // band of the now-taller host and does not extend under the search
+    // instances below it — same 0,0 origin and size as before, observably
+    // identical to Task 13's anchors.fill for every Dashboard assertion.
+    DashboardScreen { id: dash; width: 1100; height: 760; vm: dashStub }
 
     // Second instance with no vm at all, covering the `vm ? ... : ...` fallback
     // path every binding in the screen is written to defend.
     DashboardScreen { id: vmlessDash; width: 1100; height: 760 }
+
+    // --- Search stub VM ---
+    ListModel { id: searchStub
+        ListElement { name: "Maria Santos"; schoolId: "2023-0001"; course: "BSCE"; department: "CE"; visits: 42 }
+    }
+    QtObject {
+        id: searchVmStub
+        property var results: searchStub
+        property var courses: ["BSCE", "BSEE"]
+        property bool loading: false
+        property string errorText: ""
+        property string lastSearch: ""
+        property string lastCourse: ""
+        property int searchCount: 0
+        function search(s, c) { lastSearch = s; lastCourse = c; searchCount++; }
+    }
+    // Positioned below dash (y: 760) so the taller host gives it its own band
+    // instead of stacking on top of dash's errorBlock/retryButton — see the
+    // host comment above.
+    SearchScreen { id: search; y: 760; width: 1100; height: 700; vm: searchVmStub }
+
+    // No-vm fallback instance, offset off to the side (never clicked) so it
+    // cannot intercept clicks meant for `search` or `dash`.
+    SearchScreen { id: vmlessSearch; x: 2000; width: 900; height: 700 }
 
     TestCase {
         name: "DashboardScreen"
@@ -124,6 +155,139 @@ Item {
             compare(findChild(vmlessDash, "errorBlock").visible, false);
             compare(findChild(vmlessDash, "busyIndicator").running, false);
             compare(findChild(vmlessDash, "dashContent").opacity, 1.0);
+        }
+    }
+
+    TestCase {
+        name: "SearchScreen"
+        when: windowShown
+
+        // Test functions run in alphabetical order, and several mutate the
+        // shared stub or screen state, so reset everything to a known
+        // baseline before each one rather than relying on declaration order.
+        function init() {
+            searchVmStub.errorText = "";
+            searchVmStub.loading = false;
+            searchVmStub.lastSearch = "";
+            searchVmStub.lastCourse = "";
+            searchVmStub.searchCount = 0;
+            search.selectedCourse = "";
+            findChild(search, "queryField").text = "";
+        }
+
+        function findAny(root, s) {
+            if (root.text !== undefined && root.text !== null && root.text.indexOf(s) !== -1)
+                return root;
+            for (var i = 0; i < root.children.length; i++) {
+                var f = findAny(root.children[i], s);
+                if (f !== null) return f;
+            }
+            return null;
+        }
+
+        function test_showsResultCount() {
+            compare(search.resultCount, 1);
+        }
+
+        function test_rendersTotalVisitsLabel() {
+            waitForRendering(search);
+            verify(findAny(search, "Total Visits: 42") !== null);
+        }
+
+        // --- Search invocation branches ---
+
+        function test_searchButtonInvokesSearch() {
+            var field = findChild(search, "queryField");
+            field.text = "Santos";
+            var btn = findChild(search, "searchButton");
+            verify(btn !== null);
+            waitForRendering(search);
+            mouseClick(btn);
+            compare(searchVmStub.lastSearch, "Santos");
+            compare(searchVmStub.lastCourse, "");
+            compare(searchVmStub.searchCount, 1);
+        }
+
+        function test_queryFieldAcceptedInvokesSearch() {
+            var field = findChild(search, "queryField");
+            field.text = "2023-0001";
+            field.forceActiveFocus();
+            keyClick(Qt.Key_Return);
+            compare(searchVmStub.lastSearch, "2023-0001");
+            compare(searchVmStub.searchCount, 1);
+        }
+
+        function test_retryButtonInvokesSearch() {
+            searchVmStub.errorText = "Network unreachable";
+            var btn = findChild(search, "retryButton");
+            verify(btn !== null);
+            waitForRendering(search);
+            compare(searchVmStub.searchCount, 0);
+            mouseClick(btn);
+            compare(searchVmStub.searchCount, 1);
+        }
+
+        // --- Course filter chips (the only non-trivial logic on this screen) ---
+
+        function test_chipClickSetsSelectedCourseAndSearches() {
+            var chip = findChild(search, "chip_BSCE");
+            verify(chip !== null);
+            waitForRendering(search);
+            mouseClick(chip);
+            compare(search.selectedCourse, "BSCE");
+            compare(searchVmStub.lastCourse, "BSCE");
+            compare(searchVmStub.searchCount, 1);
+        }
+
+        function test_chipToggleOffClearsSelectedCourseAndSearches() {
+            var chip = findChild(search, "chip_BSCE");
+            waitForRendering(search);
+            mouseClick(chip);
+            compare(search.selectedCourse, "BSCE");
+            mouseClick(chip);
+            compare(search.selectedCourse, "");
+            compare(searchVmStub.lastCourse, "");
+            compare(searchVmStub.searchCount, 2);
+        }
+
+        // --- Error + retry ---
+
+        function test_errorBlockHiddenWhenNoError() {
+            var block = findChild(search, "errorBlock");
+            verify(block !== null);
+            compare(block.visible, false);
+        }
+
+        function test_errorBlockVisibleWhenErrorText() {
+            var block = findChild(search, "errorBlock");
+            searchVmStub.errorText = "Network unreachable";
+            compare(block.visible, true);
+            searchVmStub.errorText = "";
+            compare(block.visible, false);
+        }
+
+        // --- Loading state ---
+
+        function test_loadingTogglesBusyIndicator() {
+            var busy = findChild(search, "busyIndicator");
+            compare(busy.running, false);
+            compare(busy.visible, false);
+
+            searchVmStub.loading = true;
+            compare(busy.running, true);
+            compare(busy.visible, true);
+
+            searchVmStub.loading = false;
+            compare(busy.running, false);
+            compare(busy.visible, false);
+        }
+
+        // --- No-vm fallback path ---
+
+        function test_undefinedVmRendersFallbacksWithoutError() {
+            compare(vmlessSearch.resultCount, 0);
+            compare(findChild(vmlessSearch, "errorBlock").visible, false);
+            compare(findChild(vmlessSearch, "busyIndicator").running, false);
         }
     }
 }
