@@ -1,5 +1,7 @@
 #include "RecentLoginsModel.h"
 
+#include "Initials.h"
+
 RecentLoginsModel::RecentLoginsModel(QObject *parent)
     : QAbstractListModel(parent)
 {
@@ -46,18 +48,6 @@ QString RecentLoginsModel::shortenYear(const QString &year)
     return y.replace(QLatin1String(" Year"), QLatin1String(" Yr"));
 }
 
-QString RecentLoginsModel::initialsOf(const QString &name)
-{
-    QString out;
-    const QStringList parts = name.split(QLatin1Char(' '), Qt::SkipEmptyParts);
-    for (const QString &p : parts) {
-        out.append(p.at(0).toUpper());
-        if (out.size() == 2)
-            break;
-    }
-    return out;
-}
-
 void RecentLoginsModel::prepend(const QString &name, const QString &course,
                                 const QString &year, const QString &dept,
                                 const QString &time)
@@ -72,7 +62,7 @@ void RecentLoginsModel::prepend(const QString &name, const QString &course,
 
     beginInsertRows(QModelIndex(), 0, 0);
     m_rows.prepend(Row{ name, course, shortenYear(year), dept, time,
-                        initialsOf(name), true });
+                        Initials::of(name), true });
     endInsertRows();
 
     if (m_rows.size() > kMaxRows) {
