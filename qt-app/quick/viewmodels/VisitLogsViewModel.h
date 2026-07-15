@@ -76,6 +76,7 @@ private:
     void setError(const QString &e);
     void setCount(int c);
     QString computeRangeLabel() const;   // uses current date + m_range
+    void resetDataOnError();   // clears rows/count, recomputes rangeLabel; shared by all error paths
 
     QNetworkAccessManager *m_nam = nullptr;
     VisitLogRowsModel m_rows;

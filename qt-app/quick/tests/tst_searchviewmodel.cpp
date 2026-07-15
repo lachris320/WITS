@@ -10,6 +10,7 @@ class TestSearchViewModel : public QObject
 private slots:
     void resultsPopulateWithVisits();
     void searchFailedSetsErrorText();
+    void searchFailedClearsStaleResults();
     void coursesLoadedExposesChips();
 };
 
@@ -38,6 +39,31 @@ void TestSearchViewModel::searchFailedSetsErrorText()
     QVERIFY(!vm.errorText().isEmpty());
     // The user-facing string must not leak the raw transport error.
     QVERIFY(!vm.errorText().contains(QStringLiteral("boom")));
+}
+
+// Reviewer finding (scope correction): onSearchFailed had the identical
+// error-path-inconsistency shape as Dashboard/VisitLogs — onSearchFinished's
+// parse-failure path unconditionally calls setRecords(records) (line 40,
+// clearing stale results), but onSearchFailed left m_results untouched. So a
+// search that returns good results, then a subsequent search that fails on
+// the network, would keep showing the PREVIOUS search's rows behind the
+// error banner. Fully network-free: onSearchFailed is a public slot.
+void TestSearchViewModel::searchFailedClearsStaleResults()
+{
+    SearchViewModel vm;
+    StudentRecord r;
+    r.schoolId = "2023-0001";
+    r.name = "Maria Santos";
+    r.course = "BSCE";
+    r.department = "CE";
+    r.visits = 42;
+    vm.onSearchFinished(SearchOutcome::Results, { r }, QString(), QStringLiteral("Maria"));
+    QCOMPARE(vm.results()->rowCount(), 1);
+
+    vm.onSearchFailed(QStringLiteral("boom"));
+
+    QCOMPARE(vm.results()->rowCount(), 0);
+    QVERIFY(!vm.errorText().isEmpty());
 }
 
 void TestSearchViewModel::coursesLoadedExposesChips()

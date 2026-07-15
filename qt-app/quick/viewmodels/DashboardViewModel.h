@@ -64,6 +64,7 @@ signals:
 private:
     void setLoading(bool v);
     void setError(const QString &e);
+    void resetPeakOnError();   // resets peakHourIndex/peakHourLabel; shared by both error paths
 
     QNetworkAccessManager *m_nam = nullptr;
     BarsModel m_hourly;

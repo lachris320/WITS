@@ -52,6 +52,12 @@ void SearchViewModel::onSearchFailed(const QString & /*errorString*/)
 {
     // Do NOT surface the raw transport string (security-hygiene).
     setLoading(false);
+    // Consistent with onSearchFinished, which unconditionally calls
+    // setRecords(records) (clearing stale rows on InvalidResponse/NotSuccess
+    // too) — a failed re-search must not leave the PREVIOUS search's results
+    // on screen behind the error banner.
+    m_results.setRecords({});
+    emit resultsChanged();
     setError(QStringLiteral("Network error. Please try again."));
 }
 

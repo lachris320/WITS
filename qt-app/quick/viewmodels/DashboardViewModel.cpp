@@ -35,6 +35,7 @@ void DashboardViewModel::refresh()
         if (!isCurrentRequest(seq)) return;   // superseded — drop
         setLoading(false);
         if (netErr) {
+            resetPeakOnError();
             setError(QStringLiteral("Network error. Please try again."));
             return;
         }
@@ -47,10 +48,8 @@ void DashboardViewModel::applySummary(const QByteArray &raw)
     DashboardSummary s;
     QString err;
     if (!DashboardParser::parse(raw, s, err)) {
+        resetPeakOnError();
         setError(err);
-        m_peakHourIndex = -1;
-        m_peakHourLabel = QStringLiteral("—");
-        emit dataChanged();
         return;
     }
 
@@ -83,6 +82,20 @@ void DashboardViewModel::applySummary(const QByteArray &raw)
     m_department.setBars(depts);
 
     setError(QString());
+    emit dataChanged();
+}
+
+// Shared by both error branches (network-error in refresh()'s reply lambda,
+// parse-error in applySummary) so they stay internally consistent: the
+// derived peak-hour fields reset rather than keep showing a stale peak from
+// a previous successful fetch behind the error banner. Raw stats
+// (today/week/students) and the bar models are intentionally left as-is —
+// that is the existing, unchanged behavior this refactor preserves, not a
+// new decision; widening the reset to those fields is out of scope here.
+void DashboardViewModel::resetPeakOnError()
+{
+    m_peakHourIndex = -1;
+    m_peakHourLabel = QStringLiteral("—");
     emit dataChanged();
 }
 

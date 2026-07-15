@@ -15,6 +15,8 @@ private slots:
     void setModeEmitsAndChanges();
     void formatWeekLabelSpansMonToSun();
     void supersededRequestSeqIsNotCurrent();
+    void setRangeUpdatesRangeLabelImmediately();
+    void parseErrorAfterGoodDataClearsStaleRowsAndRecomputesLabel();
 };
 
 void TestVisitLogsViewModel::defaultsToStudentToday()
@@ -110,6 +112,57 @@ void TestVisitLogsViewModel::supersededRequestSeqIsNotCurrent()
     const quint64 second = vm.nextRequestSeq();    // Student click before the POST returns
     QVERIFY(!vm.isCurrentRequest(first));          // first request is now superseded
     QVERIFY(vm.isCurrentRequest(second));          // second request is the current one
+}
+
+// Root cause of the user-reported bug: refresh()'s network-error branch used
+// to setError(...) and return without touching m_rangeLabel, which was only
+// ever recomputed inside applyStudentVisits/applyGuestVisits — i.e. only
+// after data arrived. If the fetch never succeeded, the label silently kept
+// showing the PREVIOUS selection's range while the toggle itself (mode/range)
+// had already switched to Week. This test drives only the public selection
+// setter — no reply, no apply* call — proving the label is now derived from
+// the user's selection eagerly, not from the last successful reply.
+void TestVisitLogsViewModel::setRangeUpdatesRangeLabelImmediately()
+{
+    VisitLogsViewModel vm;
+    QCOMPARE(vm.range(), VisitLogsViewModel::Today);
+    QVERIFY(!vm.rangeLabel().contains(QStringLiteral("–")));   // "Today, ..." has no en-dash range
+
+    vm.setRange(VisitLogsViewModel::Week);   // fires refresh() as a side effect (fire-and-forget,
+                                              // same pattern already used by setModeEmitsAndChanges);
+                                              // no QTest::qWait, so no reply can have arrived yet.
+
+    const QDate today = QDate::currentDate();
+    const QDate monday = today.addDays(-(today.dayOfWeek() - 1));
+    QCOMPARE(vm.rangeLabel(), VisitLogsViewModel::formatWeekLabel(monday));
+}
+
+// The reviewer finding: network-error branches didn't clear prior state while
+// parse-error branches did, making the two error paths internally
+// inconsistent. This seeds a real (nonzero) prior result set — unlike the
+// pre-existing applyInvalidSetsErrorText test, which starts from a fresh VM
+// where count is already 0 by construction and so can't distinguish "cleared"
+// from "never populated" — then drives a parse failure via the network-free
+// seam and asserts the stale row is actually dropped, not merely absent.
+void TestVisitLogsViewModel::parseErrorAfterGoodDataClearsStaleRowsAndRecomputesLabel()
+{
+    VisitLogsViewModel vm;
+    vm.applyStudentVisits(R"({
+        "status":"success","count":1,
+        "visits":[{"date":"2026-07-13","name":"Maria Santos","course":"BSCE",
+                   "department":"CE","time_in":"08:14"}]
+    })");
+    QCOMPARE(vm.count(), 1);
+
+    vm.setRange(VisitLogsViewModel::Week);
+    vm.applyStudentVisits(R"({"status":"error"})");
+
+    QCOMPARE(vm.count(), 0);
+    QCOMPARE(vm.rows()->rowCount(), 0);
+    QVERIFY(!vm.errorText().isEmpty());
+    const QDate today = QDate::currentDate();
+    const QDate monday = today.addDays(-(today.dayOfWeek() - 1));
+    QCOMPARE(vm.rangeLabel(), VisitLogsViewModel::formatWeekLabel(monday));
 }
 
 QTEST_MAIN(TestVisitLogsViewModel)

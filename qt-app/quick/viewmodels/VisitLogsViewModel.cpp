@@ -53,6 +53,14 @@ void VisitLogsViewModel::setRange(Range r)
         return;
     m_range = r;
     emit rangeChanged();
+    // Recompute the label from the NEW selection immediately, before the
+    // refresh() below even issues its request. The user's selection is the
+    // source of truth for rangeLabel — not the last successful reply — so
+    // the label must never wait on a network round trip to catch up. This
+    // is what fixes the reported bug: without it, a failed (or slow) fetch
+    // left the label showing the previous range indefinitely.
+    m_rangeLabel = computeRangeLabel();
+    emit dataChanged();
     refresh();
 }
 
@@ -75,7 +83,7 @@ void VisitLogsViewModel::refresh()
             reply->deleteLater();
             if (!isCurrentRequest(seq)) return;   // superseded — drop
             setLoading(false);
-            if (netErr) { setError(QStringLiteral("Network error. Please try again.")); return; }
+            if (netErr) { resetDataOnError(); setError(QStringLiteral("Network error. Please try again.")); return; }
             applyStudentVisits(body);
         });
         return;
@@ -117,7 +125,7 @@ void VisitLogsViewModel::refresh()
         reply->deleteLater();
         if (!isCurrentRequest(seq)) return;   // superseded — drop
         setLoading(false);
-        if (netErr) { setError(QStringLiteral("Network error. Please try again.")); return; }
+        if (netErr) { resetDataOnError(); setError(QStringLiteral("Network error. Please try again.")); return; }
         applyGuestVisits(body);
     });
 }
@@ -128,10 +136,8 @@ void VisitLogsViewModel::applyStudentVisits(const QByteArray &raw)
     int count = 0;
     QString err;
     if (!VisitLogParser::parse(raw, parsed, count, err)) {
+        resetDataOnError();
         setError(err);
-        m_rows.setRows({});
-        setCount(0);
-        emit dataChanged();
         return;
     }
     QList<VisitLogRowsModel::Row> rows;
@@ -159,10 +165,8 @@ void VisitLogsViewModel::applyGuestVisits(const QByteArray &raw)
     int total = 0;
     QString err;
     if (!VisitorController::parseVisitorsResponse(raw, &parsed, &total, &err)) {
+        resetDataOnError();
         setError(err.isEmpty() ? QStringLiteral("Could not load guest logs.") : err);
-        m_rows.setRows({});
-        setCount(0);
-        emit dataChanged();
         return;
     }
     QList<VisitLogRowsModel::Row> rows;
@@ -181,6 +185,20 @@ void VisitLogsViewModel::applyGuestVisits(const QByteArray &raw)
     setCount(rows.size());
     m_rangeLabel = computeRangeLabel();
     setError(QString());
+    emit dataChanged();
+}
+
+// Shared by every error branch (network-error in refresh()'s reply lambdas,
+// and parse-error in applyStudentVisits/applyGuestVisits) so both keep the
+// SAME contract: clear the now-untrustworthy rows/count rather than show
+// stale data behind the error banner, and recompute rangeLabel from the
+// currently selected mode/range rather than leaving it pinned to whatever
+// the last successful reply happened to show.
+void VisitLogsViewModel::resetDataOnError()
+{
+    m_rows.setRows({});
+    setCount(0);
+    m_rangeLabel = computeRangeLabel();
     emit dataChanged();
 }
 
