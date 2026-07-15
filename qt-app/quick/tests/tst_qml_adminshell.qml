@@ -25,6 +25,16 @@ Item {
 
     AdminScreen { id: shell; width: 1100; height: 720; autoLoad: false }
 
+    // Watches the REAL sidebar's pageActivated signal so the disabled-item
+    // guard can be asserted on the signal itself rather than on a downstream
+    // side effect a broken guard would not disturb. `target` is bound in
+    // init() via the existing objectName seam — no test-only property is
+    // added to AdminScreen just to reach it.
+    SignalSpy {
+        id: activationSpy
+        signalName: "pageActivated"
+    }
+
     TestCase {
         name: "AdminScreenShell"
         when: windowShown
@@ -39,10 +49,13 @@ Item {
         function init() {
             Navigator.showAdminPage(Navigator.Dashboard);
             Navigator.showKiosk();
+            activationSpy.target = findChild(shell, "sideNav");
+            activationSpy.clear();
         }
         function cleanup() {
             Navigator.showKiosk();
             Navigator.showAdminPage(Navigator.Dashboard);
+            activationSpy.clear();
         }
 
         // Depth-first search for a sidebar delegate row whose modelData.page
@@ -137,10 +150,29 @@ Item {
         // LSideNav's disabled guard (Task 9) must still block activation of
         // the Phase-4 placeholder items reached through the shell's own item
         // list.
+        //
+        // Asserted via SignalSpy on the real pageActivated signal, because
+        // that IS the named behavior ("does not activate") and it is the only
+        // observable that survives both failure modes. Navigator.adminPage is
+        // NOT a usable witness here: an unrecognized key now warns instead of
+        // routing (see AdminScreen's onPageActivated), so adminPage holds its
+        // value whether or not the guard fired — asserting on it would pass
+        // against a removed guard AND against `enabled: false` flipped true.
+        // The spy fails on both.
         function test_sidebarDisabledItemGuardBlocksActivation() {
             var nav = findChild(shell, "sideNav");
+            Navigator.showAdminPage(Navigator.VisitLogs);
+            activationSpy.clear();
+
             nav.activate("database");
-            compare(Navigator.adminPage, Navigator.Dashboard);
+            compare(activationSpy.count, 0);
+            // Nothing navigated as a result, either.
+            compare(Navigator.adminPage, Navigator.VisitLogs);
+
+            // Positive control: the same call path DOES emit for an enabled
+            // item, so a spy that never fires cannot fake a pass.
+            nav.activate("search");
+            compare(activationSpy.count, 1);
         }
 
         // CRITICAL 1 regression test: LSideNav.currentPage is a

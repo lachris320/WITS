@@ -69,13 +69,22 @@ Rectangle {
                 { page: "reporting", label: qsTr("Reporting"),  enabled: false },
                 { page: "settings",  label: qsTr("Settings"),   enabled: false }
             ]
+            // Every key is matched explicitly, including "dashboard". A bare
+            // `else -> Dashboard` fallthrough would silently route ANY
+            // unrecognized key to the Dashboard: harmless today (LSideNav's
+            // own guard blocks the disabled Phase-4 items before they ever
+            // emit), but the moment Phase 4 enables "database"/"reporting"/
+            // "settings" they would land on the Dashboard instead of failing
+            // loudly. Warn rather than route. Phase 4 adds the real cases.
             onPageActivated: function(page) {
-                if (page === "search")
+                if (page === "dashboard")
+                    Navigator.showAdminPage(Navigator.Dashboard)
+                else if (page === "search")
                     Navigator.showAdminPage(Navigator.Search)
                 else if (page === "visitlogs")
                     Navigator.showAdminPage(Navigator.VisitLogs)
                 else
-                    Navigator.showAdminPage(Navigator.Dashboard)
+                    console.warn("AdminScreen: no route for page key", page)
             }
             footer: LButton {
                 objectName: "backToKioskButton"
