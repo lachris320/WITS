@@ -133,6 +133,19 @@ Item {
             compare(header.title, "Dashboard");
         }
 
+        // The header's live clock (Component.onCompleted: tickClock()) must
+        // populate BOTH dateText and clockText on the real LPageHeader, not
+        // just clockText — exact wall-clock strings aren't asserted (real
+        // Date(), not injectable here) but non-emptiness is exactly what a
+        // missing `dateText: admin.dateText` binding (AdminScreen.qml) would
+        // break: dateText would stay "" forever.
+        function test_pageHeaderShowsDateAlongsideClock() {
+            var header = findChild(shell, "pageHeader");
+            verify(header !== null);
+            verify(header.dateText.length > 0);
+            verify(header.clockText.length > 0);
+        }
+
         // Drives LSideNav.activate() (Task 9's sanctioned click-equivalent
         // hook — "the single path both a click and a test call take") rather
         // than only the shell's own activatePage() hook, so this proves the

@@ -65,6 +65,7 @@ Item {
         width: 480
         title: "Dashboard"
         subtitle: "Library activity overview"
+        dateText: "Monday, July 6, 2026"
         clockText: "8:04:11 AM"
     }
     LPulseDot  { id: pd; color: Theme.secondary; pulseDuration: 900 }
@@ -204,6 +205,21 @@ Item {
         function test_subtitleAndClockBothPresent() {
             verify(findText(ph, "Library activity overview") !== null);
             verify(findText(ph, "8:04:11 AM") !== null);
+        }
+        // The date must render as its own text alongside the clock, not
+        // merely be swallowed into/duplicated by clockText. Reference
+        // format: date, then the clock. Deleting `dateText: hdr.dateText`
+        // from LPageHeader.qml's headerDateText Text (or its property
+        // declaration) makes this fail: the node either never appears or
+        // reports the wrong string.
+        function test_dateTextRendersBesideClock() {
+            var dateNode = findChild(ph, "headerDateText");
+            var clockNode = findChild(ph, "headerClockText");
+            verify(dateNode !== null);
+            verify(clockNode !== null);
+            compare(dateNode.text, "Monday, July 6, 2026");
+            compare(clockNode.text, "8:04:11 AM");
+            verify(dateNode.visible === true);
         }
         function findText(root, s) {
             if (root.text !== undefined && root.text !== null && root.text.indexOf(s) !== -1)

@@ -32,9 +32,16 @@ Rectangle {
     // no refresh() to gate, unlike the three VMs above.
     SchoolInfoViewModel { id: schoolInfoVm }
 
-    // Live clock for the header.
+    // Live clock + date for the header. Same "dddd, MMMM d, yyyy" format
+    // KioskViewModel::tickClock() already uses for clockDate, so the date
+    // reads identically across kiosk and admin.
     property string clockText: ""
-    function tickClock() { clockText = Qt.formatDateTime(new Date(), "h:mm:ss AP") }
+    property string dateText: ""
+    function tickClock() {
+        var now = new Date();
+        clockText = Qt.formatDateTime(now, "h:mm:ss AP");
+        dateText = Qt.formatDateTime(now, "dddd, MMMM d, yyyy");
+    }
     Component.onCompleted: tickClock()
     Timer { interval: 1000; running: true; repeat: true; onTriggered: admin.tickClock() }
 
@@ -115,6 +122,7 @@ Rectangle {
                 Layout.margins: Theme.spacing.xxl
                 Layout.bottomMargin: 0
                 title: admin.pageTitle
+                dateText: admin.dateText
                 clockText: admin.clockText
             }
 

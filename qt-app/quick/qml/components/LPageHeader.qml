@@ -2,12 +2,17 @@ import QtQuick
 import QtQuick.Layouts
 import LOAMS
 
-// Admin page-header region (§11): title + subtitle on the left, live clock on
-// the right — all shown together.
+// Admin page-header region (§11): title + subtitle on the left, live
+// date + clock on the right — all shown together. Reference (Admin
+// Dashboard.dc.html ~L68): "{{ clockDate }} · {{ clockTime }} {{ clockMeridiem }}",
+// date and time as two differently-styled runs (muted date, brand-colored
+// time) rather than one merged string — hence a separate dateText property
+// instead of folding the date into clockText.
 Item {
     id: hdr
     property string title: ""
     property string subtitle: ""
+    property string dateText: ""
     property string clockText: ""
     property Item actions: null
 
@@ -40,14 +45,36 @@ Item {
             }
         }
 
-        Text {
-            visible: hdr.clockText.length > 0
+        RowLayout {
             Layout.alignment: Qt.AlignVCenter | Qt.AlignRight
-            text: hdr.clockText
-            color: Theme.mutedText
-            font.family: Theme.typography.sans
-            font.pixelSize: Theme.typography.cardTitle
-            Accessible.role: Accessible.StaticText
+            spacing: Theme.spacing.xs
+
+            Text {
+                objectName: "headerDateText"
+                visible: hdr.dateText.length > 0
+                text: hdr.dateText
+                color: Theme.mutedText
+                font.family: Theme.typography.sans
+                font.pixelSize: Theme.typography.control
+                Accessible.role: Accessible.StaticText
+            }
+            Text {
+                visible: hdr.dateText.length > 0 && hdr.clockText.length > 0
+                text: "·"
+                color: Theme.mutedText
+                font.family: Theme.typography.sans
+                font.pixelSize: Theme.typography.control
+            }
+            Text {
+                objectName: "headerClockText"
+                visible: hdr.clockText.length > 0
+                text: hdr.clockText
+                color: Theme.brand.admin
+                font.family: Theme.typography.sans
+                font.pixelSize: Theme.typography.cardTitle
+                font.weight: Font.Bold
+                Accessible.role: Accessible.StaticText
+            }
         }
     }
 }
