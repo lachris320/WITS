@@ -11,6 +11,29 @@ $range = isset($_GET['range']) ? strtolower(trim($_GET['range'])) : 'today';
 $start = isset($_GET['start']) ? trim($_GET['start']) : '';
 $end   = isset($_GET['end'])   ? trim($_GET['end'])   : '';
 
+/**
+ * Strictly parse a 'Y-m-d' date string.
+ * createFromFormat() is lenient (e.g. it will roll "2026-13-45" into a
+ * different valid date while only recording a warning, not a failure), so
+ * this also checks getLastErrors() and round-trips the formatted result
+ * back against the input. Returns a DateTime on success, null on any
+ * malformed input — never throws.
+ */
+function parse_strict_date($value) {
+    $dt = DateTime::createFromFormat('Y-m-d', $value);
+    if ($dt === false) {
+        return null;
+    }
+    $errors = DateTime::getLastErrors();
+    if ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0)) {
+        return null;
+    }
+    if ($dt->format('Y-m-d') !== $value) {
+        return null;
+    }
+    return $dt;
+}
+
 // Resolve a half-open [start, end) datetime window (spec §5 date semantics).
 if ($range === 'week') {
     // Current Mon–Sun calendar week as a half-open [start, end) datetime range
@@ -21,9 +44,15 @@ if ($range === 'week') {
     $startDt = $monday->format('Y-m-d 00:00:00');
     $endDt   = (clone $monday)->modify('+7 days')->format('Y-m-d 00:00:00');
 } elseif ($start !== '' && $end !== '') {
-    $startDt = $start . ' 00:00:00';
+    $startParsed = parse_strict_date($start);
+    $endParsed   = parse_strict_date($end);
+    if ($startParsed === null || $endParsed === null) {
+        echo json_encode(["status" => "error", "message" => "Invalid date parameters"]);
+        exit;
+    }
+    $startDt = $startParsed->format('Y-m-d 00:00:00');
     // Half-open [start, end+1day) so the entire $end day is included.
-    $endDt   = (new DateTime($end))->modify('+1 day')->format('Y-m-d 00:00:00');
+    $endDt   = $endParsed->modify('+1 day')->format('Y-m-d 00:00:00');
 } else { // today (default)
     $startDt = (new DateTime('today'))->format('Y-m-d 00:00:00');
     $endDt   = (new DateTime('tomorrow'))->format('Y-m-d 00:00:00');
