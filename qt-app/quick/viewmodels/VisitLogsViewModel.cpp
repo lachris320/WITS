@@ -68,10 +68,12 @@ void VisitLogsViewModel::refresh()
                        m_range == Week ? QStringLiteral("week") : QStringLiteral("today"));
         url.setQuery(q);
         QNetworkReply *reply = m_nam->get(QNetworkRequest(url));
-        connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const quint64 seq = nextRequestSeq();
+        connect(reply, &QNetworkReply::finished, this, [this, reply, seq]() {
             const bool netErr = reply->error() != QNetworkReply::NoError;
             const QByteArray body = reply->readAll();
             reply->deleteLater();
+            if (!isCurrentRequest(seq)) return;   // superseded — drop
             setLoading(false);
             if (netErr) { setError(QStringLiteral("Network error. Please try again.")); return; }
             applyStudentVisits(body);
@@ -108,10 +110,12 @@ void VisitLogsViewModel::refresh()
     QNetworkRequest req(ApiConfig::endpoint(QStringLiteral("get_visitors.php")));
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
     QNetworkReply *reply = m_nam->post(req, QJsonDocument(payload).toJson());
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    const quint64 seq = nextRequestSeq();
+    connect(reply, &QNetworkReply::finished, this, [this, reply, seq]() {
         const bool netErr = reply->error() != QNetworkReply::NoError;
         const QByteArray body = reply->readAll();
         reply->deleteLater();
+        if (!isCurrentRequest(seq)) return;   // superseded — drop
         setLoading(false);
         if (netErr) { setError(QStringLiteral("Network error. Please try again.")); return; }
         applyGuestVisits(body);
@@ -197,4 +201,14 @@ void VisitLogsViewModel::setError(const QString &e)
 void VisitLogsViewModel::setCount(int c)
 {
     m_count = c;   // emitted via dataChanged by callers
+}
+
+quint64 VisitLogsViewModel::nextRequestSeq()
+{
+    return ++m_requestSeq;
+}
+
+bool VisitLogsViewModel::isCurrentRequest(quint64 seq) const
+{
+    return seq == m_requestSeq;
 }

@@ -27,10 +27,12 @@ void DashboardViewModel::refresh()
     setLoading(true);
     QNetworkReply *reply = m_nam->get(
         QNetworkRequest(ApiConfig::endpoint(QStringLiteral("dashboard_summary.php"))));
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    const quint64 seq = nextRequestSeq();
+    connect(reply, &QNetworkReply::finished, this, [this, reply, seq]() {
         const bool netErr = reply->error() != QNetworkReply::NoError;
         const QByteArray body = reply->readAll();
         reply->deleteLater();
+        if (!isCurrentRequest(seq)) return;   // superseded — drop
         setLoading(false);
         if (netErr) {
             setError(QStringLiteral("Network error. Please try again."));
@@ -98,4 +100,14 @@ void DashboardViewModel::setError(const QString &e)
         return;
     m_errorText = e;
     emit errorTextChanged();
+}
+
+quint64 DashboardViewModel::nextRequestSeq()
+{
+    return ++m_requestSeq;
+}
+
+bool DashboardViewModel::isCurrentRequest(quint64 seq) const
+{
+    return seq == m_requestSeq;
 }

@@ -50,6 +50,17 @@ public:
     void applyStudentVisits(const QByteArray &raw);
     void applyGuestVisits(const QByteArray &raw);
 
+    // In-flight request generation guard. refresh() calls nextRequestSeq()
+    // when it issues a request and captures the returned value; the
+    // reply-finished handler later calls isCurrentRequest(seq) before
+    // touching m_rows/loading/errorText, so a reply superseded by a newer
+    // refresh() (e.g. a mode/range switch clicked before the prior request
+    // returned) is dropped instead of clobbering newer data. Exposed here
+    // (not just private) so the counter's increment/compare arithmetic can
+    // be pinned by a unit test without a real network round trip.
+    quint64 nextRequestSeq();
+    bool isCurrentRequest(quint64 seq) const;
+
     // Pure: Monday date -> "Jul 13 – Jul 19, 2026".
     static QString formatWeekLabel(const QDate &monday);
 
@@ -74,6 +85,7 @@ private:
     QString m_rangeLabel;
     bool m_loading = false;
     QString m_errorText;
+    quint64 m_requestSeq = 0;
 };
 
 #endif // VISITLOGSVIEWMODEL_H

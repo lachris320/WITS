@@ -44,6 +44,15 @@ public:
     // Network-free seam (tests + reply handler).
     void applySummary(const QByteArray &raw);
 
+    // In-flight request generation guard — see VisitLogsViewModel's identical
+    // seam for the full rationale. refresh() calls nextRequestSeq() when it
+    // issues a request; the reply-finished handler calls isCurrentRequest(seq)
+    // before touching loading/errorText/models so a reply superseded by a
+    // newer refresh() (rapid navigation / Retry mashing) is dropped rather
+    // than flipping loading=false while a newer request is still in flight.
+    quint64 nextRequestSeq();
+    bool isCurrentRequest(quint64 seq) const;
+
     // Pure: 0..23 -> "8 AM" / "2 PM"; out-of-range -> "—".
     static QString formatPeakHour(int hour);
 
@@ -66,6 +75,7 @@ private:
     int m_peakHourIndex = -1;
     bool m_loading = false;
     QString m_errorText;
+    quint64 m_requestSeq = 0;
 };
 
 #endif // DASHBOARDVIEWMODEL_H

@@ -14,6 +14,7 @@ private slots:
     void applyInvalidSetsErrorText();
     void setModeEmitsAndChanges();
     void formatWeekLabelSpansMonToSun();
+    void supersededRequestSeqIsNotCurrent();
 };
 
 void TestVisitLogsViewModel::defaultsToStudentToday()
@@ -82,6 +83,33 @@ void TestVisitLogsViewModel::formatWeekLabelSpansMonToSun()
     // 2026-07-13 is a Monday.
     QCOMPARE(VisitLogsViewModel::formatWeekLabel(QDate(2026, 7, 13)),
              QStringLiteral("Jul 13 – Jul 19, 2026"));
+}
+
+// Pins the in-flight request-generation guard's increment/compare arithmetic
+// (VisitLogsViewModel::nextRequestSeq / isCurrentRequest) — the mechanism
+// refresh()'s reply-finished lambdas use to drop a superseded reply (e.g. a
+// slow Guest POST that returns after the user has already switched to
+// Student, which would otherwise render guest rows under student columns).
+//
+// What this proves: once a second request is issued, the seq handed out to
+// the first request is no longer "current" — so a reply carrying it would be
+// dropped by the `if (!isCurrentRequest(seq)) return;` guard in refresh().
+// What this does NOT prove: that refresh() actually wires nextRequestSeq()/
+// isCurrentRequest() into its QNetworkReply::finished lambdas correctly, or
+// that a real out-of-order network race is fixed end-to-end — refresh() opens
+// a genuine QNetworkAccessManager request against ApiConfig::endpoint(), so a
+// unit test cannot drive it without hitting the network (against this
+// project's "no real network in unit tests" rule). That wiring was verified
+// by inspection of VisitLogsViewModel.cpp instead.
+void TestVisitLogsViewModel::supersededRequestSeqIsNotCurrent()
+{
+    VisitLogsViewModel vm;
+    const quint64 first = vm.nextRequestSeq();     // e.g. Guest click -> POST in flight
+    QVERIFY(vm.isCurrentRequest(first));           // still the only request outstanding
+
+    const quint64 second = vm.nextRequestSeq();    // Student click before the POST returns
+    QVERIFY(!vm.isCurrentRequest(first));          // first request is now superseded
+    QVERIFY(vm.isCurrentRequest(second));          // second request is the current one
 }
 
 QTEST_MAIN(TestVisitLogsViewModel)

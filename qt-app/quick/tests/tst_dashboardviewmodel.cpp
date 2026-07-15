@@ -11,6 +11,7 @@ private slots:
     void applySummaryPopulatesStatsAndModels();
     void applySummaryDerivesPeak();
     void applyInvalidSetsErrorText();
+    void supersededRequestSeqIsNotCurrent();
 };
 
 void TestDashboardViewModel::formatPeakHourMapsTo12Hour()
@@ -58,6 +59,24 @@ void TestDashboardViewModel::applyInvalidSetsErrorText()
     vm.applySummary(R"({"status":"error"})");
     QVERIFY(!vm.errorText().isEmpty());
     QCOMPARE(vm.peakHourIndex(), -1);
+}
+
+// Pins the in-flight request-generation guard's increment/compare arithmetic
+// (DashboardViewModel::nextRequestSeq / isCurrentRequest) — see the identical
+// seam/test in tst_visitlogsviewmodel.cpp for the full rationale and the
+// scope of what this test does and does not prove. Short version: this
+// confirms a superseded seq stops comparing as "current" once a newer
+// request is issued; it does not exercise refresh()'s real QNetworkReply
+// wiring, which was verified by inspection instead of a network-hitting test.
+void TestDashboardViewModel::supersededRequestSeqIsNotCurrent()
+{
+    DashboardViewModel vm;
+    const quint64 first = vm.nextRequestSeq();     // e.g. first navigation to Dashboard
+    QVERIFY(vm.isCurrentRequest(first));
+
+    const quint64 second = vm.nextRequestSeq();    // Retry mashed before the GET returns
+    QVERIFY(!vm.isCurrentRequest(first));
+    QVERIFY(vm.isCurrentRequest(second));
 }
 
 QTEST_MAIN(TestDashboardViewModel)
