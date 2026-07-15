@@ -27,6 +27,11 @@ Rectangle {
     SearchViewModel    { id: searchVm }
     VisitLogsViewModel { id: visitLogsVm }
 
+    // Read-only school identity (logo + name) for the sidebar brand block.
+    // Reads QSettings once at construction (see SchoolInfoViewModel.cpp) —
+    // no refresh() to gate, unlike the three VMs above.
+    SchoolInfoViewModel { id: schoolInfoVm }
+
     // Live clock for the header.
     property string clockText: ""
     function tickClock() { clockText = Qt.formatDateTime(new Date(), "h:mm:ss AP") }
@@ -85,6 +90,11 @@ Rectangle {
                     Navigator.showAdminPage(Navigator.VisitLogs)
                 else
                     console.warn("AdminScreen: no route for page key", page)
+            }
+            header: LSidebarBrand {
+                schoolName: schoolInfoVm.schoolName
+                logoUrl: schoolInfoVm.logoUrl
+                hasLogo: schoolInfoVm.hasLogo
             }
             footer: LButton {
                 objectName: "backToKioskButton"

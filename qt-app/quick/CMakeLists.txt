@@ -58,6 +58,7 @@ qt_add_qml_module(witsquickmodule
         qml/components/LPulseDot.qml
         qml/components/LEyebrow.qml
         qml/components/LKioskGradient.qml
+        qml/components/LSidebarBrand.qml
         qml/kiosk/GuestDialog.qml
     SOURCES
         HttpForm.h HttpForm.cpp
@@ -66,6 +67,7 @@ qt_add_qml_module(witsquickmodule
         viewmodels/ThemeViewModel.h viewmodels/ThemeViewModel.cpp
         viewmodels/Navigator.h viewmodels/Navigator.cpp
         viewmodels/KioskViewModel.h viewmodels/KioskViewModel.cpp
+        viewmodels/SchoolInfoViewModel.h viewmodels/SchoolInfoViewModel.cpp
         viewmodels/GuestViewModel.h viewmodels/GuestViewModel.cpp
         viewmodels/DashboardViewModel.h viewmodels/DashboardViewModel.cpp
         models/RecentLoginsModel.h models/RecentLoginsModel.cpp
@@ -160,6 +162,15 @@ wits_add_qttest(tst_navigator
 wits_add_qttest(tst_kioskviewmodel
     SOURCES tests/tst_kioskviewmodel.cpp
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Quick Qt${QT_VERSION_MAJOR}::Network
+    OFFSCREEN)
+
+# --- SchoolInfoViewModel unit test (C++ QtTest, offscreen: house
+# consistency with tst_initials/tst_navigator above — witsquickmodule
+# PUBLIC-propagates Qt::Gui, which would otherwise make QTEST_MAIN build a
+# QGuiApplication) ---
+wits_add_qttest(tst_schoolinfoviewmodel
+    SOURCES tests/tst_schoolinfoviewmodel.cpp
+    LIBS witsquickmodule
     OFFSCREEN)
 
 # --- GuestViewModel unit test (C++ QtTest, offscreen) ---

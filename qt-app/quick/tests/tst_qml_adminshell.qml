@@ -227,5 +227,24 @@ Item {
             mouseClick(btn);
             compare(Navigator.currentSurface, Navigator.Kiosk);
         }
+
+        // Sidebar brand block (school logo + details): proves LSidebarBrand
+        // is actually wired into the real sideNav.header slot, not merely
+        // that the component works in isolation (tst_qml_components.qml
+        // covers that with literal fixtures). "Library Admin" is a static
+        // qsTr() literal in LSidebarBrand.qml, not machine-configured data,
+        // so this assertion holds on every dev machine regardless of what
+        // that machine's real QSettings school/name happens to be — the
+        // real (this-machine, non-empty) schoolName is deliberately NOT
+        // asserted here per the security-hygiene rule against encoding real
+        // configured data into a committed test. Deleting the `header:
+        // LSidebarBrand { ... }` assignment in AdminScreen.qml (or the
+        // SchoolInfoViewModel instantiation it depends on) makes this fail:
+        // findChild would come back null.
+        function test_sidebarShowsBrandBlock() {
+            var titleNode = findChild(shell, "brandTitleText");
+            verify(titleNode !== null);
+            compare(titleNode.text, "Library Admin");
+        }
     }
 }

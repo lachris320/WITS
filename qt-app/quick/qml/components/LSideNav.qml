@@ -8,6 +8,7 @@ Rectangle {
     id: nav
     property var items: []
     property string currentPage: ""
+    property Item header: null
     property Item footer: null
     signal pageActivated(var page)
 
@@ -32,6 +33,16 @@ Rectangle {
         anchors.fill: parent
         anchors.margins: Theme.spacing.lg
         spacing: Theme.spacing.sm
+
+        // Header slot (e.g. the admin sidebar's logo + school name block),
+        // reparented into the column above the nav items — same mechanism
+        // as the footer slot below, kept symmetric so LSideNav itself stays
+        // agnostic of what a "header" or "footer" actually contains.
+        Item {
+            Layout.fillWidth: true
+            implicitHeight: nav.header ? nav.header.implicitHeight : 0
+            children: nav.header ? [nav.header] : []
+        }
 
         Repeater {
             model: nav.items
