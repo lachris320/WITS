@@ -1,7 +1,7 @@
 <?php
 header('Content-Type: application/json');
 include 'db.php';
-include 'date_window.php';
+require_once 'date_window.php';
 
 if ($conn->connect_error) {
     echo json_encode(["status" => "error", "message" => "Database connection failed"]);
