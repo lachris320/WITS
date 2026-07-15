@@ -227,6 +227,11 @@ Item {
             verify(findAny(search, "Total Visits: 42") !== null);
         }
 
+        function test_rendersSchoolId() {
+            waitForRendering(search);
+            verify(findAny(search, "2023-0001") !== null);
+        }
+
         // --- Search invocation branches ---
 
         function test_searchButtonInvokesSearch() {

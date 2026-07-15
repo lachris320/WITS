@@ -94,13 +94,15 @@ Rectangle {
                 width: ListView.view ? ListView.view.width : 0
                 // LCard's own padding (Theme.spacing.xl) already insets the
                 // delegate content; no extra anchors.margins here, or the
-                // three text rows overflow implicitHeight (double inset).
-                implicitHeight: 110
+                // four text rows overflow implicitHeight (double inset).
+                implicitHeight: 132
                 ColumnLayout {
                     anchors.fill: parent
                     spacing: Theme.spacing.xs
                     Text { text: model.name; color: Theme.text
                            font.family: Theme.typography.sans; font.pixelSize: Theme.typography.cardTitle }
+                    Text { text: qsTr("ID: %1").arg(model.schoolId); color: Theme.mutedText
+                           font.family: Theme.typography.sans; font.pixelSize: Theme.typography.body }
                     Text { text: model.course + " · " + model.department; color: Theme.mutedText
                            font.family: Theme.typography.sans; font.pixelSize: Theme.typography.body }
                     Text {
