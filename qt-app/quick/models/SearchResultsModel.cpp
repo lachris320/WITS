@@ -1,5 +1,7 @@
 #include "SearchResultsModel.h"
 
+#include "Initials.h"
+
 SearchResultsModel::SearchResultsModel(QObject *parent) : QAbstractListModel(parent) {}
 
 int SearchResultsModel::rowCount(const QModelIndex &parent) const
@@ -20,6 +22,11 @@ QVariant SearchResultsModel::data(const QModelIndex &index, int role) const
     case YearLevelRole:  return r.yearLevel;
     case StatusRole:     return r.status;
     case VisitsRole:     return r.visits;
+    // Computed, not stored: search_students.php returns no photo data (see
+    // Phase 3 owner decision — 171 students, 0 usable photos on disk), so
+    // the avatar chip is initials-only for now. Deriving here means a future
+    // photo role can slot in without touching StudentRecord/the parser.
+    case InitialsRole:   return Initials::of(r.name);
     default:             return {};
     }
 }
@@ -29,7 +36,7 @@ QHash<int, QByteArray> SearchResultsModel::roleNames() const
     return {
         { NameRole, "name" }, { SchoolIdRole, "schoolId" }, { CourseRole, "course" },
         { DepartmentRole, "department" }, { YearLevelRole, "yearLevel" },
-        { StatusRole, "status" }, { VisitsRole, "visits" },
+        { StatusRole, "status" }, { VisitsRole, "visits" }, { InitialsRole, "initials" },
     };
 }
 

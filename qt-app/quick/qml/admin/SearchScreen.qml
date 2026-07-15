@@ -90,22 +90,82 @@ Rectangle {
             spacing: Theme.spacing.md
             model: vm ? vm.results : null
             delegate: LCard {
+                id: resultCard
                 required property var model
                 width: ListView.view ? ListView.view.width : 0
                 // LCard's own padding (Theme.spacing.xl) already insets the
-                // delegate content; no extra anchors.margins here, or the
-                // four text rows overflow implicitHeight (double inset).
-                implicitHeight: 132
-                ColumnLayout {
+                // delegate content; no extra anchors.margins here.
+                //
+                // Height derivation: the row's tallest element is the
+                // circular avatar, not the two-line text stack beside it
+                // (name ~21px + xs gap + the merged ID/course/department
+                // line ~17px ≈ 42px, comfortably under the 44px avatar), so
+                // the card only needs avatarDiameter + top/bottom padding —
+                // no separate magic total. This is meaningfully shorter than
+                // the old fixed 132 (four stacked text rows, one of which
+                // was "Total Visits") now that visits moved beside the name
+                // instead of under it — more students fit on screen at once.
+                readonly property int avatarDiameter: 44
+                implicitHeight: avatarDiameter + Theme.spacing.xl * 2
+
+                RowLayout {
                     anchors.fill: parent
-                    spacing: Theme.spacing.xs
-                    Text { text: model.name; color: Theme.text
-                           font.family: Theme.typography.sans; font.pixelSize: Theme.typography.cardTitle }
-                    Text { text: qsTr("ID: %1").arg(model.schoolId); color: Theme.mutedText
-                           font.family: Theme.typography.sans; font.pixelSize: Theme.typography.body }
-                    Text { text: model.course + " · " + model.department; color: Theme.mutedText
-                           font.family: Theme.typography.sans; font.pixelSize: Theme.typography.body }
+                    spacing: Theme.spacing.md
+
+                    // Circle avatar. No student photo data exists yet (spec
+                    // owner decision, Phase 3: search_students.php returns
+                    // no photo column) — initials-only, same chip pattern as
+                    // the kiosk login feed (KioskFeedRow.qml), recolored for
+                    // the admin surface. Swapping in a real photo later only
+                    // means adding an Image behind this Text, not a redesign.
+                    Rectangle {
+                        Layout.preferredWidth: resultCard.avatarDiameter
+                        Layout.preferredHeight: resultCard.avatarDiameter
+                        Layout.alignment: Qt.AlignVCenter
+                        radius: width / 2
+                        color: Theme.brand.adminSoft
+                        Text {
+                            objectName: "avatarInitials"
+                            anchors.centerIn: parent
+                            text: model.initials
+                            color: Theme.brand.admin
+                            font.family: Theme.typography.sans
+                            font.pixelSize: Theme.typography.control
+                            font.weight: Font.ExtraBold
+                        }
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.alignment: Qt.AlignVCenter
+                        spacing: Theme.spacing.xs
+                        Text {
+                            Layout.fillWidth: true
+                            text: model.name
+                            color: Theme.text
+                            elide: Text.ElideRight
+                            font.family: Theme.typography.sans
+                            font.pixelSize: Theme.typography.cardTitle
+                        }
+                        // Same information as before (ID, course, department)
+                        // on one line instead of two separate rows — the ID
+                        // itself is unchanged (spec keeps it rendered).
+                        Text {
+                            Layout.fillWidth: true
+                            text: qsTr("ID: %1 · %2 · %3").arg(model.schoolId).arg(model.course).arg(model.department)
+                            color: Theme.mutedText
+                            elide: Text.ElideRight
+                            font.family: Theme.typography.sans
+                            font.pixelSize: Theme.typography.body
+                        }
+                    }
+
+                    // "Total Visits: N" — frozen label (spec §6.2), moved to
+                    // the side. RowLayout naturally pushes it to the far
+                    // right since the middle column above fills the
+                    // remaining width.
                     Text {
+                        Layout.alignment: Qt.AlignVCenter
                         text: qsTr("Total Visits: %1").arg(model.visits)
                         color: Theme.text
                         font.family: Theme.typography.sans

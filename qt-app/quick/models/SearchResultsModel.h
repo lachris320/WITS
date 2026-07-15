@@ -23,6 +23,7 @@ public:
         YearLevelRole,
         StatusRole,
         VisitsRole,
+        InitialsRole,
     };
 
     explicit SearchResultsModel(QObject *parent = nullptr);

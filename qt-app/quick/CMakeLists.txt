@@ -61,6 +61,7 @@ qt_add_qml_module(witsquickmodule
         qml/kiosk/GuestDialog.qml
     SOURCES
         HttpForm.h HttpForm.cpp
+        Initials.h Initials.cpp
         RfidQuickFilter.h RfidQuickFilter.cpp
         viewmodels/ThemeViewModel.h viewmodels/ThemeViewModel.cpp
         viewmodels/Navigator.h viewmodels/Navigator.cpp
@@ -171,6 +172,14 @@ wits_add_qttest(tst_guestviewmodel
 wits_add_qttest(tst_httpform
     SOURCES tests/tst_httpform.cpp
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network
+    OFFSCREEN)
+
+# --- Initials pure-helper unit test (C++ QtTest, offscreen: house
+# consistency with tst_httpform above — witsquickmodule PUBLIC-propagates
+# Qt::Gui, which would otherwise make QTEST_MAIN build a QGuiApplication) ---
+wits_add_qttest(tst_initials
+    SOURCES tests/tst_initials.cpp
+    LIBS witsquickmodule
     OFFSCREEN)
 
 # --- BarsModel unit test (C++ QtTest, offscreen) ---

@@ -52,7 +52,7 @@ Item {
 
     // --- Search stub VM ---
     ListModel { id: searchStub
-        ListElement { name: "Maria Santos"; schoolId: "2023-0001"; course: "BSCE"; department: "CE"; visits: 42 }
+        ListElement { name: "Maria Santos"; schoolId: "2023-0001"; course: "BSCE"; department: "CE"; visits: 42; initials: "MS" }
     }
     QtObject {
         id: searchVmStub
@@ -230,6 +230,13 @@ Item {
         function test_rendersSchoolId() {
             waitForRendering(search);
             verify(findAny(search, "2023-0001") !== null);
+        }
+
+        function test_avatarRendersInitials() {
+            waitForRendering(search);
+            var avatar = findChild(search, "avatarInitials");
+            verify(avatar !== null);
+            compare(avatar.text, "MS");
         }
 
         // --- Search invocation branches ---
