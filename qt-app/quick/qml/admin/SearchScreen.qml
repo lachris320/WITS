@@ -421,14 +421,14 @@ Rectangle {
                                         font.weight: Font.ExtraBold
                                     }
                                     // ID + course + department. Year level is
-                                    // deliberately NOT shown here: verified
-                                    // live data has year_level holding section
-                                    // names ("Bl. Frederick") for 159/171
-                                    // students and numeric years for the
-                                    // rest — mixed semantics that would
-                                    // mislead if rendered as if it were
-                                    // always a year (same reasoning that
-                                    // already keeps it out of the filters).
+                                    // deliberately NOT shown here: on real
+                                    // deployments year_level holds a section
+                                    // name for the vast majority of students
+                                    // and a numeric year for the rest — mixed
+                                    // semantics that would mislead if rendered
+                                    // as if it were always a year (same
+                                    // reasoning that keeps it out of the
+                                    // filters).
                                     Text {
                                         Layout.fillWidth: true
                                         text: qsTr("%1 · %2 · %3").arg(model.schoolId).arg(model.course).arg(model.department)
