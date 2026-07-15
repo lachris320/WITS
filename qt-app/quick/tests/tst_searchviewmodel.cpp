@@ -12,6 +12,7 @@ private slots:
     void searchFailedSetsErrorText();
     void searchFailedClearsStaleResults();
     void coursesLoadedExposesChips();
+    void departmentsLoadedExposesList();
     void supersededSearchFinishedReplyIsDropped();
     void supersededSearchFailedReplyIsDropped();
     void setDepartmentUpdatesPropertyAndEmits();
@@ -78,6 +79,19 @@ void TestSearchViewModel::coursesLoadedExposesChips()
     QVERIFY(spy.count() >= 1);
     QCOMPARE(vm.courses().size(), 2);
     QCOMPARE(vm.courses().at(0), QStringLiteral("BSCE"));
+}
+
+// SearchScreen needs a department chip list the same way it already gets
+// `courses` — mirrors coursesLoadedExposesChips exactly, driven directly
+// (network-free) since onDepartmentsLoaded is a public slot.
+void TestSearchViewModel::departmentsLoadedExposesList()
+{
+    SearchViewModel vm;
+    QSignalSpy spy(&vm, &SearchViewModel::departmentsChanged);
+    vm.onDepartmentsLoaded({ QStringLiteral("CE"), QStringLiteral("IT") });
+    QVERIFY(spy.count() >= 1);
+    QCOMPARE(vm.departments().size(), 2);
+    QCOMPARE(vm.departments().at(0), QStringLiteral("CE"));
 }
 
 // StudentController fires an independent QNetworkReply per searchStudents()

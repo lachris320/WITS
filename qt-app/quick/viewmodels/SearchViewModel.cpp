@@ -14,13 +14,16 @@ SearchViewModel::SearchViewModel(QObject *parent)
             this, &SearchViewModel::onSearchFailed);
     connect(m_controller, &StudentController::coursesLoaded,
             this, &SearchViewModel::onCoursesLoaded);
+    connect(m_controller, &StudentController::departmentsLoaded,
+            this, &SearchViewModel::onDepartmentsLoaded);
     // NOTE: no network in the constructor — the filter chips load in refresh(),
     // triggered when the Search page is navigated to (AdminScreen autoLoad).
 }
 
 void SearchViewModel::refresh()
 {
-    m_controller->loadCourses(QString());   // populate the filter chips
+    m_controller->loadCourses(QString());   // populate the course filter chips
+    m_controller->loadDepartments();        // populate the department filter chips
 }
 
 void SearchViewModel::search(const QString &search, const QString &course)
@@ -81,6 +84,12 @@ void SearchViewModel::onCoursesLoaded(const QStringList &courses)
 {
     m_courses = courses;
     emit coursesChanged();
+}
+
+void SearchViewModel::onDepartmentsLoaded(const QStringList &departments)
+{
+    m_departments = departments;
+    emit departmentsChanged();
 }
 
 bool SearchViewModel::acceptRequest(quint64 requestId)

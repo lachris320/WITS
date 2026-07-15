@@ -19,6 +19,7 @@ class SearchViewModel : public QObject
     QML_ELEMENT
     Q_PROPERTY(SearchResultsModel *results READ results CONSTANT)
     Q_PROPERTY(QStringList courses READ courses NOTIFY coursesChanged)
+    Q_PROPERTY(QStringList departments READ departments NOTIFY departmentsChanged)
     Q_PROPERTY(QString department READ department NOTIFY departmentChanged)
     Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged)
     Q_PROPERTY(QString errorText READ errorText NOTIFY errorTextChanged)
@@ -28,6 +29,7 @@ public:
 
     SearchResultsModel *results() { return &m_results; }
     QStringList courses() const { return m_courses; }
+    QStringList departments() const { return m_departments; }
     QString department() const { return m_department; }
     bool loading() const { return m_loading; }
     QString errorText() const { return m_errorText; }
@@ -54,9 +56,9 @@ public:
     Q_INVOKABLE void setDepartment(const QString &department);
 
     // Load-on-navigation hook (called by AdminScreen when the Search page is
-    // shown). Populates the course filter chips; does NOT auto-run a search.
-    // Kept out of the constructor so constructing the VM issues no network
-    // (unit tests + the shell smoke test stay network-free).
+    // shown). Populates the course + department filter chips; does NOT
+    // auto-run a search. Kept out of the constructor so constructing the VM
+    // issues no network (unit tests + the shell smoke test stay network-free).
     Q_INVOKABLE void refresh();
 
 public slots:
@@ -70,9 +72,11 @@ public slots:
                           quint64 requestId);
     void onSearchFailed(const QString &errorString, quint64 requestId);
     void onCoursesLoaded(const QStringList &courses);
+    void onDepartmentsLoaded(const QStringList &departments);
 
 signals:
     void coursesChanged();
+    void departmentsChanged();
     void departmentChanged();
     void loadingChanged();
     void errorTextChanged();
@@ -90,6 +94,7 @@ private:
     StudentController *m_controller = nullptr;
     SearchResultsModel m_results;
     QStringList m_courses;
+    QStringList m_departments;
     QString m_department;
     bool m_loading = false;
     QString m_errorText;
