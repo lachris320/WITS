@@ -4,10 +4,11 @@ import LOAMS
 
 Item {
     id: host
-    // Tall enough to host both DashboardScreen (0..760) and SearchScreen
-    // (760..1460) side by side without overlap — QTest mouse synthesis is
-    // window-local, and the window tracks this root item's size.
-    width: 1100; height: 1460
+    // Tall enough to host DashboardScreen (0..760), SearchScreen (760..1460),
+    // and VisitLogsScreen (1460..2160) side by side without overlap — QTest
+    // mouse synthesis is window-local, and the window tracks this root
+    // item's size.
+    width: 1100; height: 2160
 
     // --- Dashboard stub VM ---
     // maxValue is declared on the stubs because the screen binds
@@ -72,6 +73,38 @@ Item {
     // No-vm fallback instance, offset off to the side (never clicked) so it
     // cannot intercept clicks meant for `search` or `dash`.
     SearchScreen { id: vmlessSearch; x: 2000; width: 900; height: 700 }
+
+    // --- Visit Logs stub VM ---
+    // A single row carries every union role (student + guest fields) since
+    // the real VisitLogRowsModel is one CONSTANT model reused across modes —
+    // the column set that reads it switches, not the row data shape.
+    ListModel { id: visitRowsStub
+        ListElement { date: "2026-07-13"; name: "Maria Santos"; course: "BSCE"; department: "CE"; timeIn: "08:14"; timeOut: "—"; company: ""; purpose: "" }
+    }
+    QtObject {
+        id: visitVmStub
+        property int mode: 0        // 0 == VisitLogsViewModel.Student
+        property int range: 0
+        property int count: 1
+        property string rangeLabel: "Today, Jul 13, 2026"
+        property var rows: visitRowsStub
+        property bool loading: false
+        property string errorText: ""
+        property int refreshCount: 0
+        function refresh() { refreshCount++ }
+    }
+    // Own band below search (search ends at y 1460) — same fixed-geometry
+    // rationale as dash/search above (never anchors.fill, so growing the
+    // host cannot silently expand an instance under its neighbors).
+    VisitLogsScreen { id: logs; y: 1460; width: 1100; height: 700; vm: visitVmStub }
+
+    // No-vm fallback instance, parked right and below vmlessSearch (which
+    // owns x 2000/y 0-700) so it can never intercept a click meant for
+    // `logs` or `vmlessSearch`. `visible: false` is NOT used here — Item's
+    // visible is *effective* visibility, so a hidden parent would force this
+    // instance's children to read visible === false too, turning the
+    // no-vm fallback assertions into a false pass.
+    VisitLogsScreen { id: vmlessLogs; x: 2000; y: 760; width: 1000; height: 700 }
 
     TestCase {
         name: "DashboardScreen"
@@ -288,6 +321,143 @@ Item {
             compare(vmlessSearch.resultCount, 0);
             compare(findChild(vmlessSearch, "errorBlock").visible, false);
             compare(findChild(vmlessSearch, "busyIndicator").running, false);
+        }
+    }
+
+    TestCase {
+        name: "VisitLogsScreen"
+        when: windowShown
+
+        // Test functions run in alphabetical order, and several of them
+        // mutate the shared stub (some via a segmented click, which — per
+        // LSegmented.qml:42 — permanently breaks that instance's
+        // `currentValue` binding, so it is never reset here; only the stub's
+        // own fields are), so reset the stub to a known baseline before
+        // each one rather than relying on declaration order.
+        function init() {
+            visitVmStub.mode = 0;
+            visitVmStub.range = 0;
+            visitVmStub.rangeLabel = "Today, Jul 13, 2026";
+            visitVmStub.errorText = "";
+            visitVmStub.loading = false;
+            visitVmStub.refreshCount = 0;
+        }
+
+        function findAny(root, s) {
+            if (root.text !== undefined && root.text !== null && root.text.indexOf(s) !== -1)
+                return root;
+            for (var i = 0; i < root.children.length; i++) {
+                var f = findAny(root.children[i], s);
+                if (f !== null) return f;
+            }
+            return null;
+        }
+
+        // --- Mode switch: real rendered column evidence, not just a count ---
+
+        function test_studentModeHasSixColumns() {
+            compare(logs.vm.mode, VisitLogsViewModel.Student);
+            compare(logs.activeColumnCount, 6);
+            waitForRendering(logs);
+            verify(findAny(logs, "Time Out") !== null);
+        }
+
+        function test_guestModeHasFourColumns() {
+            visitVmStub.mode = VisitLogsViewModel.Guest;
+            compare(logs.activeColumnCount, 4);
+            waitForRendering(logs);
+            verify(findAny(logs, "Time Out") === null);
+            verify(findAny(logs, "Company") !== null);
+        }
+
+        function test_tableRendersStubRow() {
+            var table = findChild(logs, "visitsTable");
+            verify(table !== null);
+            compare(table.rowCount, 1);
+            compare(table.emptyVisible, false);
+        }
+
+        // --- rangeLabel ---
+
+        function test_rangeLabelRenders() {
+            compare(findChild(logs, "rangeLabel").text, "Today, Jul 13, 2026");
+            visitVmStub.rangeLabel = "Jul 13 – Jul 19, 2026";
+            compare(findChild(logs, "rangeLabel").text, "Jul 13 – Jul 19, 2026");
+        }
+
+        // --- Both LSegmented controls write back to the VM. Asserted on the
+        // stub, never on `currentValue` post-click — see LSegmented.qml:42
+        // and the init() comment above. ---
+
+        function test_modeSegmentedWritesBackToVm() {
+            var seg = findChild(logs, "modeSegmented");
+            verify(seg !== null);
+            waitForRendering(logs);
+            compare(visitVmStub.mode, 0);
+            mouseClick(seg, seg.width * 0.75, seg.height / 2);
+            compare(visitVmStub.mode, VisitLogsViewModel.Guest);
+        }
+
+        function test_rangeSegmentedWritesBackToVm() {
+            var seg = findChild(logs, "rangeSegmented");
+            verify(seg !== null);
+            waitForRendering(logs);
+            compare(visitVmStub.range, 0);
+            mouseClick(seg, seg.width * 0.75, seg.height / 2);
+            compare(visitVmStub.range, VisitLogsViewModel.Week);
+        }
+
+        // --- Error + retry ---
+
+        function test_errorBlockHiddenWhenNoError() {
+            var block = findChild(logs, "errorBlock");
+            verify(block !== null);
+            compare(block.visible, false);
+        }
+
+        function test_errorBlockVisibleWhenErrorText() {
+            var block = findChild(logs, "errorBlock");
+            visitVmStub.errorText = "Network unreachable";
+            compare(block.visible, true);
+            visitVmStub.errorText = "";
+            compare(block.visible, false);
+        }
+
+        function test_retryInvokesRefresh() {
+            visitVmStub.errorText = "Network unreachable";
+            var btn = findChild(logs, "retryButton");
+            verify(btn !== null);
+            waitForRendering(logs);
+            compare(visitVmStub.refreshCount, 0);
+            mouseClick(btn);
+            compare(visitVmStub.refreshCount, 1);
+        }
+
+        // --- Loading state ---
+
+        function test_loadingTogglesBusyIndicator() {
+            var busy = findChild(logs, "busyIndicator");
+            compare(busy.running, false);
+            compare(busy.visible, false);
+
+            visitVmStub.loading = true;
+            compare(busy.running, true);
+            compare(busy.visible, true);
+
+            visitVmStub.loading = false;
+            compare(busy.running, false);
+            compare(busy.visible, false);
+        }
+
+        // --- No-vm fallback path ---
+
+        function test_undefinedVmRendersFallbacksWithoutError() {
+            // Student-primary is a frozen owner decision (spec §6.3): with no
+            // vm to report a mode, the screen must still default to student.
+            compare(vmlessLogs.isStudent, true);
+            compare(vmlessLogs.activeColumnCount, 6);
+            compare(findChild(vmlessLogs, "errorBlock").visible, false);
+            compare(findChild(vmlessLogs, "busyIndicator").running, false);
         }
     }
 }
