@@ -58,12 +58,27 @@ Item {
         id: searchVmStub
         property var results: searchStub
         property var courses: ["BSCE", "BSEE"]
+        property var departments: ["CE", "IT"]
+        property string department: ""
         property bool loading: false
         property string errorText: ""
         property string lastSearch: ""
         property string lastCourse: ""
+        property string lastDepartment: ""
         property int searchCount: 0
+        property int setDepartmentCount: 0
         function search(s, c) { lastSearch = s; lastCourse = c; searchCount++; }
+        // Mirrors the real SearchViewModel::setDepartment() contract: no-op on
+        // an unchanged value, otherwise re-scopes `courses` (fires
+        // coursesChanged) — the trigger the screen must reconcile a
+        // now-invalid course selection against.
+        function setDepartment(d) {
+            if (d === department) return;
+            department = d;
+            lastDepartment = d;
+            setDepartmentCount++;
+            courses = d === "CE" ? ["BSCE"] : d === "IT" ? ["BSIT"] : ["BSCE", "BSEE"];
+        }
     }
     // Positioned below dash (y: 760) so the taller host gives it its own band
     // instead of stacking on top of dash's errorBlock/retryButton — see the
@@ -203,9 +218,27 @@ Item {
             searchVmStub.loading = false;
             searchVmStub.lastSearch = "";
             searchVmStub.lastCourse = "";
+            searchVmStub.lastDepartment = "";
             searchVmStub.searchCount = 0;
+            searchVmStub.setDepartmentCount = 0;
+            searchVmStub.department = "";
+            searchVmStub.courses = ["BSCE", "BSEE"];
+            searchVmStub.departments = ["CE", "IT"];
+            // test_emptyStateShowsWhenSearchReturnsNothing empties this model;
+            // restore it so every other test sees the usual single row.
+            if (searchStub.count !== 1) {
+                searchStub.clear();
+                searchStub.append({ name: "Maria Santos", schoolId: "2023-0001", course: "BSCE", department: "CE", visits: 42, initials: "MS" });
+            }
             search.selectedCourse = "";
+            search.selectedDepartment = "";
+            search.hasSearched = false;
+            search.debounceMs = 300;
             findChild(search, "queryField").text = "";
+            // Setting queryField.text above restarts the debounce Timer; stop
+            // it so a leftover pending fire cannot land mid-way through a
+            // LATER test's own wait()/tryCompare() and skew its search count.
+            findChild(search, "debounceTimer").stop();
         }
 
         function findAny(root, s) {
@@ -218,20 +251,6 @@ Item {
             return null;
         }
 
-        function test_showsResultCount() {
-            compare(search.resultCount, 1);
-        }
-
-        function test_rendersTotalVisitsLabel() {
-            waitForRendering(search);
-            verify(findAny(search, "Total Visits: 42") !== null);
-        }
-
-        function test_rendersSchoolId() {
-            waitForRendering(search);
-            verify(findAny(search, "2023-0001") !== null);
-        }
-
         function test_avatarRendersInitials() {
             waitForRendering(search);
             var avatar = findChild(search, "avatarInitials");
@@ -239,40 +258,7 @@ Item {
             compare(avatar.text, "MS");
         }
 
-        // --- Search invocation branches ---
-
-        function test_searchButtonInvokesSearch() {
-            var field = findChild(search, "queryField");
-            field.text = "Santos";
-            var btn = findChild(search, "searchButton");
-            verify(btn !== null);
-            waitForRendering(search);
-            mouseClick(btn);
-            compare(searchVmStub.lastSearch, "Santos");
-            compare(searchVmStub.lastCourse, "");
-            compare(searchVmStub.searchCount, 1);
-        }
-
-        function test_queryFieldAcceptedInvokesSearch() {
-            var field = findChild(search, "queryField");
-            field.text = "2023-0001";
-            field.forceActiveFocus();
-            keyClick(Qt.Key_Return);
-            compare(searchVmStub.lastSearch, "2023-0001");
-            compare(searchVmStub.searchCount, 1);
-        }
-
-        function test_retryButtonInvokesSearch() {
-            searchVmStub.errorText = "Network unreachable";
-            var btn = findChild(search, "retryButton");
-            verify(btn !== null);
-            waitForRendering(search);
-            compare(searchVmStub.searchCount, 0);
-            mouseClick(btn);
-            compare(searchVmStub.searchCount, 1);
-        }
-
-        // --- Course filter chips (the only non-trivial logic on this screen) ---
+        // --- Course filter chips (department-scoped) ---
 
         function test_chipClickSetsSelectedCourseAndSearches() {
             var chip = findChild(search, "chip_BSCE");
@@ -295,6 +281,77 @@ Item {
             compare(searchVmStub.searchCount, 2);
         }
 
+        // --- Active filter pills ---
+
+        function test_clearAllButtonClearsBothFiltersAndSearches() {
+            waitForRendering(search);
+            mouseClick(findChild(search, "deptChip_CE"));
+            mouseClick(findChild(search, "chip_BSCE"));
+            compare(search.selectedDepartment, "CE");
+            compare(search.selectedCourse, "BSCE");
+
+            // The pill Repeater's model is a freshly-computed JS array on
+            // every selection change (activePills), so adding the second
+            // (course) pill above fully recreates the Repeater's delegates —
+            // give Flow a render tick to position them before clicking one,
+            // or the click can land on whichever pill hasn't moved off (0,0)
+            // yet instead of the one findChild() actually located.
+            waitForRendering(search);
+            var clearBtn = findChild(search, "clearAllButton");
+            verify(clearBtn !== null);
+            mouseClick(clearBtn);
+
+            compare(search.selectedDepartment, "");
+            compare(search.selectedCourse, "");
+            compare(searchVmStub.lastDepartment, "");
+            compare(searchVmStub.lastCourse, "");
+        }
+
+        // --- Department -> course reconciliation (the non-trivial logic here) ---
+
+        function test_courseSelectionResetsWhenDepartmentChangeInvalidatesIt() {
+            var courseChip = findChild(search, "chip_BSEE");
+            waitForRendering(search);
+            mouseClick(courseChip);
+            compare(search.selectedCourse, "BSEE");
+
+            // Selecting department "CE" re-scopes the stub's course list to
+            // just ["BSCE"] (mirrors the real VM's setDepartment() re-scoping
+            // `courses` via loadCourses) — BSEE is no longer a valid
+            // selection, and the screen must reconcile it back to "All
+            // Courses" (empty) instead of continuing to search on a course
+            // that no longer exists under the new department.
+            var deptChip = findChild(search, "deptChip_CE");
+            mouseClick(deptChip);
+
+            compare(search.selectedCourse, "");
+            compare(searchVmStub.lastCourse, "");
+        }
+
+        function test_departmentChipInvokesSetDepartmentAndSearches() {
+            var chip = findChild(search, "deptChip_CE");
+            verify(chip !== null);
+            waitForRendering(search);
+            mouseClick(chip);
+            compare(search.selectedDepartment, "CE");
+            compare(searchVmStub.lastDepartment, "CE");
+            compare(searchVmStub.setDepartmentCount, 1);
+            verify(searchVmStub.searchCount >= 1);
+        }
+
+        // --- Empty state (distinct from the error state) ---
+
+        function test_emptyStateShowsWhenSearchReturnsNothing() {
+            var empty = findChild(search, "emptyState");
+            verify(empty !== null);
+            compare(empty.visible, false);   // no search has run yet this test
+
+            searchStub.clear();
+            search.runSearch();
+            waitForRendering(search);
+            compare(empty.visible, true);
+        }
+
         // --- Error + retry ---
 
         function test_errorBlockHiddenWhenNoError() {
@@ -311,20 +368,120 @@ Item {
             compare(block.visible, false);
         }
 
+        function test_pillRemoveClearsOnlyThatFilter() {
+            waitForRendering(search);
+            mouseClick(findChild(search, "deptChip_CE"));
+            mouseClick(findChild(search, "chip_BSCE"));
+            compare(search.selectedDepartment, "CE");
+            compare(search.selectedCourse, "BSCE");
+
+            // See the comment in test_clearAllButtonClearsBothFiltersAndSearches:
+            // the pill Repeater's model array is recreated wholesale by the
+            // course-chip click above, so give Flow a render tick before
+            // clicking a pill.
+            waitForRendering(search);
+            var deptPill = findChild(search, "pill_department");
+            verify(deptPill !== null);
+            mouseClick(deptPill);
+
+            compare(search.selectedDepartment, "");
+            compare(searchVmStub.lastDepartment, "");
+            // Removing only the department pill must not also drop the
+            // (still department-valid) course filter.
+            compare(search.selectedCourse, "BSCE");
+        }
+
+        // --- Search invocation branches ---
+
+        function test_queryFieldAcceptedInvokesSearch() {
+            var field = findChild(search, "queryField");
+            field.text = "2023-0001";
+            field.forceActiveFocus();
+            keyClick(Qt.Key_Return);
+            compare(searchVmStub.lastSearch, "2023-0001");
+            compare(searchVmStub.searchCount, 1);
+        }
+
+        function test_rendersSchoolId() {
+            waitForRendering(search);
+            verify(findAny(search, "2023-0001") !== null);
+        }
+
+        function test_rendersTotalVisitsLabel() {
+            waitForRendering(search);
+            verify(findAny(search, "Total Visits: 42") !== null);
+        }
+
+        function test_resultCountHeaderRendersCount() {
+            waitForRendering(search);
+            var header = findChild(search, "resultCountHeader");
+            verify(header !== null);
+            compare(header.text, "1 results");
+        }
+
+        // --- Staggered row entrance (mechanism, not exact timing) ---
+
+        function test_resultRowsFadeInToFullOpacity() {
+            waitForRendering(search);
+            var row = findChild(search, "resultRow_2023-0001");
+            verify(row !== null);
+            tryCompare(row, "opacity", 1);
+        }
+
+        function test_retryButtonInvokesSearch() {
+            searchVmStub.errorText = "Network unreachable";
+            var btn = findChild(search, "retryButton");
+            verify(btn !== null);
+            waitForRendering(search);
+            compare(searchVmStub.searchCount, 0);
+            mouseClick(btn);
+            compare(searchVmStub.searchCount, 1);
+        }
+
+        function test_searchButtonInvokesSearch() {
+            var field = findChild(search, "queryField");
+            field.text = "Santos";
+            var btn = findChild(search, "searchButton");
+            verify(btn !== null);
+            waitForRendering(search);
+            mouseClick(btn);
+            compare(searchVmStub.lastSearch, "Santos");
+            compare(searchVmStub.lastCourse, "");
+            compare(searchVmStub.searchCount, 1);
+        }
+
+        function test_showsResultCount() {
+            compare(search.resultCount, 1);
+        }
+
         // --- Loading state ---
 
-        function test_loadingTogglesBusyIndicator() {
-            var busy = findChild(search, "busyIndicator");
-            compare(busy.running, false);
-            compare(busy.visible, false);
+        function test_skeletonRowsVisibleWhileLoading() {
+            var skeleton = findChild(search, "skeletonColumn");
+            verify(skeleton !== null);
+            compare(skeleton.visible, false);
 
             searchVmStub.loading = true;
-            compare(busy.running, true);
-            compare(busy.visible, true);
+            compare(skeleton.visible, true);
 
             searchVmStub.loading = false;
-            compare(busy.running, false);
-            compare(busy.visible, false);
+            compare(skeleton.visible, false);
+        }
+
+        // --- Debounced live search ---
+
+        function test_typingDebouncesSearchToOneCall() {
+            search.debounceMs = 30;
+            var field = findChild(search, "queryField");
+            field.text = "M";
+            wait(10);
+            field.text = "Ma";
+            wait(10);
+            field.text = "Mar";
+            // Still inside the (restarted) debounce window — no search yet.
+            compare(searchVmStub.searchCount, 0);
+            tryCompare(searchVmStub, "searchCount", 1);
+            compare(searchVmStub.lastSearch, "Mar");
         }
 
         // --- No-vm fallback path ---
@@ -332,7 +489,8 @@ Item {
         function test_undefinedVmRendersFallbacksWithoutError() {
             compare(vmlessSearch.resultCount, 0);
             compare(findChild(vmlessSearch, "errorBlock").visible, false);
-            compare(findChild(vmlessSearch, "busyIndicator").running, false);
+            compare(findChild(vmlessSearch, "skeletonColumn").visible, false);
+            compare(findChild(vmlessSearch, "emptyState").visible, false);
         }
     }
 
