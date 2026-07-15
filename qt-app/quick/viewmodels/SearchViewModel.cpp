@@ -33,9 +33,13 @@ void SearchViewModel::search(const QString &search, const QString &course)
 void SearchViewModel::onSearchFinished(SearchOutcome outcome,
                                        const QList<StudentRecord> &records,
                                        const QString &message,
-                                       const QString &searchTerm)
+                                       const QString &searchTerm,
+                                       quint64 requestId)
 {
     Q_UNUSED(searchTerm)
+    if (!acceptRequest(requestId))
+        return;   // superseded by a newer search() call — drop
+
     setLoading(false);
     m_results.setRecords(records);
     emit resultsChanged();
@@ -48,8 +52,11 @@ void SearchViewModel::onSearchFinished(SearchOutcome outcome,
     }
 }
 
-void SearchViewModel::onSearchFailed(const QString & /*errorString*/)
+void SearchViewModel::onSearchFailed(const QString & /*errorString*/, quint64 requestId)
 {
+    if (!acceptRequest(requestId))
+        return;   // superseded by a newer search() call — drop
+
     // Do NOT surface the raw transport string (security-hygiene).
     setLoading(false);
     // Consistent with onSearchFinished, which unconditionally calls
@@ -65,6 +72,14 @@ void SearchViewModel::onCoursesLoaded(const QStringList &courses)
 {
     m_courses = courses;
     emit coursesChanged();
+}
+
+bool SearchViewModel::acceptRequest(quint64 requestId)
+{
+    if (requestId < m_latestAppliedRequestId)
+        return false;
+    m_latestAppliedRequestId = requestId;
+    return true;
 }
 
 void SearchViewModel::setLoading(bool v)

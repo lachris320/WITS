@@ -138,7 +138,7 @@ QStringList StudentController::parseCourses(const QByteArray &raw)
 
 // --- Network methods ---
 
-void StudentController::searchStudents(const QString &search,
+quint64 StudentController::searchStudents(const QString &search,
                                        const QString &department,
                                        const QString &course)
 {
@@ -153,10 +153,13 @@ void StudentController::searchStudents(const QString &search,
 
     QNetworkReply *reply = m_nam->post(request, QJsonDocument(filters).toJson());
 
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    const quint64 requestId = ++m_searchRequestSeq;
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, requestId]() {
         if (reply->error() != QNetworkReply::NoError) {
-            emit searchFailed(reply->errorString());       // View gates overlay row 11 on flag
+            const QString errorString = reply->errorString();
             reply->deleteLater();
+            emit searchFailed(errorString, requestId);      // View gates overlay row 11 on flag
             return;
         }
 
@@ -167,8 +170,10 @@ void StudentController::searchStudents(const QString &search,
         QString message, searchTerm;
         const SearchOutcome outcome =
             parseSearchResponse(resp, records, message, searchTerm);
-        emit searchFinished(outcome, records, message, searchTerm);
+        emit searchFinished(outcome, records, message, searchTerm, requestId);
     });
+
+    return requestId;
 }
 
 void StudentController::bulkUpdateStudents(const QList<StudentRecord> &updates)
