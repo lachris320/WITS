@@ -24,6 +24,13 @@ Rectangle {
     // user has typed or picked anything.
     property bool hasSearched: false
 
+    // Page entrance progress (A4): fades + rises the content column once per
+    // navigation (this screen is destroyed/recreated by AdminScreen's Loader
+    // on every sidebar click, so Component.onCompleted below fires exactly
+    // once per visit). Kept as a plain property (not readonly) so it can be
+    // read/driven directly; nothing else binds to it.
+    property real pageInT: 0
+
     // Introspection for tests: derived from the live model's count, not a
     // test-only mirror, so it cannot silently pass if vm/results is broken.
     readonly property int resultCount: vm && vm.results ? vm.results.count : 0
@@ -106,10 +113,32 @@ Rectangle {
         onTriggered: screen.runSearch()
     }
 
+    // A4: page-fade-in, applied only to the content column below (never the
+    // root Rectangle — the background must not move — and never errorBlock,
+    // a sibling that must appear instantly with no wait). Duration respects
+    // the reduce-motion switch; the animation still runs either way (see the
+    // rowDelegate entrance comment above for why duration-zeroing, not
+    // `running:`-gating, is the correct pattern).
+    NumberAnimation {
+        id: pageInAnimation
+        objectName: "pageInAnimation"
+        target: screen
+        property: "pageInT"
+        to: 1
+        duration: Theme.motion.enabled ? Theme.motion.pageIn : 0
+        easing.type: Easing.BezierSpline
+        easing.bezierCurve: Theme.motion.easing
+    }
+    Component.onCompleted: pageInAnimation.start()
+
     ColumnLayout {
+        id: contentColumn
+        objectName: "contentColumn"
         anchors.fill: parent
         anchors.margins: Theme.spacing.xxl
         spacing: Theme.spacing.lg
+        opacity: screen.pageInT
+        transform: Translate { id: contentColumnTranslate; y: (1 - screen.pageInT) * 16 }
 
         // --- Filter card: query, department, course, active pills ---
         Rectangle {
@@ -366,7 +395,9 @@ Rectangle {
                             // invisible rather than silently "just working".
                             opacity: 0
                             color: rowHover.hovered ? Qt.alpha(Theme.brand.admin, 0.06) : "transparent"
-                            Behavior on color { ColorAnimation { duration: Theme.motion.hoverLift } }
+                            Behavior on color {
+                                ColorAnimation { duration: Theme.motion.enabled ? Theme.motion.hoverLift : 0 }
+                            }
                             transform: Translate { id: rowTranslate; y: 10 }
 
                             HoverHandler { id: rowHover }
@@ -468,15 +499,22 @@ Rectangle {
                             // PauseAnimation a negative duration.
                             SequentialAnimation {
                                 id: entranceAnim
-                                PauseAnimation { duration: Math.max(0, Math.min(rowDelegate.index, 10)) * 25 }
+                                objectName: "entranceAnim"
+                                PauseAnimation {
+                                    duration: Theme.motion.enabled
+                                        ? Math.max(0, Math.min(rowDelegate.index, Theme.motion.staggerCap)) * Theme.motion.rowStagger
+                                        : 0
+                                }
                                 ParallelAnimation {
                                     NumberAnimation {
                                         target: rowDelegate; property: "opacity"; to: 1
-                                        duration: Theme.motion.rowIn; easing.type: Easing.OutCubic
+                                        duration: Theme.motion.enabled ? Theme.motion.rowIn : 0
+                                        easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.motion.easing
                                     }
                                     NumberAnimation {
                                         target: rowTranslate; property: "y"; to: 0
-                                        duration: Theme.motion.rowIn; easing.type: Easing.OutCubic
+                                        duration: Theme.motion.enabled ? Theme.motion.rowIn : 0
+                                        easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.motion.easing
                                     }
                                 }
                             }

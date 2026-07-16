@@ -234,6 +234,12 @@ Item {
             search.selectedDepartment = "";
             search.hasSearched = false;
             search.debounceMs = 300;
+            // test_pageInAnimatesContentColumnFadeAndRise drives this down to
+            // 0 and back up; restore the resting state so every other test
+            // sees a fully-opaque, unmoved content column regardless of test
+            // order (test functions run alphabetically, not declaration
+            // order).
+            search.pageInT = 1;
             findChild(search, "queryField").text = "";
             // Setting queryField.text above restarts the debounce Timer; stop
             // it so a leftover pending fire cannot land mid-way through a
@@ -426,6 +432,63 @@ Item {
             var row = findChild(search, "resultRow_2023-0001");
             verify(row !== null);
             tryCompare(row, "opacity", 1);
+        }
+
+        // --- Motion (Phase 3 Task A): tuned easing + Theme stagger tokens ---
+
+        function test_entranceUsesThemeBezierEasing() {
+            waitForRendering(search);
+            var row = findChild(search, "resultRow_2023-0001");
+            verify(row !== null);
+            var seq = findChild(row, "entranceAnim");
+            verify(seq !== null);
+            // entranceAnim is PauseAnimation, ParallelAnimation[opacity, y] —
+            // inspect the opacity leg's easing directly rather than timing
+            // samples, so this can't flake under offscreen CI.
+            var opacityAnim = seq.animations[1].animations[0];
+            compare(opacityAnim.easing.type, Easing.BezierSpline);
+            compare(opacityAnim.easing.bezierCurve.length, Theme.motion.easing.length);
+            for (var i = 0; i < Theme.motion.easing.length; i++)
+                compare(opacityAnim.easing.bezierCurve[i], Theme.motion.easing[i]);
+        }
+
+        function test_staggerDelayReadsThemeRowStaggerToken() {
+            // Second row (index 1) is the smallest index that actually
+            // distinguishes "reads Theme.motion.rowStagger" from "index 0,
+            // always zero regardless of the multiplier".
+            searchStub.append({ name: "Second Student", schoolId: "2023-0002", course: "BSCE", department: "CE", visits: 3, initials: "SS" });
+            waitForRendering(search);
+
+            var row = findChild(search, "resultRow_2023-0002");
+            verify(row !== null);
+            var seq = findChild(row, "entranceAnim");
+            verify(seq !== null);
+            var pause = seq.animations[0];
+            compare(pause.duration, Math.max(0, Math.min(1, Theme.motion.staggerCap)) * Theme.motion.rowStagger);
+        }
+
+        // --- Motion (Phase 3 Task A): page entrance (A4) ---
+
+        function test_pageInAnimatesContentColumnFadeAndRise() {
+            var col = findChild(search, "contentColumn");
+            verify(col !== null);
+            var anim = findChild(search, "pageInAnimation");
+            verify(anim !== null);
+
+            search.pageInT = 0;
+            anim.start();
+            // Reset state: content column starts invisible/raised, the root
+            // Rectangle itself never moves (only the content column does).
+            compare(col.opacity, 0);
+            compare(col.transform[0].y, 16);
+            compare(search.opacity, 1);
+
+            wait(80); // ~20% of the 400ms pageIn duration
+            verify(col.opacity > 0 && col.opacity < 1);
+
+            tryCompare(search, "pageInT", 1, 1000);
+            tryCompare(col, "opacity", 1, 1000);
+            tryCompare(col.transform[0], "y", 0, 1000);
         }
 
         function test_retryButtonInvokesSearch() {

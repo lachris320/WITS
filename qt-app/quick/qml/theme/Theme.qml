@@ -94,7 +94,22 @@ QtObject {
         readonly property int toastIn: 200
         readonly property int toastOut: 150
         readonly property int toastHold: 2500
-        readonly property var easing: [0.2, 0.8, 0.3, 1.0]
+        // 6-value BezierSpline form (the 4-value cubic-bezier control points
+        // from the reference mock, plus the required (1.0, 1.0) endpoint) so
+        // call sites can use it directly as
+        // `easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.motion.easing`.
+        readonly property var easing: [0.2, 0.8, 0.3, 1.0, 1.0, 1.0]
+        // Per-item entrance delay for staggered lists/charts. 25ms here is a
+        // DELIBERATE deviation from the reference mock's 35-40ms: this is an
+        // all-shift tool used hundreds of times a day, so snappier wins and
+        // intra-app consistency across Search/Dashboard/Visit Logs beats
+        // fidelity to a mock nobody holds next to the running app.
+        readonly property int rowStagger: 25
+        readonly property int barStagger: 45
+        // Cap on how many items get an extra stagger delay; beyond this,
+        // items appear with no additional wait so a large list/chart doesn't
+        // take seconds to finish its entrance.
+        readonly property int staggerCap: 10
     }
 
     // Mode (§13.5) — Phase 1 defaults to light; full light/dark derivation is
