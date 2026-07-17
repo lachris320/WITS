@@ -10,6 +10,13 @@ Rectangle {
     id: screen
     property var vm
 
+    // Page entrance progress (Phase 3 Task C, matches Task A/B exactly):
+    // fades + rises the content column once per navigation (this screen is
+    // destroyed/recreated by AdminScreen's Loader on every sidebar click, so
+    // Component.onCompleted below fires exactly once per visit). Plain
+    // property (not readonly) so tests can drive it directly.
+    property real pageInT: 0
+
     readonly property var studentColumns: [
         { key: "date",       title: qsTr("Date") },
         { key: "name",       title: qsTr("Name") },
@@ -35,10 +42,35 @@ Rectangle {
     // (the standalone QuickTest, the shell smoke test) issues no network unless
     // a caller opts in. The Retry button still calls vm.refresh() explicitly.
 
+    // Page entrance (C1): applied only to the content column below (never
+    // this root Rectangle — the background must not move — and never
+    // errorBlock/busyIndicator, siblings that must appear instantly). Unlike
+    // DashboardScreen, this ColumnLayout has no competing opacity binding, so
+    // a direct `opacity: screen.pageInT` needs no multiplier. Duration
+    // respects the reduce-motion switch; the animation still runs either way
+    // (see LTable's row entrance for why duration-zeroing, not
+    // `running:`-gating, is the correct pattern for a deliberate invisible
+    // start state).
+    NumberAnimation {
+        id: pageInAnimation
+        objectName: "pageInAnimation"
+        target: screen
+        property: "pageInT"
+        to: 1
+        duration: Theme.motion.enabled ? Theme.motion.pageIn : 0
+        easing.type: Easing.BezierSpline
+        easing.bezierCurve: Theme.motion.easing
+    }
+    Component.onCompleted: pageInAnimation.start()
+
     ColumnLayout {
+        id: contentColumn
+        objectName: "contentColumn"
         anchors.fill: parent
         anchors.margins: Theme.spacing.xxl
         spacing: Theme.spacing.lg
+        opacity: screen.pageInT
+        transform: Translate { id: contentColumnTranslate; y: (1 - screen.pageInT) * 16 }
 
         // Controls row: Student/Guest mode (student primary) + Today/Week range.
         RowLayout {
@@ -76,6 +108,8 @@ Rectangle {
             columns: screen.activeColumns
             model: vm ? vm.rows : null
             emptyStateText: qsTr("No visits in this range")
+            // C2: the one consumer that opts into LTable's row entrance.
+            animateRows: true
         }
     }
 

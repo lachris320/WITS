@@ -4,9 +4,13 @@ import LOAMS
 
 Item {
     id: host
-    // Extra height accommodates the three LBarChart motion fixtures below in
-    // their own non-overlapping vertical bands (see the comment at `bc`).
-    width: 400; height: 700
+    // Extra height accommodates the three LBarChart motion fixtures (their
+    // own non-overlapping vertical bands, see the comment at `bc`) and the
+    // LTable row-motion fixture `tAnimated` (Phase 3 Task C), which gets its
+    // own band below all of them for the same reason: interactive fixtures
+    // sharing a position/z with a later-declared sibling silently absorb
+    // synthetic mouse events meant for the earlier one.
+    width: 400; height: 1100
 
     LButton    { id: b;  text: "OK" }
     LCard      { id: c }
@@ -24,6 +28,52 @@ Item {
             { key: "timeIn", title: "Time In" }
         ]
         model: tableFixture
+    }
+
+    // --- Motion (Phase 3 Task C) fixtures: row entrance + hover ---
+    // 10 rows (indices 0-9) so the stagger-differential test has enough
+    // range below Theme.motion.staggerCap (10) to compare a zero-stagger row
+    // against a clearly-staggered one. `t` above stays untouched (never sets
+    // animateRows) and IS the default-false regression fixture.
+    ListModel {
+        id: visitRowsAnimatedFixtureA
+        ListElement { date: "2026-07-13"; name: "Row 0"; timeIn: "08:00" }
+        ListElement { date: "2026-07-13"; name: "Row 1"; timeIn: "08:01" }
+        ListElement { date: "2026-07-13"; name: "Row 2"; timeIn: "08:02" }
+        ListElement { date: "2026-07-13"; name: "Row 3"; timeIn: "08:03" }
+        ListElement { date: "2026-07-13"; name: "Row 4"; timeIn: "08:04" }
+        ListElement { date: "2026-07-13"; name: "Row 5"; timeIn: "08:05" }
+        ListElement { date: "2026-07-13"; name: "Row 6"; timeIn: "08:06" }
+        ListElement { date: "2026-07-13"; name: "Row 7"; timeIn: "08:07" }
+        ListElement { date: "2026-07-13"; name: "Row 8"; timeIn: "08:08" }
+        ListElement { date: "2026-07-13"; name: "Row 9"; timeIn: "08:09" }
+    }
+    // A distinct model object (not the same instance re-cleared) so
+    // reassigning LTable.model is a genuine "model changed" event for the
+    // ListView, the same event QQuickListView treats identically to a
+    // QAbstractListModel begin/endResetModel() reset (VisitLogRowsModel's
+    // actual refresh mechanism) — both re-fire `populate`.
+    ListModel {
+        id: visitRowsAnimatedFixtureB
+        ListElement { date: "2026-07-14"; name: "Fresh Row"; timeIn: "09:00" }
+    }
+    LTable {
+        id: tAnimated
+        objectName: "tAnimated"
+        y: 620
+        // Tall enough that all 10 rows are simultaneously visible (header 36
+        // + 10 * 40px rows) so the initial `populate` batch actually creates
+        // every delegate the stagger-differential test below needs — a
+        // shorter ListView would only realize the rows that fit the
+        // viewport, and index 8 would never exist to observe.
+        width: 480; height: 460
+        animateRows: true
+        columns: [
+            { key: "date",   title: "Date" },
+            { key: "name",   title: "Name" },
+            { key: "timeIn", title: "Time In" }
+        ]
+        model: visitRowsAnimatedFixtureA
     }
     LSegmented { id: sg }
     LSideNav {
@@ -219,6 +269,23 @@ Item {
     TestCase {
         name: "LTableRendersRows"
         when: windowShown
+        // test_showsEmptyStateWhenNoRows nulls out t.model; reset it before
+        // every test (alphabetical order, not declaration) so that mutation
+        // can't leak into the motion tests below.
+        function init() {
+            t.model = tableFixture;
+        }
+        // Forces a genuine model-changed event on tAnimated regardless of
+        // whatever the previous test left it at (fixtureA already assigned
+        // is a no-op reassignment QML would skip notifying). Unconditionally
+        // assigning fixtureB first guarantees the FOLLOWING fixtureA
+        // assignment is always a real value change (fixtureB !== fixtureA),
+        // so this always re-fires `populate` for a fresh batch — a t=0 for
+        // stagger timing regardless of what state the previous test left.
+        function resetAnimatedRows() {
+            tAnimated.model = visitRowsAnimatedFixtureB;
+            tAnimated.model = visitRowsAnimatedFixtureA;
+        }
         function test_rowCountMatchesModel() {
             compare(t.rowCount, 2);
         }
@@ -226,6 +293,96 @@ Item {
             t.model = null;
             compare(t.rowCount, 0);
             verify(t.emptyVisible === true);
+        }
+
+        // --- Motion (Phase 3 Task C): row entrance (C2) + hover (C3) ---
+
+        // Regression guard for the opt-in default (brief C2 CRITICAL /
+        // advisor §6) — the highest-value test in this file: `t` never sets
+        // animateRows, so it must stay false, and BOTH ListView Transitions
+        // must be disabled. This is a structural check, not a timing one:
+        // opacity settles at 1 either way once any entrance (if one ran)
+        // finishes, so only the Transition's own `enabled` flag can actually
+        // prove the populate/add mechanism never engaged for a static
+        // consumer like the existing tst_qml_components.qml fixtures or a
+        // future Phase-4 dense grid.
+        function test_defaultAnimateRowsFalseDisablesPopulateAndAddTransitions() {
+            compare(t.animateRows, false);
+            var list = findChild(t, "rowsList");
+            verify(list !== null);
+            compare(list.populate.enabled, false);
+            compare(list.add.enabled, false);
+            var row = findChild(t, "tableRow_0");
+            verify(row !== null);
+            compare(row.opacity, 1);
+        }
+
+        // The highest-value row-entrance test: proves populate genuinely
+        // (re-)plays on a model reset for an animateRows:true consumer — the
+        // whole reason C2 uses populate over SearchScreen's per-delegate
+        // Component.onCompleted approach. Swapping to a distinct model
+        // object is the QML-test equivalent of
+        // VisitLogRowsModel::setRows()'s real begin/endResetModel() call —
+        // both are a "model changed" event that re-fires populate for the
+        // fresh item batch. Caught right after the very first rendered
+        // frame: with populate broken/disabled the fresh row would already
+        // sit at its natural opacity of 1 immediately, never having passed
+        // through the deliberate `from: 0` start state at all.
+        function test_animateRowsTrueRepopulatesFreshRowsOnModelReset() {
+            tAnimated.model = visitRowsAnimatedFixtureB;
+            waitForRendering(tAnimated);
+            var freshRow = findChild(tAnimated, "tableRow_0");
+            verify(freshRow !== null);
+            verify(freshRow.opacity < 1);
+            tryCompare(freshRow, "opacity", 1);
+        }
+
+        // Stagger differential (mutation target: Theme.motion.rowStagger /
+        // staggerCap). Index 0 has zero PauseAnimation delay and resolves
+        // after ~Theme.motion.rowIn (400ms); index 8 (below staggerCap of
+        // 10) carries an extra 8 * Theme.motion.rowStagger (200ms at current
+        // token values) of pause before its own fade even starts. Waiting
+        // 450ms — comfortably past row 0's 400ms settle but well short of
+        // row 8's 600ms (200 pause + 400 fade) — must find row 0 fully
+        // resolved and row 8 still strictly mid-flight.
+        function test_rowStaggerDelaysHigherIndexRows() {
+            resetAnimatedRows();
+            waitForRendering(tAnimated);
+            var row0 = findChild(tAnimated, "tableRow_0");
+            var row8 = findChild(tAnimated, "tableRow_8");
+            verify(row0 !== null);
+            verify(row8 !== null);
+            wait(450);
+            compare(row0.opacity, 1);
+            verify(row8.opacity > 0 && row8.opacity < 1);
+            tryCompare(row8, "opacity", 1);
+        }
+
+        // Row hover glide (C3). HoverHandler.hovered is not a QQuickItem and
+        // is invisible to findChild(), so isHovered (exposed on the row) is
+        // asserted instead. The Behavior means color must NOT already equal
+        // the hover tint the instant hover starts (a plain binding without
+        // a Behavior would jump synchronously); it must still read the
+        // resting color at that exact instant, then reach the tint only
+        // after tryCompare waits the ColorAnimation out.
+        function test_rowHoverColorGlidesInAndOutViaBehavior() {
+            var row = findChild(tAnimated, "tableRow_0");
+            verify(row !== null);
+            tryCompare(row, "opacity", 1); // let any pending entrance settle first
+            var restColor = row.color;
+            var hoverColor = Qt.alpha(Theme.brand.admin, 0.06);
+
+            mouseMove(tAnimated, 2, 2); // neutral point, away from any row
+            compare(row.isHovered, false);
+
+            mouseMove(row, row.width / 2, row.height / 2);
+            verify(row.isHovered);
+            compare(row.color, restColor); // Behavior hasn't advanced a frame yet
+            tryCompare(row, "color", hoverColor);
+
+            mouseMove(tAnimated, 2, 2);
+            tryCompare(row, "isHovered", false);
+            tryCompare(row, "color", restColor);
         }
     }
 

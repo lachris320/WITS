@@ -609,6 +609,12 @@ Item {
             visitVmStub.errorText = "";
             visitVmStub.loading = false;
             visitVmStub.refreshCount = 0;
+            // test_pageInAnimatesContentColumnFadeAndRise drives this down to
+            // 0 and back up; restore the resting state so every other test
+            // sees a fully-opaque, unmoved content column regardless of test
+            // order (alphabetical, not declaration).
+            logs.pageInT = 1;
+            vmlessLogs.pageInT = 1;
         }
 
         function findAny(root, s) {
@@ -726,6 +732,30 @@ Item {
             compare(vmlessLogs.activeColumnCount, 6);
             compare(findChild(vmlessLogs, "errorBlock").visible, false);
             compare(findChild(vmlessLogs, "busyIndicator").running, false);
+        }
+
+        // --- Motion (Phase 3 Task C): page entrance (C1) ---
+
+        function test_pageInAnimatesContentColumnFadeAndRise() {
+            var col = findChild(logs, "contentColumn");
+            verify(col !== null);
+            var anim = findChild(logs, "pageInAnimation");
+            verify(anim !== null);
+
+            logs.pageInT = 0;
+            anim.start();
+            // Reset state: content column starts invisible/raised, the root
+            // Rectangle itself never moves (only the content column does).
+            compare(col.opacity, 0);
+            compare(col.transform[0].y, 16);
+            compare(logs.opacity, 1);
+
+            wait(80); // ~20% of the 400ms pageIn duration
+            verify(col.opacity > 0 && col.opacity < 1);
+
+            tryCompare(logs, "pageInT", 1, 1000);
+            tryCompare(col, "opacity", 1, 1000);
+            tryCompare(col.transform[0], "y", 0, 1000);
         }
     }
 }
