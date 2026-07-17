@@ -110,7 +110,14 @@ Item {
                         // model reset; Math.max(0, ...) keeps that from
                         // feeding PauseAnimation a negative duration.
                         PauseAnimation {
-                            duration: Math.max(0, Math.min(index, Theme.motion.staggerCap)) * Theme.motion.barStagger
+                            // Gated by enabled like the grow below and the
+                            // SearchScreen row sibling: under reduced motion the
+                            // stagger must not hold the bar collapsed at yScale 0
+                            // for up to staggerCap*barStagger ms before it snaps —
+                            // reduced motion means "appear at natural state now".
+                            duration: Theme.motion.enabled
+                                      ? Math.max(0, Math.min(index, Theme.motion.staggerCap)) * Theme.motion.barStagger
+                                      : 0
                         }
                         NumberAnimation {
                             target: barScale; property: "yScale"; to: 1
