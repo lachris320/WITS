@@ -4,7 +4,9 @@ import LOAMS
 
 Item {
     id: host
-    width: 400; height: 400
+    // Extra height accommodates the three LBarChart motion fixtures below in
+    // their own non-overlapping vertical bands (see the comment at `bc`).
+    width: 400; height: 700
 
     LButton    { id: b;  text: "OK" }
     LCard      { id: c }
@@ -55,10 +57,61 @@ Item {
     }
     LBarChart {
         id: bc
+        // Elevated above the fixtures declared after it (LPageHeader,
+        // LPulseDot, LEyebrow, the gradient Rectangle, LSidebarBrand) so the
+        // hover test's synthetic mouseMove hit-tests this chart's bars
+        // rather than whatever unrelated sibling happens to paint on top by
+        // declaration order.
+        z: 1000
         width: 320; height: 160
         model: barsFixture
         maxValue: 41
         highlightIndex: 2
+    }
+
+    // --- Motion (Phase 3 Task B) fixtures: entrance + refresh-reset guard ---
+    // Each of the three chart fixtures gets its OWN vertical band (bc at
+    // y:0, then y:200, y:400) rather than relying on z alone to
+    // disambiguate: all three default to the same (0,0) position and same
+    // z, and a synthetic mouseMove targeting `bc`'s bars was silently
+    // hit-testing whichever LATER-declared chart happened to be stacked on
+    // top instead (found via host.childAt() during hover-test debugging) —
+    // z only breaks ties against fixtures declared BEFORE it, not ones
+    // declared after with the same z.
+    ListModel {
+        id: barsAnimatedFixture
+        property real maxValue: 41
+        ListElement { label: "8"; value: 12 }
+        ListElement { label: "9"; value: 34 }
+        ListElement { label: "10"; value: 41 }
+    }
+    LBarChart {
+        id: bcAnimated
+        objectName: "bcAnimated"
+        y: 200
+        z: 1000
+        width: 320; height: 160
+        orientation: "Vertical"
+        animated: true
+        model: barsAnimatedFixture
+        maxValue: 41
+    }
+    // Department (Horizontal) fixture: glide-on-value-change only, no
+    // entrance of its own (brief B3).
+    ListModel {
+        id: deptFillFixture
+        property real maxValue: 200
+        ListElement { label: "CE"; value: 100 }
+    }
+    LBarChart {
+        id: bcDeptFill
+        objectName: "bcDeptFill"
+        y: 400
+        z: 1000
+        width: 320; height: 160
+        orientation: "Horizontal"
+        model: deptFillFixture
+        maxValue: 200
     }
     LPageHeader {
         id: ph
@@ -196,6 +249,107 @@ Item {
             bc.orientation = "Horizontal";
             compare(bc.orientation, "Horizontal");
             compare(bc.barCount, 3);
+        }
+
+        // --- Motion (Phase 3 Task B) ---
+
+        // Regression guard for the opt-in default (brief B2 / advisor §6):
+        // `bc` never sets `animated`, so it must default to false and its
+        // bars must be at full scale immediately — proving the deliberate
+        // yScale:0 entrance start state ONLY exists when `animated: true`
+        // guarantees something will resolve it.
+        function test_defaultAnimatedFalseKeepsBarsAtFullScaleImmediately() {
+            compare(bc.animated, false);
+            var bar = findChild(bc, "hourBar_0");
+            verify(bar !== null);
+            compare(bar.transform[0].yScale, 1);
+        }
+
+        function test_animatedChartGrowsAllBarsToFullScale() {
+            tryCompare(findChild(bcAnimated, "hourBar_0").transform[0], "yScale", 1);
+            tryCompare(findChild(bcAnimated, "hourBar_1").transform[0], "yScale", 1);
+            tryCompare(findChild(bcAnimated, "hourBar_2").transform[0], "yScale", 1);
+            verify(bcAnimated._entranceDone === true);
+        }
+
+        // The double-grow guard (advisor §2/§3#1, brief B2 CRITICAL) — the
+        // highest-value test here. AdminScreen's Loader recreates the
+        // dashboard's chart once per navigation, but its VM refresh()es
+        // ~0.3-1s later and resets the model, destroying and recreating
+        // every delegate a SECOND time within the same visit. Without the
+        // `_entranceDone` latch, that second batch would restart the
+        // staggered PauseAnimation-then-grow from yScale 0.
+        function test_entranceLatchPreventsRegrowOnModelReset() {
+            tryCompare(findChild(bcAnimated, "hourBar_0").transform[0], "yScale", 1);
+            verify(bcAnimated._entranceDone === true);
+
+            barsAnimatedFixture.clear();
+            barsAnimatedFixture.append({ label: "8", value: 20 });
+            barsAnimatedFixture.append({ label: "9", value: 30 });
+            barsAnimatedFixture.append({ label: "10", value: 40 });
+
+            // Checked SYNCHRONOUSLY (no wait) — the reset above just
+            // destroyed and recreated every delegate. If the latch is
+            // working, the fresh delegate's Component.onCompleted snapped it
+            // straight to yScale 1; if the guard were missing, the delegate
+            // would instead be mid-PauseAnimation with yScale still 0 (the
+            // grow leg hasn't started yet, let alone finished).
+            var bar0 = findChild(bcAnimated, "hourBar_0");
+            verify(bar0 !== null);
+            compare(bar0.transform[0].yScale, 1);
+        }
+
+        // Department bars glide on value change (brief B3) — a Behavior,
+        // not a keyframe entrance, and the fill Rectangle only (never the
+        // track). Uses ListModel.setProperty (a targeted dataChanged), not a
+        // model reset, so the SAME fill delegate survives and its Behavior
+        // can be observed animating in place.
+        function test_deptBarFillWidthGlidesToNewValueViaBehavior() {
+            var fill = findChild(bcDeptFill, "deptBarFill_0");
+            verify(fill !== null);
+            var track = fill.parent;
+            tryCompare(fill, "width", track.width * (100 / 200));
+
+            deptFillFixture.setProperty(0, "value", 180);
+            var targetWidth = track.width * (180 / 200);
+            wait(120);
+            // Mid-flight: past the old width, not yet at the new one — the
+            // signature of an in-progress Behavior, not an instant snap.
+            verify(fill.width > track.width * (100 / 200));
+            verify(fill.width < targetWidth);
+            tryCompare(fill, "width", targetWidth);
+        }
+
+        // Hover brighten + "N visits" readout (owner-approved, brief B4):
+        // brighten alone is a false affordance, so both ship together.
+        function test_hourBarHoverBrightensAndShowsVisitsReadout() {
+            waitForRendering(bc);
+            var bar = findChild(bc, "hourBar_0");
+            verify(bar !== null);
+            var readout = findChild(bc, "hourBarReadout_0");
+            verify(readout !== null);
+            compare(readout.visible, false);
+            var restColor = bc.colorFor(0);
+            compare(bar.color, restColor);
+
+            // A genuine position DELTA is needed to synthesize a hover-move
+            // event — start from a neutral point away from any bar first.
+            mouseMove(bc, 2, 2);
+            mouseMove(bar, bar.width / 2, bar.height / 2);
+            tryCompare(readout, "visible", true);
+            compare(findChild(bc, "hourBarReadoutText_0").text, "12 visits");
+            // The Behavior on color animates the brighten over
+            // Theme.motion.hoverLift — tryCompare waits it out instead of
+            // racing an immediate compare against the still-mid-transition
+            // value.
+            tryCompare(bar, "color", Qt.lighter(restColor, 1.12));
+
+            // Park the pointer over empty space above the bars (the
+            // fill-height spacer, not any bar) so later tests see no
+            // lingering hover state on this shared fixture.
+            mouseMove(bc, 2, 2);
+            tryCompare(readout, "visible", false);
+            tryCompare(bar, "color", restColor);
         }
     }
 

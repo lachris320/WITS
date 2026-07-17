@@ -133,6 +133,12 @@ Item {
             dashStub.errorText = "";
             dashStub.loading = false;
             dashStub.refreshCount = 0;
+            // test_pageInAnimatesContentAndPreservesLoadingDim drives this
+            // down to 0 and back up; restore the resting state so every
+            // other test sees a fully-opaque, unmoved content column
+            // regardless of test order (alphabetical, not declaration).
+            dash.pageInT = 1;
+            vmlessDash.pageInT = 1;
         }
 
         function test_showsPeakHourLabel() {
@@ -203,6 +209,35 @@ Item {
             compare(findChild(vmlessDash, "errorBlock").visible, false);
             compare(findChild(vmlessDash, "busyIndicator").running, false);
             compare(findChild(vmlessDash, "dashContent").opacity, 1.0);
+        }
+
+        // --- Motion (Phase 3 Task B): page entrance + the opacity-ownership
+        // collision with the loading dim ---
+
+        function test_pageInAnimatesContentAndPreservesLoadingDim() {
+            var contentCol = findChild(dash, "dashContent");
+            var anim = findChild(dash, "pageInAnimation");
+            verify(anim !== null);
+
+            dash.pageInT = 0;
+            anim.restart();
+            // Immediately after reset: content is invisible and raised 16px;
+            // the root Rectangle (background) must never move or fade.
+            compare(contentCol.opacity, 0);
+            compare(contentCol.transform[0].y, 16);
+            compare(dash.opacity, 1);
+
+            tryCompare(dash, "pageInT", 1);
+            compare(contentCol.opacity, 1);
+            compare(contentCol.transform[0].y, 0);
+
+            // The subtlest line in the task: pageInT multiplies into the
+            // EXISTING loading-dim binding rather than replacing it, so the
+            // dim still works once the entrance has settled at pageInT===1.
+            dashStub.loading = true;
+            compare(contentCol.opacity, 0.5);
+            dashStub.loading = false;
+            compare(contentCol.opacity, 1);
         }
     }
 

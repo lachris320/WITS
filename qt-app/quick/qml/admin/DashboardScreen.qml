@@ -15,6 +15,13 @@ Rectangle {
     // value binding is broken or removed.
     readonly property string peakShown: peakTile.value
 
+    // Page entrance progress (Phase 3 Task B, mirrors SearchScreen's A4):
+    // fades + rises the content column once per navigation (AdminScreen's
+    // Loader destroys/recreates this screen on every sidebar click, so
+    // Component.onCompleted below fires exactly once per visit). Plain
+    // property (not readonly) so tests can drive it directly.
+    property real pageInT: 0
+
     color: Theme.appBackground
 
     // Initial fetch is triggered by AdminScreen's Loader.onLoaded (gated by
@@ -22,13 +29,38 @@ Rectangle {
     // (the standalone QuickTest, the shell smoke test) issues no network unless
     // a caller opts in. The Retry button still calls vm.refresh() explicitly.
 
+    // A4-style page-fade-in, applied only to the content column below (never
+    // the root Rectangle — the background must not move — and never
+    // errorBlock/busy, siblings that must appear instantly with no wait).
+    // Duration respects the reduce-motion switch; the animation still runs
+    // either way so the deliberate opacity-multiplier below always resolves.
+    NumberAnimation {
+        id: pageInAnimation
+        objectName: "pageInAnimation"
+        target: screen
+        property: "pageInT"
+        to: 1
+        duration: Theme.motion.enabled ? Theme.motion.pageIn : 0
+        easing.type: Easing.BezierSpline
+        easing.bezierCurve: Theme.motion.easing
+    }
+    Component.onCompleted: pageInAnimation.start()
+
     ColumnLayout {
         id: content
         objectName: "dashContent"
         anchors.fill: parent
         anchors.margins: Theme.spacing.xxl
         spacing: Theme.spacing.xl
-        opacity: (vm && vm.loading) ? 0.5 : 1.0
+        // THE SUBTLEST LINE IN THIS TASK: content.opacity is already owned
+        // by the loading-dim binding below — an animation targeting opacity
+        // directly would destroy it permanently. pageInT multiplies into the
+        // existing ternary instead of replacing it, so the dim keeps working
+        // once the entrance settles at pageInT===1. The `(vm && vm.loading)`
+        // here is a ternary CONDITION (the one safe use of that shape), not
+        // a value bound directly to a bool property.
+        opacity: screen.pageInT * ((vm && vm.loading) ? 0.5 : 1.0)
+        transform: Translate { id: contentTranslate; y: (1 - screen.pageInT) * 16 }
 
         // Stat cards.
         GridLayout {
@@ -64,6 +96,7 @@ Rectangle {
                     LBarChart {
                         Layout.fillWidth: true; Layout.fillHeight: true
                         orientation: "Vertical"
+                        animated: true
                         model: vm ? vm.hourlyModel : null
                         maxValue: vm && vm.hourlyModel ? vm.hourlyModel.maxValue : 1
                         highlightIndex: vm ? vm.peakHourIndex : -1
@@ -82,6 +115,7 @@ Rectangle {
                     LBarChart {
                         Layout.fillWidth: true; Layout.fillHeight: true
                         orientation: "Horizontal"
+                        animated: true
                         model: vm ? vm.departmentModel : null
                         maxValue: vm && vm.departmentModel ? vm.departmentModel.maxValue : 1
                     }
