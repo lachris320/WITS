@@ -24,12 +24,13 @@ Item {
     // `animated: true` guarantees something will resolve it.
     property bool animated: false
     // Refresh double-grow guard: AdminScreen's Loader recreates the chart's
-    // OWNER screen once per navigation, but the owning VM refresh()es
-    // ~0.3-1s later and resets the model (BarsModel.setBars() always does a
-    // full beginResetModel/endResetModel), destroying and recreating every
-    // delegate a second time within the same visit. Only the first entrance
-    // batch grows; this latches true once it starts, and later delegate
-    // recreations snap straight to final geometry with no animation.
+    // OWNER screen once per navigation, and within a visit the owning VM
+    // refresh()es ~0.3-1s after mount. A same-labels refresh now updates
+    // BarsModel in place (granular dataChanged, no delegate recreation), but a
+    // label-set change still full-resets and recreates every delegate. This
+    // latch keeps the grow entrance to the first batch: once it starts, later
+    // delegate recreations (a reset, or a re-mount) snap straight to final
+    // geometry with no animation.
     property bool _entranceDone: false
 
     readonly property int barCount: repeaterV.model ? repeaterV.count
