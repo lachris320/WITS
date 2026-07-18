@@ -52,7 +52,7 @@ explicit about it:
 |---|---|---|
 | **4b Reporting** | **None** — purely client-side (read-only endpoints unchanged). | No. |
 | **4c Settings** | **Yes** — guards `reset_visits` + `update_admin_info`; lockstep with the client + the *legacy* `reset_visits` caller (§5.5). | No. |
-| **4a Database** | **Yes** — guards `delete_students`/`bulk_update` (harmonized) + the dept ops; lockstep with the client + the *legacy* dept-op callers (§5.5). | No. |
+| **4a Database** | **Yes** — guards `delete_students`/`bulk_update` (harmonized) + the dept ops; lockstep with the client + the legacy callers: the direct dept-op calls **and** the shared-`StudentController` delete/bulk path (§5.5). | No. |
 | **4d Photo** | **Yes** — additive `photo` on `search_students`. | **Yes** — edits shipped Kiosk (Phase 2) + Search (Phase 3). |
 
 So each PR is still **independently reviewable and mergeable**, but "independently *deployable* with no backend step" is true only for **4b**. 4a/4c each carry their own breaking endpoint deploy (§5.4); 4d is unique in *also* editing already-shipped screens, which is why it is isolated (a regression there is a small revertable PR).
@@ -283,8 +283,8 @@ and BOTH must be covered:
 - **Direct URL calls:** `deactivate_department`, `reset_visits`, `delete_department` (plus the
   non-destructive `update_admin_key`, which already needs the old key and gets no guard).
 - **Indirect, via the SHARED `StudentController`:** `delete_students` and `bulk_update_students`
-  — the legacy window calls `m_studentController->deleteStudents(...)` / `bulkUpdateStudents(...)`
-  (`adminwindow.cpp:2137` + the `StudentController` instantiated at `:166`). These were missed by
+  — the legacy window calls `m_studentController->bulkUpdateStudents(...)` (`adminwindow.cpp:2137`)
+  and `deleteStudents(...)` (`:2230`), on the `StudentController` instantiated at `:166`. These were missed by
   an earlier URL-string grep because the endpoint URLs live in `StudentController`, not
   `adminwindow.cpp`. When §3.2's request-format change lands on that shared controller, the legacy
   window's delete/bulk paths change with it and would 401 without a key.
