@@ -66,6 +66,10 @@ contract-spec PR pre-lands the shell wiring:
 
 - Flip `database` / `reporting` / `settings` to `enabled: true` in
   `qt-app/quick/qml/admin/AdminScreen.qml`.
+- **Extend the `Navigator::AdminPage` enum** — it is currently only
+  `{ Dashboard, Search, VisitLogs }` (`Navigator.h:19`); add `Database`, `Reporting`, `Settings`
+  and the matching cases to the `pageLoader` switch (`AdminScreen.qml:135-139`). Trivially
+  additive but a required C++ change, not just a QML flag flip.
 - Register each in the `Navigator.adminPage` `Loader`.
 - Ship **placeholder screens** so navigation works before the tracks fill them in.
 
@@ -74,8 +78,20 @@ contract-spec PR pre-lands the shell wiring:
 One ViewModel per screen (`DatabaseViewModel`, `ReportingViewModel`, `SettingsViewModel`), each
 injected into its screen as `property var vm` so QuickTests can inject a plain-QML stub.
 ViewModels are the **ONLY** QML-facing C++; QML never calls a `witscore` controller directly.
-VMs own the existing controllers — **no controller rewrites**. Naming: PascalCase QML types +
-C++ VM classes; `m_camelCase` members; the QML module target is `witsquickmodule`.
+VMs own the existing controllers. Naming: PascalCase QML types + C++ VM classes; `m_camelCase`
+members; the QML module target is `witsquickmodule`.
+
+**Caveat — this is "mostly presentation," NOT "zero controller changes."** One shared controller
+*does* change: adopting `requireAdminAuth` on `delete_students.php` / `bulk_update_students.php`
+(§5) forces a **request-format change** to `StudentController::deleteStudents` (`studentcontroller.cpp:216`)
+and `bulkUpdateStudents` (`:177`) — today they POST an `application/json` body; they must move to a
+FORM post carrying `admin_key`. `StudentController` is **shared** (`DatabaseViewModel` will own it
+*and* the legacy `adminwindow.cpp` already uses it — see §5.5), so this one edit touches both
+surfaces at once. It also ships **uncovered** unless the 4a plan adds request-side tests:
+`tst_studentcontroller.cpp` only exercises *response* parsers (`parseSearchResponse`,
+`parseBulkUpdateResponse`, `parseDeleteResponse`), never request building. Everything else in
+Phase 4 genuinely is presentation over unchanged controllers; delete/bulk is the one exception,
+and the 4a plan must treat it as a controller change with its own tests.
 
 ### 3.3 In-memory admin session
 
@@ -207,9 +223,13 @@ opacity variants via `Qt.alpha(Theme.<token>, a)`. Same rule enforced since Phas
     the client prefixes the `ApiConfig` base (§5).
   - **Normalization rule (client-side, in `LAvatar`):** show initials when the source is empty,
     absent, OR ends with `default.jpg`; otherwise load the URL, prefixing the `ApiConfig` base if
-    it is relative. This is the one component that makes the two divergent server shapes look
-    uniform; it must be unit-tested against *both* shapes (§6.2). No change to `student_login.php`
-    is required (keeps back-compat).
+    it is relative. Additionally, **wire the failed-*load* branch** (`Image.status === Image.Error`
+    → initials): unlike Kiosk, `search_students.php` does **no** `file_exists()` check
+    (`student_login.php:78` does), so a student whose `photo` column is set but whose file is
+    missing emits a live-but-broken URL that only the load-failure fallback catches. This is the
+    one component that makes the two divergent server shapes look uniform; it must be unit-tested
+    against *both* shapes AND the broken-URL case (§6.2). No change to `student_login.php` is
+    required (keeps back-compat).
 - Edits the shipped Phase 2 Kiosk and Phase 3 Search screens, hence its own isolated, revertable
   PR + coordinated deploy.
 
@@ -235,7 +255,7 @@ plus the `requireAdminAuth($conn);` call.
 | Endpoint | Change |
 |---|---|
 | `reset_visits.php`, `deactivate_department.php`, `delete_department.php`, `update_admin_info.php` (guard only) | **Add the `requireAdminAuth` guard.** These already read `$_POST`, so the client just adds an `admin_key` form field. (`reset_visits.php` currently includes only `db.php` — add the `auth_helper.php` include too.) |
-| `delete_students.php` **and** `bulk_update_students.php` (harmonization) | **Both** currently read a **JSON** request body (`json_decode(file_get_contents('php://input'))`) and open a hardcoded `new mysqli("localhost","root","",...)` connection — so a naive `requireAdminAuth($conn)` would 401 every call (the key isn't in `$_POST` and there's no shared `$conn`). Rewrite both to the house style — `include "db.php"` + `include "auth_helper.php"`, read `admin_key` + their payload (`school_ids` / the update rows) from a **FORM** post — so `requireAdminAuth($conn)` applies uniformly. |
+| `delete_students.php` **and** `bulk_update_students.php` (harmonization) | **Both** currently read a **JSON** request body (`json_decode(file_get_contents('php://input'))`) and open a hardcoded `new mysqli("localhost","root","",...)` connection — so a naive `requireAdminAuth($conn)` would 401 every call (the key isn't in `$_POST` and there's no shared `$conn`). Rewrite both to the house style — `include "db.php"` + `include "auth_helper.php"`, read `admin_key` + their payload from a **FORM** post — so `requireAdminAuth($conn)` applies uniformly. **Payload encoding (pin before the plan):** `delete_students` takes a flat `school_ids[]`; `bulk_update` carries an array of 7-field student objects (`bulk_update_students.php:56-81`), which does **not** urlencode cleanly — send it as a **JSON string in a single `students` form field** (`admin_key` stays a sibling form field so `requireAdminAuth` still reads `$_POST['admin_key']`; PHP `json_decode`s the `students` field server-side). The mirrored client change is in the shared `StudentController` (§3.2); the captured contract fixture (§6.3) and the request-assembly tests (§6.1) both encode this exact shape. |
 | `delete_students.php` (cascade fix) | Wrap in a **transaction** and also delete the affected students' `library_visits` rows (by `student_id IN (...)`), mirroring what `delete_department.php` already does (which correctly cascades). Today `delete_students.php` orphans visit rows; this fixes it. (`reset_visits.php` uses an INNER JOIN so it is unaffected.) |
 | `search_students.php` (additive `photo`, 4d) | Emit `"photo" => $row['photo']` as a **RELATIVE** path (empty on NULL); the client prefixes the `ApiConfig` base (so it survives the Phase 6 base-URL change). Purely additive — existing callers ignore unknown fields; the client's `StudentRecord` + `StudentController::parseSearchResponse` gain a `photo` field. (Kiosk uses the separate absolute `photo_url` from `student_login.php` — see §4.4 for how `LAvatar` unifies the two shapes.) |
 
@@ -256,23 +276,31 @@ below, or the moment an endpoint deploys, any caller not sending `admin_key` 401
 ### 5.5 Legacy rollback stays whole
 
 The legacy Qt Widgets admin window (`qt-app/adminwindow.cpp`) is the designated **rollback** until
-Phase 6 deletes it, and it calls **only a subset** of the guarded endpoints:
-`deactivate_department`, `reset_visits`, and `delete_department` (plus the non-destructive
-`update_admin_key`, which already needs the old key and gets no guard). It does **not** call
-`delete_students`, `bulk_update_students`, or `update_admin_info` — those have no legacy caller, so
-no legacy edit is needed for them.
+Phase 6 deletes it. **Owner decision: keep the rollback whole** — every guarded op the legacy
+window can reach must keep working after the deploy. It reaches the guarded endpoints two ways,
+and BOTH must be covered:
 
-Two consequences the per-track plans must honor:
+- **Direct URL calls:** `deactivate_department`, `reset_visits`, `delete_department` (plus the
+  non-destructive `update_admin_key`, which already needs the old key and gets no guard).
+- **Indirect, via the SHARED `StudentController`:** `delete_students` and `bulk_update_students`
+  — the legacy window calls `m_studentController->deleteStudents(...)` / `bulkUpdateStudents(...)`
+  (`adminwindow.cpp:2137` + the `StudentController` instantiated at `:166`). These were missed by
+  an earlier URL-string grep because the endpoint URLs live in `StudentController`, not
+  `adminwindow.cpp`. When §3.2's request-format change lands on that shared controller, the legacy
+  window's delete/bulk paths change with it and would 401 without a key.
+
+Consequences the per-track plans must honor:
 
 - **The legacy key work fragments across tracks, matching the endpoint each track guards:**
-  `reset_visits` → **4c**; `deactivate_department` + `delete_department` → **4a**. Each track's
-  breaking deploy must be **lockstep with its own matching legacy edit** — there is no single
-  monolithic legacy touch.
-- **Legacy does not retain the key either** (same finding as §3.3 — its destructive POSTs currently
-  send only `department`, and it has no key member). So each legacy edit is "**capture + retain the
-  key at the legacy admin-login gate, then thread it into that endpoint's POST**," not "attach an
-  already-held value." Contained, but real work — an app Phase 6 removes anyway; without it,
-  deploying a guard breaks that rollback path.
+  `reset_visits` → **4c**; `deactivate_department` + `delete_department` **and** the shared-
+  controller `delete_students` + `bulk_update_students` → **4a**. Each track's breaking deploy must
+  be **lockstep with its own matching legacy edit** — there is no single monolithic legacy touch.
+- **Legacy retains no key either** (same finding as §3.3 — its destructive POSTs currently send
+  only `department`, and it has no key member). So each legacy edit is "**capture + retain the key
+  at the legacy admin-login gate, then thread it in**" — for the direct calls, into the POST; for
+  delete/bulk, as the new `admin_key` argument on the shared `StudentController` methods (the same
+  argument `DatabaseViewModel` passes). Contained, but real work — an app Phase 6 removes anyway;
+  without it, deploying a guard breaks that rollback path.
 
 ## 6. Testing & gates
 
@@ -286,6 +314,11 @@ Follows the project TDD rule: QtTest + QuickTest under ctest, registered via `wi
   assembly including `admin_key`; `ReportingViewModel` filter→request mapping; `SettingsViewModel`
   dirty-tracking + key-change flow + reset-visits gating; `AdminSession` holds key + refreshes on
   change.
+- **New `StudentController` request-side coverage (the currently-untested edit, §3.2):** the
+  harmonized `deleteStudents` / `bulkUpdateStudents` build a FORM body with `admin_key` +
+  the pinned `students`-JSON-field encoding (§5.2) — assert the request shape, since
+  `tst_studentcontroller.cpp` today covers only response parsers. This is the shared code path
+  the legacy window also drives (§5.5), so the test guards both surfaces.
 - The **401/auth-failure decode path** on every destructive call.
 - The **export-before-destroy CSV serializer**.
 - The **additive `photo` parse**.
