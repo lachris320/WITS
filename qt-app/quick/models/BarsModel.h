@@ -35,6 +35,11 @@ signals:
     void maxValueChanged();
 
 private:
+    // True when `bars` has the same size AND the same label at every index
+    // as the current m_bars (order-sensitive) — the precondition for the
+    // granular (dataChanged) update path instead of a full model reset.
+    bool sameLabels(const QList<Bar> &bars) const;
+
     QList<Bar> m_bars;
     double m_maxValue = 0.0;
 };
