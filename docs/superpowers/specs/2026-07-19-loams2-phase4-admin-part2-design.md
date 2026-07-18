@@ -85,9 +85,13 @@ posts `admin_key` to `admin_login.php` and then emits `adminRequested()` with th
 `BrandingController.h:26` documents "the client does not retain it" (which is why `saveBranding`
 re-takes the key as a parameter). So this section adds a new **`AdminSession`** holder:
 
-- **Capture seam:** at the admin-entry gate — in `KioskViewModel::submitLogin`, on the successful
-  `r.ok && r.isAdmin` branch, *before* `emit adminRequested()` — hand the just-verified key to
-  `AdminSession`.
+- **Capture seam:** at the admin-entry gate. Note (implementation forward-note, don't read the
+  phrasing too literally): `submitLogin` (`KioskViewModel.cpp:107`) holds the key as its local
+  `trimmed`, but the `r.ok && r.isAdmin` decision resolves later in the shared `postForm` reply
+  lambda (`:98`), which captures only `this` and no longer has the key in scope. So the plan must
+  either stash the key in a member at `submitLogin` time and consume it when `isAdmin` resolves,
+  or thread it through `postForm` into the reply handler — hand it to `AdminSession` *before*
+  `emit adminRequested()`.
 - Held in **RAM only** — **NEVER written to QSettings** (no persisted client copy) — and attached
   to destructive POSTs as the `admin_key` field.
 - **Refreshed** when the key is changed in Settings (§4.1) during the same session, so a
