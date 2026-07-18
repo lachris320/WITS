@@ -116,7 +116,7 @@ Item {
                             // for up to staggerCap*barStagger ms before it snaps —
                             // reduced motion means "appear at natural state now".
                             duration: Theme.motion.enabled
-                                      ? Math.max(0, Math.min(index, Theme.motion.staggerCap)) * Theme.motion.barStagger
+                                      ? Theme.motion.staggerDelay(index, Theme.motion.barStagger)
                                       : 0
                         }
                         NumberAnimation {

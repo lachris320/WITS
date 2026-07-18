@@ -31,11 +31,16 @@ QString VisitLogsViewModel::computeRangeLabel() const
 {
     const QDate today = QDate::currentDate();
     if (m_range == Week) {
-        // Qt: dayOfWeek() Monday==1. Step back to this week's Monday.
-        const QDate monday = today.addDays(-(today.dayOfWeek() - 1));
+        const QDate monday = weekMonday(today);
         return formatWeekLabel(monday);
     }
     return QStringLiteral("Today, %1").arg(today.toString(QStringLiteral("MMM d, yyyy")));
+}
+
+QDate VisitLogsViewModel::weekMonday(const QDate &d)
+{
+    // Qt: dayOfWeek() Monday==1. Step back to this week's Monday.
+    return d.addDays(-(d.dayOfWeek() - 1));
 }
 
 void VisitLogsViewModel::setMode(Mode m)
@@ -101,7 +106,7 @@ void VisitLogsViewModel::refresh()
     const QDate today = QDate::currentDate();
     QString dateType, startDate, endDate;
     if (m_range == Week) {
-        const QDate monday = today.addDays(-(today.dayOfWeek() - 1));
+        const QDate monday = weekMonday(today);
         dateType  = QStringLiteral("date range");
         startDate = monday.toString(Qt::ISODate);
         endDate   = monday.addDays(6).toString(Qt::ISODate);

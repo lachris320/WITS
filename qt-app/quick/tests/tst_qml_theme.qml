@@ -80,4 +80,15 @@ TestCase {
         compare(Theme.motion.barStagger, 45);
         compare(Theme.motion.staggerCap, 10);
     }
+
+    // --- Part 3 (DRY): shared stagger-delay helper on the nested Theme.motion
+    // QtObject. Verifies a function declared ON a nested-QtObject singleton
+    // property actually resolves and is callable from QML in Qt 6.11 — not
+    // just that the clamp-and-multiply arithmetic is correct.
+    function test_staggerDelayClampsIndexToStaggerCapThenMultipliesByStep() {
+        // index 15 > staggerCap(10) -> clamped to 10 * step 10 = 100.
+        compare(Theme.motion.staggerDelay(15, 10), 100);
+        // index 2 <= staggerCap -> 2 * step 25 = 50, unclamped.
+        compare(Theme.motion.staggerDelay(2, 25), 50);
+    }
 }

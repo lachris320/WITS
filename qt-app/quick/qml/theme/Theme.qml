@@ -110,6 +110,18 @@ QtObject {
         // items appear with no additional wait so a large list/chart doesn't
         // take seconds to finish its entrance.
         readonly property int staggerCap: 10
+
+        // Shared clamp-and-multiply stagger arithmetic (Phase 3 gatefix DRY):
+        // was hand-rolled identically at LBarChart's bar entrance, LTable's
+        // populate/add Transitions, and (after the SearchScreen migration)
+        // the results-row entrance too. `i` is clamped to [0, staggerCap]
+        // (a delegate's index transiently goes to -1 during a model-reset
+        // teardown; without the max(0, ...) that would feed a negative
+        // duration to a PauseAnimation) before multiplying by the caller's
+        // own per-item step (rowStagger/barStagger).
+        function staggerDelay(i, step) {
+            return Math.max(0, Math.min(i, staggerCap)) * step;
+        }
     }
 
     // Mode (§13.5) — Phase 1 defaults to light; full light/dark derivation is

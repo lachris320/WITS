@@ -103,7 +103,7 @@ Rectangle {
                 // does for later items in the same populate batch.
                 property int idx: ViewTransition.index
                 onIdxChanged: {
-                    populatePause.duration = Math.max(0, Math.min(idx, Theme.motion.staggerCap)) * Theme.motion.rowStagger;
+                    populatePause.duration = Theme.motion.staggerDelay(idx, Theme.motion.rowStagger);
                     populateY.from = (ViewTransition.item ? ViewTransition.item.y : 0) + 10;
                 }
                 SequentialAnimation {
@@ -127,7 +127,7 @@ Rectangle {
                 enabled: table.animateRows && Theme.motion.enabled
                 property int idx: ViewTransition.index
                 onIdxChanged: {
-                    addPause.duration = Math.max(0, Math.min(idx, Theme.motion.staggerCap)) * Theme.motion.rowStagger;
+                    addPause.duration = Theme.motion.staggerDelay(idx, Theme.motion.rowStagger);
                     addY.from = (ViewTransition.item ? ViewTransition.item.y : 0) + 10;
                 }
                 SequentialAnimation {

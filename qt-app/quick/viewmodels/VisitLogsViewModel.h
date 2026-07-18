@@ -77,6 +77,10 @@ private:
     void setCount(int c);
     QString computeRangeLabel() const;   // uses current date + m_range
     void resetDataOnError();   // clears rows/count, recomputes rangeLabel; shared by all error paths
+    // Step back from `d` to this week's Monday (Qt: dayOfWeek() Monday==1).
+    // Shared by computeRangeLabel() and refresh()'s guest/week branch so the
+    // "Monday of this week" arithmetic can't drift between the two copies.
+    static QDate weekMonday(const QDate &d);
 
     QNetworkAccessManager *m_nam = nullptr;
     VisitLogRowsModel m_rows;
