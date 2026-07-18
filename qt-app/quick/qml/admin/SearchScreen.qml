@@ -382,6 +382,86 @@ Rectangle {
                         clip: true
                         visible: !screen.isLoading && !screen.isEmpty
                         model: vm ? vm.results : null
+
+                        // Row entrance (Phase 3 gatefix Part 1): populate +
+                        // add Transitions (the LTable/KioskMain idiom), NOT a
+                        // per-delegate Component.onCompleted animation (the
+                        // prior approach here) — a ListView RECYCLES
+                        // delegates, so the old per-delegate approach re-ran
+                        // the entrance (blank row + up to staggerCap*
+                        // rowStagger delay) every time a row merely scrolled
+                        // back into view. populate/add only fire on a
+                        // genuine model change (SearchResultsModel::
+                        // setRecords() always does a beginResetModel/
+                        // endResetModel — a fresh search replaces the whole
+                        // result set), never on pure scroll-driven
+                        // recycling. Unlike LTable this screen has no
+                        // animateRows opt-in bool — it is a screen, not a
+                        // shared static-by-default component — so results
+                        // always animate, gated only on Theme.motion.enabled
+                        // (reduced motion: items appear at their natural
+                        // state instantly, the correct pattern for the
+                        // Transition mechanism, unlike the duration-zeroing
+                        // explicit SequentialAnimation the old approach
+                        // needed).
+                        populate: Transition {
+                            enabled: Theme.motion.enabled
+                            // ViewTransition.index/.item only resolve to real
+                            // per-item values when read directly here, at the
+                            // Transition's own top level (Task C,
+                            // LTable.qml:87-149 — reading them one level
+                            // deeper, even a plain property on the child
+                            // SequentialAnimation, freezes at the unset
+                            // sentinel). Read here, then imperatively assign
+                            // the computed numbers onto the per-item
+                            // PauseAnimation/NumberAnimation instances by id.
+                            property int idx: ViewTransition.index
+                            onIdxChanged: {
+                                populatePause.duration = Theme.motion.staggerDelay(idx, Theme.motion.rowStagger);
+                                populateY.from = (ViewTransition.item ? ViewTransition.item.y : 0) + 10;
+                            }
+                            SequentialAnimation {
+                                PauseAnimation { id: populatePause; duration: 0 }
+                                ParallelAnimation {
+                                    NumberAnimation {
+                                        property: "opacity"; from: 0; to: 1
+                                        duration: Theme.motion.rowIn
+                                        easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.motion.easing
+                                    }
+                                    NumberAnimation {
+                                        id: populateY
+                                        property: "y"; from: 0
+                                        duration: Theme.motion.rowIn
+                                        easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.motion.easing
+                                    }
+                                }
+                            }
+                        }
+                        add: Transition {
+                            enabled: Theme.motion.enabled
+                            property int idx: ViewTransition.index
+                            onIdxChanged: {
+                                addPause.duration = Theme.motion.staggerDelay(idx, Theme.motion.rowStagger);
+                                addY.from = (ViewTransition.item ? ViewTransition.item.y : 0) + 10;
+                            }
+                            SequentialAnimation {
+                                PauseAnimation { id: addPause; duration: 0 }
+                                ParallelAnimation {
+                                    NumberAnimation {
+                                        property: "opacity"; from: 0; to: 1
+                                        duration: Theme.motion.rowIn
+                                        easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.motion.easing
+                                    }
+                                    NumberAnimation {
+                                        id: addY
+                                        property: "y"; from: 0
+                                        duration: Theme.motion.rowIn
+                                        easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.motion.easing
+                                    }
+                                }
+                            }
+                        }
+
                         delegate: Rectangle {
                             id: rowDelegate
                             required property var model
@@ -389,16 +469,10 @@ Rectangle {
                             objectName: "resultRow_" + model.schoolId
                             width: ListView.view ? ListView.view.width : 0
                             implicitHeight: 64
-                            // Starts invisible/offset; entranceAnim below is
-                            // the ONLY thing that brings it to its resting
-                            // state, so a row that is never animated stays
-                            // invisible rather than silently "just working".
-                            opacity: 0
                             color: rowHover.hovered ? Qt.alpha(Theme.brand.admin, 0.06) : "transparent"
                             Behavior on color {
                                 ColorAnimation { duration: Theme.motion.enabled ? Theme.motion.hoverLift : 0 }
                             }
-                            transform: Translate { id: rowTranslate; y: 10 }
 
                             HoverHandler { id: rowHover }
 
@@ -486,39 +560,6 @@ Rectangle {
                                     font.weight: Font.ExtraBold
                                 }
                             }
-
-                            // Staggered entrance: fade + rise, per-row delay
-                            // capped at 10 rows so a large result set doesn't
-                            // take seconds to finish appearing. Clamped to 0
-                            // at the low end too: a delegate's `index`
-                            // transiently becomes -1 while it's being torn
-                            // down as part of a model reset (e.g. a fresh
-                            // search clearing the previous rows), and this
-                            // binding re-evaluates during that teardown —
-                            // without the max(0, ...) that would feed
-                            // PauseAnimation a negative duration.
-                            SequentialAnimation {
-                                id: entranceAnim
-                                objectName: "entranceAnim"
-                                PauseAnimation {
-                                    duration: Theme.motion.enabled
-                                        ? Math.max(0, Math.min(rowDelegate.index, Theme.motion.staggerCap)) * Theme.motion.rowStagger
-                                        : 0
-                                }
-                                ParallelAnimation {
-                                    NumberAnimation {
-                                        target: rowDelegate; property: "opacity"; to: 1
-                                        duration: Theme.motion.enabled ? Theme.motion.rowIn : 0
-                                        easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.motion.easing
-                                    }
-                                    NumberAnimation {
-                                        target: rowTranslate; property: "y"; to: 0
-                                        duration: Theme.motion.enabled ? Theme.motion.rowIn : 0
-                                        easing.type: Easing.BezierSpline; easing.bezierCurve: Theme.motion.easing
-                                    }
-                                }
-                            }
-                            Component.onCompleted: entranceAnim.start()
                         }
                     }
 

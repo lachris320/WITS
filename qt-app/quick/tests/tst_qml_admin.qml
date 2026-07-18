@@ -80,6 +80,34 @@ Item {
             courses = d === "CE" ? ["BSCE"] : d === "IT" ? ["BSIT"] : ["BSCE", "BSEE"];
         }
     }
+    // --- Search row-motion fixtures (Phase 3 gatefix Part 1): populate/add ---
+    // A DISTINCT model object (not the same instance re-cleared) so
+    // reassigning searchVmStub.results is a genuine "model changed" event for
+    // the ListView — the same distinction LTable's visitRowsAnimatedFixtureA/B
+    // pair relies on (tst_qml_components.qml): clear()+append() on the SAME
+    // ListModel only fires add/remove, never populate. In production,
+    // SearchResultsModel::setRecords() always does a genuine
+    // beginResetModel/endResetModel (a fresh search replaces the whole result
+    // set), so populate — not add — is the transition that actually matters
+    // for a real search; this fixture proves it genuinely re-plays.
+    ListModel { id: searchMotionFixtureB
+        ListElement { name: "Fresh Result"; schoolId: "2023-9999"; course: "BSIT"; department: "IT"; visits: 7; initials: "FR" }
+    }
+    // 9 rows (indices 0-8) so the stagger-differential test has range below
+    // Theme.motion.staggerCap (10) to compare a zero-stagger row against a
+    // clearly mid-flight one — same rationale as LTable's
+    // visitRowsAnimatedFixtureA (tst_qml_components.qml).
+    ListModel { id: searchStaggerFixture
+        ListElement { name: "Row 0"; schoolId: "S-0"; course: "BSCE"; department: "CE"; visits: 1; initials: "R0" }
+        ListElement { name: "Row 1"; schoolId: "S-1"; course: "BSCE"; department: "CE"; visits: 1; initials: "R1" }
+        ListElement { name: "Row 2"; schoolId: "S-2"; course: "BSCE"; department: "CE"; visits: 1; initials: "R2" }
+        ListElement { name: "Row 3"; schoolId: "S-3"; course: "BSCE"; department: "CE"; visits: 1; initials: "R3" }
+        ListElement { name: "Row 4"; schoolId: "S-4"; course: "BSCE"; department: "CE"; visits: 1; initials: "R4" }
+        ListElement { name: "Row 5"; schoolId: "S-5"; course: "BSCE"; department: "CE"; visits: 1; initials: "R5" }
+        ListElement { name: "Row 6"; schoolId: "S-6"; course: "BSCE"; department: "CE"; visits: 1; initials: "R6" }
+        ListElement { name: "Row 7"; schoolId: "S-7"; course: "BSCE"; department: "CE"; visits: 1; initials: "R7" }
+        ListElement { name: "Row 8"; schoolId: "S-8"; course: "BSCE"; department: "CE"; visits: 1; initials: "R8" }
+    }
     // Positioned below dash (y: 760) so the taller host gives it its own band
     // instead of stacking on top of dash's errorBlock/retryButton — see the
     // host comment above.
@@ -265,6 +293,11 @@ Item {
                 searchStub.clear();
                 searchStub.append({ name: "Maria Santos", schoolId: "2023-0001", course: "BSCE", department: "CE", visits: 42, initials: "MS" });
             }
+            // The row-motion tests swap vm.results to a distinct model object
+            // to force a genuine populate re-fire; restore the usual stub so
+            // every other test (and re-runs of the motion tests themselves)
+            // sees the standard single-row fixture regardless of test order.
+            searchVmStub.results = searchStub;
             search.selectedCourse = "";
             search.selectedDepartment = "";
             search.hasSearched = false;
@@ -460,26 +493,47 @@ Item {
             compare(header.text, "1 results");
         }
 
-        // --- Staggered row entrance (mechanism, not exact timing) ---
+        // --- Staggered row entrance (populate/add, mechanism not exact timing) ---
 
+        // The highest-value row-entrance test: proves populate genuinely
+        // (re-)plays on a model reset — the whole reason the gatefix migrates
+        // to populate/add over the old per-delegate Component.onCompleted
+        // approach. A ListView RECYCLES delegates, so the old approach
+        // re-ran the entrance (blank row + full stagger) every time a row
+        // merely scrolled back into view; populate/add only fire on a
+        // genuine model change, never on pure scroll-driven recycling.
+        // Reassigning vm.results to a DISTINCT model object is the QML-test
+        // equivalent of SearchResultsModel::setRecords()'s real
+        // begin/endResetModel() call — both are a "model changed" event that
+        // re-fires populate for the fresh row. Caught right after the first
+        // rendered frame: with populate broken/disabled the fresh row would
+        // already sit at its natural opacity of 1 immediately, never having
+        // passed through the deliberate `from: 0` start state at all.
         function test_resultRowsFadeInToFullOpacity() {
+            searchVmStub.results = searchMotionFixtureB;
             waitForRendering(search);
-            var row = findChild(search, "resultRow_2023-0001");
+            var row = findChild(search, "resultRow_2023-9999");
             verify(row !== null);
+            verify(row.opacity < 1);
             tryCompare(row, "opacity", 1);
         }
 
         // --- Motion (Phase 3 Task A): tuned easing + Theme stagger tokens ---
 
+        // Structural check on the populate Transition's own declared
+        // template (not a per-item ViewTransition clone) — reading
+        // resultsList.populate here is the same kind of static property-path
+        // access LTable.qml's onIdxChanged uses to reach populatePause/
+        // populateY by id, just read from the test side instead.
         function test_entranceUsesThemeBezierEasing() {
             waitForRendering(search);
-            var row = findChild(search, "resultRow_2023-0001");
-            verify(row !== null);
-            var seq = findChild(row, "entranceAnim");
+            var list = findChild(search, "resultsList");
+            verify(list !== null);
+            var seq = list.populate.animations[0];
             verify(seq !== null);
-            // entranceAnim is PauseAnimation, ParallelAnimation[opacity, y] —
-            // inspect the opacity leg's easing directly rather than timing
-            // samples, so this can't flake under offscreen CI.
+            // seq is PauseAnimation, ParallelAnimation[opacity, y] — inspect
+            // the opacity leg's easing directly rather than timing samples,
+            // so this can't flake under offscreen CI.
             var opacityAnim = seq.animations[1].animations[0];
             compare(opacityAnim.easing.type, Easing.BezierSpline);
             compare(opacityAnim.easing.bezierCurve.length, Theme.motion.easing.length);
@@ -487,19 +541,42 @@ Item {
                 compare(opacityAnim.easing.bezierCurve[i], Theme.motion.easing[i]);
         }
 
+        // Stagger differential (mutation target: Theme.motion.rowStagger /
+        // staggerCap) — mirrors LTable's test_rowStaggerDelaysHigherIndexRows
+        // (tst_qml_components.qml) exactly, since the migration means there
+        // is no more per-delegate entranceAnim/PauseAnimation to read a
+        // duration off directly (populate/add clone their animation tree per
+        // transitioning item, so reading the template's own nested
+        // properties from outside does not reflect a specific item's
+        // resolved values — the differential-timing approach is the
+        // reliable one). Row 0 has zero PauseAnimation delay and resolves
+        // after ~Theme.motion.rowIn (400ms); row 5 (below staggerCap of 10,
+        // and still on-screen in this test host — see below) carries an
+        // extra 5 * Theme.motion.rowStagger (125ms at current token values)
+        // of pause before its own fade even starts. Waiting 450ms —
+        // comfortably past row 0's 400ms settle but well short of row 5's
+        // 525ms (125 pause + 400 fade) — must find row 0 fully resolved and
+        // row 5 still strictly mid-flight.
         function test_staggerDelayReadsThemeRowStaggerToken() {
-            // Second row (index 1) is the smallest index that actually
-            // distinguishes "reads Theme.motion.rowStagger" from "index 0,
-            // always zero regardless of the multiplier".
-            searchStub.append({ name: "Second Student", schoolId: "2023-0002", course: "BSCE", department: "CE", visits: 3, initials: "SS" });
+            searchVmStub.results = searchStaggerFixture;
             waitForRendering(search);
 
-            var row = findChild(search, "resultRow_2023-0002");
-            verify(row !== null);
-            var seq = findChild(row, "entranceAnim");
-            verify(seq !== null);
-            var pause = seq.animations[0];
-            compare(pause.duration, Math.max(0, Math.min(1, Theme.motion.staggerCap)) * Theme.motion.rowStagger);
+            // resultsList's viewport (fixed screen height in this test host)
+            // is only ~422px tall — fully containing rows 0-5 (row 5 ends at
+            // y=384, well under 422) but NOT row 8 (starts at y=512): the
+            // ListView never instantiates a delegate that never intersects
+            // its viewport, so a taller-index target needs an on-screen row.
+            // Row 5 is chosen (not row 6, whose 384-448 band straddles the
+            // 422px cutoff) to avoid any edge-of-viewport instantiation
+            // flakiness.
+            var row0 = findChild(search, "resultRow_S-0");
+            var row5 = findChild(search, "resultRow_S-5");
+            verify(row0 !== null);
+            verify(row5 !== null);
+            wait(450);
+            compare(row0.opacity, 1);
+            verify(row5.opacity > 0 && row5.opacity < 1);
+            tryCompare(row5, "opacity", 1);
         }
 
         // --- Motion (Phase 3 Task A): page entrance (A4) ---
