@@ -7,8 +7,6 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
-#include <QUrl>
-#include <QUrlQuery>
 
 StudentController::StudentController(QNetworkAccessManager *nam, QObject *parent)
     : QObject(parent)
@@ -65,6 +63,7 @@ SearchOutcome StudentController::parseSearchResponse(const QByteArray &raw,
         rec.yearLevel  = s["year_level"].toString();
         rec.gender     = s["gender"].toString();
         rec.status     = s["status"].toString();
+        rec.visits     = s["visits"].toInt();
         outRecords.append(rec);
     }
     outSearchTerm = obj["searchTerm"].toString();      // line 3242
@@ -137,7 +136,7 @@ QStringList StudentController::parseCourses(const QByteArray &raw)
 
 // --- Network methods ---
 
-void StudentController::searchStudents(const QString &search,
+quint64 StudentController::searchStudents(const QString &search,
                                        const QString &department,
                                        const QString &course)
 {
@@ -152,10 +151,13 @@ void StudentController::searchStudents(const QString &search,
 
     QNetworkReply *reply = m_nam->post(request, QJsonDocument(filters).toJson());
 
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    const quint64 requestId = ++m_searchRequestSeq;
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, requestId]() {
         if (reply->error() != QNetworkReply::NoError) {
-            emit searchFailed(reply->errorString());       // View gates overlay row 11 on flag
+            const QString errorString = reply->errorString();
             reply->deleteLater();
+            emit searchFailed(errorString, requestId);      // View gates overlay row 11 on flag
             return;
         }
 
@@ -166,8 +168,10 @@ void StudentController::searchStudents(const QString &search,
         QString message, searchTerm;
         const SearchOutcome outcome =
             parseSearchResponse(resp, records, message, searchTerm);
-        emit searchFinished(outcome, records, message, searchTerm);
+        emit searchFinished(outcome, records, message, searchTerm, requestId);
     });
+
+    return requestId;
 }
 
 void StudentController::bulkUpdateStudents(const QList<StudentRecord> &updates)
@@ -259,12 +263,20 @@ void StudentController::loadDepartments()
 
 void StudentController::loadCourses(const QString &department)
 {
-    QUrl url = ApiConfig::endpoint(QStringLiteral("get_courses.php"));
-    QUrlQuery query;
-    query.addQueryItem(QStringLiteral("department"), department);
-    url.setQuery(query);
+    // get_courses_by_department.php reads a JSON request body
+    // (json_decode(file_get_contents("php://input")), key "department") —
+    // NOT a query string. A GET or form-POST falls through its own
+    // empty/absent-department branch and silently returns every course
+    // regardless of what was asked for, so this must be a JSON POST.
+    QNetworkRequest request(
+        ApiConfig::endpoint(QStringLiteral("get_courses_by_department.php")));
+    request.setHeader(QNetworkRequest::ContentTypeHeader,
+                      QStringLiteral("application/json"));
 
-    QNetworkReply *reply = m_nam->get(QNetworkRequest(url));
+    QJsonObject payload;
+    payload["department"] = normalizeFilter(department);   // placeholder/empty -> "" -> "all courses"
+
+    QNetworkReply *reply = m_nam->post(request, QJsonDocument(payload).toJson());
 
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         const QStringList courses =

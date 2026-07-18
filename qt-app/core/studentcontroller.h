@@ -29,8 +29,15 @@ public:
     // server "message" field (empty on success).
     static bool parseDeleteResponse(const QByteArray &raw, QString &outMessage);
 
-    // Async — result arrives via searchFinished / searchFailed.
-    void searchStudents(const QString &search,
+    // Async — result arrives via searchFinished / searchFailed, both of which
+    // echo back the returned request id. StudentController fires an
+    // independent QNetworkReply per call and does not serialize/abort a prior
+    // in-flight search, so racing calls (e.g. rapid course-chip clicks) can
+    // resolve out of request order; the id lets a consumer that cares (see
+    // SearchViewModel) tell a superseded reply from the current one. Legacy
+    // callers that ignore the id (adminwindow.cpp) are unaffected — Qt
+    // permits connecting a signal to a slot with fewer trailing parameters.
+    quint64 searchStudents(const QString &search,
                         const QString &department,
                         const QString &course);
 
@@ -44,14 +51,21 @@ public:
     void loadDepartments();
 
     // Async — result arrives via coursesLoaded (empty on error/!success).
+    // Posts a JSON body {"department": <normalized department>} to
+    // get_courses_by_department.php (NOT get_courses.php — that endpoint is
+    // GET-only and errors on an empty department). An empty department (or
+    // "All"/placeholder text, which normalizeFilter reduces to empty) is
+    // treated server-side as "every course" — that's how the initial,
+    // no-department-selected course-chip load is scoped.
     void loadCourses(const QString &department);
 
 signals:
     void searchFinished(SearchOutcome outcome,
                         const QList<StudentRecord> &records,
                         const QString &message,
-                        const QString &searchTerm);
-    void searchFailed(const QString &errorString);
+                        const QString &searchTerm,
+                        quint64 requestId);
+    void searchFailed(const QString &errorString, quint64 requestId);
     void bulkUpdateFinished(const BulkUpdateResult &result);
     void bulkUpdateFailed(const QString &errorString);
     // ok=true on success; requestedCount echoes how many ids were submitted
@@ -64,6 +78,7 @@ signals:
 
 private:
     QNetworkAccessManager *m_nam;   // injected, not owned — adminWindow keeps ownership
+    quint64 m_searchRequestSeq = 0; // monotonic id source for searchStudents()
 };
 
 #endif // STUDENTCONTROLLER_H

@@ -42,6 +42,9 @@ qt_add_qml_module(witsquickmodule
         qml/kiosk/KioskMain.qml
         qml/kiosk/KioskFeedRow.qml
         qml/admin/AdminScreen.qml
+        qml/admin/DashboardScreen.qml
+        qml/admin/SearchScreen.qml
+        qml/admin/VisitLogsScreen.qml
         qml/components/LButton.qml
         qml/components/LCard.qml
         qml/components/LTable.qml
@@ -55,15 +58,24 @@ qt_add_qml_module(witsquickmodule
         qml/components/LPulseDot.qml
         qml/components/LEyebrow.qml
         qml/components/LKioskGradient.qml
+        qml/components/LSidebarBrand.qml
         qml/kiosk/GuestDialog.qml
     SOURCES
         HttpForm.h HttpForm.cpp
+        Initials.h Initials.cpp
         RfidQuickFilter.h RfidQuickFilter.cpp
         viewmodels/ThemeViewModel.h viewmodels/ThemeViewModel.cpp
         viewmodels/Navigator.h viewmodels/Navigator.cpp
         viewmodels/KioskViewModel.h viewmodels/KioskViewModel.cpp
+        viewmodels/SchoolInfoViewModel.h viewmodels/SchoolInfoViewModel.cpp
         viewmodels/GuestViewModel.h viewmodels/GuestViewModel.cpp
+        viewmodels/DashboardViewModel.h viewmodels/DashboardViewModel.cpp
         models/RecentLoginsModel.h models/RecentLoginsModel.cpp
+        models/BarsModel.h models/BarsModel.cpp
+        models/VisitLogRowsModel.h models/VisitLogRowsModel.cpp
+        viewmodels/VisitLogsViewModel.h viewmodels/VisitLogsViewModel.cpp
+        models/SearchResultsModel.h models/SearchResultsModel.cpp
+        viewmodels/SearchViewModel.h viewmodels/SearchViewModel.cpp
 )
 
 target_link_libraries(witsquickmodule PUBLIC
@@ -152,6 +164,15 @@ wits_add_qttest(tst_kioskviewmodel
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Quick Qt${QT_VERSION_MAJOR}::Network
     OFFSCREEN)
 
+# --- SchoolInfoViewModel unit test (C++ QtTest, offscreen: house
+# consistency with tst_initials/tst_navigator above — witsquickmodule
+# PUBLIC-propagates Qt::Gui, which would otherwise make QTEST_MAIN build a
+# QGuiApplication) ---
+wits_add_qttest(tst_schoolinfoviewmodel
+    SOURCES tests/tst_schoolinfoviewmodel.cpp
+    LIBS witsquickmodule
+    OFFSCREEN)
+
 # --- GuestViewModel unit test (C++ QtTest, offscreen) ---
 wits_add_qttest(tst_guestviewmodel
     SOURCES tests/tst_guestviewmodel.cpp
@@ -162,6 +183,20 @@ wits_add_qttest(tst_guestviewmodel
 wits_add_qttest(tst_httpform
     SOURCES tests/tst_httpform.cpp
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network
+    OFFSCREEN)
+
+# --- Initials pure-helper unit test (C++ QtTest, offscreen: house
+# consistency with tst_httpform above — witsquickmodule PUBLIC-propagates
+# Qt::Gui, which would otherwise make QTEST_MAIN build a QGuiApplication) ---
+wits_add_qttest(tst_initials
+    SOURCES tests/tst_initials.cpp
+    LIBS witsquickmodule
+    OFFSCREEN)
+
+# --- BarsModel unit test (C++ QtTest, offscreen) ---
+wits_add_qttest(tst_barsmodel
+    SOURCES tests/tst_barsmodel.cpp
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Gui
     OFFSCREEN)
 
 # --- L* component skeletons Quick test (offscreen) ---
@@ -181,6 +216,33 @@ wits_add_qttest(tst_qml_components
 # must be linked explicitly.
 wits_add_qttest(tst_qml_kiosk
     SOURCES tests/tst_qml_kiosk.cpp
+    LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
+         Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
+    DEFINES QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
+    OFFSCREEN)
+
+# --- DashboardViewModel unit test (C++ QtTest, offscreen) ---
+wits_add_qttest(tst_dashboardviewmodel
+    SOURCES tests/tst_dashboardviewmodel.cpp
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    OFFSCREEN)
+
+# --- VisitLogsViewModel unit test (C++ QtTest, offscreen) ---
+wits_add_qttest(tst_visitlogsviewmodel
+    SOURCES tests/tst_visitlogsviewmodel.cpp
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    OFFSCREEN)
+
+# --- SearchViewModel unit test (C++ QtTest, offscreen) ---
+wits_add_qttest(tst_searchviewmodel
+    SOURCES tests/tst_searchviewmodel.cpp
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    OFFSCREEN)
+
+# --- Admin screens Quick test (offscreen). "import LOAMS" lives only in the
+# QUICK_TEST_MAIN data file, so link the plugin + "_init" object explicitly. ---
+wits_add_qttest(tst_qml_admin
+    SOURCES tests/tst_qml_admin.cpp
     LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
          Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
     DEFINES QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"

@@ -36,7 +36,9 @@ private:
         bool fresh = false;
     };
     static QString shortenYear(const QString &year);   // "3rd Year" -> "3rd Yr"
-    static QString initialsOf(const QString &name);    // "Maria Santos" -> "MS"
+    // Initials derivation moved to the shared Initials::of() helper
+    // (quick/Initials.h) so RecentLoginsModel and SearchResultsModel share
+    // one implementation.
 
     QList<Row> m_rows;
     static constexpr int kMaxRows = 40;
