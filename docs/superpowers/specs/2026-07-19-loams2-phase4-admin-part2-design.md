@@ -14,8 +14,9 @@ to the destructive endpoints and cascading `delete_students.php`.
 ## 1. Goal & framing
 
 Phase 4 fills the three currently-disabled admin sidebar items — **Database (+ student import)**,
-**Reporting**, and **Settings** (`AdminScreen.qml:80-82`, currently `enabled: false` with a
-"soon" badge). It is a **presentation-layer rebuild over existing, already-unit-tested C++
+**Reporting**, and **Settings** (`AdminScreen.qml:80-82`, currently `enabled: false`; `LSideNav`
+renders the "soon" badge for any disabled item, so flipping `enabled: true` both activates the
+item and drops its badge). It is a **presentation-layer rebuild over existing, already-unit-tested C++
 controllers** (`StudentController`, `ImportController`, `ReportController` + stateless
 `ReportRenderer`, `SettingsController`, `BrandingController`) — **NOT new business logic**. The
 backend is essentially already complete: nearly every feature maps to an existing, deployed PHP
@@ -43,9 +44,18 @@ photo capture and edits shipped screens). Rationale: 4c Settings is the smallest
 where the tiered destructive-op dialog debuts (reset-visits lives there) — prove that pattern on
 the cheap track before 4a's multi-delete.
 
-**Why 4d is its own track.** Photo *display* reaches into the already-shipped Kiosk (Phase 2)
-and Search (Phase 3) screens and needs a coordinated backend deploy; keeping it isolated keeps
-4a/4b/4c deployment-free and independently revertable.
+**Deploy topology (corrected — the tracks are NOT uniformly deploy-free).** Because Phase 4
+adopts the `requireAdminAuth` guard (§5), the tracks differ in backend coupling, and the spec is
+explicit about it:
+
+| Track | Backend deploy | Shipped-screen edits |
+|---|---|---|
+| **4b Reporting** | **None** — purely client-side (read-only endpoints unchanged). | No. |
+| **4c Settings** | **Yes** — guards `reset_visits` + `update_admin_info`; lockstep with the client + the *legacy* `reset_visits` caller (§5.5). | No. |
+| **4a Database** | **Yes** — guards `delete_students`/`bulk_update` (harmonized) + the dept ops; lockstep with the client + the *legacy* dept-op callers (§5.5). | No. |
+| **4d Photo** | **Yes** — additive `photo` on `search_students`. | **Yes** — edits shipped Kiosk (Phase 2) + Search (Phase 3). |
+
+So each PR is still **independently reviewable and mergeable**, but "independently *deployable* with no backend step" is true only for **4b**. 4a/4c each carry their own breaking endpoint deploy (§5.4); 4d is unique in *also* editing already-shipped screens, which is why it is isolated (a regression there is a small revertable PR).
 
 ## 3. Architecture & the shared contract (lands FIRST, in the contract-spec PR)
 
@@ -69,11 +79,24 @@ C++ VM classes; `m_camelCase` members; the QML module target is `witsquickmodule
 
 ### 3.3 In-memory admin session
 
-An admin-key holder (on `Navigator` or a small new `AdminSession` type) captured at admin entry,
-held in **RAM only** — **NEVER written to QSettings** — attached to destructive POSTs as the
-`admin_key` field, and refreshed if the key is changed in Settings during the same session. This
-is what makes the new endpoint-level auth (§5) work without any token/session concept (tokens
-stay a Phase 6 concern). There must be **NO persisted client copy of the key**.
+**The client does NOT retain the admin key today — this is capture to be BUILT, not wiring to an
+existing value.** `KioskViewModel::submitLogin` (`qt-app/quick/viewmodels/KioskViewModel.cpp:107`)
+posts `admin_key` to `admin_login.php` and then emits `adminRequested()` with the key dropped;
+`BrandingController.h:26` documents "the client does not retain it" (which is why `saveBranding`
+re-takes the key as a parameter). So this section adds a new **`AdminSession`** holder:
+
+- **Capture seam:** at the admin-entry gate — in `KioskViewModel::submitLogin`, on the successful
+  `r.ok && r.isAdmin` branch, *before* `emit adminRequested()` — hand the just-verified key to
+  `AdminSession`.
+- Held in **RAM only** — **NEVER written to QSettings** (no persisted client copy) — and attached
+  to destructive POSTs as the `admin_key` field.
+- **Refreshed** when the key is changed in Settings (§4.1) during the same session, so a
+  same-session key change doesn't leave a stale held key that 401s subsequent destructive ops.
+
+This is what makes the new endpoint-level auth (§5) work without any token/session concept (tokens
+stay a Phase 6 concern). Reset-visits (§4.1) is the one op that does **not** use the held key: its
+tier-2 dialog sends a freshly re-typed key — coherent because `requireAdminAuth` only checks
+`$_POST['admin_key']`, so a fresh field and the held field are interchangeable server-side.
 
 ### 3.4 Shared components — defined HERE, before the tracks diverge
 
@@ -103,9 +126,12 @@ opacity variants via `Qt.alpha(Theme.<token>, a)`. Same rule enforced since Phas
 
 ### 4.1 Track 4c — Settings (smallest; debuts the destructive-op dialog)
 
-- **School name/address/logo** — logo import triggers live re-theme via
-  `BrandingController.regenerateFromLogo` (no restart); persistence on the `branding_config`
-  backend + QSettings cache, exactly as shipped.
+- **School name/address/logo** — logo import triggers live re-theme by reusing the existing
+  Quick-wired path `ThemeViewModel::regenerateFromImportedLogo(path)`
+  (`qt-app/quick/viewmodels/ThemeViewModel.h:65`), which calls
+  `BrandTheme::regenerateFromLogo(...)` (`qt-app/core/brandtheme.h:62`) — NOT a
+  `BrandingController` method (no such method exists). No restart; persistence on the
+  `branding_config` backend + QSettings cache, exactly as shipped.
 - **Admin name/position** → `update_admin_info.php`.
 - **Admin-key change** → `update_admin_key.php` (requires the OLD key; bcrypt-verified
   server-side).
@@ -113,8 +139,11 @@ opacity variants via `Qt.alpha(Theme.<token>, a)`. Same rule enforced since Phas
 - **Guest-login toggle** (existing feature flag).
 - **Reset-visits per department** → `reset_visits.php`. This permanently **DELETES** the
   department's `library_visits` history (not just zeroes the count), so it is a **tier-2**
-  confirm: names the department + the history-deletion, requires a re-typed admin key that is
-  verified **server-side** (see §5), plus an **export-before-destroy CSV**.
+  confirm: names the department + the history-deletion, requires a re-typed admin key, plus an
+  **export-before-destroy CSV**. Note the tier distinction is a **client-side UX gate**, not a
+  stronger server check — with the guard applied (§5), *every* destructive op is equally
+  `requireAdminAuth`-verified server-side; tier-2 just adds a deliberate re-type step in front of
+  the most irreversible one.
 
 **CUT from legacy Settings:**
 
@@ -163,10 +192,20 @@ opacity variants via `Qt.alpha(Theme.<token>, a)`. Same rule enforced since Phas
 
 ### 4.4 Track 4d — Photo display
 
-- **`LAvatar`** on the Kiosk login result (backend `student_login.php` **ALREADY** returns a
-  photo URL) and on the Search results (needs the additive `photo` field on
-  `search_students.php` — see §5). **Initials fallback** for the ~171 existing students whose
-  `photo` column is NULL.
+- **`LAvatar`** on the Kiosk login result and on the Search results, with an **initials
+  fallback** for the ~171 existing students whose `photo` column is NULL.
+- **The two screens deliver photos in DIFFERENT shapes — `LAvatar` normalizes both:**
+  - Kiosk: `student_login.php` already returns an **absolute** `photo_url`
+    (`$protocol.$_SERVER['HTTP_HOST'].…`), and on a NULL/missing photo it substitutes the
+    **`uploads/default.jpg` sentinel** rather than an empty value — so the initials fallback would
+    *never* fire on the kiosk unless `LAvatar` treats that sentinel as "no photo."
+  - Search: `search_students.php` gains an additive **relative** `photo` field (empty on NULL);
+    the client prefixes the `ApiConfig` base (§5).
+  - **Normalization rule (client-side, in `LAvatar`):** show initials when the source is empty,
+    absent, OR ends with `default.jpg`; otherwise load the URL, prefixing the `ApiConfig` base if
+    it is relative. This is the one component that makes the two divergent server shapes look
+    uniform; it must be unit-tested against *both* shapes (§6.2). No change to `student_login.php`
+    is required (keeps back-compat).
 - Edits the shipped Phase 2 Kiosk and Phase 3 Search screens, hence its own isolated, revertable
   PR + coordinated deploy.
 
@@ -186,12 +225,15 @@ opacity variants via `Qt.alpha(Theme.<token>, a)`. Same rule enforced since Phas
 
 ### 5.2 Changes to make
 
+Each guarded endpoint needs `include "auth_helper.php";` (in addition to its existing `db.php`)
+plus the `requireAdminAuth($conn);` call.
+
 | Endpoint | Change |
 |---|---|
-| `reset_visits.php`, `deactivate_department.php`, `delete_department.php`, `update_admin_info.php`, `bulk_update_students.php` | **Add the `requireAdminAuth` guard.** These already read `$_POST`, so the client just adds an `admin_key` form field. |
-| `delete_students.php` (harmonization) | It currently reads a **JSON** request body and opens a hardcoded `new mysqli("localhost","root","",...)` connection. Rewrite it to the house style — `include "db.php"`, read `admin_key` + `school_ids` from a **FORM** post — so `requireAdminAuth($conn)` applies uniformly. |
+| `reset_visits.php`, `deactivate_department.php`, `delete_department.php`, `update_admin_info.php` (guard only) | **Add the `requireAdminAuth` guard.** These already read `$_POST`, so the client just adds an `admin_key` form field. (`reset_visits.php` currently includes only `db.php` — add the `auth_helper.php` include too.) |
+| `delete_students.php` **and** `bulk_update_students.php` (harmonization) | **Both** currently read a **JSON** request body (`json_decode(file_get_contents('php://input'))`) and open a hardcoded `new mysqli("localhost","root","",...)` connection — so a naive `requireAdminAuth($conn)` would 401 every call (the key isn't in `$_POST` and there's no shared `$conn`). Rewrite both to the house style — `include "db.php"` + `include "auth_helper.php"`, read `admin_key` + their payload (`school_ids` / the update rows) from a **FORM** post — so `requireAdminAuth($conn)` applies uniformly. |
 | `delete_students.php` (cascade fix) | Wrap in a **transaction** and also delete the affected students' `library_visits` rows (by `student_id IN (...)`), mirroring what `delete_department.php` already does (which correctly cascades). Today `delete_students.php` orphans visit rows; this fixes it. (`reset_visits.php` uses an INNER JOIN so it is unaffected.) |
-| `search_students.php` (additive `photo`, 4d) | Emit `"photo" => $row['photo']` as a **RELATIVE** path; the client prefixes the `ApiConfig` base (so it survives the Phase 6 base-URL change). Purely additive — existing callers ignore unknown fields; the client's `StudentRecord` + `StudentController::parseSearchResponse` gain a `photo` field. |
+| `search_students.php` (additive `photo`, 4d) | Emit `"photo" => $row['photo']` as a **RELATIVE** path (empty on NULL); the client prefixes the `ApiConfig` base (so it survives the Phase 6 base-URL change). Purely additive — existing callers ignore unknown fields; the client's `StudentRecord` + `StudentController::parseSearchResponse` gain a `photo` field. (Kiosk uses the separate absolute `photo_url` from `student_login.php` — see §4.4 for how `LAvatar` unifies the two shapes.) |
 
 ### 5.3 Contract convention
 
@@ -209,11 +251,24 @@ below, or the moment an endpoint deploys, any caller not sending `admin_key` 401
 
 ### 5.5 Legacy rollback stays whole
 
-The legacy Qt Widgets admin window (`qt-app/adminwindow.cpp`) still calls these same destructive
-endpoints and is the designated **rollback** until Phase 6 deletes it. So its destructive calls
-**also** get `admin_key` attached (captured at its existing admin-login gate). Contained edit to
-an app Phase 6 removes anyway; without it, deploying the guard breaks the rollback's
-delete/reset/deactivate.
+The legacy Qt Widgets admin window (`qt-app/adminwindow.cpp`) is the designated **rollback** until
+Phase 6 deletes it, and it calls **only a subset** of the guarded endpoints:
+`deactivate_department`, `reset_visits`, and `delete_department` (plus the non-destructive
+`update_admin_key`, which already needs the old key and gets no guard). It does **not** call
+`delete_students`, `bulk_update_students`, or `update_admin_info` — those have no legacy caller, so
+no legacy edit is needed for them.
+
+Two consequences the per-track plans must honor:
+
+- **The legacy key work fragments across tracks, matching the endpoint each track guards:**
+  `reset_visits` → **4c**; `deactivate_department` + `delete_department` → **4a**. Each track's
+  breaking deploy must be **lockstep with its own matching legacy edit** — there is no single
+  monolithic legacy touch.
+- **Legacy does not retain the key either** (same finding as §3.3 — its destructive POSTs currently
+  send only `department`, and it has no key member). So each legacy edit is "**capture + retain the
+  key at the legacy admin-login gate, then thread it into that endpoint's POST**," not "attach an
+  already-held value." Contained, but real work — an app Phase 6 removes anyway; without it,
+  deploying a guard breaks that rollback path.
 
 ## 6. Testing & gates
 
@@ -237,7 +292,9 @@ Follows the project TDD rule: QtTest + QuickTest under ctest, registered via `wi
 - `LConfirmDialog` (tier-1 vs tier-2, confirm disabled in-flight, key field required for tier-2).
 - The cascading Dept→Course→Year selector (dependent-clear, "All" semantics, loading states).
 - `LTable` multi-select (select-all, N-selected header, selection survives refresh).
-- `LAvatar` (URL loads → image; empty/failed → initials fallback).
+- `LAvatar` — tested against **both** server shapes (§4.4): an absolute `photo_url` loads → image;
+  the `default.jpg` sentinel → initials; a relative `photo` → prefixed + loaded; empty/failed →
+  initials fallback.
 - Each screen's flows: Settings save + reset-visits re-key dialog; Database
   register-validation / delete-confirm / import-progress; Reporting filter-enable / preview /
   export-trigger; 4d Kiosk + Search photo display.
