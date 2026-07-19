@@ -4,8 +4,13 @@ ini_set('display_errors', 1);
 
 header("Content-Type: application/json");
 include "db.php";
+include "auth_helper.php";
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    // Guard BEFORE reading the payload or touching the DB: a 401 must never
+    // leave a department half-reset (visits zeroed but history still present).
+    requireAdminAuth($conn);
+
     $department = isset($_POST['department']) ? $_POST['department'] : '';
 
     if (empty($department)) {
