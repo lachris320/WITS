@@ -3,6 +3,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QUrlQuery>
+#include <QVariant>
 
 namespace HttpForm {
 
@@ -22,6 +23,15 @@ QNetworkRequest formRequest(const QUrl &url)
     return request;
 }
 
+bool isServerAnswer(bool replyHadError, int httpStatus, const QByteArray &body)
+{
+    if (!replyHadError)
+        return true;
+    // An error status is still the server answering — provided it sent
+    // something for the decode seam to read.
+    return httpStatus > 0 && !body.isEmpty();
+}
+
 void submit(QNetworkAccessManager *nam, const QUrl &url,
             const QList<QPair<QString, QString>> &fields, QObject *context,
             std::function<void(const QByteArray &)> onSuccess,
@@ -33,13 +43,16 @@ void submit(QNetworkAccessManager *nam, const QUrl &url,
                      [reply, onSuccess = std::move(onSuccess),
                       onNetworkError = std::move(onNetworkError)]() {
         const QByteArray body = reply->readAll();
-        const bool netErr = reply->error() != QNetworkReply::NoError;
+        const bool replyHadError = reply->error() != QNetworkReply::NoError;
+        const QVariant statusAttr =
+            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
+        const int httpStatus = statusAttr.isValid() ? statusAttr.toInt() : 0;
         reply->deleteLater();
 
-        if (netErr)
-            onNetworkError();
-        else
+        if (isServerAnswer(replyHadError, httpStatus, body))
             onSuccess(body);
+        else
+            onNetworkError();
     });
 }
 

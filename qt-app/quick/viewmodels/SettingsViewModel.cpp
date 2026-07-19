@@ -141,7 +141,10 @@ void SettingsViewModel::saveAdminInfo()
     HttpForm::submit(m_nam, ApiConfig::endpoint(QStringLiteral("update_admin_info.php")),
                      fields, this,
         [this](const QByteArray &body) { applyAdminInfoResponse(body); },
-        [this]() { setBusy(false); emit networkError(); });   // 401 lands here in production (see plan T10 known limitation)
+        // Only a genuine transport failure lands here: HttpForm::isServerAnswer
+        // routes requireAdminAuth's 401 (which carries a JSON body) to the
+        // decode seam above, so a bad key surfaces as authFailed, not this.
+        [this]() { setBusy(false); emit networkError(); });
 }
 
 void SettingsViewModel::applyKeyChangeResponse(const QByteArray &json, const QString &newKey)
@@ -186,9 +189,18 @@ void SettingsViewModel::loadDepartments()
         m_nam->get(QNetworkRequest(ApiConfig::endpoint(QStringLiteral("get_departments.php"))));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         const QByteArray body = reply->readAll();
-        const bool netErr = reply->error() != QNetworkReply::NoError;
+        const bool replyHadError = reply->error() != QNetworkReply::NoError;
+        const QVariant statusAttr = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
+        const int httpStatus = statusAttr.isValid() ? statusAttr.toInt() : 0;
         reply->deleteLater();
-        if (netErr) { emit networkError(); return; }
+        // Same classification as HttpForm::submit, so this GET agrees with the
+        // POST paths: an HTTP error carrying a body is the server answering and
+        // goes to the decode seam (parseDepartments degrades to an empty list);
+        // only a transport failure is a networkError.
+        if (!HttpForm::isServerAnswer(replyHadError, httpStatus, body)) {
+            emit networkError();
+            return;
+        }
         applyDepartmentsResponse(body);
     });
 }

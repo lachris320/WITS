@@ -29,12 +29,36 @@ QByteArray encodeForm(const QList<QPair<QString, QString>> &fields);
 // Pure + network-free.
 QNetworkRequest formRequest(const QUrl &url);
 
+// Response classification — pure, network-free, and the single place that
+// decides which submit() callback fires.
+//
+// The useful distinction is NOT "did reply->error() get set" but "did the
+// server answer at all". An HTTP response carrying a status code and a body is
+// the server answering, even when its answer is an error status: Qt reports a
+// 401 as QNetworkReply::ContentAccessDenied, yet the body is exactly what the
+// caller needs. requireAdminAuth() in the backend answers a bad or missing
+// admin key with HTTP 401 plus {"status":"error","message":"Invalid admin
+// key"} — routing that to onNetworkError() would throw the message away and
+// tell the user "network error" when they simply mistyped their key.
+//
+//   replyHadError - reply->error() != QNetworkReply::NoError
+//   httpStatus    - QNetworkRequest::HttpStatusCodeAttribute, or 0 when the
+//                   attribute is absent (no response line was ever received)
+//   body          - reply->readAll()
+//
+// Returns true when the response should be handed to onSuccess (the decode
+// seam), which then classifies auth-vs-generic failure from the JSON itself.
+// Returns false only for a genuine transport failure — DNS failure, refused
+// connection, timeout — where there is no status code, or a status code with
+// an empty body that would give the decode seam nothing to classify.
+bool isServerAnswer(bool replyHadError, int httpStatus, const QByteArray &body);
+
 // Posts encodeForm(fields) to url via nam and wires the reply's finished
 // signal. context is the connection receiver (lifetime safety): if it is
 // destroyed before the reply finishes, the slot never fires. The finished
-// handler reads the body, captures whether there was a network error, calls
-// deleteLater() on the reply, then dispatches to onNetworkError() on error or
-// onSuccess(body) otherwise — matching the legacy ordering exactly.
+// handler reads the body and the HTTP status, calls deleteLater() on the
+// reply, then dispatches via isServerAnswer() above: onSuccess(body) whenever
+// the server actually answered, onNetworkError() only on a transport failure.
 void submit(QNetworkAccessManager *nam, const QUrl &url,
             const QList<QPair<QString, QString>> &fields, QObject *context,
             std::function<void(const QByteArray &)> onSuccess,

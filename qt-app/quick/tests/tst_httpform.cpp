@@ -18,6 +18,11 @@ private slots:
     void encodeSpecialCharsAreFullyEncoded();
     void formRequestSetsContentType();
     void formRequestUrlRoundTrips();
+    void noReplyErrorIsAServerAnswer();
+    void httpErrorStatusWithBodyIsAServerAnswer();
+    void transportFailureWithNoStatusIsNotAServerAnswer();
+    void httpErrorStatusWithEmptyBodyIsNotAServerAnswer();
+    void httpErrorStatusWithNonJsonBodyIsAServerAnswer();
 };
 
 void TestHttpForm::encodeEmptyListIsEmptyBody()
@@ -84,6 +89,61 @@ void TestHttpForm::formRequestUrlRoundTrips()
     const QUrl url(QStringLiteral("http://example.com/endpoint.php"));
     const QNetworkRequest req = HttpForm::formRequest(url);
     QCOMPARE(req.url(), url);
+}
+
+// --- isServerAnswer: the pure response-classification seam -------------------
+// The distinction is "the server answered, and its answer was an error" vs
+// "we never got a usable answer". Only the latter is a network error.
+
+void TestHttpForm::noReplyErrorIsAServerAnswer()
+{
+    // The ordinary 200 path: no reply error at all.
+    QVERIFY(HttpForm::isServerAnswer(false, 200,
+        QByteArray(R"({"status":"success","message":"ok"})")));
+    // Defensive: even if the status attribute were somehow missing, a reply
+    // with no error has always been treated as a success dispatch.
+    QVERIFY(HttpForm::isServerAnswer(false, 0, QByteArray("{}")));
+}
+
+void TestHttpForm::httpErrorStatusWithBodyIsAServerAnswer()
+{
+    // requireAdminAuth() (deliverables/loams_api/auth_helper.php) answers a bad
+    // or missing admin key with HTTP 401 AND a real JSON body. Qt surfaces the
+    // 401 as QNetworkReply::ContentAccessDenied — a reply error — but the body
+    // is the whole point, so this must reach the decode seam.
+    QVERIFY(HttpForm::isServerAnswer(true, 401,
+        QByteArray(R"({"status":"error","message":"Invalid admin key"})")));
+    QVERIFY(HttpForm::isServerAnswer(true, 401,
+        QByteArray(R"({"status":"error","message":"Admin authentication required"})")));
+    // Same for the helper's 500 branches, which also carry a JSON body.
+    QVERIFY(HttpForm::isServerAnswer(true, 500,
+        QByteArray(R"({"status":"error","message":"Authentication check failed"})")));
+}
+
+void TestHttpForm::transportFailureWithNoStatusIsNotAServerAnswer()
+{
+    // DNS failure / connection refused / timeout: no response line was ever
+    // received, so there is no status code and no body. Still a network error.
+    QVERIFY(!HttpForm::isServerAnswer(true, 0, QByteArray()));
+}
+
+void TestHttpForm::httpErrorStatusWithEmptyBodyIsNotAServerAnswer()
+{
+    // A status code with nothing behind it (e.g. a proxy 502 with an empty
+    // body) gives the decode seam nothing to classify, so it would degrade to
+    // a meaningless generic failure. Report it as what it is: no usable answer.
+    QVERIFY(!HttpForm::isServerAnswer(true, 502, QByteArray()));
+    QVERIFY(!HttpForm::isServerAnswer(true, 401, QByteArray()));
+}
+
+void TestHttpForm::httpErrorStatusWithNonJsonBodyIsAServerAnswer()
+{
+    // A PHP fatal error emits HTML with a 500. That IS the server answering,
+    // so it must not be swallowed as a network error: it reaches the decode
+    // seam, which yields an empty JSON object and therefore the ViewModel's
+    // generic "Failed to ..." message rather than "Network error".
+    QVERIFY(HttpForm::isServerAnswer(true, 500,
+        QByteArray("<br /><b>Fatal error</b>: call to undefined function")));
 }
 
 QTEST_MAIN(TestHttpForm)

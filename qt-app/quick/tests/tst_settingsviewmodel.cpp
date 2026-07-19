@@ -9,6 +9,7 @@
 #include <QUrl>
 #include "SettingsViewModel.h"
 #include "AdminSession.h"
+#include "HttpForm.h"
 
 class TestSettingsViewModel : public QObject
 {
@@ -61,6 +62,10 @@ private slots:
     void resetVisitsSuccessEmitsReset();
     void resetVisitsAuthFailureEmitsAuthFailed();
     void writeResetManifestContainsMetadataNotBackup();
+    void http401AuthBodyReachesDecodeSeamNotNetworkError();
+    void http200SuccessBodyStillReachesDecodeSeam();
+    void transportFailureStillMeansNetworkError();
+    void httpErrorWithNonJsonBodyFailsLoudlyNotSilently();
 };
 
 void TestSettingsViewModel::loadPopulatesPropertiesFromSettings()
@@ -351,6 +356,82 @@ void TestSettingsViewModel::writeResetManifestContainsMetadataNotBackup()
     QVERIFY(csv.contains(QStringLiteral("Jane Librarian")));   // Operator
     QVERIFY(csv.contains(QStringLiteral("Reset requested")));
     QVERIFY(!csv.contains(QStringLiteral("Backup")));          // never labeled a backup
+}
+
+// --- 401-from-requireAdminAuth end-to-end (transport seam + decode seam) -----
+// These compose the two network-free halves of the real path: the pure
+// HttpForm::isServerAnswer classification that submit() applies, and the
+// apply*Response decode seam it dispatches to. No live network is stood up.
+
+void TestSettingsViewModel::http401AuthBodyReachesDecodeSeamNotNetworkError()
+{
+    // The exact bodies requireAdminAuth($conn) emits with http_response_code(401)
+    // — see deliverables/loams_api/auth_helper.php. Qt reports the 401 as
+    // QNetworkReply::ContentAccessDenied, i.e. reply->error() is set.
+    const QByteArray missingKey = R"({"status":"error","message":"Admin authentication required"})";
+    const QByteArray badKey     = R"({"status":"error","message":"Invalid admin key"})";
+
+    for (const QByteArray &body : {missingKey, badKey}) {
+        QVERIFY(HttpForm::isServerAnswer(/*replyHadError=*/true, 401, body));
+
+        // reset_visits.php — the tier-2 irreversible path, where telling the
+        // user "network error" for a mistyped key is worst.
+        SettingsViewModel reset;
+        QSignalSpy resetAuth(&reset, &SettingsViewModel::authFailed);
+        QSignalSpy resetNet(&reset, &SettingsViewModel::networkError);
+        reset.applyResetVisitsResponse(body);
+        QCOMPARE(resetAuth.count(), 1);
+        QCOMPARE(resetNet.count(), 0);
+
+        // update_admin_info.php — same guard, same classification.
+        SettingsViewModel info;
+        QSignalSpy infoAuth(&info, &SettingsViewModel::authFailed);
+        QSignalSpy infoNet(&info, &SettingsViewModel::networkError);
+        info.applyAdminInfoResponse(body);
+        QCOMPARE(infoAuth.count(), 1);
+        QCOMPARE(infoNet.count(), 0);
+    }
+}
+
+void TestSettingsViewModel::http200SuccessBodyStillReachesDecodeSeam()
+{
+    const QByteArray body = R"({"status":"success","message":"Visit counts reset and visit history cleared for department: CE"})";
+    QVERIFY(HttpForm::isServerAnswer(/*replyHadError=*/false, 200, body));
+
+    SettingsViewModel vm;
+    QSignalSpy reset(&vm, &SettingsViewModel::visitsReset);
+    QSignalSpy net(&vm, &SettingsViewModel::networkError);
+    vm.applyResetVisitsResponse(body);
+    QCOMPARE(reset.count(), 1);
+    QCOMPARE(net.count(), 0);
+}
+
+void TestSettingsViewModel::transportFailureStillMeansNetworkError()
+{
+    // Backend unreachable: no status line, no body. The decode seam is never
+    // reached — submit() takes the onNetworkError branch.
+    QVERIFY(!HttpForm::isServerAnswer(/*replyHadError=*/true, 0, QByteArray()));
+    QVERIFY(!HttpForm::isServerAnswer(/*replyHadError=*/true, 0, QByteArray("")));
+}
+
+void TestSettingsViewModel::httpErrorWithNonJsonBodyFailsLoudlyNotSilently()
+{
+    // An HTTP error carrying a non-JSON body (a PHP fatal, an HTML error page)
+    // is still the server answering, so it reaches the decode seam — which
+    // must surface a visible failure rather than doing nothing.
+    const QByteArray html = "<b>Fatal error</b>: something broke";
+    QVERIFY(HttpForm::isServerAnswer(/*replyHadError=*/true, 500, html));
+
+    SettingsViewModel vm;
+    QSignalSpy failed(&vm, &SettingsViewModel::resetFailed);
+    QSignalSpy auth(&vm, &SettingsViewModel::authFailed);
+    QSignalSpy reset(&vm, &SettingsViewModel::visitsReset);
+    vm.applyResetVisitsResponse(html);
+    QCOMPARE(reset.count(), 0);
+    QCOMPARE(auth.count(), 0);
+    QCOMPARE(failed.count(), 1);
+    QCOMPARE(failed.at(0).at(0).toString(), QStringLiteral("Reset failed."));
+    QVERIFY(!vm.busy());   // the busy spinner is always cleared
 }
 
 QTEST_MAIN(TestSettingsViewModel)
