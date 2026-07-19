@@ -1,12 +1,16 @@
 #include <QtTest>
 #include <QSignalSpy>
 #include <QSet>
+#include "AdminSession.h"
 #include "Navigator.h"
 
 class TestNavigator : public QObject
 {
     Q_OBJECT
 private slots:
+    void init() { AdminSession::instance().clear(); }
+    void cleanup() { AdminSession::instance().clear(); }
+
     void defaultsToKiosk();
     void showAdminSwitchesAndSignals();
     void showKioskSwitchesBack();
@@ -15,6 +19,9 @@ private slots:
     void showAdminResetsPageToDashboard();
     void showAdminPageRoutesToSettings();
     void newEnumValuesAreDistinct();
+    void showKioskClearsTheHeldAdminKey();
+    void showKioskClearsEvenWhenAlreadyOnKiosk();
+    void enteringAdminDoesNotClearTheHeldKey();
 };
 
 void TestNavigator::defaultsToKiosk()
@@ -93,6 +100,47 @@ void TestNavigator::newEnumValuesAreDistinct()
     QSet<int> seen{ Navigator::Dashboard, Navigator::Search, Navigator::VisitLogs,
                     Navigator::Database, Navigator::Reporting, Navigator::Settings };
     QCOMPARE(seen.size(), 6);
+}
+
+// Leaving the admin surface ends the admin session. Without this the plaintext
+// admin key sits in the process image for the rest of an unattended kiosk's
+// uptime (crash dumps, swap, debugger attach) — exactly what AdminSession's
+// "RAM ONLY" contract exists to bound. Re-entering admin re-posts the key to
+// admin_login.php, so nothing legitimate depends on it surviving.
+void TestNavigator::showKioskClearsTheHeldAdminKey()
+{
+    Navigator nav;
+    nav.showAdmin();
+    AdminSession::instance().setKey(QStringLiteral("SECRET-1"));
+
+    nav.showKiosk();
+
+    QVERIFY(!AdminSession::instance().hasKey());
+    QVERIFY(AdminSession::instance().key().isEmpty());
+}
+
+// setSurface() is deliberately idempotent, but the clear must NOT be: a
+// redundant "back to kiosk" is still an explicit request to end the session,
+// and hanging the wipe off the surface-changed edge would silently skip it.
+void TestNavigator::showKioskClearsEvenWhenAlreadyOnKiosk()
+{
+    Navigator nav;                                   // starts on Kiosk
+    AdminSession::instance().setKey(QStringLiteral("SECRET-1"));
+
+    nav.showKiosk();
+
+    QVERIFY(!AdminSession::instance().hasKey());
+}
+
+void TestNavigator::enteringAdminDoesNotClearTheHeldKey()
+{
+    Navigator nav;
+    AdminSession::instance().setKey(QStringLiteral("SECRET-1"));
+
+    nav.showAdmin();
+    nav.showAdminPage(Navigator::Settings);
+
+    QCOMPARE(AdminSession::instance().key(), QStringLiteral("SECRET-1"));
 }
 
 QTEST_MAIN(TestNavigator)

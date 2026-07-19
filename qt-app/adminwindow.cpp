@@ -1340,6 +1340,21 @@ void adminWindow::closeEvent(QCloseEvent *event) {
     } else {
         event->accept();
     }
+
+    // The window is only HIDDEN on close (mainwindow.cpp constructs one
+    // adminWindow that lives for the whole app lifetime), so without this the
+    // plaintext admin key stayed in process memory from the first admin login
+    // until the kiosk was rebooted. Closing the admin surface ends the admin
+    // session; the key is re-captured by MainWindow's login gate on the next
+    // entry (setAdminKey), so nothing legitimate depends on it surviving.
+    //
+    // Safe for in-flight requests: every guarded POST above copies m_adminKey
+    // into its QUrlQuery body synchronously before send, so a reply still on
+    // the wire carries its own copy and its finished-lambda never re-reads the
+    // member. That includes the Save branch's onApplyChangesBtnClicked() call
+    // above, which runs to completion before this line.
+    if (event->isAccepted())
+        m_adminKey.clear();
 }
 
 
