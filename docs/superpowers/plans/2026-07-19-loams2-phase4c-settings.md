@@ -2175,7 +2175,8 @@ Rectangle {
     // Reset Manifest (NOT a visit backup): records what was reset. onAccepted
     // asks the VM to write the metadata manifest via serializeCsv (T13).
     FileDialog { id: manifestSaveDialog; fileMode: FileDialog.SaveFile; defaultSuffix: "csv"
-                 currentFile: "Reset_Manifest_" + deptPicker.currentValue + ".csv"
+                 currentFile: "Reset_Manifest_" + deptPicker.currentValue + "_"
+                              + Qt.formatDateTime(new Date(), "yyyyMMdd_HHmmss") + ".csv"
                  onAccepted: if (vm) vm.writeResetManifest(deptPicker.currentValue, selectedFile) }
 }
 ```
