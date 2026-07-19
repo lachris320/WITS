@@ -397,10 +397,13 @@ void TestAdminSession::clearEmptiesAndSignals()
 void TestAdminSession::keyIsNeverPersistedToSettings()
 {
     // AdminSession has no QSettings dependency at all — the key lives only in
-    // the m_key member. This test documents the RAM-only contract: setting a
-    // key then constructing a fresh QSettings scope must not surface it.
+    // the m_key member. Documentary RAM-only check, kept HERMETIC: probe a
+    // throwaway INI scope (never the developer's real MyCompany/MyApp registry,
+    // matching the SettingsViewModel tests' isolation).
     AdminSession::instance().setKey(QStringLiteral("SECRET-1"));
-    QSettings s(QStringLiteral("MyCompany"), QStringLiteral("MyApp"));
+    QTemporaryDir tmp;
+    QVERIFY(tmp.isValid());
+    QSettings s(tmp.path() + QStringLiteral("/probe.ini"), QSettings::IniFormat);
     QVERIFY(!s.allKeys().contains(QStringLiteral("admin/key")));
     QVERIFY(!s.allKeys().contains(QStringLiteral("admin/admin_key")));
 }
@@ -408,7 +411,7 @@ void TestAdminSession::keyIsNeverPersistedToSettings()
 QTEST_MAIN(TestAdminSession)
 #include "tst_adminsession.moc"
 ```
-Add `#include <QSettings>` at the top.
+Add `#include <QSettings>` and `#include <QTemporaryDir>` at the top.
 
 - [ ] **Register the test target.** In `qt-app/quick/CMakeLists.txt`, add after the `tst_navigator` block:
 ```cmake
@@ -529,7 +532,7 @@ void TestKioskViewModel::studentLoginResponseDoesNotCaptureKey()
     QVERIFY(!AdminSession::instance().hasKey());   // student branch never captures
 }
 ```
-Declare both slots in the test class's `private slots:` section. (Match the class name already in `tst_kioskviewmodel.cpp` — verify it is `TestKioskViewModel` and adjust if the file uses a different name.)
+Declare both slots in the test class's `private slots:` section. The test class in `tst_kioskviewmodel.cpp` is `TestKioskViewModel` (confirmed at `tst_kioskviewmodel.cpp:20`) — the slot declarations must land in that exact class.
 
 - [ ] **Run it, expect FAIL** (no `applyLoginResponse` yet → compile error).
 
@@ -790,6 +793,7 @@ and a TestCase:
         function test_tier2ConfirmedEmitsTypedKey() {
             var got = null;
             cd2.confirmed.connect(function(k) { got = k; });
+            cd2.visible = true; waitForRendering(cd2);   // invisible items get no synthesized input
             findChild(cd2, "confirmKeyField").text = "typed-key";
             mouseClick(findChild(cd2, "confirmButton"));
             compare(got, "typed-key");
@@ -797,6 +801,7 @@ and a TestCase:
         function test_tier1ConfirmedEmitsEmptyKey() {
             var got = "sentinel";
             cd1.confirmed.connect(function(k) { got = k; });
+            cd1.visible = true; waitForRendering(cd1);   // invisible items get no synthesized input
             mouseClick(findChild(cd1, "confirmButton"));
             compare(got, "");
         }
@@ -1407,7 +1412,9 @@ git commit -m "feat(loams2): SettingsViewModel.save() + reconcile guest-login ke
 **Files:**
 - Modify: `qt-app/quick/viewmodels/SettingsViewModel.h`, `qt-app/quick/viewmodels/SettingsViewModel.cpp`, `qt-app/quick/tests/tst_settingsviewmodel.cpp`
 
-> `importLogo(path)` calls `SettingsController::importLogo(path)` (copies the file into AppDataLocation, returns the dest path), persists `school/logoPath`, updates `m_cur.logoPath` (so `logoUrl`/`hasLogo`/dirty update), then triggers the live re-theme via `ThemeViewModel::regenerateFromImportedLogo(dest)` (ThemeViewModel.h:65 — this is the Quick-wired path; NOT a BrandingController method). Import failure (bad path / non-image) leaves state unchanged and surfaces a status message.
+> `importLogo(path)` calls `SettingsController::importLogo(path)` (copies the file into AppDataLocation, returns the dest path), persists `school/logoPath`, updates `m_cur.logoPath` (so `logoUrl`/`hasLogo`/dirty update), and emits `logoChanged`. Import failure (bad path / non-image) leaves state unchanged and surfaces a status message.
+>
+> **CRITICAL — the VM does NOT re-theme; that is wired in QML on the Theme singleton's own instance (T14).** `Theme.qml:10` binds every color token to its *private* `readonly property ThemeViewModel _vm: ThemeViewModel {}`. A re-theme only reaches the running UI if **that** instance's `changed()` fires. If the VM constructed its own `ThemeViewModel` and called `regenerateFromImportedLogo` on it, that would update the global `BrandTheme` but never notify `Theme._vm`, so the palette would stay stale while the test went green — a silent no-op of the flagship feature. Therefore the VM only imports+persists; T14 triggers the live re-theme by calling `Theme._vm.regenerateFromImportedLogo(vm.logoPath)` from QML (Auto brand mode; a no-op in Manual mode). There is no existing QML caller of `regenerateFromImportedLogo` — 4c is the first, so this wiring is load-bearing. End-to-end token propagation is proven by the manual GUI smoke in T16 (import a logo → the maroon palette shifts live); the engine step (a saturated logo changes a `BrandTheme` token in Auto mode) is already covered by `tst_themeviewmodel`, and the singleton binding (`Theme.*` reflects `_vm`) by `tst_qml_theme`.
 
 - [ ] **Write the failing test.** The test uses a real generated PNG in the temp dir so `SettingsController::importImageFile` (which does `QImage(path).isNull()`) accepts it:
 ```cpp
@@ -1448,7 +1455,7 @@ Add `#include <QImage>` to the test.
 
 - [ ] **Run it, expect FAIL** (`importLogo` missing).
 
-- [ ] **Implement.** In `SettingsViewModel.h`, add `Q_INVOKABLE void importLogo(const QString &sourcePath);` and a member `class ThemeViewModel *m_theme = nullptr;` (forward-declare `class ThemeViewModel;` at the top). In `SettingsViewModel.cpp`, add `#include "ThemeViewModel.h"`, construct the theme VM in the ctor (`, m_theme(new ThemeViewModel(this))` in the init list — add after `m_nam`), and:
+- [ ] **Implement.** In `SettingsViewModel.h`, add `Q_INVOKABLE void importLogo(const QString &sourcePath);` (NO `ThemeViewModel` member — see the CRITICAL note above; the VM must not own a second instance). In `SettingsViewModel.cpp`:
 ```cpp
 void SettingsViewModel::importLogo(const QString &sourcePath)
 {
@@ -1465,11 +1472,9 @@ void SettingsViewModel::importLogo(const QString &sourcePath)
 
     emit logoChanged();
     recomputeDirty();
-
-    // Live re-theme (spec §4.1): reuse the Quick-wired brand engine path. In
-    // Manual brand mode this is a no-op returning false (brandtheme.cpp) — the
-    // logo still imports; only the palette re-extraction is skipped.
-    m_theme->regenerateFromImportedLogo(dest);
+    // NB: no re-theme here. The live palette re-extraction runs in QML on
+    // Theme._vm (T14) — see the CRITICAL note above for why a VM-owned
+    // ThemeViewModel would not reach the running UI.
 }
 ```
 
@@ -1763,9 +1768,9 @@ git commit -m "feat(loams2): SettingsViewModel load departments via parseDepartm
 **Files:**
 - Modify: `qt-app/quick/viewmodels/SettingsViewModel.h`, `qt-app/quick/viewmodels/SettingsViewModel.cpp`, `qt-app/quick/tests/tst_settingsviewmodel.cpp`
 
-> Two deliverables: (1) a **pure CSV serializer** `serializeCsv(headers, rows)` (RFC-4180-ish quoting), unit-tested standalone; (2) `resetVisits(department, adminKey)` posting `reset_visits.php` with `department` + a **FRESH** `admin_key` (the re-typed key from the tier-2 dialog, NOT the held session key — spec §3.3), guarded by an empty-department check, with the `applyResetVisitsResponse` decode seam.
+> Three deliverables: (1) a **pure CSV serializer** `serializeCsv(headers, rows)` (RFC-4180-ish quoting), unit-tested standalone; (2) `resetVisits(department, adminKey)` posting `reset_visits.php` with `department` + a **FRESH** `admin_key` (the re-typed key from the tier-2 dialog, NOT the held session key — spec §3.3), guarded by an empty-department check, with the `applyResetVisitsResponse` decode seam; (3) `writeResetManifest(department, fileUrl)` — writes the honest **Reset Manifest** (below).
 >
-> **Scope note (export rows):** the pure serializer is 4c's tested deliverable; wiring a live fetch of the department's affected visit rows is deferred (4c pins no visits-by-department fetch endpoint). The T14 screen serializes the header + department manifest it has on hand and offers "Export CSV" before Reset; a full affected-row export rides on 4a's data layer. State this in the screen, don't fake a row fetch here.
+> **Reset Manifest — NOT a visit backup (owner decision 2026-07-19).** 4c has no visits-by-department fetch, so it must NOT fabricate a partial backup and present it as one. The manifest records only what 4c genuinely has: the *operation metadata* — Department, Reset timestamp, Operator (the configured `admin/name`), and a "Reset requested" confirmation. It is named `Reset_Manifest_<Department>_<Timestamp>.csv`, and both the UI copy (T14) and this file state the limitation. The **visit count** and the **full pre-reset visit-row export** are deferred to **Phase 4a**, when the visit-fetch path exists — 4a replaces/extends this manifest with the real export. Do NOT label the file "export" or "backup," and do NOT fake a row fetch here.
 
 - [ ] **Write the failing test.** Add slots + bodies:
 ```cpp
@@ -1773,6 +1778,7 @@ git commit -m "feat(loams2): SettingsViewModel load departments via parseDepartm
     void resetVisitsEmptyDepartmentIsGuarded();
     void resetVisitsSuccessEmitsReset();
     void resetVisitsAuthFailureEmitsAuthFailed();
+    void writeResetManifestContainsMetadataNotBackup();
 ```
 ```cpp
 void TestSettingsViewModel::serializeCsvQuotesSpecialCells()
@@ -1816,7 +1822,26 @@ void TestSettingsViewModel::resetVisitsAuthFailureEmitsAuthFailed()
     vm.applyResetVisitsResponse(R"({"status":"error","message":"Invalid admin key"})");
     QCOMPARE(auth.count(), 1);
 }
+
+void TestSettingsViewModel::writeResetManifestContainsMetadataNotBackup()
+{
+    SettingsViewModel vm;
+    vm.load();
+    vm.setProperty("adminName", QStringLiteral("Jane Librarian"));   // Operator
+    const QString path = m_tmp.path() + QStringLiteral("/manifest.csv");
+    QVERIFY(vm.writeResetManifest(QStringLiteral("CE"), QUrl::fromLocalFile(path)));
+
+    QFile f(path);
+    QVERIFY(f.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QString csv = QString::fromUtf8(f.readAll());
+    QVERIFY(csv.contains(QStringLiteral("Department")));
+    QVERIFY(csv.contains(QStringLiteral("CE")));               // the reset department
+    QVERIFY(csv.contains(QStringLiteral("Jane Librarian")));   // Operator
+    QVERIFY(csv.contains(QStringLiteral("Reset requested")));
+    QVERIFY(!csv.contains(QStringLiteral("Backup")));          // never labeled a backup
+}
 ```
+Add `#include <QFile>`, `#include <QUrl>` to the test if not present.
 
 - [ ] **Run it, expect FAIL.**
 
@@ -1830,6 +1855,10 @@ void TestSettingsViewModel::resetVisitsAuthFailureEmitsAuthFailed()
 
     Q_INVOKABLE void resetVisits(const QString &department, const QString &adminKey);
     void applyResetVisitsResponse(const QByteArray &json);
+
+    // Reset Manifest — operation metadata only, NOT a visit backup (owner
+    // decision 2026-07-19). Full pre-reset row export lands in Phase 4a.
+    Q_INVOKABLE bool writeResetManifest(const QString &department, const QUrl &fileUrl);
 ```
 and signals:
 ```cpp
@@ -1892,7 +1921,31 @@ void SettingsViewModel::resetVisits(const QString &department, const QString &ad
         [this](const QByteArray &body) { applyResetVisitsResponse(body); },
         [this]() { setBusy(false); emit networkError(); });
 }
+
+bool SettingsViewModel::writeResetManifest(const QString &department, const QUrl &fileUrl)
+{
+    // Operation metadata only — 4c has no visits-by-department fetch, so we do
+    // NOT fabricate a partial backup. The count + full row export land in 4a.
+    const QStringList headers{ QStringLiteral("Field"), QStringLiteral("Value") };
+    const QList<QStringList> rows{
+        { QStringLiteral("Document"),        QStringLiteral("Visit Reset Manifest") },
+        { QStringLiteral("Department"),      department },
+        { QStringLiteral("Reset timestamp"), QDateTime::currentDateTime().toString(Qt::ISODate) },
+        { QStringLiteral("Operator"),        m_cur.adminName },
+        { QStringLiteral("Reset requested"), QStringLiteral("yes") },
+        { QStringLiteral("Note"), QStringLiteral("Records what was reset. Full pre-reset visit-row export arrives in Phase 4a.") },
+    };
+    const QString csv = serializeCsv(headers, rows);
+    const QString path = fileUrl.isLocalFile() ? fileUrl.toLocalFile() : fileUrl.toString();
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate))
+        return false;
+    f.write(csv.toUtf8());
+    f.close();
+    return true;
+}
 ```
+Add `#include <QDateTime>`, `#include <QFile>`, `#include <QUrl>` to `SettingsViewModel.cpp` if not already present.
 
 - [ ] **Build + run, expect PASS:**
 ```
@@ -1932,7 +1985,9 @@ Rectangle {
     property var vm
     color: Theme.appBackground
 
-    Component.onCompleted: if (vm && vm.loadDepartments) vm.loadDepartments()
+    // NB: no Component.onCompleted network call here — loadDepartments() is
+    // gated by AdminScreen's Loader.onLoaded (see the swap-placeholder step
+    // below) so QuickTests with a stub vm stay network-free.
 
     Flickable {
         anchors.fill: parent
@@ -2055,7 +2110,7 @@ Rectangle {
                     spacing: Theme.spacing.md
                     Text { text: qsTr("Reset Visits"); color: Theme.error
                            font.family: Theme.typography.sans; font.pixelSize: Theme.typography.cardTitle }
-                    Text { text: qsTr("Permanently deletes the selected department's visit history. Export first.")
+                    Text { text: qsTr("Permanently deletes the selected department's visit history and cannot be undone. Download the Reset Manifest first — it records what was reset (department, time, operator). The full pre-reset visit-row export arrives in Phase 4a when the visit-fetch path exists.")
                            color: Theme.mutedText; wrapMode: Text.WordWrap; Layout.fillWidth: true
                            font.family: Theme.typography.sans; font.pixelSize: Theme.typography.body }
                     LComboBox { id: deptPicker; objectName: "resetDeptPicker"; Layout.fillWidth: true
@@ -2063,9 +2118,10 @@ Rectangle {
                                 model: vm ? vm.departments : [] }
                     RowLayout {
                         spacing: Theme.spacing.md
-                        LButton { objectName: "exportCsvButton"; variant: "Outline"
-                                  text: qsTr("Export CSV")
-                                  onClicked: csvSaveDialog.open() }
+                        LButton { objectName: "manifestButton"; variant: "Outline"
+                                  text: qsTr("Download Reset Manifest")
+                                  enabled: deptPicker.currentValue.length > 0
+                                  onClicked: manifestSaveDialog.open() }
                         LButton { objectName: "resetVisitsButton"; variant: "Danger"
                                   text: qsTr("Reset Visits…")
                                   enabled: deptPicker.currentValue.length > 0
@@ -2108,8 +2164,19 @@ Rectangle {
     // here as stubs so the screen is self-contained. QuickTests never open
     // native dialogs — they drive the VM directly (T15).
     FileDialog { id: logoDialog; nameFilters: ["Images (*.png *.jpg *.jpeg *.gif)"]
-                 onAccepted: if (vm) vm.importLogo(selectedFile) }
-    FileDialog { id: csvSaveDialog; fileMode: FileDialog.SaveFile; defaultSuffix: "csv" }
+                 onAccepted: {
+                     if (!vm) return;
+                     vm.importLogo(selectedFile);
+                     // Live re-theme on the SAME instance Theme.qml binds to
+                     // (Theme._vm) — NOT a VM-owned ThemeViewModel. See Task 9's
+                     // CRITICAL note. Auto brand mode only; no-op in Manual.
+                     if (vm.hasLogo) Theme._vm.regenerateFromImportedLogo(vm.logoPath);
+                 } }
+    // Reset Manifest (NOT a visit backup): records what was reset. onAccepted
+    // asks the VM to write the metadata manifest via serializeCsv (T13).
+    FileDialog { id: manifestSaveDialog; fileMode: FileDialog.SaveFile; defaultSuffix: "csv"
+                 currentFile: "Reset_Manifest_" + deptPicker.currentValue + ".csv"
+                 onAccepted: if (vm) vm.writeResetManifest(deptPicker.currentValue, selectedFile) }
 }
 ```
 > `FileDialog` is in `QtQuick.Dialogs` — add `import QtQuick.Dialogs` at the top. If the offscreen QuickTest platform cannot construct `FileDialog`, wrap the two dialogs in a `Loader` gated by a `property bool nativeDialogs: true` that T15 sets false, OR move the dialogs behind `Qt.createComponent`. Verify at T15's first run; the simplest fix if it fails is to guard construction with `active: screen.nativeDialogs`.
@@ -2122,7 +2189,7 @@ and change the settings Component to:
 ```qml
     Component { id: settingsComponent; SettingsScreen { objectName: "settingsPage"; vm: settingsVm } }
 ```
-and the pageLoader switch case to `case Navigator.Settings: return settingsComponent;`. Also gate the initial load: `SettingsScreen`'s `Component.onCompleted` calls `vm.loadDepartments()` which hits the network — respect `AdminScreen.autoLoad` by adding to the Loader.onLoaded (already there) OR guard in the screen. Simplest: in `SettingsScreen.qml` change the completion hook to `Component.onCompleted: if (vm && vm.loadDepartments && (screen.parent === undefined || true)) ...` — instead, follow the established pattern: remove the screen's own onCompleted network call and let `AdminScreen`'s `Loader.onLoaded` gate it. Since `loadDepartments` ≠ `refresh`, add a one-line hook in AdminScreen's `onLoaded`:
+and the pageLoader switch case to `case Navigator.Settings: return settingsComponent;`. Gate the initial department load through `AdminScreen`'s existing `Loader.onLoaded` (the established pattern — the screen deliberately has NO `Component.onCompleted` network call, so QuickTests with a stub vm stay network-free). Since `loadDepartments` ≠ `refresh`, add the one extra guarded line:
 ```qml
                 onLoaded: {
                     if (admin.autoLoad && item && item.vm && item.vm.refresh)
@@ -2131,7 +2198,6 @@ and the pageLoader switch case to `case Navigator.Settings: return settingsCompo
                         item.vm.loadDepartments()
                 }
 ```
-and delete the `Component.onCompleted: if (vm && vm.loadDepartments) vm.loadDepartments()` line from `SettingsScreen.qml` so tests stay network-free.
 
 - [ ] **Build, expect clean compile** (no test yet — T15 adds it):
 ```
@@ -2319,7 +2385,7 @@ Expected: at least 33 targets (32 floor + `tst_adminsession`; `tst_settingsviewm
 
 - [ ] **Manual GUI smoke (record, don't automate).** This is a desktop GUI app — a clean build is necessary but not sufficient (project rule §4). Run the `WITS` (or `WITSQuick`) executable and, against a **SYNTHETIC** test database (no real student PII):
   - Enter the admin key at the kiosk → land on the admin surface; open Settings.
-  - Change the school name, import a logo (confirm the live re-theme), Save; reopen and confirm persistence.
+  - Change the school name, import a logo, Save; reopen and confirm persistence. **Confirm the live re-theme actually re-colors the UI** — the brand/maroon palette (sidebar, buttons) shifts to the logo's colors, not just the logo image swapping (this is the T9/T14 `Theme._vm` wiring; in Manual brand mode the palette stays and only the image changes, which is expected).
   - Toggle guest login off, Save; return to the kiosk and confirm the guest button is gone (proves the `kiosk/guestEnabled` mirror from T8).
   - Reset a fake department's visits via the tier-2 dialog (re-type the key) and confirm the history clears.
   Note the outcome in the PR description.
