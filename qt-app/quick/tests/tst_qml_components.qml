@@ -100,6 +100,8 @@ Item {
     LDialog    { id: dg; title: "T" }
     LTextField { id: tf; label: "School Name"; text: "Acme" }
     LTextField { id: pf; label: "Admin Key"; isPassword: true; text: "secret" }
+    LConfirmDialog { id: cd1; tier: 1; title: "Confirm"; message: "Proceed?" }
+    LConfirmDialog { id: cd2; tier: 2; title: "Reset Visits"; message: "Deletes history."; confirmText: "Reset" }
     LStatTile  { id: st; label: "L"; value: "1" }
     ListModel {
         id: barsFixture
@@ -623,6 +625,66 @@ Item {
             var input = findChild(tf, "fieldInput");
             input.text = "New Value";
             compare(tf.text, "New Value");
+        }
+    }
+
+    TestCase {
+        name: "LConfirmDialogTiers"
+        when: windowShown
+        function init() {
+            cd1.visible = false; cd1.busy = false;
+            cd2.visible = false; cd2.busy = false;
+            var keyField = findChild(cd2, "confirmKeyField");
+            if (keyField) keyField.text = "";
+        }
+
+        function test_tier1HasNoKeyField() {
+            compare(findChild(cd1, "confirmKeyField"), null);
+        }
+        function test_tier2HasKeyField() {
+            verify(findChild(cd2, "confirmKeyField") !== null);
+        }
+        function test_tier1ConfirmEnabledByDefault() {
+            var btn = findChild(cd1, "confirmButton");
+            verify(btn !== null);
+            compare(btn.enabled, true);
+        }
+        function test_tier2ConfirmDisabledUntilKeyEntered() {
+            var btn = findChild(cd2, "confirmButton");
+            compare(btn.enabled, false);            // key empty
+            findChild(cd2, "confirmKeyField").text = "mykey";
+            compare(btn.enabled, true);
+        }
+        function test_busyDisablesConfirmBothTiers() {
+            var b1 = findChild(cd1, "confirmButton");
+            cd1.busy = true;
+            compare(b1.enabled, false);
+            var b2 = findChild(cd2, "confirmButton");
+            findChild(cd2, "confirmKeyField").text = "mykey";
+            cd2.busy = true;
+            compare(b2.enabled, false);             // in-flight blocks even with a key
+        }
+        function test_tier2ConfirmedEmitsTypedKey() {
+            var got = null;
+            cd2.confirmed.connect(function(k) { got = k; });
+            cd2.visible = true; waitForRendering(cd2);   // invisible items get no synthesized input
+            findChild(cd2, "confirmKeyField").text = "typed-key";
+            mouseClick(findChild(cd2, "confirmButton"));
+            compare(got, "typed-key");
+        }
+        function test_tier1ConfirmedEmitsEmptyKey() {
+            var got = "sentinel";
+            cd1.confirmed.connect(function(k) { got = k; });
+            cd1.visible = true; waitForRendering(cd1);   // invisible items get no synthesized input
+            mouseClick(findChild(cd1, "confirmButton"));
+            compare(got, "");
+        }
+        function test_cancelHidesAndEmitsCancelled() {
+            cd1.visible = true;
+            var cancelled = 0;
+            cd1.cancelled.connect(function() { cancelled++; });
+            mouseClick(findChild(cd1, "cancelButton"));
+            compare(cancelled, 1);
         }
     }
 }

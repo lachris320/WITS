@@ -62,6 +62,7 @@ qt_add_qml_module(witsquickmodule
         qml/components/LEyebrow.qml
         qml/components/LKioskGradient.qml
         qml/components/LSidebarBrand.qml
+        qml/components/LConfirmDialog.qml
         qml/kiosk/GuestDialog.qml
     SOURCES
         HttpForm.h HttpForm.cpp
