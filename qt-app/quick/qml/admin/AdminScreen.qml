@@ -26,6 +26,7 @@ Rectangle {
     DashboardViewModel { id: dashboardVm }
     SearchViewModel    { id: searchVm }
     VisitLogsViewModel { id: visitLogsVm }
+    SettingsViewModel  { id: settingsVm }
 
     // Read-only school identity (logo + name) for the sidebar brand block.
     // Reads QSettings once at construction (see SchoolInfoViewModel.cpp) —
@@ -148,15 +149,27 @@ Rectangle {
                     case Navigator.VisitLogs: return visitLogsComponent;
                     case Navigator.Database:  return databaseComponent;
                     case Navigator.Reporting: return reportingComponent;
-                    case Navigator.Settings:  return settingsPlaceholderComponent;
+                    case Navigator.Settings:  return settingsComponent;
                     default:                  return dashboardComponent;
                     }
                 }
                 // Fetch once when a page is shown (spec §5.1 "fetch on
                 // navigation"). Each of the three VMs exposes Q_INVOKABLE
                 // refresh(); gated by autoLoad so tests can suppress network.
-                onLoaded: if (admin.autoLoad && item && item.vm && item.vm.refresh)
-                              item.vm.refresh()
+                // Settings has no refresh(): it reads QSettings via load() and
+                // fetches the reset-visits department list via loadDepartments().
+                // Each call is feature-detected, so a screen (or a QuickTest
+                // stub VM) that lacks the method is simply skipped — the
+                // screens themselves deliberately have no Component.onCompleted
+                // fetch, which is what keeps stub-driven QuickTests offline.
+                onLoaded: {
+                    if (admin.autoLoad && item && item.vm && item.vm.refresh)
+                        item.vm.refresh()
+                    if (admin.autoLoad && item && item.vm && item.vm.load)
+                        item.vm.load()
+                    if (admin.autoLoad && item && item.vm && item.vm.loadDepartments)
+                        item.vm.loadDepartments()
+                }
             }
         }
     }
@@ -166,11 +179,5 @@ Rectangle {
     Component { id: visitLogsComponent; VisitLogsScreen { objectName: "visitLogsPage"; vm: visitLogsVm } }
     Component { id: databaseComponent;  DatabaseScreen  { objectName: "databasePage" } }
     Component { id: reportingComponent; ReportingScreen { objectName: "reportingPage" } }
-    // Settings gets its own inline placeholder so the route is observable now;
-    // Task 14 replaces this with the real SettingsScreen.
-    Component { id: settingsPlaceholderComponent;
-                Rectangle { objectName: "settingsPage"; color: Theme.appBackground
-                            Text { anchors.centerIn: parent; text: qsTr("Settings — coming soon")
-                                   color: Theme.mutedText; font.family: Theme.typography.sans
-                                   font.pixelSize: Theme.typography.cardTitle } } }
+    Component { id: settingsComponent;  SettingsScreen  { objectName: "settingsPage";  vm: settingsVm } }
 }
