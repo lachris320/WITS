@@ -57,6 +57,7 @@ qt_add_qml_module(witsquickmodule
         qml/components/LStatTile.qml
         qml/components/LBarChart.qml
         qml/components/LPageHeader.qml
+        qml/components/LTextField.qml
         qml/components/LPulseDot.qml
         qml/components/LEyebrow.qml
         qml/components/LKioskGradient.qml

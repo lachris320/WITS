@@ -98,6 +98,8 @@ Item {
     }
     LToast     { id: to; message: "hi" }
     LDialog    { id: dg; title: "T" }
+    LTextField { id: tf; label: "School Name"; text: "Acme" }
+    LTextField { id: pf; label: "Admin Key"; isPassword: true; text: "secret" }
     LStatTile  { id: st; label: "L"; value: "1" }
     ListModel {
         id: barsFixture
@@ -580,6 +582,47 @@ Item {
             tryCompare(image, "status", Image.Ready, 5000);
             tryCompare(canvas, "visible", true, 5000);
             compare(placeholder.visible, false);
+        }
+    }
+
+    TestCase {
+        name: "LTextFieldBehavior"
+        when: windowShown
+        // test_editingRoundTripsToTextProperty mutates the shared `tf`
+        // fixture's text; TestCase runs test_ functions in alphabetical
+        // order (not declaration order — see LTableRendersRows/
+        // LBarChartRenders above for the same pattern), so
+        // "test_editingRoundTripsToTextProperty" runs before
+        // "test_labelAndTextExposed" and would leak "New Value" into it
+        // without this reset.
+        function init() {
+            tf.text = "Acme";
+        }
+        function test_labelAndTextExposed() {
+            verify(tf !== null);
+            compare(tf.label, "School Name");
+            compare(tf.text, "Acme");
+        }
+        function test_bindsThemeTokensNotLiterals() {
+            // Text color must be the Theme token, proving no raw hex leaked in.
+            var input = findChild(tf, "fieldInput");
+            verify(input !== null);
+            compare(input.color, Theme.text);
+        }
+        function test_passwordModeMasksInput() {
+            var input = findChild(pf, "fieldInput");
+            verify(input !== null);
+            compare(input.echoMode, TextInput.Password);
+        }
+        function test_defaultModeShowsPlainText() {
+            var input = findChild(tf, "fieldInput");
+            compare(input.echoMode, TextInput.Normal);
+        }
+        function test_editingRoundTripsToTextProperty() {
+            tf.text = "";
+            var input = findChild(tf, "fieldInput");
+            input.text = "New Value";
+            compare(tf.text, "New Value");
         }
     }
 }
