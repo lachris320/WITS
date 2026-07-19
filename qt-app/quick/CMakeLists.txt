@@ -65,6 +65,7 @@ qt_add_qml_module(witsquickmodule
     SOURCES
         HttpForm.h HttpForm.cpp
         Initials.h Initials.cpp
+        AdminSession.h AdminSession.cpp
         RfidQuickFilter.h RfidQuickFilter.cpp
         viewmodels/ThemeViewModel.h viewmodels/ThemeViewModel.cpp
         viewmodels/Navigator.h viewmodels/Navigator.cpp
@@ -158,6 +159,13 @@ wits_add_qttest(tst_qml_theme
 wits_add_qttest(tst_navigator
     SOURCES tests/tst_navigator.cpp
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Qml
+    OFFSCREEN)
+
+# --- AdminSession unit test (C++ QtTest, offscreen: house consistency —
+# witsquickmodule PUBLIC-propagates Qt::Gui). ---
+wits_add_qttest(tst_adminsession
+    SOURCES tests/tst_adminsession.cpp
+    LIBS witsquickmodule
     OFFSCREEN)
 
 # --- KioskViewModel + RecentLoginsModel unit test (C++ QtTest, offscreen) ---
