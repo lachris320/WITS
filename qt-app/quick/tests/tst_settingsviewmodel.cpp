@@ -1,0 +1,82 @@
+#include <QtTest>
+#include <QSignalSpy>
+#include <QSettings>
+#include <QStandardPaths>
+#include <QTemporaryDir>
+#include "SettingsViewModel.h"
+
+class TestSettingsViewModel : public QObject
+{
+    Q_OBJECT
+    QTemporaryDir m_tmp;
+private slots:
+    void initTestCase()
+    {
+        QVERIFY(m_tmp.isValid());
+        QStandardPaths::setTestModeEnabled(true);
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_tmp.path());
+    }
+    void init()
+    {
+        // Seed a known baseline in the redirected QSettings before each test.
+        QSettings s(QStringLiteral("MyCompany"), QStringLiteral("MyApp"));
+        s.clear();
+        s.setValue(QStringLiteral("school/name"), QStringLiteral("Acme Library"));
+        s.setValue(QStringLiteral("school/address"), QStringLiteral("123 Main St"));
+        s.setValue(QStringLiteral("admin/name"), QStringLiteral("J. Rizal"));
+        s.setValue(QStringLiteral("admin/position"), QStringLiteral("Head Librarian"));
+        s.setValue(QStringLiteral("library/openHour"), 8);
+        s.setValue(QStringLiteral("library/closeHour"), 17);
+        s.setValue(QStringLiteral("features/guestLogin"), true);
+        s.sync();
+    }
+
+    void loadPopulatesPropertiesFromSettings();
+    void loadStartsClean();
+    void editingASettingMarksDirtyAndSignals();
+    void resettingToSavedValueClearsDirty();
+};
+
+void TestSettingsViewModel::loadPopulatesPropertiesFromSettings()
+{
+    SettingsViewModel vm;
+    vm.load();
+    QCOMPARE(vm.schoolName(), QStringLiteral("Acme Library"));
+    QCOMPARE(vm.schoolAddress(), QStringLiteral("123 Main St"));
+    QCOMPARE(vm.adminName(), QStringLiteral("J. Rizal"));
+    QCOMPARE(vm.adminPosition(), QStringLiteral("Head Librarian"));
+    QCOMPARE(vm.openHour(), 8);
+    QCOMPARE(vm.closeHour(), 17);
+    QCOMPARE(vm.guestEnabled(), true);
+}
+
+void TestSettingsViewModel::loadStartsClean()
+{
+    SettingsViewModel vm;
+    vm.load();
+    QVERIFY(!vm.dirty());
+}
+
+void TestSettingsViewModel::editingASettingMarksDirtyAndSignals()
+{
+    SettingsViewModel vm;
+    vm.load();
+    QSignalSpy dirtySpy(&vm, &SettingsViewModel::dirtyChanged);
+    vm.setSchoolName(QStringLiteral("New Name"));
+    QVERIFY(vm.dirty());
+    QVERIFY(dirtySpy.count() >= 1);
+}
+
+void TestSettingsViewModel::resettingToSavedValueClearsDirty()
+{
+    SettingsViewModel vm;
+    vm.load();
+    vm.setSchoolName(QStringLiteral("New Name"));
+    QVERIFY(vm.dirty());
+    vm.setSchoolName(QStringLiteral("Acme Library"));   // back to the loaded value
+    QVERIFY(!vm.dirty());
+}
+
+QTEST_MAIN(TestSettingsViewModel)
+#include "tst_settingsviewmodel.moc"

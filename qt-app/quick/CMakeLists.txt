@@ -82,6 +82,7 @@ qt_add_qml_module(witsquickmodule
         viewmodels/VisitLogsViewModel.h viewmodels/VisitLogsViewModel.cpp
         models/SearchResultsModel.h models/SearchResultsModel.cpp
         viewmodels/SearchViewModel.h viewmodels/SearchViewModel.cpp
+        viewmodels/SettingsViewModel.h viewmodels/SettingsViewModel.cpp
 )
 
 target_link_libraries(witsquickmodule PUBLIC
@@ -259,4 +260,11 @@ wits_add_qttest(tst_qml_admin
     LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
          Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
     DEFINES QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
+    OFFSCREEN)
+
+# --- SettingsViewModel unit test (C++ QtTest, offscreen). Uses Network for
+# the async POST paths (T10-T13) and Gui via witsquickmodule propagation. ---
+wits_add_qttest(tst_settingsviewmodel
+    SOURCES tests/tst_settingsviewmodel.cpp
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
     OFFSCREEN)
