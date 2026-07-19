@@ -5,6 +5,7 @@
 #include <QTemporaryDir>
 #include <QImage>
 #include <QFile>
+#include <QFileInfo>
 #include <QUrl>
 #include "SettingsViewModel.h"
 #include "AdminSession.h"
@@ -44,7 +45,10 @@ private slots:
     void saveMirrorsGuestFlagOntoKioskKey();
     void saveClearsDirty();
     void importLogoUpdatesPathAndEmitsLogoChanged();
+    void importLogoAcceptsAFileUrl();
     void importBadPathLeavesLogoUnchanged();
+    void loadKeepsUnsavedEdits();
+    void defaultManifestUrlIsALocalFileNamedForTheDepartment();
     void adminInfoSuccessEmitsSaved();
     void adminInfoErrorEmitsFailedWithMessage();
     void adminInfoAuthFailureEmitsAuthFailed();
@@ -152,7 +156,7 @@ void TestSettingsViewModel::importLogoUpdatesPathAndEmitsLogoChanged()
     SettingsViewModel vm;
     vm.load();
     QSignalSpy logo(&vm, &SettingsViewModel::logoChanged);
-    vm.importLogo(src);
+    vm.importLogo(QUrl::fromLocalFile(src));
 
     QVERIFY(logo.count() >= 1);
     QVERIFY(!vm.logoPath().isEmpty());
@@ -161,13 +165,67 @@ void TestSettingsViewModel::importLogoUpdatesPathAndEmitsLogoChanged()
     QVERIFY(vm.dirty());   // an import is an unsaved change
 }
 
+void TestSettingsViewModel::importLogoAcceptsAFileUrl()
+{
+    // FileDialog hands QML a "file:///C:/..." QUrl. The VM must convert it
+    // itself — the controller bottoms out in QFile::exists()/QFile::copy(),
+    // which fail on a "file://" string.
+    const QString src = m_tmp.path() + QStringLiteral("/url_logo.png");
+    QImage img(2, 2, QImage::Format_ARGB32);
+    img.fill(Qt::red);
+    QVERIFY(img.save(src, "PNG"));
+
+    const QUrl url = QUrl::fromLocalFile(src);
+    QVERIFY(url.toString().startsWith(QStringLiteral("file:///")));
+
+    SettingsViewModel vm;
+    vm.load();
+    vm.importLogo(url);
+    QVERIFY(vm.hasLogo());
+    QVERIFY(!vm.logoPath().startsWith(QStringLiteral("file:")));
+}
+
 void TestSettingsViewModel::importBadPathLeavesLogoUnchanged()
 {
     SettingsViewModel vm;
     vm.load();
     const QString before = vm.logoPath();
-    vm.importLogo(m_tmp.path() + QStringLiteral("/does_not_exist.png"));
+    vm.importLogo(QUrl::fromLocalFile(m_tmp.path() + QStringLiteral("/does_not_exist.png")));
     QCOMPARE(vm.logoPath(), before);   // unchanged
+}
+
+void TestSettingsViewModel::loadKeepsUnsavedEdits()
+{
+    // AdminScreen's Loader destroys/recreates SettingsScreen on every
+    // navigation, so load() re-runs. It must not silently discard edits.
+    SettingsViewModel vm;
+    vm.load();
+    vm.setSchoolName(QStringLiteral("Unsaved Draft"));
+    QVERIFY(vm.dirty());
+
+    vm.load();                                                       // re-entry
+    QCOMPARE(vm.schoolName(), QStringLiteral("Unsaved Draft"));      // survives
+    QVERIFY(vm.dirty());                                             // still dirty
+
+    // A clean form still re-reads the baseline.
+    vm.setSchoolName(QStringLiteral("Acme Library"));
+    QVERIFY(!vm.dirty());
+    vm.load();
+    QCOMPARE(vm.schoolName(), QStringLiteral("Acme Library"));
+}
+
+void TestSettingsViewModel::defaultManifestUrlIsALocalFileNamedForTheDepartment()
+{
+    SettingsViewModel vm;
+    const QUrl url = vm.defaultManifestUrl(QStringLiteral("CE"));
+    QVERIFY(url.isLocalFile());
+    const QString base = QFileInfo(url.toLocalFile()).fileName();
+    QVERIFY(base.startsWith(QStringLiteral("Reset_Manifest_")));
+    QVERIFY(base.contains(QStringLiteral("CE")));
+    QVERIFY(base.endsWith(QStringLiteral(".csv")));
+    // Never a "backup"/"export" — the manifest is operation metadata only.
+    QVERIFY(!base.contains(QStringLiteral("Backup"), Qt::CaseInsensitive));
+    QVERIFY(!base.contains(QStringLiteral("Export"), Qt::CaseInsensitive));
 }
 
 void TestSettingsViewModel::adminInfoSuccessEmitsSaved()

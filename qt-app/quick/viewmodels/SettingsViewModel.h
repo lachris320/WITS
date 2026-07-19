@@ -61,12 +61,22 @@ public:
     void setCloseHour(int v);
     void setGuestEnabled(bool v);
 
+    // Re-reads the persisted baseline. NO-OP while dirty(): AdminScreen's
+    // Loader destroys/recreates SettingsScreen on every navigation, so
+    // re-entering Settings re-runs load() — overwriting m_cur there would
+    // silently discard the user's unsaved edits.
     Q_INVOKABLE void load();
     Q_INVOKABLE void save();
     // NO ThemeViewModel member here — the VM only imports+persists the logo.
     // Live re-theme is wired in QML on Theme's own instance (T14); see the
     // CRITICAL note in the Phase 4c plan, Task 9.
-    Q_INVOKABLE void importLogo(const QString &sourcePath);
+    //
+    // Takes the QUrl that FileDialog hands back rather than a path string: the
+    // url -> path conversion belongs here (QUrl::toLocalFile handles Windows,
+    // POSIX, UNC and percent-encoding) and NOT in hand-rolled QML string
+    // surgery. SettingsController below still needs a filesystem path because
+    // it bottoms out in QFile::exists()/QFile::copy().
+    Q_INVOKABLE void importLogo(const QUrl &sourceUrl);
     Q_INVOKABLE void saveAdminInfo();
     // update_admin_key.php bcrypt-verifies oldKey server-side, so no admin_key
     // field is sent (it is NOT guarded by requireAdminAuth). On success the
@@ -107,6 +117,12 @@ public:
     // Reset Manifest — operation metadata only, NOT a visit backup (owner
     // decision 2026-07-19). Full pre-reset row export lands in Phase 4a.
     Q_INVOKABLE bool writeResetManifest(const QString &department, const QUrl &fileUrl);
+    // Absolute file: URL the save dialog pre-fills with. Built in C++ (and unit
+    // tested) because a bare relative string assigned to FileDialog's url-typed
+    // selectedFile resolves against the component's base URL — which is a
+    // "qrc:" path for this module, so the pre-fill would silently do nothing.
+    // Named "Reset_Manifest_…", never "Backup"/"Export" (owner decision).
+    Q_INVOKABLE QUrl defaultManifestUrl(const QString &department) const;
 
 signals:
     void schoolNameChanged();
@@ -139,6 +155,9 @@ private:
     // Shared auth-failure classification: the two message strings
     // requireAdminAuth (T17) / its guard return on a bad or missing key.
     static bool isAuthFailureMessage(const QString &message);
+    // Single url -> filesystem-path conversion used by every file-taking entry
+    // point, so the "file:///…" / UNC handling lives in exactly one place.
+    static QString localPath(const QUrl &url);
 
     SettingsController m_controller;
     QNetworkAccessManager *m_nam = nullptr;

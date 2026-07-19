@@ -687,6 +687,27 @@ Item {
             mouseClick(findChild(cd1, "cancelButton"));
             compare(cancelled, 1);
         }
+        // The re-typed key is deliberate friction in front of an irreversible
+        // op — it must not survive one use. Reopening must land on a blank
+        // field with Confirm disabled again, for EVERY tier-2 consumer.
+        function test_tier2KeyClearedOnReopenSoConfirmIsDisabledAgain() {
+            var btn = findChild(cd2, "confirmButton");
+            cd2.visible = true; waitForRendering(cd2);
+            findChild(cd2, "confirmKeyField").text = "typed-key";
+            compare(btn.enabled, true);
+            mouseClick(btn);
+
+            cd2.visible = false;
+            cd2.visible = true; waitForRendering(cd2);      // reopen
+            compare(findChild(cd2, "confirmKeyField").text, "");
+            compare(btn.enabled, false);
+        }
+        function test_clearKeyIsCallableByConsumers() {
+            findChild(cd2, "confirmKeyField").text = "typed-key";
+            cd2.clearKey();
+            compare(findChild(cd2, "confirmKeyField").text, "");
+            compare(findChild(cd2, "confirmButton").enabled, false);
+        }
     }
 
     TestCase {

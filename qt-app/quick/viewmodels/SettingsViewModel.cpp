@@ -4,11 +4,14 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QRegularExpression>
 #include <QSettings>
+#include <QStandardPaths>
 #include <QUrl>
 
 #include "AdminSession.h"
@@ -38,6 +41,15 @@ bool SettingsViewModel::hasLogo() const
 
 void SettingsViewModel::load()
 {
+    // Guard the re-entry case: AdminScreen's Loader destroys and recreates
+    // SettingsScreen on every navigation, so load() runs again each time the
+    // admin returns to Settings. Re-reading the baseline over a dirty form
+    // would discard the pending edits (and reset `dirty`) with no warning, so
+    // a dirty form keeps what it has — the baseline is only re-read when
+    // there is nothing to lose. save() clears dirty, which re-arms this.
+    if (m_dirty)
+        return;
+
     m_cur = m_controller.load();
     m_saved = m_cur;
     recomputeDirty();
@@ -68,9 +80,17 @@ void SettingsViewModel::save()
     emit saved();
 }
 
-void SettingsViewModel::importLogo(const QString &sourcePath)
+QString SettingsViewModel::localPath(const QUrl &url)
 {
-    const QString dest = m_controller.importLogo(sourcePath);
+    // isLocalFile() covers "file:///C:/x", "file:///home/x" AND the UNC form
+    // "file://server/share/x"; toLocalFile() also percent-decodes. A bare path
+    // (no scheme) round-trips unchanged through toString().
+    return url.isLocalFile() ? url.toLocalFile() : url.toString();
+}
+
+void SettingsViewModel::importLogo(const QUrl &sourceUrl)
+{
+    const QString dest = m_controller.importLogo(localPath(sourceUrl));
     if (dest.isEmpty()) {
         // SettingsController already emitted importError; surface a status.
         setStatus(QStringLiteral("Could not import logo."));
@@ -242,13 +262,25 @@ bool SettingsViewModel::writeResetManifest(const QString &department, const QUrl
         { QStringLiteral("Note"), QStringLiteral("Records what was reset. Full pre-reset visit-row export arrives in Phase 4a.") },
     };
     const QString csv = serializeCsv(headers, rows);
-    const QString path = fileUrl.isLocalFile() ? fileUrl.toLocalFile() : fileUrl.toString();
-    QFile f(path);
+    QFile f(localPath(fileUrl));
     if (!f.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate))
         return false;
     f.write(csv.toUtf8());
     f.close();
     return true;
+}
+
+QUrl SettingsViewModel::defaultManifestUrl(const QString &department) const
+{
+    QString dir = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    if (dir.isEmpty())
+        dir = QDir::homePath();
+    // A department name reaches us from the backend; keep it filename-safe.
+    QString dept = department.trimmed();
+    dept.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9._-]")), QStringLiteral("_"));
+    const QString name = QStringLiteral("Reset_Manifest_%1_%2.csv")
+        .arg(dept, QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
+    return QUrl::fromLocalFile(QDir(dir).filePath(name));
 }
 
 void SettingsViewModel::recomputeDirty()

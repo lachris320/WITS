@@ -23,6 +23,19 @@ LDialog {
     readonly property bool keyReady: tier !== 2
         || (keyFieldLoader.item !== null && keyFieldLoader.item.text.trim().length > 0)
 
+    // The re-typed key is deliberate friction in front of the most irreversible
+    // operations in the app — so it must NOT survive a single use. Clearing on
+    // every show (and offering clearKey() for the post-confirm path) puts the
+    // safeguard in the component, so every tier-2 consumer inherits it instead
+    // of each screen having to remember. Without this, one reset leaves the key
+    // in the field for the rest of the session and every later confirm opens
+    // with Confirm already enabled.
+    function clearKey() {
+        if (keyFieldLoader.item)
+            keyFieldLoader.item.text = "";
+    }
+    onVisibleChanged: if (visible) root.clearKey()
+
     ColumnLayout {
         width: parent.width
         spacing: Theme.spacing.lg
