@@ -5,10 +5,15 @@ import LOAMS
 Item {
     id: host
     // Tall enough to host DashboardScreen (0..760), SearchScreen (760..1460),
-    // and VisitLogsScreen (1460..2160) side by side without overlap — QTest
-    // mouse synthesis is window-local, and the window tracks this root
-    // item's size.
-    width: 1100; height: 2160
+    // VisitLogsScreen (1460..2160) and SettingsScreen (2160..3760) side by
+    // side without overlap — QTest mouse synthesis is window-local, and the
+    // window tracks this root item's size.
+    //
+    // Geometry ledger (x 0 column):   dash 0..760 | search 760..1460 |
+    //   logs 1460..2160 | settings 2160..3760.
+    // Parked no-vm column (x 2000): vmlessSearch 0..700 |
+    //   vmlessLogs 760..1460 | vmlessSettings 1560..2260.
+    width: 1100; height: 3760
 
     // --- Dashboard stub VM ---
     // maxValue is declared on the stubs because the screen binds
@@ -148,6 +153,91 @@ Item {
     // instance's children to read visible === false too, turning the
     // no-vm fallback assertions into a false pass.
     VisitLogsScreen { id: vmlessLogs; x: 2000; y: 760; width: 1000; height: 700 }
+
+    // --- Settings stub VM ---
+    // Mirrors SettingsViewModel's QML-facing surface as it stands AFTER the
+    // T14 review fixes (commit 231dd3f), not as the plan sketched it:
+    //   * importLogo takes the QUrl FileDialog hands back (not a path string),
+    //   * defaultManifestUrl(dept) exists and openManifestDialog() calls it,
+    //   * writeResetManifest returns bool and the screen consumes it,
+    //   * every outcome signal the screen's Connections block listens on is
+    //     declared here, because a signal that is not declared on the stub
+    //     cannot be emitted from a test — and `ignoreUnknownSignals: true`
+    //     means a missing one fails silently instead of warning.
+    // Deliberately a plain QtObject: instantiating the real SettingsViewModel
+    // here would drag QNetworkAccessManager and QSettings into a QuickTest.
+    QtObject {
+        id: settingsVmStub
+        property string schoolName: "Acme Library"
+        property string schoolAddress: "123 Main St"
+        property string logoPath: ""
+        property url logoUrl: ""
+        property bool hasLogo: false
+        property string adminName: "J. Rizal"
+        property string adminPosition: "Head Librarian"
+        property int openHour: 8
+        property int closeHour: 17
+        property bool guestEnabled: true
+        property bool dirty: false
+        property bool busy: false
+        property var departments: ["CE", "IT", "BA"]
+        property string statusMessage: ""
+
+        // Call counters / captured arguments.
+        property int loadCount: 0
+        property int saveCount: 0
+        property int saveAdminInfoCount: 0
+        property int loadDepartmentsCount: 0
+        property string lastOldKey: ""
+        property string lastNewKey: ""
+        property string lastResetDept: ""
+        property string lastResetKey: ""
+        property string lastManifestDept: ""
+        property url lastImportedLogo: ""
+        property bool manifestWriteResult: true
+
+        signal saved()
+        signal saveFailed(string message)
+        signal adminInfoSaved()
+        signal adminInfoFailed(string message)
+        signal keyChanged()
+        signal keyChangeFailed(string message)
+        signal visitsReset()
+        signal resetFailed(string message)
+        signal authFailed()
+        signal networkError()
+        // The real VM's statusMessage NOTIFY is statusChanged (not the
+        // auto-generated statusMessageChanged), and the screen's Connections
+        // block handles onStatusChanged — so it must be declared explicitly.
+        signal statusChanged()
+
+        function load() { loadCount++ }
+        function save() { saveCount++ }
+        function saveAdminInfo() { saveAdminInfoCount++ }
+        function changeAdminKey(o, n) { lastOldKey = o; lastNewKey = n }
+        function resetVisits(d, k) { lastResetDept = d; lastResetKey = k }
+        function importLogo(u) { lastImportedLogo = u }
+        function loadDepartments() { loadDepartmentsCount++ }
+        function defaultManifestUrl(d) {
+            lastManifestDept = d;
+            return "file:///manifests/Reset_Manifest_" + d + ".csv";
+        }
+        function writeResetManifest(d, u) {
+            lastManifestDept = d;
+            return manifestWriteResult;
+        }
+    }
+    // Own band below logs. Height 1600 (not the plan's 900) because the whole
+    // settings column has to fit INSIDE the screen's clipping Flickable: the
+    // footer Save button is the last item in a ~1340px content column, and a
+    // shorter fixture would scroll it out of the viewport, where mouseClick()
+    // maps to a point no longer over the button. test_fixtureFitsWholeContent
+    // pins that invariant so a future card cannot silently break the clicks.
+    SettingsScreen { id: settings; y: 2160; width: 1100; height: 1600; vm: settingsVmStub }
+
+    // No-vm fallback instance, parked in the right-hand column below
+    // vmlessLogs (which owns y 760..1460) so it can never intercept a click.
+    SettingsScreen { id: vmlessSettings; x: 2000; y: 1560; width: 1000; height: 700 }
 
     TestCase {
         name: "DashboardScreen"
@@ -833,6 +923,318 @@ Item {
             tryCompare(logs, "pageInT", 1, 1000);
             tryCompare(col, "opacity", 1, 1000);
             tryCompare(col.transform[0], "y", 0, 1000);
+        }
+    }
+
+    TestCase {
+        name: "SettingsScreen"
+        when: windowShown
+
+        // Test functions run in alphabetical order and every one of these
+        // mutates shared state (the stub, the three key fields, the tier-2
+        // dialog, the status line), so reset to a known baseline here rather
+        // than relying on declaration order. Leaving the tier-2 dialog open
+        // would be the worst of these: its scrim fills the whole screen and
+        // swallows every click meant for the cards underneath.
+        function init() {
+            settingsVmStub.dirty = false;
+            settingsVmStub.busy = false;
+            settingsVmStub.statusMessage = "";
+            settingsVmStub.manifestWriteResult = true;
+            settingsVmStub.saveCount = 0;
+            settingsVmStub.saveAdminInfoCount = 0;
+            settingsVmStub.lastOldKey = "";
+            settingsVmStub.lastNewKey = "";
+            settingsVmStub.lastResetDept = "";
+            settingsVmStub.lastResetKey = "";
+            settingsVmStub.lastManifestDept = "";
+            settings.statusText = "";
+            settings.statusIsError = false;
+            findChild(settings, "oldKeyField").text = "";
+            findChild(settings, "newKeyField").text = "";
+            findChild(settings, "confirmNewKeyField").text = "";
+            findChild(settings, "resetDeptPicker").selectValue("");
+            var dlg = findChild(settings, "resetConfirmDialog");
+            dlg.visible = false;
+            dlg.clearKey();
+        }
+
+        // Opens the tier-2 dialog for `dept` and returns it, ready to type in.
+        function openResetDialog(dept) {
+            findChild(settings, "resetDeptPicker").selectValue(dept);
+            waitForRendering(settings);
+            mouseClick(findChild(settings, "resetVisitsButton"));
+            var dlg = findChild(settings, "resetConfirmDialog");
+            verify(dlg !== null);
+            compare(dlg.visible, true);
+            return dlg;
+        }
+
+        // --- Fixture invariant ---
+
+        // The screen clips its content (Flickable { clip: true }), so any
+        // control that does not fit the fixture's viewport cannot be clicked
+        // by mouseClick() — it would silently synthesise a press at a point
+        // the control has scrolled away from. Guard the whole band here
+        // instead of debugging a mystery "button didn't fire" later.
+        function test_fixtureFitsWholeContentColumn() {
+            var content = findChild(settings, "settingsContent");
+            verify(content !== null);
+            verify(settings.height >= content.implicitHeight + Theme.spacing.xxl * 2);
+        }
+
+        // --- Footer save gating (dirty + busy) ---
+
+        function test_saveDisabledUntilDirty() {
+            var btn = findChild(settings, "saveButton");
+            verify(btn !== null);
+            compare(btn.enabled, false);
+            settingsVmStub.dirty = true;
+            compare(btn.enabled, true);
+        }
+
+        function test_saveDisabledWhileBusy() {
+            settingsVmStub.dirty = true;
+            settingsVmStub.busy = true;
+            compare(findChild(settings, "saveButton").enabled, false);
+        }
+
+        function test_saveInvokesVmSave() {
+            settingsVmStub.dirty = true;
+            waitForRendering(settings);
+            mouseClick(findChild(settings, "saveButton"));
+            compare(settingsVmStub.saveCount, 1);
+        }
+
+        // A save that reports nothing is indistinguishable from a save that
+        // silently failed — the status line must confirm success too.
+        function test_savedSignalShowsSuccessStatus() {
+            var status = findChild(settings, "settingsStatus");
+            verify(status !== null);
+            compare(status.visible, false);
+            settingsVmStub.saved();
+            compare(status.visible, true);
+            compare(status.text, "Settings saved.");
+            compare(status.color, Theme.success);
+        }
+
+        function test_saveFailedShowsErrorStatus() {
+            var status = findChild(settings, "settingsStatus");
+            settingsVmStub.saveFailed("Disk is read-only.");
+            compare(status.visible, true);
+            compare(status.text, "Disk is read-only.");
+            compare(status.color, Theme.error);
+        }
+
+        // --- Admin info ---
+
+        function test_saveAdminInfoInvokesVm() {
+            waitForRendering(settings);
+            mouseClick(findChild(settings, "saveAdminInfoButton"));
+            compare(settingsVmStub.saveAdminInfoCount, 1);
+        }
+
+        function test_saveAdminInfoDisabledWhileBusy() {
+            settingsVmStub.busy = true;
+            compare(findChild(settings, "saveAdminInfoButton").enabled, false);
+        }
+
+        function test_adminInfoOutcomesReachStatusLine() {
+            var status = findChild(settings, "settingsStatus");
+            settingsVmStub.adminInfoSaved();
+            compare(status.text, "Admin info saved.");
+            settingsVmStub.adminInfoFailed("Server rejected the update.");
+            compare(status.text, "Server rejected the update.");
+            compare(status.color, Theme.error);
+        }
+
+        // --- Change admin key ---
+
+        function test_changeKeyRequiresMatchingConfirmation() {
+            var btn = findChild(settings, "changeKeyButton");
+            verify(btn !== null);
+            compare(btn.enabled, false);                    // both fields empty
+            findChild(settings, "newKeyField").text = "abc";
+            findChild(settings, "confirmNewKeyField").text = "xyz";
+            compare(btn.enabled, false);                    // mismatch
+            findChild(settings, "confirmNewKeyField").text = "abc";
+            compare(btn.enabled, true);
+        }
+
+        function test_changeKeyInvokesVmWithBothKeys() {
+            findChild(settings, "oldKeyField").text = "OLD";
+            findChild(settings, "newKeyField").text = "NEW";
+            findChild(settings, "confirmNewKeyField").text = "NEW";
+            waitForRendering(settings);
+            mouseClick(findChild(settings, "changeKeyButton"));
+            compare(settingsVmStub.lastOldKey, "OLD");
+            compare(settingsVmStub.lastNewKey, "NEW");
+        }
+
+        // The old and new admin keys must not sit in the UI for the rest of
+        // the session once the change has landed.
+        function test_changeKeyFieldsClearedOnKeyChanged() {
+            findChild(settings, "oldKeyField").text = "OLD";
+            findChild(settings, "newKeyField").text = "NEW";
+            findChild(settings, "confirmNewKeyField").text = "NEW";
+            settingsVmStub.keyChanged();
+            compare(findChild(settings, "oldKeyField").text, "");
+            compare(findChild(settings, "newKeyField").text, "");
+            compare(findChild(settings, "confirmNewKeyField").text, "");
+            compare(findChild(settings, "settingsStatus").text, "Admin key changed.");
+        }
+
+        // An empty failure message still has to say something.
+        function test_changeKeyFailureFallsBackToGenericMessage() {
+            var status = findChild(settings, "settingsStatus");
+            settingsVmStub.keyChangeFailed("");
+            compare(status.text, "Could not change the admin key.");
+            compare(status.color, Theme.error);
+        }
+
+        // --- Reset visits: department gating ---
+
+        function test_resetControlsRequireADepartment() {
+            var resetBtn = findChild(settings, "resetVisitsButton");
+            var manifestBtn = findChild(settings, "manifestButton");
+            compare(resetBtn.enabled, false);
+            compare(manifestBtn.enabled, false);
+            findChild(settings, "resetDeptPicker").selectValue("CE");
+            compare(resetBtn.enabled, true);
+            compare(manifestBtn.enabled, true);
+        }
+
+        // --- Reset visits: the tier-2 dialog ---
+
+        function test_resetButtonOpensTier2DialogWithConfirmDisabled() {
+            var dlg = openResetDialog("CE");
+            compare(dlg.tier, 2);
+            var confirmBtn = findChild(dlg, "confirmButton");
+            verify(confirmBtn !== null);
+            // No key typed yet — the re-typed key is the whole point of tier 2.
+            compare(confirmBtn.enabled, false);
+            findChild(dlg, "confirmKeyField").text = "typed";
+            compare(confirmBtn.enabled, true);
+        }
+
+        function test_resetConfirmedSendsDeptAndFreshKey() {
+            var dlg = openResetDialog("IT");
+            findChild(dlg, "confirmKeyField").text = "fresh-key";
+            waitForRendering(settings);
+            mouseClick(findChild(dlg, "confirmButton"));
+            compare(settingsVmStub.lastResetDept, "IT");
+            compare(settingsVmStub.lastResetKey, "fresh-key");
+        }
+
+        function test_resetConfirmDisabledWhileBusy() {
+            var dlg = openResetDialog("CE");
+            findChild(dlg, "confirmKeyField").text = "typed";
+            compare(findChild(dlg, "confirmButton").enabled, true);
+            settingsVmStub.busy = true;
+            compare(findChild(dlg, "confirmButton").enabled, false);
+        }
+
+        // The safeguard a T14 review found broken: the re-typed key is
+        // deliberate friction in front of an irreversible mass delete, so it
+        // must NOT survive a single use. Without the clear-on-show, the second
+        // reset of a session opens with Confirm already enabled and no
+        // re-typing at all.
+        function test_tier2KeyDoesNotSurviveAReopen() {
+            var dlg = openResetDialog("CE");
+            findChild(dlg, "confirmKeyField").text = "first-key";
+            waitForRendering(settings);
+            mouseClick(findChild(dlg, "confirmButton"));
+            compare(settingsVmStub.lastResetKey, "first-key");
+
+            settingsVmStub.visitsReset();           // VM reports success
+            compare(dlg.visible, false);
+
+            waitForRendering(settings);
+            mouseClick(findChild(settings, "resetVisitsButton"));
+            compare(dlg.visible, true);
+            compare(findChild(dlg, "confirmKeyField").text, "");
+            compare(findChild(dlg, "confirmButton").enabled, false);
+        }
+
+        // --- Reset visits: outcome surfacing ---
+
+        function test_visitsResetClosesDialogAndConfirmsDepartment() {
+            var dlg = openResetDialog("BA");
+            settingsVmStub.visitsReset();
+            compare(dlg.visible, false);
+            var status = findChild(settings, "settingsStatus");
+            compare(status.text, "Visits reset for BA.");
+            compare(status.color, Theme.success);
+        }
+
+        // A failed reset used to leave the dialog hanging open with no
+        // explanation, which reads exactly like a no-op.
+        function test_resetFailedClosesDialogAndShowsError() {
+            var dlg = openResetDialog("CE");
+            findChild(dlg, "confirmKeyField").text = "typed";
+            settingsVmStub.resetFailed("Department not found.");
+            compare(dlg.visible, false);
+            var status = findChild(settings, "settingsStatus");
+            compare(status.visible, true);
+            compare(status.text, "Department not found.");
+            compare(status.color, Theme.error);
+            compare(findChild(dlg, "confirmKeyField").text, "");
+        }
+
+        function test_resetFailedWithEmptyMessageFallsBack() {
+            openResetDialog("CE");
+            settingsVmStub.resetFailed("");
+            compare(findChild(settings, "settingsStatus").text, "Reset failed.");
+        }
+
+        function test_authFailedClosesDialogAndShowsError() {
+            var dlg = openResetDialog("CE");
+            findChild(dlg, "confirmKeyField").text = "wrong";
+            settingsVmStub.authFailed();
+            compare(dlg.visible, false);
+            var status = findChild(settings, "settingsStatus");
+            compare(status.visible, true);
+            compare(status.text, "Admin key rejected. Please sign in again.");
+            compare(status.color, Theme.error);
+            compare(findChild(dlg, "confirmKeyField").text, "");
+        }
+
+        function test_networkErrorClosesDialogAndShowsError() {
+            var dlg = openResetDialog("CE");
+            findChild(dlg, "confirmKeyField").text = "typed";
+            settingsVmStub.networkError();
+            compare(dlg.visible, false);
+            var status = findChild(settings, "settingsStatus");
+            compare(status.visible, true);
+            compare(status.text, "Could not reach the server. Check the connection and try again.");
+            compare(findChild(dlg, "confirmKeyField").text, "");
+        }
+
+        // statusMessage carries the VM-side failures with no dedicated signal
+        // (currently the logo import) — its NOTIFY is statusChanged.
+        function test_vmStatusMessageSurfacesAsError() {
+            var status = findChild(settings, "settingsStatus");
+            settingsVmStub.statusMessage = "Could not copy the logo file.";
+            settingsVmStub.statusChanged();
+            compare(status.visible, true);
+            compare(status.text, "Could not copy the logo file.");
+            compare(status.color, Theme.error);
+        }
+
+        // --- No-vm fallback path ---
+
+        function test_undefinedVmRendersFallbacksWithoutError() {
+            // Every action gate must fail closed with nothing to act on.
+            compare(findChild(vmlessSettings, "saveButton").enabled, false);
+            compare(findChild(vmlessSettings, "saveAdminInfoButton").enabled, false);
+            compare(findChild(vmlessSettings, "changeKeyButton").enabled, false);
+            compare(findChild(vmlessSettings, "resetVisitsButton").enabled, false);
+            compare(findChild(vmlessSettings, "manifestButton").enabled, false);
+            // No vm means no outcome to report, and no tier-2 dialog on screen.
+            compare(findChild(vmlessSettings, "settingsStatus").visible, false);
+            compare(findChild(vmlessSettings, "resetConfirmDialog").visible, false);
+            // The logo slot must not latch on with no vm to supply one.
+            compare(findChild(vmlessSettings, "logoPreview").visible, false);
         }
     }
 }
