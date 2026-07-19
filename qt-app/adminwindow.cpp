@@ -64,6 +64,27 @@
 #include <QtCharts/QLineSeries>
 #include <QtCharts/QValueAxis>
 
+namespace {
+
+// Mirrors the shared contract documented on HttpForm::isServerAnswer()
+// (qt-app/quick/HttpForm.h). Deliberately duplicated here rather than linked:
+// this legacy Widgets app is the rollback path for the Qt Quick UI, so it must
+// not take a link dependency on the very module it rolls back from.
+//
+// The useful question is not "did reply->error() get set" but "did the server
+// answer at all". requireAdminAuth() answers a bad admin key with HTTP 401 plus
+// {"status":"error","message":"..."} — Qt reports that as ContentAccessDenied,
+// yet the body is exactly what the admin needs to see. Returns false only for a
+// genuine transport failure (no status line, or a status with an empty body).
+bool isServerAnswer(bool replyHadError, int httpStatus, const QByteArray &body)
+{
+    if (!replyHadError)
+        return true;
+    return httpStatus > 0 && !body.isEmpty();
+}
+
+} // namespace
+
 void adminWindow::setActiveSidebar(QPushButton* activeBtn){
     QList<QPushButton*> buttons = {
         ui->generalBtn,
@@ -604,20 +625,29 @@ adminWindow::adminWindow(QWidget *parent)
         QNetworkReply *reply = networkManager->post(request, postData.toString(QUrl::FullyEncoded).toUtf8());
 
         connect(reply, &QNetworkReply::finished, this, [=]() {
-            if (reply->error() != QNetworkReply::NoError) {
-                QMessageBox::critical(this, "Error", reply->errorString());
-                reply->deleteLater();
+            const QByteArray resp = reply->readAll();
+            const bool replyHadError = reply->error() != QNetworkReply::NoError;
+            const int httpStatus = reply->attribute(
+                QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const QString transportError = reply->errorString();
+            reply->deleteLater();
+
+            // A 401 from requireAdminAuth is the server answering, not a
+            // transport failure: show its message, not "Content Access Denied".
+            if (!isServerAnswer(replyHadError, httpStatus, resp)) {
+                QMessageBox::critical(this, "Error", transportError);
                 return;
             }
-
-            QByteArray resp = reply->readAll();
-            reply->deleteLater();
 
             QJsonDocument doc = QJsonDocument::fromJson(resp);
             if (doc.isObject() && doc["status"].toString() == "success") {
                 QMessageBox::information(this, "Success", doc["message"].toString());
             } else {
-                QMessageBox::warning(this, "Failed", doc["message"].toString());
+                const QString message = doc.isObject() ? doc["message"].toString() : QString();
+                QMessageBox::warning(this, "Failed",
+                                     message.isEmpty()
+                                         ? QStringLiteral("The server rejected the request.")
+                                         : message);
             }
         });
     });
