@@ -90,6 +90,24 @@ public:
     // degrades to an empty QStringList on error/empty (picker placeholder).
     void applyDepartmentsResponse(const QByteArray &json);
 
+    // Pure, network-free CSV serializer (export-before-destroy). RFC-4180-ish:
+    // CRLF line endings; a cell is quoted iff it contains a comma, quote, CR,
+    // or LF; embedded quotes are doubled. Unit-tested standalone.
+    static QString serializeCsv(const QStringList &headers,
+                                const QList<QStringList> &rows);
+
+    // Tier-2 destructive op (spec §3.3): zeroes students.visits AND permanently
+    // DELETEs library_visits rows for department on the backend. adminKey MUST
+    // be the freshly re-typed key from the tier-2 confirmation dialog, NOT the
+    // held AdminSession key — the re-typing is deliberate extra friction in
+    // front of the most irreversible action in Phase 4c.
+    Q_INVOKABLE void resetVisits(const QString &department, const QString &adminKey);
+    void applyResetVisitsResponse(const QByteArray &json);
+
+    // Reset Manifest — operation metadata only, NOT a visit backup (owner
+    // decision 2026-07-19). Full pre-reset row export lands in Phase 4a.
+    Q_INVOKABLE bool writeResetManifest(const QString &department, const QUrl &fileUrl);
+
 signals:
     void schoolNameChanged();
     void schoolAddressChanged();
@@ -111,6 +129,8 @@ signals:
     void keyChangeFailed(const QString &message);
     void authFailed();
     void networkError();
+    void visitsReset();
+    void resetFailed(const QString &message);
 
 private:
     void recomputeDirty();

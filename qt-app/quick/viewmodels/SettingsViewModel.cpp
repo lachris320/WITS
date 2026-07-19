@@ -3,10 +3,13 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QDateTime>
+#include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSettings>
+#include <QUrl>
 
 #include "AdminSession.h"
 #include "HttpForm.h"
@@ -168,6 +171,84 @@ void SettingsViewModel::loadDepartments()
         if (netErr) { emit networkError(); return; }
         applyDepartmentsResponse(body);
     });
+}
+
+QString SettingsViewModel::serializeCsv(const QStringList &headers,
+                                        const QList<QStringList> &rows)
+{
+    auto cell = [](const QString &v) -> QString {
+        const bool needsQuote = v.contains(QLatin1Char(',')) || v.contains(QLatin1Char('"'))
+                             || v.contains(QLatin1Char('\n')) || v.contains(QLatin1Char('\r'));
+        if (!needsQuote)
+            return v;
+        QString q = v;
+        q.replace(QLatin1Char('"'), QLatin1String("\"\""));
+        return QLatin1Char('"') + q + QLatin1Char('"');
+    };
+    auto line = [&cell](const QStringList &cells) -> QString {
+        QStringList out;
+        out.reserve(cells.size());
+        for (const QString &c : cells) out << cell(c);
+        return out.join(QLatin1Char(',')) + QLatin1String("\r\n");
+    };
+    QString csv = line(headers);
+    for (const QStringList &r : rows) csv += line(r);
+    return csv;
+}
+
+void SettingsViewModel::applyResetVisitsResponse(const QByteArray &json)
+{
+    setBusy(false);
+    const QJsonObject obj = QJsonDocument::fromJson(json).object();
+    const QString status = obj.value(QStringLiteral("status")).toString();
+    const QString message = obj.value(QStringLiteral("message")).toString();
+    if (status == QLatin1String("success")) {
+        emit visitsReset();
+    } else if (isAuthFailureMessage(message)) {
+        emit authFailed();
+    } else {
+        emit resetFailed(message.isEmpty() ? QStringLiteral("Reset failed.") : message);
+    }
+}
+
+void SettingsViewModel::resetVisits(const QString &department, const QString &adminKey)
+{
+    if (department.trimmed().isEmpty() || department == QLatin1String("All")) {
+        emit resetFailed(QStringLiteral("Please select a department."));
+        return;
+    }
+    setBusy(true);
+    const QList<QPair<QString, QString>> fields = {
+        {QStringLiteral("department"), department},
+        {QStringLiteral("admin_key"), adminKey},   // FRESH re-typed key (§3.3), not the held one
+    };
+    HttpForm::submit(m_nam, ApiConfig::endpoint(QStringLiteral("reset_visits.php")),
+                     fields, this,
+        [this](const QByteArray &body) { applyResetVisitsResponse(body); },
+        [this]() { setBusy(false); emit networkError(); });
+}
+
+bool SettingsViewModel::writeResetManifest(const QString &department, const QUrl &fileUrl)
+{
+    // Operation metadata only — 4c has no visits-by-department fetch, so we do
+    // NOT fabricate a partial backup. The count + full row export land in 4a.
+    const QStringList headers{ QStringLiteral("Field"), QStringLiteral("Value") };
+    const QList<QStringList> rows{
+        { QStringLiteral("Document"),        QStringLiteral("Visit Reset Manifest") },
+        { QStringLiteral("Department"),      department },
+        { QStringLiteral("Reset timestamp"), QDateTime::currentDateTime().toString(Qt::ISODate) },
+        { QStringLiteral("Operator"),        m_cur.adminName },
+        { QStringLiteral("Reset requested"), QStringLiteral("yes") },
+        { QStringLiteral("Note"), QStringLiteral("Records what was reset. Full pre-reset visit-row export arrives in Phase 4a.") },
+    };
+    const QString csv = serializeCsv(headers, rows);
+    const QString path = fileUrl.isLocalFile() ? fileUrl.toLocalFile() : fileUrl.toString();
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate))
+        return false;
+    f.write(csv.toUtf8());
+    f.close();
+    return true;
 }
 
 void SettingsViewModel::recomputeDirty()

@@ -4,6 +4,8 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QImage>
+#include <QFile>
+#include <QUrl>
 #include "SettingsViewModel.h"
 #include "AdminSession.h"
 
@@ -50,6 +52,11 @@ private slots:
     void keyChangeWrongOldKeyEmitsFailedAndKeepsSession();
     void departmentsParseFillsList();
     void departmentsErrorLeavesListEmpty();
+    void serializeCsvQuotesSpecialCells();
+    void resetVisitsEmptyDepartmentIsGuarded();
+    void resetVisitsSuccessEmitsReset();
+    void resetVisitsAuthFailureEmitsAuthFailed();
+    void writeResetManifestContainsMetadataNotBackup();
 };
 
 void TestSettingsViewModel::loadPopulatesPropertiesFromSettings()
@@ -226,6 +233,66 @@ void TestSettingsViewModel::departmentsErrorLeavesListEmpty()
     SettingsViewModel vm;
     vm.applyDepartmentsResponse(R"({"status":"error","message":"No departments found"})");
     QVERIFY(vm.departments().isEmpty());
+}
+
+void TestSettingsViewModel::serializeCsvQuotesSpecialCells()
+{
+    const QStringList headers{ "Name", "Note" };
+    const QList<QStringList> rows{
+        { "Ana Cruz",       "ok" },
+        { "O'Hara, Liam",   "has \"quote\" and, comma" },
+    };
+    const QString csv = SettingsViewModel::serializeCsv(headers, rows);
+    const QString expected =
+        "Name,Note\r\n"
+        "Ana Cruz,ok\r\n"
+        "\"O'Hara, Liam\",\"has \"\"quote\"\" and, comma\"\r\n";
+    QCOMPARE(csv, expected);
+}
+
+void TestSettingsViewModel::resetVisitsEmptyDepartmentIsGuarded()
+{
+    SettingsViewModel vm;
+    QSignalSpy reset(&vm, &SettingsViewModel::visitsReset);
+    QSignalSpy failed(&vm, &SettingsViewModel::resetFailed);
+    vm.resetVisits(QString(), QStringLiteral("key"));   // empty dept -> no POST
+    QCOMPARE(reset.count(), 0);
+    QCOMPARE(failed.count(), 1);
+    QVERIFY(!vm.busy());                                // never went busy
+}
+
+void TestSettingsViewModel::resetVisitsSuccessEmitsReset()
+{
+    SettingsViewModel vm;
+    QSignalSpy reset(&vm, &SettingsViewModel::visitsReset);
+    vm.applyResetVisitsResponse(R"({"status":"success","message":"Visit counts reset and visit history cleared for department: CE"})");
+    QCOMPARE(reset.count(), 1);
+}
+
+void TestSettingsViewModel::resetVisitsAuthFailureEmitsAuthFailed()
+{
+    SettingsViewModel vm;
+    QSignalSpy auth(&vm, &SettingsViewModel::authFailed);
+    vm.applyResetVisitsResponse(R"({"status":"error","message":"Invalid admin key"})");
+    QCOMPARE(auth.count(), 1);
+}
+
+void TestSettingsViewModel::writeResetManifestContainsMetadataNotBackup()
+{
+    SettingsViewModel vm;
+    vm.load();
+    vm.setProperty("adminName", QStringLiteral("Jane Librarian"));   // Operator
+    const QString path = m_tmp.path() + QStringLiteral("/manifest.csv");
+    QVERIFY(vm.writeResetManifest(QStringLiteral("CE"), QUrl::fromLocalFile(path)));
+
+    QFile f(path);
+    QVERIFY(f.open(QIODevice::ReadOnly | QIODevice::Text));
+    const QString csv = QString::fromUtf8(f.readAll());
+    QVERIFY(csv.contains(QStringLiteral("Department")));
+    QVERIFY(csv.contains(QStringLiteral("CE")));               // the reset department
+    QVERIFY(csv.contains(QStringLiteral("Jane Librarian")));   // Operator
+    QVERIFY(csv.contains(QStringLiteral("Reset requested")));
+    QVERIFY(!csv.contains(QStringLiteral("Backup")));          // never labeled a backup
 }
 
 QTEST_MAIN(TestSettingsViewModel)
