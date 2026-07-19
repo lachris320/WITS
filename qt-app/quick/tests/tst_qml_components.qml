@@ -639,6 +639,15 @@ Item {
             if (keyField) keyField.text = "";
         }
 
+        // LDialog is the only modal primitive, so anything a consumer ever
+        // pipes into title/message (backend "message" fields reach the UI over
+        // cleartext HTTP elsewhere in this screen) must not be parsed as
+        // markup. Text defaults to AutoText, which auto-detects and RENDERS
+        // rich text — including remote <img> fetches.
+        function test_dialogTextIsPlainNotRichText() {
+            compare(findChild(cd2, "dialogTitleText").textFormat, Text.PlainText);
+            compare(findChild(cd2, "dialogMessageText").textFormat, Text.PlainText);
+        }
         function test_tier1HasNoKeyField() {
             compare(findChild(cd1, "confirmKeyField"), null);
         }
@@ -702,6 +711,26 @@ Item {
             compare(findChild(cd2, "confirmKeyField").text, "");
             compare(btn.enabled, false);
         }
+        // The Confirm gate keys off text.trim(), so a key typed with stray
+        // whitespace passed the client check and then 401'd server-side —
+        // surfacing as "Admin key rejected. Please sign in again." on the most
+        // destructive operation in the app. Gate and payload must agree.
+        function test_tier2ConfirmedEmitsTrimmedKey() {
+            var got = null;
+            cd2.confirmed.connect(function(k) { got = k; });
+            cd2.visible = true; waitForRendering(cd2);
+            findChild(cd2, "confirmKeyField").text = "  typed-key  ";
+            mouseClick(findChild(cd2, "confirmButton"));
+            compare(got, "typed-key");
+        }
+        // Whitespace-only is not a key: the gate already rejects it, and the
+        // payload must never become an empty admin_key that reads as "no key".
+        function test_tier2WhitespaceOnlyKeyLeavesConfirmDisabled() {
+            var btn = findChild(cd2, "confirmButton");
+            cd2.visible = true; waitForRendering(cd2);
+            findChild(cd2, "confirmKeyField").text = "   ";
+            compare(btn.enabled, false);
+        }
         function test_clearKeyIsCallableByConsumers() {
             findChild(cd2, "confirmKeyField").text = "typed-key";
             cd2.clearKey();
@@ -726,6 +755,11 @@ Item {
         }
         function test_bindsThemeCardTokenNotLiteral() {
             compare(cb.color, Theme.card);
+        }
+        // The model is server-supplied (get_departments.php), so the value
+        // label must never be parsed as markup — Text defaults to AutoText.
+        function test_valueLabelIsPlainNotRichText() {
+            compare(findChild(cb, "comboValueText").textFormat, Text.PlainText);
         }
         function test_modelDrivesOptionCount() {
             compare(cb.count, 3);

@@ -1018,6 +1018,24 @@ Item {
             compare(status.color, Theme.success);
         }
 
+        // The status line renders the backend's "message" field verbatim over
+        // cleartext HTTP. Text defaults to AutoText, which auto-detects and
+        // RENDERS rich text — a tampered response carrying
+        // "<img src=http://attacker/beacon>" would be fetched by the kiosk.
+        function test_statusLineRendersServerTextAsPlainNotRichText() {
+            var status = findChild(settings, "settingsStatus");
+            compare(status.textFormat, Text.PlainText);
+            settingsVmStub.saveFailed("<b>bold</b> <img src='http://attacker/beacon'>");
+            // Rendered verbatim, tags and all — never parsed as markup.
+            compare(status.text, "<b>bold</b> <img src='http://attacker/beacon'>");
+        }
+
+        // Department names come from get_departments.php, so the picker's
+        // value label is server-controlled text too.
+        function test_deptPickerRendersServerTextAsPlainNotRichText() {
+            compare(findChild(settings, "comboValueText").textFormat, Text.PlainText);
+        }
+
         function test_saveFailedShowsErrorStatus() {
             var status = findChild(settings, "settingsStatus");
             settingsVmStub.saveFailed("Disk is read-only.");

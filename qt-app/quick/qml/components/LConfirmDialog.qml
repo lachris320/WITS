@@ -66,7 +66,12 @@ LDialog {
                 variant: root.tier === 2 ? "Danger" : "Primary"
                 text: root.confirmText
                 enabled: !root.busy && root.keyReady
-                onClicked: root.confirmed(root.tier === 2 ? keyFieldLoader.item.text : "")
+                // Emit the TRIMMED key so the payload matches what keyReady
+                // above gated on. Emitting the raw text let a key typed with a
+                // trailing space pass the client gate and then 401 server-side,
+                // surfacing as "Admin key rejected. Please sign in again." — a
+                // dead end on the most destructive operation in the app.
+                onClicked: root.confirmed(root.tier === 2 ? keyFieldLoader.item.text.trim() : "")
             }
         }
     }
