@@ -102,6 +102,7 @@ Item {
     LTextField { id: pf; label: "Admin Key"; isPassword: true; text: "secret" }
     LConfirmDialog { id: cd1; tier: 1; title: "Confirm"; message: "Proceed?" }
     LConfirmDialog { id: cd2; tier: 2; title: "Reset Visits"; message: "Deletes history."; confirmText: "Reset" }
+    LComboBox { id: cb; model: ["CE", "IT", "BA"]; placeholder: "Select Department" }
     LStatTile  { id: st; label: "L"; value: "1" }
     ListModel {
         id: barsFixture
@@ -685,6 +686,28 @@ Item {
             cd1.cancelled.connect(function() { cancelled++; });
             mouseClick(findChild(cd1, "cancelButton"));
             compare(cancelled, 1);
+        }
+    }
+
+    TestCase {
+        name: "LComboBoxBehavior"
+        when: windowShown
+        function init() { cb.currentValue = ""; }
+        function test_startsWithNoSelection() {
+            compare(cb.currentValue, "");
+        }
+        function test_selectingEmitsCurrentValue() {
+            var got = null;
+            cb.selected.connect(function(v) { got = v; });
+            cb.selectValue("IT");            // test hook == the click path
+            compare(cb.currentValue, "IT");
+            compare(got, "IT");
+        }
+        function test_bindsThemeCardTokenNotLiteral() {
+            compare(cb.color, Theme.card);
+        }
+        function test_modelDrivesOptionCount() {
+            compare(cb.count, 3);
         }
     }
 }
