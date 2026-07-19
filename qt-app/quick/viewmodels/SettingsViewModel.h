@@ -95,9 +95,13 @@ public:
     // Same seam pattern for the key-change response; needs newKey to hand to
     // AdminSession::refresh() on success.
     void applyKeyChangeResponse(const QByteArray &json, const QString &newKey);
-    // Same seam pattern for the departments GET: reuses the shipped, unit-
-    // tested ReportController::parseDepartments parser, which already
-    // degrades to an empty QStringList on error/empty (picker placeholder).
+    // Same seam pattern for the departments GET. The envelope is classified
+    // FIRST (auth -> authFailed, any other error -> statusMessage); only a
+    // success body reaches the shipped, unit-tested
+    // ReportController::parseDepartments. Parsing an error body would degrade
+    // it to an empty QStringList, which is indistinguishable from a school
+    // with no departments — get_departments.php also reports failure in-band
+    // as HTTP 200 + {"status":"error"}, so an HTTP-code check is not enough.
     void applyDepartmentsResponse(const QByteArray &json);
 
     // Pure, network-free CSV serializer (export-before-destroy). RFC-4180-ish:
@@ -155,6 +159,18 @@ private:
     // Shared auth-failure classification: the two message strings
     // requireAdminAuth (T17) / its guard return on a bad or missing key.
     static bool isAuthFailureMessage(const QString &message);
+
+    // Every endpoint in this VM answers with the same envelope
+    // ({"status":..., "message":...}), so every decode seam ran the same
+    // three-way classification by hand. That hand-copying is what let the auth
+    // branch drift — it was applied to two of the three seams. classify() is
+    // now the single place that decides, and the apply*Response methods are
+    // thin dispatchers over it.
+    enum class Outcome { Success, Auth, Error };
+    // Decodes json and reports which branch it belongs to. *message (when
+    // non-null) receives the envelope's "message" field verbatim — empty for a
+    // non-JSON body, which callers turn into their own default string.
+    static Outcome classify(const QByteArray &json, QString *message);
     // Single url -> filesystem-path conversion used by every file-taking entry
     // point, so the "file:///…" / UNC handling lives in exactly one place.
     static QString localPath(const QUrl &url);
@@ -167,6 +183,10 @@ private:
     QString m_statusMessage;
     bool m_dirty = false;
     bool m_busy = false;
+    // Set by the SettingsController::importError relay so importLogo() knows a
+    // specific reason already reached statusMessage and must not be clobbered
+    // by its generic fallback.
+    bool m_importErrorSeen = false;
 };
 
 #endif // SETTINGSVIEWMODEL_H

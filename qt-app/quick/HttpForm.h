@@ -64,6 +64,15 @@ void submit(QNetworkAccessManager *nam, const QUrl &url,
             std::function<void(const QByteArray &)> onSuccess,
             std::function<void()> onNetworkError);
 
+// GETs url and wires the reply through the SAME finished-handler and the SAME
+// isServerAnswer() classification submit() uses — only the verb and the absent
+// body differ. Callers that need a bodiless request (get_departments.php) were
+// otherwise forced to hand-roll the reply shell, and a hand-rolled copy is
+// exactly what drifts away from the POST paths' error handling.
+void get(QNetworkAccessManager *nam, const QUrl &url, QObject *context,
+         std::function<void(const QByteArray &)> onSuccess,
+         std::function<void()> onNetworkError);
+
 } // namespace HttpForm
 
 #endif // HTTPFORM_H

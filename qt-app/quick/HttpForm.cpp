@@ -32,13 +32,15 @@ bool isServerAnswer(bool replyHadError, int httpStatus, const QByteArray &body)
     return httpStatus > 0 && !body.isEmpty();
 }
 
-void submit(QNetworkAccessManager *nam, const QUrl &url,
-            const QList<QPair<QString, QString>> &fields, QObject *context,
-            std::function<void(const QByteArray &)> onSuccess,
-            std::function<void()> onNetworkError)
-{
-    QNetworkReply *reply = nam->post(formRequest(url), encodeForm(fields));
+namespace {
 
+// The finished-signal shell shared by submit() (POST) and get() (GET): read the
+// body + status, release the reply, then dispatch through isServerAnswer() so
+// both verbs classify a response identically.
+void wireReply(QNetworkReply *reply, QObject *context,
+               std::function<void(const QByteArray &)> onSuccess,
+               std::function<void()> onNetworkError)
+{
     QObject::connect(reply, &QNetworkReply::finished, context,
                      [reply, onSuccess = std::move(onSuccess),
                       onNetworkError = std::move(onNetworkError)]() {
@@ -54,6 +56,25 @@ void submit(QNetworkAccessManager *nam, const QUrl &url,
         else
             onNetworkError();
     });
+}
+
+} // namespace
+
+void submit(QNetworkAccessManager *nam, const QUrl &url,
+            const QList<QPair<QString, QString>> &fields, QObject *context,
+            std::function<void(const QByteArray &)> onSuccess,
+            std::function<void()> onNetworkError)
+{
+    wireReply(nam->post(formRequest(url), encodeForm(fields)), context,
+              std::move(onSuccess), std::move(onNetworkError));
+}
+
+void get(QNetworkAccessManager *nam, const QUrl &url, QObject *context,
+         std::function<void(const QByteArray &)> onSuccess,
+         std::function<void()> onNetworkError)
+{
+    wireReply(nam->get(QNetworkRequest(url)), context,
+              std::move(onSuccess), std::move(onNetworkError));
 }
 
 } // namespace HttpForm

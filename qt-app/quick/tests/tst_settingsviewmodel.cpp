@@ -48,6 +48,9 @@ private slots:
     void importLogoUpdatesPathAndEmitsLogoChanged();
     void importLogoAcceptsAFileUrl();
     void importBadPathLeavesLogoUnchanged();
+    void importMissingFileSurfacesTheControllersReason();
+    void importNonImageSurfacesTheControllersReason();
+    void importLogoIsNotPersistedUntilSave();
     void loadKeepsUnsavedEdits();
     void defaultManifestUrlIsALocalFileNamedForTheDepartment();
     void adminInfoSuccessEmitsSaved();
@@ -57,6 +60,10 @@ private slots:
     void keyChangeWrongOldKeyEmitsFailedAndKeepsSession();
     void departmentsParseFillsList();
     void departmentsErrorLeavesListEmpty();
+    void departmentsErrorSurfacesStatusMessage();
+    void departmentsAuthFailureEmitsAuthFailed();
+    void departmentsNonJsonBodySurfacesStatus();
+    void departmentsErrorKeepsThePreviouslyLoadedList();
     void serializeCsvQuotesSpecialCells();
     void resetVisitsEmptyDepartmentIsGuarded();
     void resetVisitsSuccessEmitsReset();
@@ -199,6 +206,63 @@ void TestSettingsViewModel::importBadPathLeavesLogoUnchanged()
     QCOMPARE(vm.logoPath(), before);   // unchanged
 }
 
+void TestSettingsViewModel::importMissingFileSurfacesTheControllersReason()
+{
+    // SettingsController::importImageFile emits importError with a PRECISE
+    // reason. The VM must relay that reason instead of flattening every
+    // failure into one generic string.
+    SettingsViewModel vm;
+    vm.load();
+    vm.importLogo(QUrl::fromLocalFile(m_tmp.path() + QStringLiteral("/nope.png")));
+    QVERIFY2(vm.statusMessage().contains(QStringLiteral("File not found")),
+             qPrintable(vm.statusMessage()));
+}
+
+void TestSettingsViewModel::importNonImageSurfacesTheControllersReason()
+{
+    // A file that exists but is not decodable as an image takes the second
+    // importError branch — a different reason, which must also survive.
+    const QString bogus = m_tmp.path() + QStringLiteral("/not_an_image.png");
+    QFile f(bogus);
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.write("this is plain text, not a PNG");
+    f.close();
+
+    SettingsViewModel vm;
+    vm.load();
+    vm.importLogo(QUrl::fromLocalFile(bogus));
+    QVERIFY2(vm.statusMessage().contains(QStringLiteral("Not a valid image")),
+             qPrintable(vm.statusMessage()));
+}
+
+void TestSettingsViewModel::importLogoIsNotPersistedUntilSave()
+{
+    // An import is an UNSAVED edit (it marks the form dirty), so it must not
+    // already be written to QSettings — otherwise "dirty" is a lie and there
+    // is no way to abandon the change by navigating away.
+    const QString src = m_tmp.path() + QStringLiteral("/gated_logo.png");
+    QImage img(2, 2, QImage::Format_ARGB32);
+    img.fill(Qt::green);
+    QVERIFY(img.save(src, "PNG"));
+
+    SettingsViewModel vm;
+    vm.load();
+    vm.importLogo(QUrl::fromLocalFile(src));
+    QVERIFY(vm.dirty());
+    QVERIFY(!vm.logoPath().isEmpty());
+
+    {
+        QSettings s(QStringLiteral("MyCompany"), QStringLiteral("MyApp"));
+        QVERIFY2(s.value(QStringLiteral("school/logoPath")).toString().isEmpty(),
+                 "importLogo() must not persist behind the Save gate");
+    }
+
+    vm.save();
+    QVERIFY(!vm.dirty());
+    QSettings s2(QStringLiteral("MyCompany"), QStringLiteral("MyApp"));
+    QCOMPARE(s2.value(QStringLiteral("school/logoPath")).toString(), vm.logoPath());
+}
+
 void TestSettingsViewModel::loadKeepsUnsavedEdits()
 {
     // AdminScreen's Loader destroys/recreates SettingsScreen on every
@@ -296,6 +360,59 @@ void TestSettingsViewModel::departmentsErrorLeavesListEmpty()
     SettingsViewModel vm;
     vm.applyDepartmentsResponse(R"({"status":"error","message":"No departments found"})");
     QVERIFY(vm.departments().isEmpty());
+}
+
+void TestSettingsViewModel::departmentsErrorSurfacesStatusMessage()
+{
+    // get_departments.php signals failure IN-BAND (HTTP 200 +
+    // {"status":"error"}), so an error body must not be degraded to an empty
+    // list in silence — that is indistinguishable from "no departments".
+    SettingsViewModel vm;
+    QSignalSpy changed(&vm, &SettingsViewModel::departmentsChanged);
+    vm.applyDepartmentsResponse(R"({"status":"error","message":"No departments found"})");
+    QCOMPARE(changed.count(), 0);
+    QCOMPARE(vm.statusMessage(), QStringLiteral("No departments found"));
+}
+
+void TestSettingsViewModel::departmentsAuthFailureEmitsAuthFailed()
+{
+    // A 401 from requireAdminAuth carries a body, so it reaches this decode
+    // seam. Settings is the one screen where auth state matters most — the
+    // admin must be told the session is dead, not shown an empty picker.
+    const QByteArray missingKey = R"({"status":"error","message":"Admin authentication required"})";
+    const QByteArray badKey     = R"({"status":"error","message":"Invalid admin key"})";
+
+    for (const QByteArray &body : {missingKey, badKey}) {
+        SettingsViewModel vm;
+        QSignalSpy auth(&vm, &SettingsViewModel::authFailed);
+        QSignalSpy changed(&vm, &SettingsViewModel::departmentsChanged);
+        vm.applyDepartmentsResponse(body);
+        QCOMPARE(auth.count(), 1);
+        QCOMPARE(changed.count(), 0);
+        QVERIFY(vm.departments().isEmpty());
+    }
+}
+
+void TestSettingsViewModel::departmentsNonJsonBodySurfacesStatus()
+{
+    // An HTML/PHP-fatal body is still the server answering; it must fail
+    // visibly rather than leave a blank picker with no explanation.
+    SettingsViewModel vm;
+    QSignalSpy auth(&vm, &SettingsViewModel::authFailed);
+    vm.applyDepartmentsResponse("<b>Fatal error</b>: something broke");
+    QCOMPARE(auth.count(), 0);
+    QVERIFY(!vm.statusMessage().isEmpty());
+}
+
+void TestSettingsViewModel::departmentsErrorKeepsThePreviouslyLoadedList()
+{
+    // A later failure must not silently wipe a picker that is already good.
+    SettingsViewModel vm;
+    vm.applyDepartmentsResponse(R"({"status":"success","departments":["CE","IT"]})");
+    QCOMPARE(vm.departments(), (QStringList{"CE","IT"}));
+    vm.applyDepartmentsResponse(R"({"status":"error","message":"Query failed"})");
+    QCOMPARE(vm.departments(), (QStringList{"CE","IT"}));
+    QCOMPARE(vm.statusMessage(), QStringLiteral("Query failed"));
 }
 
 void TestSettingsViewModel::serializeCsvQuotesSpecialCells()

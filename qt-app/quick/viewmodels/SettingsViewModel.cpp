@@ -1,8 +1,6 @@
 #include "SettingsViewModel.h"
 
 #include <QNetworkAccessManager>
-#include <QNetworkReply>
-#include <QNetworkRequest>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -24,6 +22,15 @@ SettingsViewModel::SettingsViewModel(QObject *parent)
     , m_controller(this)
     , m_nam(new QNetworkAccessManager(this))
 {
+    // SettingsController reports WHY an import failed ("File not found: …",
+    // "Not a valid image: …", "Could not copy to: …") and nothing was listening
+    // — the admin got one generic string for three very different problems.
+    // Relay the real reason into statusMessage, which the screen already shows.
+    connect(&m_controller, &SettingsController::importError, this,
+            [this](const QString &message) {
+        m_importErrorSeen = true;
+        setStatus(message);
+    });
 }
 
 QUrl SettingsViewModel::logoUrl() const
@@ -90,16 +97,25 @@ QString SettingsViewModel::localPath(const QUrl &url)
 
 void SettingsViewModel::importLogo(const QUrl &sourceUrl)
 {
+    m_importErrorSeen = false;
     const QString dest = m_controller.importLogo(localPath(sourceUrl));
     if (dest.isEmpty()) {
-        // SettingsController already emitted importError; surface a status.
-        setStatus(QStringLiteral("Could not import logo."));
+        // The constructor's importError relay has already put the specific
+        // reason in statusMessage; this generic line is only the backstop for
+        // an empty return with no signal.
+        if (!m_importErrorSeen)
+            setStatus(QStringLiteral("Could not import logo."));
         return;
     }
     m_cur.logoPath = dest;
-    QSettings s(QStringLiteral("MyCompany"), QStringLiteral("MyApp"));
-    s.setValue(QStringLiteral("school/logoPath"), dest);
-    s.sync();
+    // NO QSettings write here. An import marks the form dirty, i.e. the UI
+    // presents it as an unsaved edit — persisting it immediately made that a
+    // lie: the logo was already applied for good, navigating away could not
+    // abandon it, and load() is a no-op while dirty so nothing could undo it.
+    // save() writes m_cur.logoPath through SettingsController like every other
+    // field, so the Save gate is honest in both directions. The live re-theme
+    // (QML, T14) is unaffected — it re-extracts from the imported file path,
+    // which m_cur.logoPath already carries.
 
     emit logoChanged();
     recomputeDirty();
@@ -114,19 +130,34 @@ bool SettingsViewModel::isAuthFailureMessage(const QString &message)
         || message.contains(QStringLiteral("authentication required"), Qt::CaseInsensitive);
 }
 
+SettingsViewModel::Outcome SettingsViewModel::classify(const QByteArray &json, QString *message)
+{
+    const QJsonObject obj = QJsonDocument::fromJson(json).object();
+    const QString msg = obj.value(QStringLiteral("message")).toString();
+    if (message)
+        *message = msg;
+    // A non-JSON body (PHP fatal, HTML error page) yields an empty object, so
+    // status is empty, so it lands in Error — failing loudly, never silently.
+    if (obj.value(QStringLiteral("status")).toString() == QLatin1String("success"))
+        return Outcome::Success;
+    return isAuthFailureMessage(msg) ? Outcome::Auth : Outcome::Error;
+}
+
 void SettingsViewModel::applyAdminInfoResponse(const QByteArray &json)
 {
     setBusy(false);
-    const QJsonObject obj = QJsonDocument::fromJson(json).object();
-    const QString status = obj.value(QStringLiteral("status")).toString();
-    const QString message = obj.value(QStringLiteral("message")).toString();
-    if (status == QLatin1String("success")) {
+    QString message;
+    switch (classify(json, &message)) {
+    case Outcome::Success:
         emit adminInfoSaved();
-    } else if (isAuthFailureMessage(message)) {
+        break;
+    case Outcome::Auth:
         emit authFailed();
-    } else {
+        break;
+    case Outcome::Error:
         emit adminInfoFailed(message.isEmpty()
             ? QStringLiteral("Failed to update admin info.") : message);
+        break;
     }
 }
 
@@ -150,12 +181,17 @@ void SettingsViewModel::saveAdminInfo()
 void SettingsViewModel::applyKeyChangeResponse(const QByteArray &json, const QString &newKey)
 {
     setBusy(false);
-    const QJsonObject obj = QJsonDocument::fromJson(json).object();
-    if (obj.value(QStringLiteral("status")).toString() == QLatin1String("success")) {
+    QString message;
+    // DELIBERATELY two-way, not three-way: update_admin_key.php is NOT behind
+    // requireAdminAuth (it bcrypt-verifies old_key itself), so there is no
+    // session-auth failure to route to authFailed() — a rejected old key is an
+    // ordinary key-change failure. Auth therefore folds into the same branch as
+    // Error, and the message is passed through verbatim with no default.
+    if (classify(json, &message) == Outcome::Success) {
         AdminSession::instance().refresh(newKey);   // same-session key change (§3.3)
         emit keyChanged();
     } else {
-        emit keyChangeFailed(obj.value(QStringLiteral("message")).toString());
+        emit keyChangeFailed(message);
     }
 }
 
@@ -174,6 +210,24 @@ void SettingsViewModel::changeAdminKey(const QString &oldKey, const QString &new
 
 void SettingsViewModel::applyDepartmentsResponse(const QByteArray &json)
 {
+    // Classify BEFORE parsing. parseDepartments() returns an empty QStringList
+    // for an error envelope, a non-JSON body AND a genuinely empty list alike,
+    // so handing it a failure body produced an empty picker with no signal and
+    // no status — indistinguishable from "this school has no departments", on
+    // the screen where a dead admin session matters most. Note the 401 case is
+    // reachable here even though this is a GET: requireAdminAuth answers with a
+    // body, which HttpForm::isServerAnswer routes to this seam by design.
+    QString message;
+    const Outcome outcome = classify(json, &message);
+    if (outcome != Outcome::Success) {
+        // Leave m_departments alone: a later failure must not wipe a picker
+        // that is already populated.
+        setStatus(message.isEmpty() ? QStringLiteral("Could not load departments.") : message);
+        if (outcome == Outcome::Auth)
+            emit authFailed();
+        return;
+    }
+
     const QStringList parsed = ReportController::parseDepartments(json);
     if (parsed == m_departments)
         return;
@@ -183,26 +237,14 @@ void SettingsViewModel::applyDepartmentsResponse(const QByteArray &json)
 
 void SettingsViewModel::loadDepartments()
 {
-    // GET (no body) — HttpForm is POST-only, so use the NAM directly here,
-    // mirroring ReportController's own GET helpers.
-    QNetworkReply *reply =
-        m_nam->get(QNetworkRequest(ApiConfig::endpoint(QStringLiteral("get_departments.php"))));
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        const QByteArray body = reply->readAll();
-        const bool replyHadError = reply->error() != QNetworkReply::NoError;
-        const QVariant statusAttr = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
-        const int httpStatus = statusAttr.isValid() ? statusAttr.toInt() : 0;
-        reply->deleteLater();
-        // Same classification as HttpForm::submit, so this GET agrees with the
-        // POST paths: an HTTP error carrying a body is the server answering and
-        // goes to the decode seam (parseDepartments degrades to an empty list);
-        // only a transport failure is a networkError.
-        if (!HttpForm::isServerAnswer(replyHadError, httpStatus, body)) {
-            emit networkError();
-            return;
-        }
-        applyDepartmentsResponse(body);
-    });
+    // HttpForm::get applies the SAME isServerAnswer() classification as the
+    // POST paths, so this GET agrees with them: an HTTP error carrying a body
+    // is the server answering and goes to the decode seam (which classifies
+    // auth-vs-error from the envelope); only a transport failure is a
+    // networkError.
+    HttpForm::get(m_nam, ApiConfig::endpoint(QStringLiteral("get_departments.php")), this,
+        [this](const QByteArray &body) { applyDepartmentsResponse(body); },
+        [this]() { emit networkError(); });
 }
 
 QString SettingsViewModel::serializeCsv(const QStringList &headers,
@@ -231,15 +273,17 @@ QString SettingsViewModel::serializeCsv(const QStringList &headers,
 void SettingsViewModel::applyResetVisitsResponse(const QByteArray &json)
 {
     setBusy(false);
-    const QJsonObject obj = QJsonDocument::fromJson(json).object();
-    const QString status = obj.value(QStringLiteral("status")).toString();
-    const QString message = obj.value(QStringLiteral("message")).toString();
-    if (status == QLatin1String("success")) {
+    QString message;
+    switch (classify(json, &message)) {
+    case Outcome::Success:
         emit visitsReset();
-    } else if (isAuthFailureMessage(message)) {
+        break;
+    case Outcome::Auth:
         emit authFailed();
-    } else {
+        break;
+    case Outcome::Error:
         emit resetFailed(message.isEmpty() ? QStringLiteral("Reset failed.") : message);
+        break;
     }
 }
 
