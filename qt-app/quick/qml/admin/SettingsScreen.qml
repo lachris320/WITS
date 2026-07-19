@@ -325,6 +325,13 @@ Rectangle {
                     objectName: "settingsStatus"
                     Layout.fillWidth: true
                     text: screen.statusText
+                    // statusText carries backend "message" fields verbatim, and
+                    // Text defaults to AutoText — which auto-detects and RENDERS
+                    // rich text. The backend is reached over cleartext HTTP, so a
+                    // tampered or compromised response containing
+                    // "<img src=http://attacker/beacon>" would be rendered and
+                    // fetched by an unattended kiosk. Status is never markup.
+                    textFormat: Text.PlainText
                     visible: screen.statusText.length > 0
                     color: screen.statusIsError ? Theme.error : Theme.success
                     wrapMode: Text.WordWrap

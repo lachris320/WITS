@@ -34,17 +34,27 @@ Item {
             anchors.fill: parent
             anchors.margins: Theme.spacing.xxl
             spacing: Theme.spacing.lg
+            // title/message are consumer-supplied strings and Text defaults to
+            // AutoText, which auto-detects and RENDERS rich text (including
+            // remote <img> fetches). A consumer that ever pipes a server
+            // message in here — the backend is reached over cleartext HTTP —
+            // must not turn this dialog into a markup renderer. Pinned plain
+            // in the primitive so no consumer has to remember.
             Text {
+                objectName: "dialogTitleText"
                 visible: dlg.title.length > 0
                 text: dlg.title
+                textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.typography.serif
                 font.pixelSize: Theme.typography.cardTitle
                 font.weight: Font.Bold
             }
             Text {
+                objectName: "dialogMessageText"
                 visible: dlg.message.length > 0
                 text: dlg.message
+                textFormat: Text.PlainText
                 color: Theme.text
                 font.family: Theme.typography.sans
                 font.pixelSize: Theme.typography.body

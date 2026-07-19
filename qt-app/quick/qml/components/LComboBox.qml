@@ -56,10 +56,17 @@ Item {
             border.color: combo.activeFocus ? Theme.brand.admin : Theme.border
         }
         contentItem: Text {
+            objectName: "comboValueText"
             leftPadding: Theme.spacing.md
             rightPadding: Theme.spacing.md
             verticalAlignment: Text.AlignVCenter
             text: root.currentValue.length > 0 ? root.currentValue : root.placeholder
+            // The model is server-supplied (get_departments.php over cleartext
+            // HTTP), and Text defaults to AutoText — which auto-detects and
+            // RENDERS rich text, so a tampered department name containing
+            // "<img src=http://attacker/…>" would be fetched by the kiosk.
+            // Nothing here is ever markup; pin it plain.
+            textFormat: Text.PlainText
             color: root.currentValue.length > 0 ? Theme.text : Theme.mutedTextCaption
             font: combo.font
             elide: Text.ElideRight
