@@ -2,6 +2,7 @@
 
 #include <QNetworkAccessManager>
 #include <QFileInfo>
+#include <QSettings>
 
 SettingsViewModel::SettingsViewModel(QObject *parent)
     : QObject(parent)
@@ -33,6 +34,26 @@ void SettingsViewModel::load()
     emit adminNameChanged();     emit adminPositionChanged();
     emit openHourChanged();      emit closeHourChanged();
     emit guestEnabledChanged();
+}
+
+void SettingsViewModel::save()
+{
+    if (!m_controller.save(m_cur)) {
+        emit saveFailed(QStringLiteral("Could not save settings."));
+        return;
+    }
+    // RECONCILE (spec §4.1 / plan T8): SettingsController writes
+    // features/guestLogin, but KioskViewModel reads kiosk/guestEnabled. Mirror
+    // the flag onto the kiosk's key so the toggle actually reaches the kiosk,
+    // without changing the shared controller's key contract (legacy
+    // adminwindow.cpp still reads features/guestLogin).
+    QSettings s(QStringLiteral("MyCompany"), QStringLiteral("MyApp"));
+    s.setValue(QStringLiteral("kiosk/guestEnabled"), m_cur.guestLoginEnabled);
+    s.sync();
+
+    m_saved = m_cur;
+    recomputeDirty();      // -> clears dirty
+    emit saved();
 }
 
 void SettingsViewModel::recomputeDirty()

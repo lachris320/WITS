@@ -36,6 +36,9 @@ private slots:
     void loadStartsClean();
     void editingASettingMarksDirtyAndSignals();
     void resettingToSavedValueClearsDirty();
+    void saveePersistsAllFieldsAndEmitsSaved();
+    void saveMirrorsGuestFlagOntoKioskKey();
+    void saveClearsDirty();
 };
 
 void TestSettingsViewModel::loadPopulatesPropertiesFromSettings()
@@ -75,6 +78,48 @@ void TestSettingsViewModel::resettingToSavedValueClearsDirty()
     vm.setSchoolName(QStringLiteral("New Name"));
     QVERIFY(vm.dirty());
     vm.setSchoolName(QStringLiteral("Acme Library"));   // back to the loaded value
+    QVERIFY(!vm.dirty());
+}
+
+void TestSettingsViewModel::saveePersistsAllFieldsAndEmitsSaved()
+{
+    SettingsViewModel vm;
+    vm.load();
+    vm.setSchoolName(QStringLiteral("Renamed Library"));
+    vm.setOpenHour(7);
+    QSignalSpy saved(&vm, &SettingsViewModel::saved);
+    vm.save();
+    QCOMPARE(saved.count(), 1);
+    QSettings s(QStringLiteral("MyCompany"), QStringLiteral("MyApp"));
+    QCOMPARE(s.value(QStringLiteral("school/name")).toString(), QStringLiteral("Renamed Library"));
+    QCOMPARE(s.value(QStringLiteral("library/openHour")).toInt(), 7);
+}
+
+void TestSettingsViewModel::saveMirrorsGuestFlagOntoKioskKey()
+{
+    SettingsViewModel vm;
+    vm.load();
+    vm.setGuestEnabled(false);
+    vm.save();
+    QSettings s(QStringLiteral("MyCompany"), QStringLiteral("MyApp"));
+    // Both the controller's key AND the key the kiosk reads must be set.
+    QCOMPARE(s.value(QStringLiteral("features/guestLogin")).toBool(), false);
+    QCOMPARE(s.value(QStringLiteral("kiosk/guestEnabled")).toBool(), false);
+
+    vm.setGuestEnabled(true);
+    vm.save();
+    QSettings s2(QStringLiteral("MyCompany"), QStringLiteral("MyApp"));
+    QCOMPARE(s2.value(QStringLiteral("features/guestLogin")).toBool(), true);
+    QCOMPARE(s2.value(QStringLiteral("kiosk/guestEnabled")).toBool(), true);
+}
+
+void TestSettingsViewModel::saveClearsDirty()
+{
+    SettingsViewModel vm;
+    vm.load();
+    vm.setSchoolName(QStringLiteral("X"));
+    QVERIFY(vm.dirty());
+    vm.save();
     QVERIFY(!vm.dirty());
 }
 

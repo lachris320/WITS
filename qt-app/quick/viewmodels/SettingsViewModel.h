@@ -61,6 +61,7 @@ public:
     void setGuestEnabled(bool v);
 
     Q_INVOKABLE void load();
+    Q_INVOKABLE void save();
 
 signals:
     void schoolNameChanged();
@@ -75,6 +76,8 @@ signals:
     void busyChanged();
     void departmentsChanged();
     void statusChanged();
+    void saved();
+    void saveFailed(const QString &message);
 
 private:
     void recomputeDirty();
