@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QSignalSpy>
+#include <QSet>
 #include "Navigator.h"
 
 class TestNavigator : public QObject
@@ -12,6 +13,8 @@ private slots:
     void defaultsToDashboardPage();
     void showAdminPageSwitchesAndSignals();
     void showAdminResetsPageToDashboard();
+    void showAdminPageRoutesToSettings();
+    void newEnumValuesAreDistinct();
 };
 
 void TestNavigator::defaultsToKiosk()
@@ -69,6 +72,27 @@ void TestNavigator::showAdminResetsPageToDashboard()
     nav.showAdmin();
 
     QCOMPARE(nav.adminPage(), Navigator::Dashboard);
+}
+
+void TestNavigator::showAdminPageRoutesToSettings()
+{
+    Navigator nav;
+    QSignalSpy spy(&nav, &Navigator::adminPageChanged);
+    nav.showAdminPage(Navigator::Settings);
+    QCOMPARE(nav.adminPage(), Navigator::Settings);
+    QCOMPARE(spy.count(), 1);
+    nav.showAdminPage(Navigator::Settings);   // idempotent — no redundant signal
+    QCOMPARE(spy.count(), 1);
+}
+
+void TestNavigator::newEnumValuesAreDistinct()
+{
+    // The three new pages must be distinct values, and distinct from the
+    // three originals, or the pageLoader switch (AdminScreen.qml) would alias
+    // two sidebar items onto one screen.
+    QSet<int> seen{ Navigator::Dashboard, Navigator::Search, Navigator::VisitLogs,
+                    Navigator::Database, Navigator::Reporting, Navigator::Settings };
+    QCOMPARE(seen.size(), 6);
 }
 
 QTEST_MAIN(TestNavigator)

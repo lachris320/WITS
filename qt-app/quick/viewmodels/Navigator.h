@@ -16,7 +16,7 @@ class Navigator : public QObject
 public:
     enum Surface { Kiosk, Admin };
     Q_ENUM(Surface)
-    enum AdminPage { Dashboard, Search, VisitLogs };
+    enum AdminPage { Dashboard, Search, VisitLogs, Database, Reporting, Settings };
     Q_ENUM(AdminPage)
 
     explicit Navigator(QObject *parent = nullptr);
