@@ -49,6 +49,9 @@ Rectangle {
         switch (Navigator.adminPage) {
         case Navigator.Search:     return qsTr("Search");
         case Navigator.VisitLogs:  return qsTr("Visit Logs");
+        case Navigator.Database:   return qsTr("Database");
+        case Navigator.Reporting:  return qsTr("Reporting");
+        case Navigator.Settings:   return qsTr("Settings");
         default:                   return qsTr("Dashboard");
         }
     }
@@ -72,22 +75,24 @@ Rectangle {
             // matches the string keys Task 9 already built/tested it with.
             currentPage: Navigator.adminPage === Navigator.Search    ? "search"
                        : Navigator.adminPage === Navigator.VisitLogs ? "visitlogs"
+                       : Navigator.adminPage === Navigator.Database  ? "database"
+                       : Navigator.adminPage === Navigator.Reporting ? "reporting"
+                       : Navigator.adminPage === Navigator.Settings  ? "settings"
                        : "dashboard"
             items: [
                 { page: "dashboard", label: qsTr("Dashboard"),  enabled: true },
                 { page: "search",    label: qsTr("Search"),     enabled: true },
                 { page: "visitlogs", label: qsTr("Visit Logs"), enabled: true },
-                { page: "database",  label: qsTr("Database"),   enabled: false },
-                { page: "reporting", label: qsTr("Reporting"),  enabled: false },
-                { page: "settings",  label: qsTr("Settings"),   enabled: false }
+                { page: "database",  label: qsTr("Database"),   enabled: true },
+                { page: "reporting", label: qsTr("Reporting"),  enabled: true },
+                { page: "settings",  label: qsTr("Settings"),   enabled: true }
             ]
             // Every key is matched explicitly, including "dashboard". A bare
             // `else -> Dashboard` fallthrough would silently route ANY
             // unrecognized key to the Dashboard: harmless today (LSideNav's
-            // own guard blocks the disabled Phase-4 items before they ever
-            // emit), but the moment Phase 4 enables "database"/"reporting"/
-            // "settings" they would land on the Dashboard instead of failing
-            // loudly. Warn rather than route. Phase 4 adds the real cases.
+            // own guard blocks any disabled items before they ever emit),
+            // but a typo'd key would otherwise land on the Dashboard instead
+            // of failing loudly. Warn rather than route.
             onPageActivated: function(page) {
                 if (page === "dashboard")
                     Navigator.showAdminPage(Navigator.Dashboard)
@@ -95,6 +100,12 @@ Rectangle {
                     Navigator.showAdminPage(Navigator.Search)
                 else if (page === "visitlogs")
                     Navigator.showAdminPage(Navigator.VisitLogs)
+                else if (page === "database")
+                    Navigator.showAdminPage(Navigator.Database)
+                else if (page === "reporting")
+                    Navigator.showAdminPage(Navigator.Reporting)
+                else if (page === "settings")
+                    Navigator.showAdminPage(Navigator.Settings)
                 else
                     console.warn("AdminScreen: no route for page key", page)
             }
@@ -135,6 +146,9 @@ Rectangle {
                     switch (Navigator.adminPage) {
                     case Navigator.Search:    return searchComponent;
                     case Navigator.VisitLogs: return visitLogsComponent;
+                    case Navigator.Database:  return databaseComponent;
+                    case Navigator.Reporting: return reportingComponent;
+                    case Navigator.Settings:  return settingsPlaceholderComponent;
                     default:                  return dashboardComponent;
                     }
                 }
@@ -150,4 +164,13 @@ Rectangle {
     Component { id: dashboardComponent; DashboardScreen { objectName: "dashboardPage"; vm: dashboardVm } }
     Component { id: searchComponent;    SearchScreen    { objectName: "searchPage";    vm: searchVm } }
     Component { id: visitLogsComponent; VisitLogsScreen { objectName: "visitLogsPage"; vm: visitLogsVm } }
+    Component { id: databaseComponent;  DatabaseScreen  { objectName: "databasePage" } }
+    Component { id: reportingComponent; ReportingScreen { objectName: "reportingPage" } }
+    // Settings gets its own inline placeholder so the route is observable now;
+    // Task 14 replaces this with the real SettingsScreen.
+    Component { id: settingsPlaceholderComponent;
+                Rectangle { objectName: "settingsPage"; color: Theme.appBackground
+                            Text { anchors.centerIn: parent; text: qsTr("Settings — coming soon")
+                                   color: Theme.mutedText; font.family: Theme.typography.sans
+                                   font.pixelSize: Theme.typography.cardTitle } } }
 }
