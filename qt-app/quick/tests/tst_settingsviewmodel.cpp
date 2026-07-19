@@ -5,6 +5,7 @@
 #include <QTemporaryDir>
 #include <QImage>
 #include "SettingsViewModel.h"
+#include "AdminSession.h"
 
 class TestSettingsViewModel : public QObject
 {
@@ -45,6 +46,8 @@ private slots:
     void adminInfoSuccessEmitsSaved();
     void adminInfoErrorEmitsFailedWithMessage();
     void adminInfoAuthFailureEmitsAuthFailed();
+    void keyChangeSuccessRefreshesSession();
+    void keyChangeWrongOldKeyEmitsFailedAndKeepsSession();
 };
 
 void TestSettingsViewModel::loadPopulatesPropertiesFromSettings()
@@ -181,6 +184,30 @@ void TestSettingsViewModel::adminInfoAuthFailureEmitsAuthFailed()
     QSignalSpy auth(&vm, &SettingsViewModel::authFailed);
     vm.applyAdminInfoResponse(R"({"status":"error","message":"Invalid admin key"})");
     QCOMPARE(auth.count(), 1);
+}
+
+void TestSettingsViewModel::keyChangeSuccessRefreshesSession()
+{
+    AdminSession::instance().setKey(QStringLiteral("OLDKEY"));
+    SettingsViewModel vm;
+    QSignalSpy ok(&vm, &SettingsViewModel::keyChanged);
+    vm.applyKeyChangeResponse(R"({"status":"success","message":"Password updated successfully."})",
+                              QStringLiteral("NEWKEY"));
+    QCOMPARE(ok.count(), 1);
+    QCOMPARE(AdminSession::instance().key(), QStringLiteral("NEWKEY"));
+    AdminSession::instance().clear();   // isolate: don't leak into sibling tests
+}
+
+void TestSettingsViewModel::keyChangeWrongOldKeyEmitsFailedAndKeepsSession()
+{
+    AdminSession::instance().setKey(QStringLiteral("OLDKEY"));
+    SettingsViewModel vm;
+    QSignalSpy bad(&vm, &SettingsViewModel::keyChangeFailed);
+    vm.applyKeyChangeResponse(R"({"status":"error","message":"Old password is incorrect."})",
+                              QStringLiteral("NEWKEY"));
+    QCOMPARE(bad.count(), 1);
+    QCOMPARE(AdminSession::instance().key(), QStringLiteral("OLDKEY"));   // unchanged
+    AdminSession::instance().clear();   // isolate: don't leak into sibling tests
 }
 
 QTEST_MAIN(TestSettingsViewModel)

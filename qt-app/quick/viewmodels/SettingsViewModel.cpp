@@ -118,6 +118,31 @@ void SettingsViewModel::saveAdminInfo()
         [this]() { setBusy(false); emit networkError(); });   // 401 lands here in production (see plan T10 known limitation)
 }
 
+void SettingsViewModel::applyKeyChangeResponse(const QByteArray &json, const QString &newKey)
+{
+    setBusy(false);
+    const QJsonObject obj = QJsonDocument::fromJson(json).object();
+    if (obj.value(QStringLiteral("status")).toString() == QLatin1String("success")) {
+        AdminSession::instance().refresh(newKey);   // same-session key change (§3.3)
+        emit keyChanged();
+    } else {
+        emit keyChangeFailed(obj.value(QStringLiteral("message")).toString());
+    }
+}
+
+void SettingsViewModel::changeAdminKey(const QString &oldKey, const QString &newKey)
+{
+    setBusy(true);
+    const QList<QPair<QString, QString>> fields = {
+        {QStringLiteral("old_key"), oldKey},
+        {QStringLiteral("new_key"), newKey},
+    };
+    HttpForm::submit(m_nam, ApiConfig::endpoint(QStringLiteral("update_admin_key.php")),
+                     fields, this,
+        [this, newKey](const QByteArray &body) { applyKeyChangeResponse(body, newKey); },
+        [this]() { setBusy(false); emit networkError(); });
+}
+
 void SettingsViewModel::recomputeDirty()
 {
     // Field-by-field compare against the saved baseline. logoPath is included

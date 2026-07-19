@@ -68,11 +68,19 @@ public:
     // CRITICAL note in the Phase 4c plan, Task 9.
     Q_INVOKABLE void importLogo(const QString &sourcePath);
     Q_INVOKABLE void saveAdminInfo();
+    // update_admin_key.php bcrypt-verifies oldKey server-side, so no admin_key
+    // field is sent (it is NOT guarded by requireAdminAuth). On success the
+    // held session key must move forward so subsequent destructive ops in
+    // this same session don't fail auth on the now-stale old key (spec §3.3).
+    Q_INVOKABLE void changeAdminKey(const QString &oldKey, const QString &newKey);
 
     // Network-free decode seam (spec §6.1): the async saveAdminInfo() wires
     // HttpForm::submit's success callback straight to this so tests can drive
     // response classification with synthetic QByteArray payloads.
     void applyAdminInfoResponse(const QByteArray &json);
+    // Same seam pattern for the key-change response; needs newKey to hand to
+    // AdminSession::refresh() on success.
+    void applyKeyChangeResponse(const QByteArray &json, const QString &newKey);
 
 signals:
     void schoolNameChanged();
@@ -91,6 +99,8 @@ signals:
     void saveFailed(const QString &message);
     void adminInfoSaved();
     void adminInfoFailed(const QString &message);
+    void keyChanged();
+    void keyChangeFailed(const QString &message);
     void authFailed();
     void networkError();
 
