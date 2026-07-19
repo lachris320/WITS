@@ -1,6 +1,8 @@
 #include "SettingsViewModel.h"
 
 #include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -9,6 +11,7 @@
 #include "AdminSession.h"
 #include "HttpForm.h"
 #include "apiconfig.h"
+#include "reportcontroller.h"
 
 SettingsViewModel::SettingsViewModel(QObject *parent)
     : QObject(parent)
@@ -141,6 +144,30 @@ void SettingsViewModel::changeAdminKey(const QString &oldKey, const QString &new
                      fields, this,
         [this, newKey](const QByteArray &body) { applyKeyChangeResponse(body, newKey); },
         [this]() { setBusy(false); emit networkError(); });
+}
+
+void SettingsViewModel::applyDepartmentsResponse(const QByteArray &json)
+{
+    const QStringList parsed = ReportController::parseDepartments(json);
+    if (parsed == m_departments)
+        return;
+    m_departments = parsed;
+    emit departmentsChanged();
+}
+
+void SettingsViewModel::loadDepartments()
+{
+    // GET (no body) — HttpForm is POST-only, so use the NAM directly here,
+    // mirroring ReportController's own GET helpers.
+    QNetworkReply *reply =
+        m_nam->get(QNetworkRequest(ApiConfig::endpoint(QStringLiteral("get_departments.php"))));
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const QByteArray body = reply->readAll();
+        const bool netErr = reply->error() != QNetworkReply::NoError;
+        reply->deleteLater();
+        if (netErr) { emit networkError(); return; }
+        applyDepartmentsResponse(body);
+    });
 }
 
 void SettingsViewModel::recomputeDirty()

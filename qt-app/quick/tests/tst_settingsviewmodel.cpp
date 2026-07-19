@@ -48,6 +48,8 @@ private slots:
     void adminInfoAuthFailureEmitsAuthFailed();
     void keyChangeSuccessRefreshesSession();
     void keyChangeWrongOldKeyEmitsFailedAndKeepsSession();
+    void departmentsParseFillsList();
+    void departmentsErrorLeavesListEmpty();
 };
 
 void TestSettingsViewModel::loadPopulatesPropertiesFromSettings()
@@ -208,6 +210,22 @@ void TestSettingsViewModel::keyChangeWrongOldKeyEmitsFailedAndKeepsSession()
     QCOMPARE(bad.count(), 1);
     QCOMPARE(AdminSession::instance().key(), QStringLiteral("OLDKEY"));   // unchanged
     AdminSession::instance().clear();   // isolate: don't leak into sibling tests
+}
+
+void TestSettingsViewModel::departmentsParseFillsList()
+{
+    SettingsViewModel vm;
+    QSignalSpy spy(&vm, &SettingsViewModel::departmentsChanged);
+    vm.applyDepartmentsResponse(R"({"status":"success","departments":["CE","IT","BA"]})");
+    QCOMPARE(spy.count(), 1);
+    QCOMPARE(vm.departments(), (QStringList{"CE","IT","BA"}));
+}
+
+void TestSettingsViewModel::departmentsErrorLeavesListEmpty()
+{
+    SettingsViewModel vm;
+    vm.applyDepartmentsResponse(R"({"status":"error","message":"No departments found"})");
+    QVERIFY(vm.departments().isEmpty());
 }
 
 QTEST_MAIN(TestSettingsViewModel)

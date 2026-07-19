@@ -73,6 +73,10 @@ public:
     // held session key must move forward so subsequent destructive ops in
     // this same session don't fail auth on the now-stale old key (spec §3.3).
     Q_INVOKABLE void changeAdminKey(const QString &oldKey, const QString &newKey);
+    // GETs get_departments.php to fill the flat department picker used by the
+    // reset-visits flow (T13/T14). Flat list only — the cascading
+    // Department -> Course -> Year selector belongs to tracks 4a/4b.
+    Q_INVOKABLE void loadDepartments();
 
     // Network-free decode seam (spec §6.1): the async saveAdminInfo() wires
     // HttpForm::submit's success callback straight to this so tests can drive
@@ -81,6 +85,10 @@ public:
     // Same seam pattern for the key-change response; needs newKey to hand to
     // AdminSession::refresh() on success.
     void applyKeyChangeResponse(const QByteArray &json, const QString &newKey);
+    // Same seam pattern for the departments GET: reuses the shipped, unit-
+    // tested ReportController::parseDepartments parser, which already
+    // degrades to an empty QStringList on error/empty (picker placeholder).
+    void applyDepartmentsResponse(const QByteArray &json);
 
 signals:
     void schoolNameChanged();
