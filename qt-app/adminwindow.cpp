@@ -598,6 +598,8 @@ adminWindow::adminWindow(QWidget *parent)
 
         QUrlQuery postData;
         postData.addQueryItem("department", dept);
+        // reset_visits.php is guarded by requireAdminAuth; without the key it 401s.
+        postData.addQueryItem("admin_key", m_adminKey);
 
         QNetworkReply *reply = networkManager->post(request, postData.toString(QUrl::FullyEncoded).toUtf8());
 
@@ -782,8 +784,9 @@ adminWindow::adminWindow(QWidget *parent)
         request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
 
         QUrlQuery postData;
+        const QString newKey = ui->lineEdit_2->text();
         postData.addQueryItem("old_key", ui->lineEdit->text());
-        postData.addQueryItem("new_key", ui->lineEdit_2->text());
+        postData.addQueryItem("new_key", newKey);
 
         QNetworkReply *reply = networkManager->post(request, postData.toString(QUrl::FullyEncoded).toUtf8());
 
@@ -806,6 +809,9 @@ adminWindow::adminWindow(QWidget *parent)
             QJsonObject obj = jsonDoc.object();
             if (obj["status"].toString() == "success") {
                 QMessageBox::information(this, "Success", obj["message"].toString());
+                // The held key just became stale server-side; refresh it so the
+                // guarded POSTs above keep authenticating (Phase 4c).
+                m_adminKey = newKey;
                 ui->lineEdit->clear();
                 ui->lineEdit_2->clear();
             } else {

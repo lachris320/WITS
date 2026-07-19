@@ -203,7 +203,7 @@ void MainWindow::handleLogin() {
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
     QNetworkReply *reply = networkManager->post(request, postData.toString(QUrl::FullyEncoded).toUtf8());
 
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, input]() {
         if (reply->error() != QNetworkReply::NoError) {
             QMessageBox::critical(this, "Network Error", reply->errorString());
             reply->deleteLater();
@@ -223,6 +223,9 @@ void MainWindow::handleLogin() {
             if (obj.contains("student")) {
                 displayStudent(obj["student"].toObject());
             } else {
+                // Retain the just-verified key in RAM for the guarded POSTs the
+                // admin window makes (requireAdminAuth); never persisted (Phase 4c).
+                adminWin->setAdminKey(input);
                 adminWin->show();
             }
         } else {
