@@ -3,6 +3,7 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QImage>
 #include "SettingsViewModel.h"
 
 class TestSettingsViewModel : public QObject
@@ -39,6 +40,8 @@ private slots:
     void saveePersistsAllFieldsAndEmitsSaved();
     void saveMirrorsGuestFlagOntoKioskKey();
     void saveClearsDirty();
+    void importLogoUpdatesPathAndEmitsLogoChanged();
+    void importBadPathLeavesLogoUnchanged();
 };
 
 void TestSettingsViewModel::loadPopulatesPropertiesFromSettings()
@@ -121,6 +124,35 @@ void TestSettingsViewModel::saveClearsDirty()
     QVERIFY(vm.dirty());
     vm.save();
     QVERIFY(!vm.dirty());
+}
+
+void TestSettingsViewModel::importLogoUpdatesPathAndEmitsLogoChanged()
+{
+    // Write a genuine 2x2 PNG into the temp dir so importImageFile accepts it.
+    const QString src = m_tmp.path() + QStringLiteral("/src_logo.png");
+    QImage img(2, 2, QImage::Format_ARGB32);
+    img.fill(Qt::blue);
+    QVERIFY(img.save(src, "PNG"));
+
+    SettingsViewModel vm;
+    vm.load();
+    QSignalSpy logo(&vm, &SettingsViewModel::logoChanged);
+    vm.importLogo(src);
+
+    QVERIFY(logo.count() >= 1);
+    QVERIFY(!vm.logoPath().isEmpty());
+    QVERIFY(vm.hasLogo());
+    QVERIFY(vm.logoUrl().isValid());
+    QVERIFY(vm.dirty());   // an import is an unsaved change
+}
+
+void TestSettingsViewModel::importBadPathLeavesLogoUnchanged()
+{
+    SettingsViewModel vm;
+    vm.load();
+    const QString before = vm.logoPath();
+    vm.importLogo(m_tmp.path() + QStringLiteral("/does_not_exist.png"));
+    QCOMPARE(vm.logoPath(), before);   // unchanged
 }
 
 QTEST_MAIN(TestSettingsViewModel)

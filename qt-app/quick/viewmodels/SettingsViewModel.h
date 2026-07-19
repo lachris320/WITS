@@ -62,6 +62,10 @@ public:
 
     Q_INVOKABLE void load();
     Q_INVOKABLE void save();
+    // NO ThemeViewModel member here — the VM only imports+persists the logo.
+    // Live re-theme is wired in QML on Theme's own instance (T14); see the
+    // CRITICAL note in the Phase 4c plan, Task 9.
+    Q_INVOKABLE void importLogo(const QString &sourcePath);
 
 signals:
     void schoolNameChanged();

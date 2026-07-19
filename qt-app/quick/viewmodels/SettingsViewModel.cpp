@@ -56,6 +56,26 @@ void SettingsViewModel::save()
     emit saved();
 }
 
+void SettingsViewModel::importLogo(const QString &sourcePath)
+{
+    const QString dest = m_controller.importLogo(sourcePath);
+    if (dest.isEmpty()) {
+        // SettingsController already emitted importError; surface a status.
+        setStatus(QStringLiteral("Could not import logo."));
+        return;
+    }
+    m_cur.logoPath = dest;
+    QSettings s(QStringLiteral("MyCompany"), QStringLiteral("MyApp"));
+    s.setValue(QStringLiteral("school/logoPath"), dest);
+    s.sync();
+
+    emit logoChanged();
+    recomputeDirty();
+    // NB: no re-theme here. The live palette re-extraction runs in QML on
+    // Theme._vm (T14) — see the CRITICAL note above for why a VM-owned
+    // ThemeViewModel would not reach the running UI.
+}
+
 void SettingsViewModel::recomputeDirty()
 {
     // Field-by-field compare against the saved baseline. logoPath is included
