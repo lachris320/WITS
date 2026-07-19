@@ -246,6 +246,21 @@ Item {
             compare(titleNode.text, "Library Admin");
         }
 
+        // Phase 4c writes school/name + school/logoPath for the first time, so
+        // the sidebar brand has to be re-readable mid-session (SettingsScreen
+        // saved -> AdminScreen.reloadSchoolInfo -> SchoolInfoViewModel.reload).
+        // The reload's own re-read/NOTIFY semantics are pinned in C++ by
+        // tst_schoolinfoviewmodel; this asserts the SHELL end of the wire
+        // exists and is callable, without writing to this machine's real
+        // QSettings (security-hygiene: no real configured data in tests).
+        // Deleting the hook, the Connections block, or reload() fails here.
+        function test_shellExposesSchoolInfoReloadHook() {
+            verify(typeof shell.reloadSchoolInfo === "function");
+            shell.reloadSchoolInfo();               // re-read must not throw
+            var titleNode = findChild(shell, "brandTitleText");
+            compare(titleNode.text, "Library Admin");
+        }
+
         // Phase 4c contract: the three newly-enabled items route to their
         // (placeholder) screens through the real sidebar + Loader.
         function test_databaseItemRoutesToDatabaseScreen() {

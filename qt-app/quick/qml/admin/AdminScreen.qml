@@ -29,9 +29,23 @@ Rectangle {
     SettingsViewModel  { id: settingsVm }
 
     // Read-only school identity (logo + name) for the sidebar brand block.
-    // Reads QSettings once at construction (see SchoolInfoViewModel.cpp) —
-    // no refresh() to gate, unlike the three VMs above.
+    // Reads QSettings at construction and again on demand via reload().
     SchoolInfoViewModel { id: schoolInfoVm }
+
+    // Phase 4c's Settings screen is the FIRST code that writes school/name and
+    // school/logoPath, so the sidebar brand can now go stale mid-session: a
+    // rename or logo import re-coloured the palette live while the sidebar
+    // kept the old name/logo until restart — a visibly half-applied change.
+    // settingsVm.save() is the only moment those keys move (importLogo()
+    // deliberately does NOT persist; see SettingsViewModel.cpp), so one
+    // handler covers both. reload() is signal-quiet when nothing this VM reads
+    // changed, so an unrelated save costs nothing. Named function so the
+    // shell QuickTest can drive the same path a save takes.
+    function reloadSchoolInfo() { schoolInfoVm.reload() }
+    Connections {
+        target: settingsVm
+        function onSaved() { admin.reloadSchoolInfo() }
+    }
 
     // Live clock + date for the header. Same "dddd, MMMM d, yyyy" format
     // KioskViewModel::tickClock() already uses for clockDate, so the date
