@@ -2,7 +2,13 @@
 
 #include <QNetworkAccessManager>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QSettings>
+
+#include "AdminSession.h"
+#include "HttpForm.h"
+#include "apiconfig.h"
 
 SettingsViewModel::SettingsViewModel(QObject *parent)
     : QObject(parent)
@@ -74,6 +80,42 @@ void SettingsViewModel::importLogo(const QString &sourcePath)
     // NB: no re-theme here. The live palette re-extraction runs in QML on
     // Theme._vm (T14) — see the CRITICAL note above for why a VM-owned
     // ThemeViewModel would not reach the running UI.
+}
+
+bool SettingsViewModel::isAuthFailureMessage(const QString &message)
+{
+    return message.contains(QStringLiteral("Invalid admin key"), Qt::CaseInsensitive)
+        || message.contains(QStringLiteral("authentication required"), Qt::CaseInsensitive);
+}
+
+void SettingsViewModel::applyAdminInfoResponse(const QByteArray &json)
+{
+    setBusy(false);
+    const QJsonObject obj = QJsonDocument::fromJson(json).object();
+    const QString status = obj.value(QStringLiteral("status")).toString();
+    const QString message = obj.value(QStringLiteral("message")).toString();
+    if (status == QLatin1String("success")) {
+        emit adminInfoSaved();
+    } else if (isAuthFailureMessage(message)) {
+        emit authFailed();
+    } else {
+        emit adminInfoFailed(message.isEmpty()
+            ? QStringLiteral("Failed to update admin info.") : message);
+    }
+}
+
+void SettingsViewModel::saveAdminInfo()
+{
+    setBusy(true);
+    const QList<QPair<QString, QString>> fields = {
+        {QStringLiteral("admin_name"), m_cur.adminName},
+        {QStringLiteral("admin_position"), m_cur.adminPosition},
+        {QStringLiteral("admin_key"), AdminSession::instance().key()},
+    };
+    HttpForm::submit(m_nam, ApiConfig::endpoint(QStringLiteral("update_admin_info.php")),
+                     fields, this,
+        [this](const QByteArray &body) { applyAdminInfoResponse(body); },
+        [this]() { setBusy(false); emit networkError(); });   // 401 lands here in production (see plan T10 known limitation)
 }
 
 void SettingsViewModel::recomputeDirty()

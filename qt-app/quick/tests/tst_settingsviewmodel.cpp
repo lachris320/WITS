@@ -42,6 +42,9 @@ private slots:
     void saveClearsDirty();
     void importLogoUpdatesPathAndEmitsLogoChanged();
     void importBadPathLeavesLogoUnchanged();
+    void adminInfoSuccessEmitsSaved();
+    void adminInfoErrorEmitsFailedWithMessage();
+    void adminInfoAuthFailureEmitsAuthFailed();
 };
 
 void TestSettingsViewModel::loadPopulatesPropertiesFromSettings()
@@ -153,6 +156,31 @@ void TestSettingsViewModel::importBadPathLeavesLogoUnchanged()
     const QString before = vm.logoPath();
     vm.importLogo(m_tmp.path() + QStringLiteral("/does_not_exist.png"));
     QCOMPARE(vm.logoPath(), before);   // unchanged
+}
+
+void TestSettingsViewModel::adminInfoSuccessEmitsSaved()
+{
+    SettingsViewModel vm;
+    QSignalSpy ok(&vm, &SettingsViewModel::adminInfoSaved);
+    vm.applyAdminInfoResponse(R"({"status":"success","message":"Admin info updated successfully."})");
+    QCOMPARE(ok.count(), 1);
+}
+
+void TestSettingsViewModel::adminInfoErrorEmitsFailedWithMessage()
+{
+    SettingsViewModel vm;
+    QSignalSpy bad(&vm, &SettingsViewModel::adminInfoFailed);
+    vm.applyAdminInfoResponse(R"({"status":"error","message":"Failed to update admin info."})");
+    QCOMPARE(bad.count(), 1);
+    QCOMPARE(bad.at(0).at(0).toString(), QStringLiteral("Failed to update admin info."));
+}
+
+void TestSettingsViewModel::adminInfoAuthFailureEmitsAuthFailed()
+{
+    SettingsViewModel vm;
+    QSignalSpy auth(&vm, &SettingsViewModel::authFailed);
+    vm.applyAdminInfoResponse(R"({"status":"error","message":"Invalid admin key"})");
+    QCOMPARE(auth.count(), 1);
 }
 
 QTEST_MAIN(TestSettingsViewModel)

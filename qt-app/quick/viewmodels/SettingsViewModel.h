@@ -1,6 +1,7 @@
 #ifndef SETTINGSVIEWMODEL_H
 #define SETTINGSVIEWMODEL_H
 
+#include <QByteArray>
 #include <QObject>
 #include <QString>
 #include <QStringList>
@@ -66,6 +67,12 @@ public:
     // Live re-theme is wired in QML on Theme's own instance (T14); see the
     // CRITICAL note in the Phase 4c plan, Task 9.
     Q_INVOKABLE void importLogo(const QString &sourcePath);
+    Q_INVOKABLE void saveAdminInfo();
+
+    // Network-free decode seam (spec §6.1): the async saveAdminInfo() wires
+    // HttpForm::submit's success callback straight to this so tests can drive
+    // response classification with synthetic QByteArray payloads.
+    void applyAdminInfoResponse(const QByteArray &json);
 
 signals:
     void schoolNameChanged();
@@ -82,11 +89,18 @@ signals:
     void statusChanged();
     void saved();
     void saveFailed(const QString &message);
+    void adminInfoSaved();
+    void adminInfoFailed(const QString &message);
+    void authFailed();
+    void networkError();
 
 private:
     void recomputeDirty();
     void setBusy(bool v);
     void setStatus(const QString &msg);
+    // Shared auth-failure classification: the two message strings
+    // requireAdminAuth (T17) / its guard return on a bad or missing key.
+    static bool isAuthFailureMessage(const QString &message);
 
     SettingsController m_controller;
     QNetworkAccessManager *m_nam = nullptr;
