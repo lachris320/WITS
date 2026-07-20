@@ -583,7 +583,29 @@ Item {
         //       the entire 525ms window would leave both rows settled with
         //       no strict lead observed, so the observation is wrapped in a
         //       bounded retry that re-triggers the entrance via the same
-        //       model reset; only "no attempt ever saw a strict lead" fails.
+        //       model reset.
+        //
+        // RETRY POLICY — a retry is only ever legitimate for ONE of the two
+        // reasons an attempt can end without a strict lead, and the loop
+        // must tell them apart. A blanket "retry until any attempt sees a
+        // lead" would also pass a product bug where the stagger fired only
+        // SOMETIMES: two broken attempts retried away by one good one. So:
+        //   • window MISSED (`windowObserved` false) — the machine stalled
+        //     hard enough that row 5 was never sampled while in flight. That
+        //     is scheduler jitter, says nothing about the code, and is the
+        //     only case that earns a retry.
+        //   • window OBSERVED, no strict lead — the entrance genuinely ran,
+        //     row 5 was genuinely caught mid-flight next to a row 0 that had
+        //     not settled either, and row 5 was never behind. That is a real
+        //     product failure and fails IMMEDIATELY rather than being
+        //     retried away.
+        // The two exhaust the space: any sample with row 5 below 1 either
+        // has row 0 already settled (⇒ a strict lead, pass) or row 0 still
+        // in flight (⇒ the window, which a working stagger always leads in),
+        // so a healthy run can never trip the fast fail. Exhausting all 3
+        // attempts without ever observing the window fails too, but with a
+        // distinct, honest message: the suite could not sample the window,
+        // which is not the same claim as "stagger is broken".
         function test_staggerDelayReadsThemeRowStaggerToken() {
             // (a) Token arithmetic — fully deterministic, no clock involved.
             var step = Theme.motion.rowStagger;
@@ -625,6 +647,10 @@ Item {
             // ordering information.
             var eps = 1e-6;
             var sawStrictLead = false;
+            // Per-attempt: was row 5 ever sampled strictly between its start
+            // and its settle, alongside a row 0 that had not settled either?
+            // Only a FALSE here licenses a retry (see RETRY POLICY above).
+            var windowObserved = false;
             var row0 = null;
             var row5 = null;
             for (var attempt = 0; attempt < 3 && !sawStrictLead; attempt++) {
@@ -646,6 +672,7 @@ Item {
                 // pair at ANY point in row 5's ~400ms flight, and if a stall
                 // swallows that whole window the outer retry re-plays it.
                 var lateStarted = false;
+                windowObserved = false;
                 var deadline = Date.now() + 2000;
                 while (Date.now() < deadline) {
                     var early = row0.opacity;
@@ -657,6 +684,12 @@ Item {
                         // on an inverted/negative stagger.
                         verify(early >= late - eps,
                                "row 5 overtook row 0: " + early + " < " + late);
+                        // Both rows caught in flight at the same instant:
+                        // this is the window in which a working stagger MUST
+                        // show a lead, so from here on a missing lead is the
+                        // product's fault, not the scheduler's.
+                        if (late < 1 - eps && early < 1 - eps)
+                            windowObserved = true;
                         // A STRICT lead is what separates real stagger from
                         // every row animating in lockstep (which would hold
                         // the two exactly equal at every sample).
@@ -669,9 +702,18 @@ Item {
                         break;
                     wait(10);
                 }
+                // Fail fast: the window WAS sampled and row 5 still never
+                // trailed row 0. Retrying this would only paper over a
+                // stagger that works intermittently.
+                if (windowObserved && !sawStrictLead)
+                    fail("row 5 was sampled mid-entrance alongside an unsettled "
+                         + "row 0 and never trailed it — stagger not wired "
+                         + "(attempt " + (attempt + 1) + ")");
             }
             verify(sawStrictLead,
-                   "row 5 never trailed row 0 in 3 attempts — stagger not wired");
+                   "row 5's entrance window was never sampled in 3 attempts — "
+                   + "the machine was too loaded to observe the stagger, which "
+                   + "is not the same as stagger being broken");
             tryCompare(row5, "opacity", 1);
         }
 

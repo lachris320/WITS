@@ -373,6 +373,18 @@ Item {
         //       rows animating in lockstep, inside a bounded retry so one
         //       scheduler stall swallowing the whole 600ms window can't
         //       redden the suite.
+        //
+        // RETRY POLICY (twin of the one in tst_qml_admin.qml): a retry is
+        // legitimate ONLY when the entrance window was missed entirely —
+        // index 8 never sampled in flight, i.e. scheduler jitter. If the
+        // window WAS sampled (index 8 below 1 next to an index 0 that had
+        // not settled either) and no strict lead appeared, the entrance
+        // really ran and really failed to stagger: that fails IMMEDIATELY,
+        // because retrying it would also pass a product bug where the
+        // stagger fires only sometimes. Running out of attempts without ever
+        // sampling the window fails as well, but with a distinct message —
+        // "could not observe" is an honest claim, "stagger is broken" would
+        // not be.
         function test_rowStaggerDelaysHigherIndexRows() {
             // (a) Token arithmetic — fully deterministic, no clock involved.
             var step = Theme.motion.rowStagger;
@@ -404,6 +416,10 @@ Item {
             // start.
             var eps = 1e-6;
             var sawStrictLead = false;
+            // Per-attempt: was index 8 ever sampled strictly between its
+            // start and its settle, alongside an index 0 that had not settled
+            // either? Only a FALSE here licenses a retry (see RETRY POLICY).
+            var windowObserved = false;
             var row0 = null;
             var row8 = null;
             for (var attempt = 0; attempt < 3 && !sawStrictLead; attempt++) {
@@ -423,6 +439,7 @@ Item {
                 // stall swallows that whole window the outer retry re-plays
                 // it.
                 var lateStarted = false;
+                windowObserved = false;
                 var deadline = Date.now() + 2000;
                 while (Date.now() < deadline) {
                     var early = row0.opacity;
@@ -434,6 +451,12 @@ Item {
                         // fire on an inverted/negative stagger.
                         verify(early >= late - eps,
                                "row 8 overtook row 0: " + early + " < " + late);
+                        // Both rows caught in flight at the same instant:
+                        // this is the window in which a working stagger MUST
+                        // show a lead, so from here on a missing lead is the
+                        // product's fault, not the scheduler's.
+                        if (late < 1 - eps && early < 1 - eps)
+                            windowObserved = true;
                         // A STRICT lead is what separates real stagger from
                         // every row animating in lockstep (which would hold
                         // the two exactly equal at every sample).
@@ -446,9 +469,18 @@ Item {
                         break;
                     wait(10);
                 }
+                // Fail fast: the window WAS sampled and index 8 still never
+                // trailed index 0. Retrying this would only paper over a
+                // stagger that works intermittently.
+                if (windowObserved && !sawStrictLead)
+                    fail("row 8 was sampled mid-entrance alongside an unsettled "
+                         + "row 0 and never trailed it — stagger not wired "
+                         + "(attempt " + (attempt + 1) + ")");
             }
             verify(sawStrictLead,
-                   "row 8 never trailed row 0 in 3 attempts — stagger not wired");
+                   "row 8's entrance window was never sampled in 3 attempts — "
+                   + "the machine was too loaded to observe the stagger, which "
+                   + "is not the same as stagger being broken");
             tryCompare(row8, "opacity", 1);
         }
 
@@ -595,6 +627,17 @@ Item {
         // The two tryCompares also pin the resting-width arithmetic
         // (track.width * value / chart.maxValue) at two distinct values.
         //
+        // Both expected widths are DERIVED, not spelled out: the resting
+        // value is read back from deptFillFixture and the divisor from
+        // bcDeptFill.maxValue. Writing `track.width * (100 / 200)` would
+        // duplicate the fixture's `value: 100` and the chart's
+        // `maxValue: 200`, so editing either would silently desync the
+        // expectation from the thing under test and the test would fail (or
+        // worse, pass) for a reason that has nothing to do with the
+        // Behavior. The only literal left is the TARGET value, which is not
+        // fixture data — this test chooses it itself, via setProperty, and
+        // the expected target width is computed from it.
+        //
         // Fixture note: deptFillFixture / bcDeptFill are referenced by no
         // other test in this file, but TestCase runs test_ functions in
         // alphabetical order, so the end state is kept deterministic anyway
@@ -604,13 +647,20 @@ Item {
             var fill = findChild(bcDeptFill, "deptBarFill_0");
             verify(fill !== null);
             var track = fill.parent;
-            var restWidth = track.width * (100 / 200);
-            var targetWidth = track.width * (180 / 200);
+            // Read the resting value off the fixture BEFORE changing it, and
+            // the divisor off the chart — never re-typed here.
+            var restValue = deptFillFixture.get(0).value;
+            var maxValue = bcDeptFill.maxValue;
+            // The only literal: this test's own choice of where to glide to.
+            var targetValue = 180;
+            verify(targetValue !== restValue);
+            var restWidth = track.width * (restValue / maxValue);
+            var targetWidth = track.width * (targetValue / maxValue);
             tryCompare(fill, "width", restWidth);
 
             // (a) No snap: checked SYNCHRONOUSLY, with no wait and no
             // event-loop turn between the write and the read.
-            deptFillFixture.setProperty(0, "value", 180);
+            deptFillFixture.setProperty(0, "value", targetValue);
             compare(fill.width, restWidth);
 
             // (b) Real interpolation: some width strictly inside the open
@@ -621,9 +671,9 @@ Item {
                 if (attempt > 0) {
                     // Re-trigger: glide back down, let it fully settle, then
                     // re-issue the same value change this test is about.
-                    deptFillFixture.setProperty(0, "value", 100);
+                    deptFillFixture.setProperty(0, "value", restValue);
                     tryCompare(fill, "width", restWidth);
-                    deptFillFixture.setProperty(0, "value", 180);
+                    deptFillFixture.setProperty(0, "value", targetValue);
                 }
                 // Generous deadline: ~2.5x the 800ms the glide needs when
                 // nothing competes for the CPU. No single sample is
