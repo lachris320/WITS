@@ -555,19 +555,99 @@ Item {
         // track). Uses ListModel.setProperty (a targeted dataChanged), not a
         // model reset, so the SAME fill delegate survives and its Behavior
         // can be observed animating in place.
+        //
+        // This test used to sample the glide at a fixed wall-clock offset:
+        // `wait(120)` (~15% of the 800ms Theme.motion.deptBarFill) then
+        // `verify(fill.width > oldWidth)` + `verify(fill.width <
+        // targetWidth)`. The second half is two-sided and becomes FALSE the
+        // moment the glide finishes, so any stall that pushes `wait(120)`
+        // past the Behavior's duration reddens it for reasons unrelated to
+        // the code under test — the last member of the flake class fixed in
+        // 4efc6a9 (pageIn) and e2e1127 (row stagger). Both tst_qml_admin and
+        // tst_qml_components compile this whole directory via
+        // QUICK_TEST_SOURCE_DIR, so one flake here reddens several ctest
+        // entries at once.
+        //
+        // The timed sample is replaced by three checks that are collectively
+        // STRICTER — in particular (a), which the original missed entirely:
+        //   (a) ZERO-CLOCK proof that the width does not SNAP. With a
+        //       Behavior in place a binding change cannot take effect
+        //       synchronously: the interceptor starts an animation from the
+        //       current value, so the property still reads the OLD width at
+        //       the instant of the write and only moves on the next tick.
+        //       Strip the Behavior and the plain binding updates
+        //       synchronously, so this fails. Same idiom as
+        //       test_rowHoverColorGlidesInAndOutViaBehavior above ("must
+        //       still read the resting value at that exact instant"); no
+        //       clock is involved at all, which makes it load-immune and the
+        //       single strongest assertion available here.
+        //   (b) proof it genuinely INTERPOLATES rather than doing a delayed
+        //       jump — (a) alone would still pass a `duration: 0` Behavior,
+        //       whose width would simply change one tick later. So poll for
+        //       a width strictly between the old and target widths, rather
+        //       than betting on one fixed offset. A single stall long enough
+        //       to swallow the whole 800ms flight would see no intermediate
+        //       value, so the observation is wrapped in a bounded retry that
+        //       re-triggers the glide (per e2e1127); only "no attempt ever
+        //       saw an intermediate width" fails.
+        //   (c) the end state, via the existing poll-based (hence
+        //       load-tolerant) tryCompare.
+        // The two tryCompares also pin the resting-width arithmetic
+        // (track.width * value / chart.maxValue) at two distinct values.
+        //
+        // Fixture note: deptFillFixture / bcDeptFill are referenced by no
+        // other test in this file, but TestCase runs test_ functions in
+        // alphabetical order, so the end state is kept deterministic anyway
+        // — every path through the retry leaves value at 180, exactly as the
+        // previous version of this test did.
         function test_deptBarFillWidthGlidesToNewValueViaBehavior() {
             var fill = findChild(bcDeptFill, "deptBarFill_0");
             verify(fill !== null);
             var track = fill.parent;
-            tryCompare(fill, "width", track.width * (100 / 200));
-
-            deptFillFixture.setProperty(0, "value", 180);
+            var restWidth = track.width * (100 / 200);
             var targetWidth = track.width * (180 / 200);
-            wait(120);
-            // Mid-flight: past the old width, not yet at the new one — the
-            // signature of an in-progress Behavior, not an instant snap.
-            verify(fill.width > track.width * (100 / 200));
-            verify(fill.width < targetWidth);
+            tryCompare(fill, "width", restWidth);
+
+            // (a) No snap: checked SYNCHRONOUSLY, with no wait and no
+            // event-loop turn between the write and the read.
+            deptFillFixture.setProperty(0, "value", 180);
+            compare(fill.width, restWidth);
+
+            // (b) Real interpolation: some width strictly inside the open
+            // interval (restWidth, targetWidth) must be observable.
+            var eps = 1e-6;
+            var sawIntermediate = false;
+            for (var attempt = 0; attempt < 3 && !sawIntermediate; attempt++) {
+                if (attempt > 0) {
+                    // Re-trigger: glide back down, let it fully settle, then
+                    // re-issue the same value change this test is about.
+                    deptFillFixture.setProperty(0, "value", 100);
+                    tryCompare(fill, "width", restWidth);
+                    deptFillFixture.setProperty(0, "value", 180);
+                }
+                // Generous deadline: ~2.5x the 800ms the glide needs when
+                // nothing competes for the CPU. No single sample is
+                // load-critical — the loop only has to catch the fill at ANY
+                // point of its flight, and if a stall swallows the whole
+                // window the outer retry re-plays it.
+                var deadline = Date.now() + 2000;
+                while (Date.now() < deadline) {
+                    var w = fill.width;
+                    if (w > restWidth + eps && w < targetWidth - eps) {
+                        sawIntermediate = true;
+                        break;
+                    }
+                    // Nothing more to learn once the glide has landed.
+                    if (w >= targetWidth - eps)
+                        break;
+                    wait(10);
+                }
+            }
+            verify(sawIntermediate,
+                   "fill width never took an intermediate value in 3 attempts "
+                   + "— the dept bar snaps instead of gliding");
+
+            // (c) End state, poll-based so it tolerates a loaded machine.
             tryCompare(fill, "width", targetWidth);
         }
 
