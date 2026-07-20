@@ -19,15 +19,75 @@ Rectangle {
     // are gated by AdminScreen's Loader.onLoaded (the established pattern), so
     // QuickTests instantiating this screen with a stub vm stay network-free.
 
-    // Last outcome, surfaced by the "settingsStatus" Text near the footer Save.
-    // Every write path (settings save, admin info, key change, logo import,
-    // reset) reports through here — success as well as failure — so nothing
-    // fails silently. Set via showStatus(); never assigned from a binding.
-    property string statusText: ""
+    // Outcome reporting is PER SECTION, not per screen. A single footer line
+    // was the whole defect: this screen is a tall Flickable, so an error raised
+    // by a button four cards above the fold rendered off-screen and read as
+    // "nothing happened". Each card now reports next to its own buttons; the
+    // footer line keeps the whole-form save() outcome (its button is there).
+    //
+    // All three are set via the show*Status() helpers; never from a binding.
+    property string statusText: ""            // footer — save() / logo import
     property bool statusIsError: false
+    property string adminStatusText: ""       // Administrator card
+    property bool adminStatusIsError: false
+    property string resetStatusText: ""       // Reset Visits card
+    property bool resetStatusIsError: false
+
+    // Which section owns the in-flight VM call. authFailed/networkError are
+    // shared — any of the three POSTs can raise them — so without this they
+    // would have to be dumped somewhere arbitrary. Set by beginSection() from
+    // the button handlers, consumed by showSectionStatus().
+    property string activeSection: ""
+
     function showStatus(text, isError) {
         screen.statusIsError = isError === true;
         screen.statusText = text;
+    }
+    function showAdminStatus(text, isError) {
+        screen.adminStatusIsError = isError === true;
+        screen.adminStatusText = text;
+    }
+    function showResetStatus(text, isError) {
+        screen.resetStatusIsError = isError === true;
+        screen.resetStatusText = text;
+    }
+    // Claim the section for the call about to start and drop that section's
+    // previous outcome, so a stale "saved"/"failed" cannot sit under a button
+    // whose new request is still in flight and be read as this attempt's result.
+    function beginSection(section) {
+        screen.activeSection = section;
+        if (section === "admin")
+            screen.adminStatusText = "";
+        else if (section === "reset")
+            screen.resetStatusText = "";
+        else
+            screen.statusText = "";
+    }
+    // Route a shared outcome back to the section that started the call, so an
+    // error can never surface in a card the admin was not acting in.
+    function showSectionStatus(text, isError) {
+        if (screen.activeSection === "admin")
+            screen.showAdminStatus(text, isError);
+        else if (screen.activeSection === "reset")
+            screen.showResetStatus(text, isError);
+        else
+            screen.showStatus(text, isError);
+    }
+
+    // One definition for all three status lines. textFormat is the load-bearing
+    // part: these carry backend "message" fields verbatim over cleartext HTTP,
+    // and Text defaults to AutoText — which auto-detects and RENDERS rich text,
+    // so a tampered response carrying "<img src=http://attacker/beacon>" would
+    // be fetched by an unattended kiosk. Status is never markup.
+    component SectionStatus: Text {
+        property bool isError: false
+        Layout.fillWidth: true
+        textFormat: Text.PlainText
+        visible: text.length > 0
+        color: isError ? Theme.error : Theme.success
+        wrapMode: Text.WordWrap
+        font.family: Theme.typography.sans
+        font.pixelSize: Theme.typography.body
     }
 
     function openLogoDialog() { logoDialog.open() }
@@ -153,7 +213,7 @@ Rectangle {
                         variant: "Primary"
                         text: qsTr("Save Admin Info")
                         enabled: vm ? !vm.busy : false
-                        onClicked: if (vm) vm.saveAdminInfo()
+                        onClicked: if (vm) { screen.beginSection("admin"); vm.saveAdminInfo() }
                     }
 
                     // Change-key subform. The three fields are deliberately NOT
@@ -193,7 +253,19 @@ Rectangle {
                         enabled: vm ? (!vm.busy
                                    && newKeyField.text.length > 0
                                    && newKeyField.text === confirmKeyField.text) : false
-                        onClicked: if (vm) vm.changeAdminKey(oldKeyField.text, newKeyField.text)
+                        onClicked: if (vm) {
+                            screen.beginSection("admin");
+                            vm.changeAdminKey(oldKeyField.text, newKeyField.text);
+                        }
+                    }
+
+                    // Both Administrator actions report HERE, directly under the
+                    // buttons that raise them — the footer line is four cards
+                    // down and off-screen at any realistic window height.
+                    SectionStatus {
+                        objectName: "adminStatus"
+                        text: screen.adminStatusText
+                        isError: screen.adminStatusIsError
                     }
                 }
             }
@@ -300,16 +372,36 @@ Rectangle {
                             variant: "Outline"
                             text: qsTr("Download Reset Manifest")
                             enabled: deptPicker.currentValue.length > 0
-                            onClicked: screen.openManifestDialog()
+                            onClicked: {
+                                screen.beginSection("reset");
+                                screen.openManifestDialog();
+                            }
                         }
                         LButton {
                             objectName: "resetVisitsButton"
                             variant: "Danger"
                             text: qsTr("Reset Visits…")
                             enabled: deptPicker.currentValue.length > 0
-                            onClicked: resetConfirm.visible = true
+                            onClicked: {
+                                // Claim the section on OPEN, not on confirm: a
+                                // shared failure can arrive from anywhere in
+                                // this flow and must come back to this card.
+                                screen.beginSection("reset");
+                                resetConfirm.visible = true;
+                            }
                         }
                         Item { Layout.fillWidth: true }
+                    }
+
+                    // The tier-2 dialog is modal and on-screen, so the reset
+                    // outcome itself is not invisible — but it closes on both
+                    // outcomes, and what is left behind is this card. Reporting
+                    // in the footer would put the explanation for the dialog
+                    // that just vanished below the fold.
+                    SectionStatus {
+                        objectName: "resetStatus"
+                        text: screen.resetStatusText
+                        isError: screen.resetStatusIsError
                     }
                 }
             }
@@ -319,24 +411,13 @@ Rectangle {
                 Layout.fillWidth: true
                 spacing: Theme.spacing.md
 
-                // Outcome of the last write (both directions — a bare "it
-                // cleared" is not confirmation). T15 asserts on this node.
-                Text {
+                // Outcome of the whole-form save (both directions — a bare "it
+                // cleared" is not confirmation). T15 asserts on this node; the
+                // per-card outcomes live next to their own buttons instead.
+                SectionStatus {
                     objectName: "settingsStatus"
-                    Layout.fillWidth: true
                     text: screen.statusText
-                    // statusText carries backend "message" fields verbatim, and
-                    // Text defaults to AutoText — which auto-detects and RENDERS
-                    // rich text. The backend is reached over cleartext HTTP, so a
-                    // tampered or compromised response containing
-                    // "<img src=http://attacker/beacon>" would be rendered and
-                    // fetched by an unattended kiosk. Status is never markup.
-                    textFormat: Text.PlainText
-                    visible: screen.statusText.length > 0
-                    color: screen.statusIsError ? Theme.error : Theme.success
-                    wrapMode: Text.WordWrap
-                    font.family: Theme.typography.sans
-                    font.pixelSize: Theme.typography.body
+                    isError: screen.statusIsError
                 }
                 LButton {
                     objectName: "saveButton"
@@ -344,7 +425,7 @@ Rectangle {
                     variant: "Primary"
                     text: qsTr("Save")
                     enabled: vm ? (vm.dirty && !vm.busy) : false
-                    onClicked: if (vm) vm.save()
+                    onClicked: if (vm) { screen.beginSection("form"); vm.save() }
                 }
             }
         }
@@ -360,22 +441,28 @@ Rectangle {
         message: qsTr("This permanently deletes the department's visit history and cannot be undone.")
         confirmText: qsTr("Reset")
         busy: vm ? vm.busy : false
-        onConfirmed: function(key) { if (vm) vm.resetVisits(deptPicker.currentValue, key) }
+        onConfirmed: function(key) {
+            if (vm) {
+                screen.beginSection("reset");
+                vm.resetVisits(deptPicker.currentValue, key);
+            }
+        }
     }
-    // Every VM outcome lands here. The VM has no visual surface of its own, so
+    // Every VM outcome lands here, and each one is routed to the status line of
+    // the section that owns it — the VM has no visual surface of its own, so
     // without these handlers a rejected admin key, a failed reset or a failed
     // logo copy would look exactly like nothing happening.
     Connections {
         target: vm
         ignoreUnknownSignals: true
 
-        // Settings save (local QSettings).
+        // Settings save (local QSettings) — the footer Save button's own result.
         function onSaved() { screen.showStatus(qsTr("Settings saved."), false) }
         function onSaveFailed(message) { screen.showStatus(message, true) }
 
-        // Admin info POST.
-        function onAdminInfoSaved() { screen.showStatus(qsTr("Admin info saved."), false) }
-        function onAdminInfoFailed(message) { screen.showStatus(message, true) }
+        // Admin info POST — reports in the Administrator card.
+        function onAdminInfoSaved() { screen.showAdminStatus(qsTr("Admin info saved."), false) }
+        function onAdminInfoFailed(message) { screen.showAdminStatus(message, true) }
 
         // Key change: on success the three subform fields must not keep the old
         // and new keys sitting in the UI for the rest of the session.
@@ -383,10 +470,10 @@ Rectangle {
             oldKeyField.text = "";
             newKeyField.text = "";
             confirmKeyField.text = "";
-            screen.showStatus(qsTr("Admin key changed."), false);
+            screen.showAdminStatus(qsTr("Admin key changed."), false);
         }
         function onKeyChangeFailed(message) {
-            screen.showStatus(message.length > 0 ? message : qsTr("Could not change the admin key."), true);
+            screen.showAdminStatus(message.length > 0 ? message : qsTr("Could not change the admin key."), true);
         }
 
         // Tier-2 reset. Close the dialog on BOTH outcomes — leaving it open
@@ -395,24 +482,25 @@ Rectangle {
         function onVisitsReset() {
             resetConfirm.visible = false;
             resetConfirm.clearKey();
-            screen.showStatus(qsTr("Visits reset for %1.").arg(deptPicker.currentValue), false);
+            screen.showResetStatus(qsTr("Visits reset for %1.").arg(deptPicker.currentValue), false);
         }
         function onResetFailed(message) {
             resetConfirm.visible = false;
             resetConfirm.clearKey();
-            screen.showStatus(message.length > 0 ? message : qsTr("Reset failed."), true);
+            screen.showResetStatus(message.length > 0 ? message : qsTr("Reset failed."), true);
         }
 
-        // Shared failure paths (any of the three POSTs can land here).
+        // Shared failure paths (any of the three POSTs can land here) — routed
+        // back to whichever section started the call.
         function onAuthFailed() {
             resetConfirm.visible = false;
             resetConfirm.clearKey();
-            screen.showStatus(qsTr("Admin key rejected. Please sign in again."), true);
+            screen.showSectionStatus(qsTr("Admin key rejected. Please sign in again."), true);
         }
         function onNetworkError() {
             resetConfirm.visible = false;
             resetConfirm.clearKey();
-            screen.showStatus(qsTr("Could not reach the server. Check the connection and try again."), true);
+            screen.showSectionStatus(qsTr("Could not reach the server. Check the connection and try again."), true);
         }
 
         // statusMessage carries the VM-side failures that have no dedicated
@@ -460,9 +548,9 @@ Rectangle {
             // writeResetManifest returns false when the file cannot be opened —
             // report it rather than leaving the admin believing it was written.
             if (vm.writeResetManifest(deptPicker.currentValue, selectedFile))
-                screen.showStatus(qsTr("Reset Manifest saved."), false);
+                screen.showResetStatus(qsTr("Reset Manifest saved."), false);
             else
-                screen.showStatus(qsTr("Could not write the Reset Manifest."), true);
+                screen.showResetStatus(qsTr("Could not write the Reset Manifest."), true);
         }
     }
 }

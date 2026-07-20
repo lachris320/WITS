@@ -1033,6 +1033,11 @@ Item {
             settingsVmStub.lastManifestDept = "";
             settings.statusText = "";
             settings.statusIsError = false;
+            settings.adminStatusText = "";
+            settings.adminStatusIsError = false;
+            settings.resetStatusText = "";
+            settings.resetStatusIsError = false;
+            settings.activeSection = "";
             findChild(settings, "oldKeyField").text = "";
             findChild(settings, "newKeyField").text = "";
             findChild(settings, "confirmNewKeyField").text = "";
@@ -1140,13 +1145,72 @@ Item {
             compare(findChild(settings, "saveAdminInfoButton").enabled, false);
         }
 
-        function test_adminInfoOutcomesReachStatusLine() {
-            var status = findChild(settings, "settingsStatus");
+        // Admin outcomes report in the Administrator card, NOT the footer: the
+        // screen is a tall Flickable and the footer line sits two cards below
+        // the fold, where an error reads as "nothing happened".
+        function test_adminInfoOutcomesReachAdminCardNotFooter() {
+            var status = findChild(settings, "adminStatus");
+            var footer = findChild(settings, "settingsStatus");
+            verify(status !== null);
+            compare(status.visible, false);
             settingsVmStub.adminInfoSaved();
+            compare(status.visible, true);
             compare(status.text, "Admin info saved.");
+            compare(status.color, Theme.success);
             settingsVmStub.adminInfoFailed("Server rejected the update.");
             compare(status.text, "Server rejected the update.");
             compare(status.color, Theme.error);
+            // Nothing leaked into the other sections' lines.
+            compare(footer.visible, false);
+            compare(findChild(settings, "resetStatus").visible, false);
+        }
+
+        // The mirror of the above: the footer keeps the whole-form save()
+        // outcome and must not push it into a card that did not raise it.
+        function test_saveOutcomeStaysInFooterNotAdminCard() {
+            settingsVmStub.saveFailed("Disk is read-only.");
+            compare(findChild(settings, "settingsStatus").text, "Disk is read-only.");
+            compare(findChild(settings, "adminStatus").visible, false);
+            compare(findChild(settings, "resetStatus").visible, false);
+        }
+
+        // Per-section lines carry the same verbatim backend "message" fields as
+        // the footer, so they need the same AutoText defence.
+        function test_sectionStatusLinesRenderServerTextAsPlainNotRichText() {
+            var adminStatus = findChild(settings, "adminStatus");
+            var resetStatus = findChild(settings, "resetStatus");
+            compare(adminStatus.textFormat, Text.PlainText);
+            compare(resetStatus.textFormat, Text.PlainText);
+            settingsVmStub.adminInfoFailed("<b>bold</b> <img src='http://attacker/beacon'>");
+            compare(adminStatus.text, "<b>bold</b> <img src='http://attacker/beacon'>");
+            settingsVmStub.resetFailed("<b>bold</b>");
+            compare(resetStatus.text, "<b>bold</b>");
+        }
+
+        // A stale outcome under a button whose new request is in flight reads as
+        // this attempt's result. Starting an action must drop the old message.
+        function test_startingAnAdminActionClearsTheStaleAdminStatus() {
+            var status = findChild(settings, "adminStatus");
+            settingsVmStub.adminInfoFailed("Server rejected the update.");
+            compare(status.visible, true);
+            waitForRendering(settings);
+            mouseClick(findChild(settings, "saveAdminInfoButton"));
+            compare(settingsVmStub.saveAdminInfoCount, 1);
+            compare(status.visible, false);
+        }
+
+        // authFailed/networkError are shared by all three POSTs — they must come
+        // back to the card whose button was pressed, never to another one.
+        function test_sharedFailureFollowsTheSectionThatStartedTheCall() {
+            var adminStatus = findChild(settings, "adminStatus");
+            waitForRendering(settings);
+            mouseClick(findChild(settings, "saveAdminInfoButton"));
+            settingsVmStub.networkError();
+            compare(adminStatus.visible, true);
+            compare(adminStatus.text, "Could not reach the server. Check the connection and try again.");
+            compare(adminStatus.color, Theme.error);
+            compare(findChild(settings, "resetStatus").visible, false);
+            compare(findChild(settings, "settingsStatus").visible, false);
         }
 
         // --- Change admin key ---
@@ -1182,15 +1246,19 @@ Item {
             compare(findChild(settings, "oldKeyField").text, "");
             compare(findChild(settings, "newKeyField").text, "");
             compare(findChild(settings, "confirmNewKeyField").text, "");
-            compare(findChild(settings, "settingsStatus").text, "Admin key changed.");
+            compare(findChild(settings, "adminStatus").text, "Admin key changed.");
         }
 
-        // An empty failure message still has to say something.
-        function test_changeKeyFailureFallsBackToGenericMessage() {
-            var status = findChild(settings, "settingsStatus");
+        // An empty failure message still has to say something — next to the
+        // Change Key button, which is the case the owner hit in smoke testing.
+        function test_changeKeyFailureFallsBackToGenericMessageInAdminCard() {
+            var status = findChild(settings, "adminStatus");
             settingsVmStub.keyChangeFailed("");
+            compare(status.visible, true);
             compare(status.text, "Could not change the admin key.");
             compare(status.color, Theme.error);
+            compare(findChild(settings, "settingsStatus").visible, false);
+            compare(findChild(settings, "resetStatus").visible, false);
         }
 
         // --- Reset visits: department gating ---
@@ -1263,9 +1331,13 @@ Item {
             var dlg = openResetDialog("BA");
             settingsVmStub.visitsReset();
             compare(dlg.visible, false);
-            var status = findChild(settings, "settingsStatus");
+            var status = findChild(settings, "resetStatus");
             compare(status.text, "Visits reset for BA.");
             compare(status.color, Theme.success);
+            // The dialog vanishes on both outcomes; what is left behind is this
+            // card, so the explanation belongs here and not in the footer.
+            compare(findChild(settings, "settingsStatus").visible, false);
+            compare(findChild(settings, "adminStatus").visible, false);
         }
 
         // A failed reset used to leave the dialog hanging open with no
@@ -1275,7 +1347,7 @@ Item {
             findChild(dlg, "confirmKeyField").text = "typed";
             settingsVmStub.resetFailed("Department not found.");
             compare(dlg.visible, false);
-            var status = findChild(settings, "settingsStatus");
+            var status = findChild(settings, "resetStatus");
             compare(status.visible, true);
             compare(status.text, "Department not found.");
             compare(status.color, Theme.error);
@@ -1285,7 +1357,7 @@ Item {
         function test_resetFailedWithEmptyMessageFallsBack() {
             openResetDialog("CE");
             settingsVmStub.resetFailed("");
-            compare(findChild(settings, "settingsStatus").text, "Reset failed.");
+            compare(findChild(settings, "resetStatus").text, "Reset failed.");
         }
 
         function test_authFailedClosesDialogAndShowsError() {
@@ -1293,7 +1365,9 @@ Item {
             findChild(dlg, "confirmKeyField").text = "wrong";
             settingsVmStub.authFailed();
             compare(dlg.visible, false);
-            var status = findChild(settings, "settingsStatus");
+            // openResetDialog() clicked the Reset Visits button, so the reset
+            // card owns the in-flight call and the shared failure lands there.
+            var status = findChild(settings, "resetStatus");
             compare(status.visible, true);
             compare(status.text, "Admin key rejected. Please sign in again.");
             compare(status.color, Theme.error);
@@ -1305,7 +1379,7 @@ Item {
             findChild(dlg, "confirmKeyField").text = "typed";
             settingsVmStub.networkError();
             compare(dlg.visible, false);
-            var status = findChild(settings, "settingsStatus");
+            var status = findChild(settings, "resetStatus");
             compare(status.visible, true);
             compare(status.text, "Could not reach the server. Check the connection and try again.");
             compare(findChild(dlg, "confirmKeyField").text, "");
@@ -1333,6 +1407,8 @@ Item {
             compare(findChild(vmlessSettings, "manifestButton").enabled, false);
             // No vm means no outcome to report, and no tier-2 dialog on screen.
             compare(findChild(vmlessSettings, "settingsStatus").visible, false);
+            compare(findChild(vmlessSettings, "adminStatus").visible, false);
+            compare(findChild(vmlessSettings, "resetStatus").visible, false);
             compare(findChild(vmlessSettings, "resetConfirmDialog").visible, false);
             // The logo slot must not latch on with no vm to supply one.
             compare(findChild(vmlessSettings, "logoPreview").visible, false);
