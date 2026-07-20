@@ -338,23 +338,144 @@ Item {
         }
 
         // Stagger differential (mutation target: Theme.motion.rowStagger /
-        // staggerCap). Index 0 has zero PauseAnimation delay and resolves
-        // after ~Theme.motion.rowIn (400ms); index 8 (below staggerCap of
-        // 10) carries an extra 8 * Theme.motion.rowStagger (200ms at current
-        // token values) of pause before its own fade even starts. Waiting
-        // 450ms — comfortably past row 0's 400ms settle but well short of
-        // row 8's 600ms (200 pause + 400 fade) — must find row 0 fully
-        // resolved and row 8 still strictly mid-flight.
+        // staggerCap). populate/add CLONE their whole animation tree per
+        // transitioning item and the pause duration is assigned imperatively
+        // onto that clone from onIdxChanged (LTable.qml:87-149), so reading
+        // populatePause.duration on the template from outside reflects no
+        // real item — asserting on it would be a vacuous test.
+        //
+        // This test used to bridge that gap with a wall-clock sample:
+        // `wait(450)` — picked to land in the gap between index 0's ~400ms
+        // (Theme.motion.rowIn) settle and index 8's 600ms (200ms pause +
+        // 400ms fade) — then `compare(row0.opacity, 1)` +
+        // `verify(row8.opacity > 0 && row8.opacity < 1)`. Under load
+        // `wait(450)` returns well past 450ms of animation time, row 8 has
+        // already settled at 1, and the strict-inequality check fails for
+        // reasons unrelated to the code under test. Same flake class as the
+        // pageIn entrance tests de-flaked just before this one — and since
+        // both tst_qml_admin and tst_qml_components compile this whole
+        // directory via QUICK_TEST_SOURCE_DIR, one flake here reddens several
+        // ctest entries at once.
+        //
+        // The timed sample is replaced by a polling WIRING proof — see the
+        // twin comment on SearchScreen's test of the same name
+        // (tst_qml_admin.qml) for the full reasoning — asserting the
+        // invariant that holds under ANY load: monotonic lead,
+        // row0.opacity >= row8.opacity at EVERY sample (same duration and
+        // easing for both, index 8 merely starts later), requiring that a
+        // STRICT lead be observed at least once, which is what separates real
+        // stagger from all rows animating in lockstep, inside a bounded retry
+        // so one scheduler stall swallowing the whole 600ms window can't
+        // redden the suite.
+        //
+        // The stagger ARITHMETIC itself (clamp at staggerCap, multiply by the
+        // step, and the negative-index guard) is deliberately NOT re-asserted
+        // here: tst_qml_theme.qml's
+        // test_staggerDelayClampsIndexToStaggerCapThenMultipliesByStep covers
+        // it on the pure Theme.motion.staggerDelay function, with zero clock,
+        // and QUICK_TEST_SOURCE_DIR means that test runs inside THIS binary
+        // too — repeating it here would only duplicate coverage already
+        // executing in the same process.
+        //
+        // RETRY POLICY (twin of the one in tst_qml_admin.qml): a retry is
+        // legitimate ONLY when the entrance window was missed entirely —
+        // index 8 never sampled in flight, i.e. scheduler jitter. If the
+        // window WAS sampled (index 8 below 1 next to an index 0 that had
+        // not settled either) and no strict lead appeared, the entrance
+        // really ran and really failed to stagger: that fails IMMEDIATELY,
+        // because retrying it would also pass a product bug where the
+        // stagger fires only sometimes. Running out of attempts without ever
+        // sampling the window fails as well, but with a distinct message —
+        // one that must NOT blame the machine alone, because a deleted or
+        // disabled populate Transition produces the IDENTICAL observation
+        // (rows sit at opacity 1, `lateStarted` never becomes true). The
+        // message names both causes and points at the row-entrance tests,
+        // which distinguish them.
         function test_rowStaggerDelaysHigherIndexRows() {
-            resetAnimatedRows();
-            waitForRendering(tAnimated);
-            var row0 = findChild(tAnimated, "tableRow_0");
-            var row8 = findChild(tAnimated, "tableRow_8");
-            verify(row0 !== null);
-            verify(row8 !== null);
-            wait(450);
-            compare(row0.opacity, 1);
-            verify(row8.opacity > 0 && row8.opacity < 1);
+            // Wiring: index 8's entrance really trails index 0's.
+            //
+            // The SHAPE of the opacity signal, measured rather than assumed:
+            // the delegate declares no `opacity: 0` default (see the populate
+            // comment in LTable.qml), and the populate clone's
+            // NumberAnimation only writes its `from: 0` when it actually
+            // STARTS — i.e. after its own PauseAnimation. So for the whole of
+            // index 8's 200ms pause the row sits at its natural opacity of
+            // exactly 1 while index 0 is already mid-fade; only then does it
+            // drop to ~0 and climb. A flat "row0.opacity >= row8.opacity at
+            // all times" invariant is therefore FALSE over that first window.
+            // The invariant that does hold under ANY load is gated on index 8
+            // having started: once it has been seen below 1, index 0 is at or
+            // ahead of it forever after — same duration, same easing, later
+            // start.
+            var eps = 1e-6;
+            var sawStrictLead = false;
+            // Per-attempt: was index 8 ever sampled strictly between its
+            // start and its settle, alongside an index 0 that had not settled
+            // either? Only a FALSE here licenses a retry (see RETRY POLICY).
+            var windowObserved = false;
+            var row0 = null;
+            var row8 = null;
+            for (var attempt = 0; attempt < 3 && !sawStrictLead; attempt++) {
+                // resetAnimatedRows() forces a genuine model-changed event,
+                // which re-fires populate from t=0 for the whole batch.
+                resetAnimatedRows();
+                waitForRendering(tAnimated);
+                row0 = findChild(tAnimated, "tableRow_0");
+                row8 = findChild(tAnimated, "tableRow_8");
+                verify(row0 !== null);
+                verify(row8 !== null);
+
+                // Generous deadline: ~3x the 600ms (200 pause + 400 fade) the
+                // entrance needs when nothing competes for the CPU. No single
+                // sample is load-critical — the loop only has to catch the
+                // pair at ANY point in index 8's ~400ms flight, and if a
+                // stall swallows that whole window the outer retry re-plays
+                // it.
+                var lateStarted = false;
+                windowObserved = false;
+                var deadline = Date.now() + 2000;
+                while (Date.now() < deadline) {
+                    var early = row0.opacity;
+                    var late = row8.opacity;
+                    if (late < 1 - eps)
+                        lateStarted = true;
+                    if (lateStarted) {
+                        // Index 8 can never be ahead of index 0 — this would
+                        // fire on an inverted/negative stagger.
+                        verify(early >= late - eps,
+                               "row 8 overtook row 0: " + early + " < " + late);
+                        // Both rows caught in flight at the same instant:
+                        // this is the window in which a working stagger MUST
+                        // show a lead, so from here on a missing lead is the
+                        // product's fault, not the scheduler's.
+                        if (late < 1 - eps && early < 1 - eps)
+                            windowObserved = true;
+                        // A STRICT lead is what separates real stagger from
+                        // every row animating in lockstep (which would hold
+                        // the two exactly equal at every sample).
+                        if (early > late + eps)
+                            sawStrictLead = true;
+                    }
+                    // Nothing more to learn once index 0 has settled and
+                    // either the lead was seen or index 8 has settled too.
+                    if (early >= 1 - eps && (sawStrictLead || late >= 1 - eps))
+                        break;
+                    wait(10);
+                }
+                // Fail fast: the window WAS sampled and index 8 still never
+                // trailed index 0. Retrying this would only paper over a
+                // stagger that works intermittently.
+                if (windowObserved && !sawStrictLead)
+                    fail("row 8 was sampled mid-entrance alongside an unsettled "
+                         + "row 0 and never trailed it — stagger not wired "
+                         + "(attempt " + (attempt + 1) + ")");
+            }
+            verify(sawStrictLead,
+                   "row 8's entrance window was never sampled in 3 attempts — "
+                   + "either the row entrance never ran at all, or the machine "
+                   + "was too loaded to sample it; check "
+                   + "test_animateRowsTrueRepopulatesFreshRowsOnModelReset, "
+                   + "which fails with an accurate message in the first case");
             tryCompare(row8, "opacity", 1);
         }
 
@@ -461,19 +582,119 @@ Item {
         // track). Uses ListModel.setProperty (a targeted dataChanged), not a
         // model reset, so the SAME fill delegate survives and its Behavior
         // can be observed animating in place.
+        //
+        // This test used to sample the glide at a fixed wall-clock offset:
+        // `wait(120)` (~15% of the 800ms Theme.motion.deptBarFill) then
+        // `verify(fill.width > oldWidth)` + `verify(fill.width <
+        // targetWidth)`. The second half is two-sided and becomes FALSE the
+        // moment the glide finishes, so any stall that pushes `wait(120)`
+        // past the Behavior's duration reddens it for reasons unrelated to
+        // the code under test — the last member of the flake class already
+        // de-flaked in the pageIn entrance tests and the row-stagger tests
+        // above. Both tst_qml_admin and
+        // tst_qml_components compile this whole directory via
+        // QUICK_TEST_SOURCE_DIR, so one flake here reddens several ctest
+        // entries at once.
+        //
+        // The timed sample is replaced by three checks that are collectively
+        // STRICTER — in particular (a), which the original missed entirely:
+        //   (a) ZERO-CLOCK proof that the width does not SNAP. With a
+        //       Behavior in place a binding change cannot take effect
+        //       synchronously: the interceptor starts an animation from the
+        //       current value, so the property still reads the OLD width at
+        //       the instant of the write and only moves on the next tick.
+        //       Strip the Behavior and the plain binding updates
+        //       synchronously, so this fails. Same idiom as
+        //       test_rowHoverColorGlidesInAndOutViaBehavior above ("must
+        //       still read the resting value at that exact instant"); no
+        //       clock is involved at all, which makes it load-immune and the
+        //       single strongest assertion available here.
+        //   (b) proof it genuinely INTERPOLATES rather than doing a delayed
+        //       jump — (a) alone would still pass a `duration: 0` Behavior,
+        //       whose width would simply change one tick later. So poll for
+        //       a width strictly between the old and target widths, rather
+        //       than betting on one fixed offset. A single stall long enough
+        //       to swallow the whole 800ms flight would see no intermediate
+        //       value, so the observation is wrapped in a bounded retry that
+        //       re-triggers the glide (the same bounded-retry idiom the
+        //       row-stagger tests above use); only "no attempt ever saw an
+        //       intermediate width" fails.
+        //   (c) the end state, via the existing poll-based (hence
+        //       load-tolerant) tryCompare.
+        // The two tryCompares also pin the resting-width arithmetic
+        // (track.width * value / chart.maxValue) at two distinct values.
+        //
+        // Both expected widths are DERIVED, not spelled out: the resting
+        // value is read back from deptFillFixture and the divisor from
+        // bcDeptFill.maxValue. Writing `track.width * (100 / 200)` would
+        // duplicate the fixture's `value: 100` and the chart's
+        // `maxValue: 200`, so editing either would silently desync the
+        // expectation from the thing under test and the test would fail (or
+        // worse, pass) for a reason that has nothing to do with the
+        // Behavior. The only literal left is the TARGET value, which is not
+        // fixture data — this test chooses it itself, via setProperty, and
+        // the expected target width is computed from it.
+        //
+        // Fixture note: deptFillFixture / bcDeptFill are referenced by no
+        // other test in this file, but TestCase runs test_ functions in
+        // alphabetical order, so the end state is kept deterministic anyway
+        // — every path through the retry leaves value at 180, exactly as the
+        // previous version of this test did.
         function test_deptBarFillWidthGlidesToNewValueViaBehavior() {
             var fill = findChild(bcDeptFill, "deptBarFill_0");
             verify(fill !== null);
             var track = fill.parent;
-            tryCompare(fill, "width", track.width * (100 / 200));
+            // Read the resting value off the fixture BEFORE changing it, and
+            // the divisor off the chart — never re-typed here.
+            var restValue = deptFillFixture.get(0).value;
+            var maxValue = bcDeptFill.maxValue;
+            // The only literal: this test's own choice of where to glide to.
+            var targetValue = 180;
+            verify(targetValue !== restValue);
+            var restWidth = track.width * (restValue / maxValue);
+            var targetWidth = track.width * (targetValue / maxValue);
+            tryCompare(fill, "width", restWidth);
 
-            deptFillFixture.setProperty(0, "value", 180);
-            var targetWidth = track.width * (180 / 200);
-            wait(120);
-            // Mid-flight: past the old width, not yet at the new one — the
-            // signature of an in-progress Behavior, not an instant snap.
-            verify(fill.width > track.width * (100 / 200));
-            verify(fill.width < targetWidth);
+            // (a) No snap: checked SYNCHRONOUSLY, with no wait and no
+            // event-loop turn between the write and the read.
+            deptFillFixture.setProperty(0, "value", targetValue);
+            compare(fill.width, restWidth);
+
+            // (b) Real interpolation: some width strictly inside the open
+            // interval (restWidth, targetWidth) must be observable.
+            var eps = 1e-6;
+            var sawIntermediate = false;
+            for (var attempt = 0; attempt < 3 && !sawIntermediate; attempt++) {
+                if (attempt > 0) {
+                    // Re-trigger: glide back down, let it fully settle, then
+                    // re-issue the same value change this test is about.
+                    deptFillFixture.setProperty(0, "value", restValue);
+                    tryCompare(fill, "width", restWidth);
+                    deptFillFixture.setProperty(0, "value", targetValue);
+                }
+                // Generous deadline: ~2.5x the 800ms the glide needs when
+                // nothing competes for the CPU. No single sample is
+                // load-critical — the loop only has to catch the fill at ANY
+                // point of its flight, and if a stall swallows the whole
+                // window the outer retry re-plays it.
+                var deadline = Date.now() + 2000;
+                while (Date.now() < deadline) {
+                    var w = fill.width;
+                    if (w > restWidth + eps && w < targetWidth - eps) {
+                        sawIntermediate = true;
+                        break;
+                    }
+                    // Nothing more to learn once the glide has landed.
+                    if (w >= targetWidth - eps)
+                        break;
+                    wait(10);
+                }
+            }
+            verify(sawIntermediate,
+                   "fill width never took an intermediate value in 3 attempts "
+                   + "— the dept bar snaps instead of gliding");
+
+            // (c) End state, poll-based so it tolerates a loaded machine.
             tryCompare(fill, "width", targetWidth);
         }
 

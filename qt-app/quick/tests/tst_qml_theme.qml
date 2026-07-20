@@ -90,5 +90,12 @@ TestCase {
         compare(Theme.motion.staggerDelay(15, 10), 100);
         // index 2 <= staggerCap -> 2 * step 25 = 50, unclamped.
         compare(Theme.motion.staggerDelay(2, 25), 50);
+        // Lower guard: a delegate's `index` transiently goes to -1 while the
+        // view tears its items down during a model reset, and the stagger
+        // delay is read from exactly that binding. Without the Math.max(0,
+        // ...) in Theme.qml that -1 would reach a PauseAnimation as a
+        // NEGATIVE duration; clamp it to no delay instead. This is the only
+        // place the negative branch is covered.
+        compare(Theme.motion.staggerDelay(-1, 25), 0);
     }
 }
