@@ -392,11 +392,12 @@ Item {
             search.selectedDepartment = "";
             search.hasSearched = false;
             search.debounceMs = 300;
-            // test_pageInAnimatesContentColumnFadeAndRise drives this down to
-            // 0 and back up; restore the resting state so every other test
+            // The two page-entrance tests drive this down to 0; stop the
+            // animation and restore the resting state so every other test
             // sees a fully-opaque, unmoved content column regardless of test
             // order (test functions run alphabetically, not declaration
-            // order).
+            // order) and with nothing left animating over it.
+            findChild(search, "pageInAnimation").stop();
             search.pageInT = 1;
             findChild(search, "queryField").text = "";
             // Setting queryField.text above restarts the debounce Timer; stop
@@ -671,23 +672,68 @@ Item {
 
         // --- Motion (Phase 3 Task A): page entrance (A4) ---
 
-        function test_pageInAnimatesContentColumnFadeAndRise() {
+        // Deliberately split in two. The fade/rise is a pure *binding* on
+        // screen.pageInT (opacity: pageInT, Translate.y: (1 - pageInT) * 16),
+        // so its correctness is provable with ZERO wall-clock dependence by
+        // driving pageInT by hand; the animation's job — that it actually
+        // runs and lands on 1 — is a separate, poll-based assertion. The
+        // previous single test sampled a mid-flight opacity after a fixed
+        // wait(80) against a 400 ms animation and failed outright whenever
+        // the machine was loaded enough for the animation to finish inside
+        // that window.
+        function test_pageInBindingsTrackProgress() {
             var col = findChild(search, "contentColumn");
             verify(col !== null);
             var anim = findChild(search, "pageInAnimation");
             verify(anim !== null);
 
+            // The animation targets the very property being set below, so it
+            // has to be stopped first or it would overwrite each assignment
+            // on the next frame.
+            anim.stop();
+
             search.pageInT = 0;
-            anim.start();
             // Reset state: content column starts invisible/raised, the root
             // Rectangle itself never moves (only the content column does).
             compare(col.opacity, 0);
             compare(col.transform[0].y, 16);
             compare(search.opacity, 1);
 
-            wait(80); // ~20% of the 400ms pageIn duration
-            verify(col.opacity > 0 && col.opacity < 1);
+            search.pageInT = 0.5;
+            fuzzyCompare(col.opacity, 0.5, 0.0001);
+            fuzzyCompare(col.transform[0].y, 8, 0.0001);
+            compare(search.opacity, 1);
 
+            // Monotonic across the whole sweep: opacity rises 0 -> 1 as y
+            // falls 16 -> 0, with no step in the wrong direction.
+            var prevOpacity = -1;
+            var prevY = Number.MAX_VALUE;
+            for (var i = 0; i <= 10; i++) {
+                search.pageInT = i / 10;
+                verify(col.opacity > prevOpacity);
+                verify(col.transform[0].y < prevY);
+                prevOpacity = col.opacity;
+                prevY = col.transform[0].y;
+            }
+            compare(prevOpacity, 1);
+            compare(prevY, 0);
+        }
+
+        function test_pageInAnimationRunsToCompletion() {
+            var col = findChild(search, "contentColumn");
+            verify(col !== null);
+            var anim = findChild(search, "pageInAnimation");
+            verify(anim !== null);
+
+            anim.stop();
+            search.pageInT = 0;
+            compare(col.opacity, 0);
+            compare(col.transform[0].y, 16);
+
+            anim.start();
+            // Poll, never sleep: nothing here depends on how far the
+            // animation happens to have travelled at a given wall-clock
+            // instant, so machine load cannot change the outcome.
             tryCompare(search, "pageInT", 1, 1000);
             tryCompare(col, "opacity", 1, 1000);
             tryCompare(col.transform[0], "y", 0, 1000);
@@ -776,10 +822,12 @@ Item {
             visitVmStub.errorText = "";
             visitVmStub.loading = false;
             visitVmStub.refreshCount = 0;
-            // test_pageInAnimatesContentColumnFadeAndRise drives this down to
-            // 0 and back up; restore the resting state so every other test
+            // The two page-entrance tests drive this down to 0; stop the
+            // animation and restore the resting state so every other test
             // sees a fully-opaque, unmoved content column regardless of test
-            // order (alphabetical, not declaration).
+            // order (alphabetical, not declaration) and with nothing left
+            // animating over it.
+            findChild(logs, "pageInAnimation").stop();
             logs.pageInT = 1;
             vmlessLogs.pageInT = 1;
         }
@@ -903,23 +951,58 @@ Item {
 
         // --- Motion (Phase 3 Task C): page entrance (C1) ---
 
-        function test_pageInAnimatesContentColumnFadeAndRise() {
+        // Split for the same reason as SearchScreen's pair above: the
+        // fade/rise is a pure binding on screen.pageInT and is asserted
+        // without any wall-clock dependence, while "the animation runs and
+        // settles" is a separate poll-based test. No fixed-wait mid-flight
+        // sample, which used to fail whenever the 400 ms animation completed
+        // inside the sample window under load.
+        function test_pageInBindingsTrackProgress() {
             var col = findChild(logs, "contentColumn");
             verify(col !== null);
             var anim = findChild(logs, "pageInAnimation");
             verify(anim !== null);
 
+            // Stop first: the animation drives the same property.
+            anim.stop();
+
             logs.pageInT = 0;
-            anim.start();
             // Reset state: content column starts invisible/raised, the root
             // Rectangle itself never moves (only the content column does).
             compare(col.opacity, 0);
             compare(col.transform[0].y, 16);
             compare(logs.opacity, 1);
 
-            wait(80); // ~20% of the 400ms pageIn duration
-            verify(col.opacity > 0 && col.opacity < 1);
+            logs.pageInT = 0.5;
+            fuzzyCompare(col.opacity, 0.5, 0.0001);
+            fuzzyCompare(col.transform[0].y, 8, 0.0001);
+            compare(logs.opacity, 1);
 
+            var prevOpacity = -1;
+            var prevY = Number.MAX_VALUE;
+            for (var i = 0; i <= 10; i++) {
+                logs.pageInT = i / 10;
+                verify(col.opacity > prevOpacity);
+                verify(col.transform[0].y < prevY);
+                prevOpacity = col.opacity;
+                prevY = col.transform[0].y;
+            }
+            compare(prevOpacity, 1);
+            compare(prevY, 0);
+        }
+
+        function test_pageInAnimationRunsToCompletion() {
+            var col = findChild(logs, "contentColumn");
+            verify(col !== null);
+            var anim = findChild(logs, "pageInAnimation");
+            verify(anim !== null);
+
+            anim.stop();
+            logs.pageInT = 0;
+            compare(col.opacity, 0);
+            compare(col.transform[0].y, 16);
+
+            anim.start();
             tryCompare(logs, "pageInT", 1, 1000);
             tryCompare(col, "opacity", 1, 1000);
             tryCompare(col.transform[0], "y", 0, 1000);
