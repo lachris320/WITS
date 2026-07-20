@@ -581,26 +581,64 @@ Item {
 
         // --- Motion (Phase 3 Task A): page entrance (A4) ---
 
+        // This test used to sample the animation mid-flight — `wait(80)` (~20%
+        // of the 400ms pageIn) followed by
+        // `verify(col.opacity > 0 && col.opacity < 1)`. That raced the wall
+        // clock: on a loaded machine the 80ms sleep either returned before the
+        // animation had visibly advanced (opacity still exactly 0) or long
+        // after it had finished (exactly 1), so the assertion failed for
+        // reasons that had nothing to do with the code under test. Both
+        // tst_qml_admin and tst_qml_components compile this whole directory
+        // via QUICK_TEST_SOURCE_DIR, so a single flake here reddened several
+        // ctest entries at once.
+        //
+        // The mid-flight sample is replaced by three deterministic checks that
+        // are collectively STRICTER, not weaker:
+        //   1. the animation's declaration (target/property/to/duration token)
+        //      — fails if someone deletes it or retargets/retunes it;
+        //   2. a hand-driven sweep of pageInT with the animation stopped —
+        //      fails if the opacity/translate bindings are replaced by a snap,
+        //      which is exactly what the mid-flight sample was there to catch,
+        //      minus the clock;
+        //   3. a real end-to-end run driven by tryCompare, which polls and is
+        //      therefore load-tolerant.
         function test_pageInAnimatesContentColumnFadeAndRise() {
             var col = findChild(search, "contentColumn");
             verify(col !== null);
             var anim = findChild(search, "pageInAnimation");
             verify(anim !== null);
 
+            // (1) Declared correctly: drives the screen's own pageInT to 1
+            // over the Theme pageIn token (zeroed under reduce-motion — the
+            // animation still runs either way, per SearchScreen.qml's comment).
+            compare(anim.target, search);
+            compare(anim.property, "pageInT");
+            compare(anim.to, 1);
+            compare(anim.duration, Theme.motion.enabled ? Theme.motion.pageIn : 0);
+
+            // (2) The derived bindings INTERPOLATE rather than snapping.
+            // stop() first: a running animation would overwrite the manual
+            // assignments below on its next tick and make this a coin flip.
+            anim.stop();
+            var samples = [0, 0.25, 0.5, 0.75, 1];
+            for (var i = 0; i < samples.length; i++) {
+                var t = samples[i];
+                search.pageInT = t;
+                compare(col.opacity, t);
+                compare(col.transform[0].y, (1 - t) * 16);
+                // Invariant at every point of the sweep: only the content
+                // column fades/rises — the root Rectangle (background) must
+                // never move or fade.
+                compare(search.opacity, 1);
+            }
+
+            // (3) End-to-end: the real animation still carries pageInT from 0
+            // to 1 and settles the bindings at their resting values.
             search.pageInT = 0;
-            anim.start();
-            // Reset state: content column starts invisible/raised, the root
-            // Rectangle itself never moves (only the content column does).
-            compare(col.opacity, 0);
-            compare(col.transform[0].y, 16);
-            compare(search.opacity, 1);
-
-            wait(80); // ~20% of the 400ms pageIn duration
-            verify(col.opacity > 0 && col.opacity < 1);
-
-            tryCompare(search, "pageInT", 1, 1000);
-            tryCompare(col, "opacity", 1, 1000);
-            tryCompare(col.transform[0], "y", 0, 1000);
+            anim.restart();
+            tryCompare(search, "pageInT", 1, 2000);
+            tryCompare(col, "opacity", 1, 2000);
+            tryCompare(col.transform[0], "y", 0, 2000);
         }
 
         function test_retryButtonInvokesSearch() {
@@ -813,26 +851,47 @@ Item {
 
         // --- Motion (Phase 3 Task C): page entrance (C1) ---
 
+        // Same rewrite as SearchScreen's test of the same name — see the long
+        // comment there. Short version: the old `wait(80)` +
+        // `verify(col.opacity > 0 && col.opacity < 1)` mid-flight sample raced
+        // the wall clock (under load the 80ms sleep landed either before the
+        // animation had visibly moved or after it had already finished), and
+        // is replaced by (1) a declaration check, (2) a hand-driven pageInT
+        // sweep with the animation stopped — which is what actually proves the
+        // bindings interpolate instead of snapping — and (3) a poll-based,
+        // load-tolerant end-to-end run.
         function test_pageInAnimatesContentColumnFadeAndRise() {
             var col = findChild(logs, "contentColumn");
             verify(col !== null);
             var anim = findChild(logs, "pageInAnimation");
             verify(anim !== null);
 
+            // (1) Declared correctly.
+            compare(anim.target, logs);
+            compare(anim.property, "pageInT");
+            compare(anim.to, 1);
+            compare(anim.duration, Theme.motion.enabled ? Theme.motion.pageIn : 0);
+
+            // (2) Bindings interpolate continuously. stop() first so the
+            // running animation cannot overwrite the manual assignments.
+            anim.stop();
+            var samples = [0, 0.25, 0.5, 0.75, 1];
+            for (var i = 0; i < samples.length; i++) {
+                var t = samples[i];
+                logs.pageInT = t;
+                compare(col.opacity, t);
+                compare(col.transform[0].y, (1 - t) * 16);
+                // Only the content column fades/rises; the root Rectangle
+                // (background) never moves or fades.
+                compare(logs.opacity, 1);
+            }
+
+            // (3) End-to-end run, poll-based so it tolerates a loaded machine.
             logs.pageInT = 0;
-            anim.start();
-            // Reset state: content column starts invisible/raised, the root
-            // Rectangle itself never moves (only the content column does).
-            compare(col.opacity, 0);
-            compare(col.transform[0].y, 16);
-            compare(logs.opacity, 1);
-
-            wait(80); // ~20% of the 400ms pageIn duration
-            verify(col.opacity > 0 && col.opacity < 1);
-
-            tryCompare(logs, "pageInT", 1, 1000);
-            tryCompare(col, "opacity", 1, 1000);
-            tryCompare(col.transform[0], "y", 0, 1000);
+            anim.restart();
+            tryCompare(logs, "pageInT", 1, 2000);
+            tryCompare(col, "opacity", 1, 2000);
+            tryCompare(col.transform[0], "y", 0, 2000);
         }
     }
 }
