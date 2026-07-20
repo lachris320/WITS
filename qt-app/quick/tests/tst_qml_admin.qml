@@ -543,24 +543,63 @@ Item {
 
         // Stagger differential (mutation target: Theme.motion.rowStagger /
         // staggerCap) — mirrors LTable's test_rowStaggerDelaysHigherIndexRows
-        // (tst_qml_components.qml) exactly, since the migration means there
-        // is no more per-delegate entranceAnim/PauseAnimation to read a
-        // duration off directly (populate/add clone their animation tree per
-        // transitioning item, so reading the template's own nested
-        // properties from outside does not reflect a specific item's
-        // resolved values — the differential-timing approach is the
-        // reliable one). Row 0 has zero PauseAnimation delay and resolves
-        // after ~Theme.motion.rowIn (400ms); row 5 (below staggerCap of 10,
-        // and still on-screen in this test host — see below) carries an
-        // extra 5 * Theme.motion.rowStagger (125ms at current token values)
-        // of pause before its own fade even starts. Waiting 450ms —
-        // comfortably past row 0's 400ms settle but well short of row 5's
-        // 525ms (125 pause + 400 fade) — must find row 0 fully resolved and
-        // row 5 still strictly mid-flight.
+        // (tst_qml_components.qml). The migration means there is no more
+        // per-delegate entranceAnim/PauseAnimation to read a duration off
+        // directly: populate/add CLONE their whole animation tree per
+        // transitioning item and the pause duration is assigned
+        // imperatively onto that clone from onIdxChanged (SearchScreen.qml
+        // :407-462), so reading populatePause.duration on the template from
+        // outside reflects no real item and asserting on it would be a
+        // vacuous test.
+        //
+        // This test used to bridge that gap with a wall-clock sample:
+        // `wait(450)` — picked to land in the gap between row 0's ~400ms
+        // (Theme.motion.rowIn) settle and row 5's 525ms (125ms pause +
+        // 400ms fade) — then `compare(row0.opacity, 1)` +
+        // `verify(row5.opacity > 0 && row5.opacity < 1)`. Under load
+        // `wait(450)` returns well past 450ms of animation time, row 5 has
+        // already settled at 1, and the strict-inequality check fails for
+        // reasons unrelated to the code under test. Same flake class as the
+        // pageIn tests fixed just before this one — and since both
+        // tst_qml_admin and tst_qml_components compile this whole directory
+        // via QUICK_TEST_SOURCE_DIR, one flake here reddens several ctest
+        // entries at once.
+        //
+        // The job is split into two parts that are collectively STRICTER:
+        //   (a) the token arithmetic, asserted directly on
+        //       Theme.motion.staggerDelay — a pure function on the singleton
+        //       and the actual named mutation target. Zero clock, so it is
+        //       load-immune, and it pins the clamp and the negative-index
+        //       guard that the timing sample never reached at all.
+        //   (b) the wiring proof: that row 5 really LAGS row 0 on screen.
+        //       Instead of betting on one instant, poll and assert the
+        //       invariant that holds under ANY load — monotonic lead,
+        //       row0.opacity >= row5.opacity at EVERY sample (both fades are
+        //       the same duration and easing, row 5 merely starts later, so
+        //       row 5 can never be ahead) — while recording whether a STRICT
+        //       lead was ever seen. A strict lead is REQUIRED to pass: that
+        //       is what separates real stagger from all rows animating in
+        //       lockstep. A single scheduler stall long enough to swallow
+        //       the entire 525ms window would leave both rows settled with
+        //       no strict lead observed, so the observation is wrapped in a
+        //       bounded retry that re-triggers the entrance via the same
+        //       model reset; only "no attempt ever saw a strict lead" fails.
         function test_staggerDelayReadsThemeRowStaggerToken() {
-            searchVmStub.results = searchStaggerFixture;
-            waitForRendering(search);
+            // (a) Token arithmetic — fully deterministic, no clock involved.
+            var step = Theme.motion.rowStagger;
+            compare(Theme.motion.staggerDelay(0, step), 0);
+            compare(Theme.motion.staggerDelay(5, step), 5 * step);
+            // Above the cap the delay stops growing, so a long list's
+            // entrance can't take seconds.
+            compare(Theme.motion.staggerDelay(Theme.motion.staggerCap + 7, step),
+                    Theme.motion.staggerCap * step);
+            // A delegate's index transiently goes to -1 during model-reset
+            // teardown; the max(0, ...) guard must keep that out of a
+            // PauseAnimation duration.
+            compare(Theme.motion.staggerDelay(-1, step), 0);
 
+            // (b) Wiring: row 5's entrance really trails row 0's.
+            //
             // resultsList's viewport (fixed screen height in this test host)
             // is only ~422px tall — fully containing rows 0-5 (row 5 ends at
             // y=384, well under 422) but NOT row 8 (starts at y=512): the
@@ -569,13 +608,70 @@ Item {
             // Row 5 is chosen (not row 6, whose 384-448 band straddles the
             // 422px cutoff) to avoid any edge-of-viewport instantiation
             // flakiness.
-            var row0 = findChild(search, "resultRow_S-0");
-            var row5 = findChild(search, "resultRow_S-5");
-            verify(row0 !== null);
-            verify(row5 !== null);
-            wait(450);
-            compare(row0.opacity, 1);
-            verify(row5.opacity > 0 && row5.opacity < 1);
+            //
+            // The SHAPE of the opacity signal, measured rather than assumed:
+            // the delegate declares no `opacity: 0` default, and the populate
+            // clone's NumberAnimation only writes its `from: 0` when it
+            // actually STARTS — i.e. after its own PauseAnimation. So for the
+            // whole of row 5's 125ms pause it sits at its natural opacity of
+            // exactly 1 while row 0 is already mid-fade; only then does row 5
+            // drop to ~0 and climb. A flat "row0.opacity >= row5.opacity at
+            // all times" invariant is therefore FALSE over that first window
+            // (observed: r0=0.71, r5=1). The invariant that does hold under
+            // ANY load is gated on row 5 having started: once row 5 has been
+            // seen below 1, row 0 is at or ahead of it forever after — same
+            // duration, same easing, later start. That gate is also what
+            // makes the loop meaningful, since row-5-still-at-1 carries no
+            // ordering information.
+            var eps = 1e-6;
+            var sawStrictLead = false;
+            var row0 = null;
+            var row5 = null;
+            for (var attempt = 0; attempt < 3 && !sawStrictLead; attempt++) {
+                // Re-trigger the entrance the same way the rest of this file
+                // does — swap vm.results to a DISTINCT model object, which is
+                // the QML-test equivalent of SearchResultsModel::setRecords()'s
+                // begin/endResetModel() and re-fires populate from t=0.
+                searchVmStub.results = searchStub;
+                searchVmStub.results = searchStaggerFixture;
+                waitForRendering(search);
+                row0 = findChild(search, "resultRow_S-0");
+                row5 = findChild(search, "resultRow_S-5");
+                verify(row0 !== null);
+                verify(row5 !== null);
+
+                // Generous deadline: ~4x the 525ms (125 pause + 400 fade) the
+                // entrance needs when nothing competes for the CPU. No single
+                // sample is load-critical — the loop only has to catch the
+                // pair at ANY point in row 5's ~400ms flight, and if a stall
+                // swallows that whole window the outer retry re-plays it.
+                var lateStarted = false;
+                var deadline = Date.now() + 2000;
+                while (Date.now() < deadline) {
+                    var early = row0.opacity;
+                    var late = row5.opacity;
+                    if (late < 1 - eps)
+                        lateStarted = true;
+                    if (lateStarted) {
+                        // Row 5 can never be ahead of row 0 — this would fire
+                        // on an inverted/negative stagger.
+                        verify(early >= late - eps,
+                               "row 5 overtook row 0: " + early + " < " + late);
+                        // A STRICT lead is what separates real stagger from
+                        // every row animating in lockstep (which would hold
+                        // the two exactly equal at every sample).
+                        if (early > late + eps)
+                            sawStrictLead = true;
+                    }
+                    // Nothing more to learn once row 0 has settled and either
+                    // the lead was seen or row 5 has settled too.
+                    if (early >= 1 - eps && (sawStrictLead || late >= 1 - eps))
+                        break;
+                    wait(10);
+                }
+            }
+            verify(sawStrictLead,
+                   "row 5 never trailed row 0 in 3 attempts — stagger not wired");
             tryCompare(row5, "opacity", 1);
         }
 

@@ -338,23 +338,117 @@ Item {
         }
 
         // Stagger differential (mutation target: Theme.motion.rowStagger /
-        // staggerCap). Index 0 has zero PauseAnimation delay and resolves
-        // after ~Theme.motion.rowIn (400ms); index 8 (below staggerCap of
-        // 10) carries an extra 8 * Theme.motion.rowStagger (200ms at current
-        // token values) of pause before its own fade even starts. Waiting
-        // 450ms — comfortably past row 0's 400ms settle but well short of
-        // row 8's 600ms (200 pause + 400 fade) — must find row 0 fully
-        // resolved and row 8 still strictly mid-flight.
+        // staggerCap). populate/add CLONE their whole animation tree per
+        // transitioning item and the pause duration is assigned imperatively
+        // onto that clone from onIdxChanged (LTable.qml:87-149), so reading
+        // populatePause.duration on the template from outside reflects no
+        // real item — asserting on it would be a vacuous test.
+        //
+        // This test used to bridge that gap with a wall-clock sample:
+        // `wait(450)` — picked to land in the gap between index 0's ~400ms
+        // (Theme.motion.rowIn) settle and index 8's 600ms (200ms pause +
+        // 400ms fade) — then `compare(row0.opacity, 1)` +
+        // `verify(row8.opacity > 0 && row8.opacity < 1)`. Under load
+        // `wait(450)` returns well past 450ms of animation time, row 8 has
+        // already settled at 1, and the strict-inequality check fails for
+        // reasons unrelated to the code under test. Same flake class as the
+        // pageIn tests fixed just before this one — and since both
+        // tst_qml_admin and tst_qml_components compile this whole directory
+        // via QUICK_TEST_SOURCE_DIR, one flake here reddens several ctest
+        // entries at once.
+        //
+        // The job is split into two parts that are collectively STRICTER —
+        // see the twin comment on SearchScreen's
+        // test_staggerDelayReadsThemeRowStaggerToken (tst_qml_admin.qml) for
+        // the full reasoning:
+        //   (a) the token arithmetic asserted directly on the pure
+        //       Theme.motion.staggerDelay — zero clock, load-immune, and it
+        //       pins the clamp and the negative-index guard the timing
+        //       sample never reached at all;
+        //   (b) a polling wiring proof of the invariant that holds under ANY
+        //       load — monotonic lead, row0.opacity >= row8.opacity at EVERY
+        //       sample (same duration and easing for both, index 8 merely
+        //       starts later) — requiring that a STRICT lead be observed at
+        //       least once, which is what separates real stagger from all
+        //       rows animating in lockstep, inside a bounded retry so one
+        //       scheduler stall swallowing the whole 600ms window can't
+        //       redden the suite.
         function test_rowStaggerDelaysHigherIndexRows() {
-            resetAnimatedRows();
-            waitForRendering(tAnimated);
-            var row0 = findChild(tAnimated, "tableRow_0");
-            var row8 = findChild(tAnimated, "tableRow_8");
-            verify(row0 !== null);
-            verify(row8 !== null);
-            wait(450);
-            compare(row0.opacity, 1);
-            verify(row8.opacity > 0 && row8.opacity < 1);
+            // (a) Token arithmetic — fully deterministic, no clock involved.
+            var step = Theme.motion.rowStagger;
+            compare(Theme.motion.staggerDelay(0, step), 0);
+            compare(Theme.motion.staggerDelay(8, step), 8 * step);
+            // Above the cap the delay stops growing, so a long list's
+            // entrance can't take seconds.
+            compare(Theme.motion.staggerDelay(Theme.motion.staggerCap + 4, step),
+                    Theme.motion.staggerCap * step);
+            // A delegate's index transiently goes to -1 during model-reset
+            // teardown; the max(0, ...) guard must keep that out of a
+            // PauseAnimation duration.
+            compare(Theme.motion.staggerDelay(-1, step), 0);
+
+            // (b) Wiring: index 8's entrance really trails index 0's.
+            //
+            // The SHAPE of the opacity signal, measured rather than assumed:
+            // the delegate declares no `opacity: 0` default (see the populate
+            // comment in LTable.qml), and the populate clone's
+            // NumberAnimation only writes its `from: 0` when it actually
+            // STARTS — i.e. after its own PauseAnimation. So for the whole of
+            // index 8's 200ms pause the row sits at its natural opacity of
+            // exactly 1 while index 0 is already mid-fade; only then does it
+            // drop to ~0 and climb. A flat "row0.opacity >= row8.opacity at
+            // all times" invariant is therefore FALSE over that first window.
+            // The invariant that does hold under ANY load is gated on index 8
+            // having started: once it has been seen below 1, index 0 is at or
+            // ahead of it forever after — same duration, same easing, later
+            // start.
+            var eps = 1e-6;
+            var sawStrictLead = false;
+            var row0 = null;
+            var row8 = null;
+            for (var attempt = 0; attempt < 3 && !sawStrictLead; attempt++) {
+                // resetAnimatedRows() forces a genuine model-changed event,
+                // which re-fires populate from t=0 for the whole batch.
+                resetAnimatedRows();
+                waitForRendering(tAnimated);
+                row0 = findChild(tAnimated, "tableRow_0");
+                row8 = findChild(tAnimated, "tableRow_8");
+                verify(row0 !== null);
+                verify(row8 !== null);
+
+                // Generous deadline: ~3x the 600ms (200 pause + 400 fade) the
+                // entrance needs when nothing competes for the CPU. No single
+                // sample is load-critical — the loop only has to catch the
+                // pair at ANY point in index 8's ~400ms flight, and if a
+                // stall swallows that whole window the outer retry re-plays
+                // it.
+                var lateStarted = false;
+                var deadline = Date.now() + 2000;
+                while (Date.now() < deadline) {
+                    var early = row0.opacity;
+                    var late = row8.opacity;
+                    if (late < 1 - eps)
+                        lateStarted = true;
+                    if (lateStarted) {
+                        // Index 8 can never be ahead of index 0 — this would
+                        // fire on an inverted/negative stagger.
+                        verify(early >= late - eps,
+                               "row 8 overtook row 0: " + early + " < " + late);
+                        // A STRICT lead is what separates real stagger from
+                        // every row animating in lockstep (which would hold
+                        // the two exactly equal at every sample).
+                        if (early > late + eps)
+                            sawStrictLead = true;
+                    }
+                    // Nothing more to learn once index 0 has settled and
+                    // either the lead was seen or index 8 has settled too.
+                    if (early >= 1 - eps && (sawStrictLead || late >= 1 - eps))
+                        break;
+                    wait(10);
+                }
+            }
+            verify(sawStrictLead,
+                   "row 8 never trailed row 0 in 3 attempts — stagger not wired");
             tryCompare(row8, "opacity", 1);
         }
 
