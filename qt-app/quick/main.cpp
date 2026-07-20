@@ -3,6 +3,8 @@
 #include <QQuickStyle>
 #include <QQuickWindow>
 #include <QSettings>
+
+#include "appsettings.h"
 #include <QSGRendererInterface>
 #include "brandtheme.h"
 
@@ -30,7 +32,7 @@ int main(int argc, char *argv[])
     // Cache-first branding (spec §6): apply the cached palette before the first
     // frame so there is no unbranded flash. Background re-sync lands in Phase 4.
     {
-        QSettings brandingStore(QStringLiteral("MyCompany"), QStringLiteral("MyApp"));
+        AppSettings brandingStore;
         BrandTheme::setCurrent(BrandTheme::loadCachedConfig(brandingStore).palette);
     }
 

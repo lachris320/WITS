@@ -3,6 +3,7 @@
 #include <QJsonObject>
 #include "KioskViewModel.h"
 #include "RecentLoginsModel.h"
+#include "AdminSession.h"
 
 static QJsonObject student(const QString &name, const QString &course,
                            const QString &year, const QString &dept,
@@ -26,6 +27,8 @@ private slots:
     void modelCapsAtForty();
     void invalidRfidCodeSetsErrorStatusNoCrash();
     void requestGuestEmitsSignal();
+    void adminLoginResponseCapturesHeldKey();
+    void studentLoginResponseDoesNotCaptureKey();
 };
 
 void TestKioskViewModel::applyStudentSetsCurrentAndBumpsStats()
@@ -90,6 +93,27 @@ void TestKioskViewModel::requestGuestEmitsSignal()
     QSignalSpy g(&vm, &KioskViewModel::guestRequested);
     vm.requestGuest();
     QCOMPARE(g.count(), 1);
+}
+
+void TestKioskViewModel::adminLoginResponseCapturesHeldKey()
+{
+    AdminSession::instance().clear();
+    KioskViewModel vm;
+    QSignalSpy admin(&vm, &KioskViewModel::adminRequested);
+    // Network-free seam: a parsed admin-success payload (status=success, NO
+    // "student" object -> isAdmin), plus the key that was posted.
+    vm.applyLoginResponse(R"({"status":"success"})", QStringLiteral("SUPERSECRET"));
+    QCOMPARE(admin.count(), 1);
+    QCOMPARE(AdminSession::instance().key(), QStringLiteral("SUPERSECRET"));
+}
+
+void TestKioskViewModel::studentLoginResponseDoesNotCaptureKey()
+{
+    AdminSession::instance().clear();
+    KioskViewModel vm;
+    vm.applyLoginResponse(R"({"status":"success","student":{"name":"Ana","course":"BSCE"}})",
+                          QStringLiteral("ignored"));
+    QVERIFY(!AdminSession::instance().hasKey());   // student branch never captures
 }
 
 QTEST_MAIN(TestKioskViewModel)

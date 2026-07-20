@@ -1,5 +1,7 @@
 #include "settingscontroller.h"
 #include <QSettings>
+
+#include "appsettings.h"
 #include <QFile>
 #include <QDir>
 #include <QFileInfo>
@@ -12,7 +14,7 @@ SettingsController::SettingsController(QObject *parent)
 
 SettingsData SettingsController::load()
 {
-    QSettings s(QLatin1String("MyCompany"), QLatin1String("MyApp"));
+    AppSettings s;
     SettingsData d;
     d.schoolName        = s.value(QLatin1String("school/name"),       QLatin1String("")).toString();
     d.schoolAddress     = s.value(QLatin1String("school/address"),    QLatin1String("")).toString();
@@ -30,7 +32,7 @@ SettingsData SettingsController::load()
 
 bool SettingsController::save(const SettingsData &data)
 {
-    QSettings s(QLatin1String("MyCompany"), QLatin1String("MyApp"));
+    AppSettings s;
     s.setValue(QLatin1String("school/name"),        data.schoolName);
     s.setValue(QLatin1String("school/address"),     data.schoolAddress);
     s.setValue(QLatin1String("school/fontFamily"),  data.fontFamily);

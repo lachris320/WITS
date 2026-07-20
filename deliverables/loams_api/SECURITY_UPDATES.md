@@ -7,20 +7,45 @@
 > a completed-work checklist; large parts of it describe work that was never wired in. Do not use
 > the ✅ marks below as evidence that a protection exists — verify against source.
 >
-> **The most dangerous gap:** four destructive/write endpoints are marked "✅ Authentication
-> required" below when **no authentication code exists in any of them**:
+> **The most dangerous gap:** four destructive/write endpoints were marked "✅ Authentication
+> required" below when **no authentication code existed in any of them**. As of 2026-07-20 one of
+> the four (`reset_visits.php`) has gained a real guard **in repo source only** — the other three
+> are unchanged, and nothing is deployed:
 >
 > - **`delete_students.php` — NOT authenticated.** Deletes student rows by `school_id`. Verified: `grep -n "admin_key\|requireAdminAuth\|auth_helper" delete_students.php` → no match.
 > - **`bulk_update_students.php` — NOT authenticated.** Overwrites student fields in bulk. Verified: same grep → no match.
-> - **`reset_visits.php` — NOT authenticated.** Zeroes visit counts and deletes visit history for a department. Verified: same grep → no match.
+> - ~~**`reset_visits.php` — NOT authenticated.**~~ **UPDATED 2026-07-20 — guarded in source, NOT
+>   yet deployed.** `reset_visits.php:12` now calls `requireAdminAuth($conn)` before reading the
+>   payload or touching the DB. **This is true of the repo copy only.** The guard has **not** been
+>   deployed to the live web root, so the running system still accepts an unauthenticated reset.
+>   See "Deploy state" below.
 > - **`upload_students_zip.php` — NOT authenticated**, and additionally has none of the file-upload
 >   validation the document claims (no MIME check, no size limits, extracts a ZIP's contents
 >   unfiltered, still creates directories `0777`). This one writes arbitrary uploaded files to disk
 >   with zero validation — arguably the most severe of the four, not a minor omission.
 >
-> Repo-wide, `requireAdminAuth()` (defined in `auth_helper.php:11`) has **exactly one real caller**:
-> `save_branding.php:6`. Verified: `grep -rn "requireAdminAuth" --include=*.php .` returns only the
-> definition and that one call site. `config.php` (the "centralized configuration" file described
+> ~~Repo-wide, `requireAdminAuth()` … has **exactly one real caller**: `save_branding.php:6`.~~
+> **UPDATED 2026-07-20:** repo-wide, `requireAdminAuth()` (defined in `auth_helper.php:11`) now has
+> **three real callers**: `save_branding.php:6`, `reset_visits.php:12`, and
+> `update_admin_info.php:13`. Verified: `grep -rn "requireAdminAuth" deliverables/loams_api/`.
+>
+> ### Deploy state (verified 2026-07-20) — guarded in source ≠ protected in production
+>
+> The two new guards are **committed to the repo but not deployed**. Deploying the API is
+> deliberately gated on the owner and had not happened at the time of this verification.
+>
+> | Endpoint | Guard in repo source | Present in deployed web root | Actually protected live |
+> |---|---|---|---|
+> | `save_branding.php` | ✅ yes | ❌ **file absent entirely** | n/a — endpoint does not exist live |
+> | `reset_visits.php` | ✅ yes (`:12`) | ✅ present, but **pre-guard copy** | ❌ **no** |
+> | `update_admin_info.php` | ✅ yes (`:13`) | ✅ present, but **pre-guard copy** | ❌ **no** |
+>
+> Verified by listing the deployed `loams_api/` directory: `save_branding.php` (and `get_branding.php`)
+> are in the repo but **do not exist in the deployed web root at all**. Until a deploy happens, do
+> **not** read the ✅ marks in this document as evidence that the running system enforces `admin_key`
+> on reset or admin-info updates — it does not.
+>
+> `config.php` (the "centralized configuration" file described
 > in Files Created §1) is **never included by any other file** — verified: `grep -rln "config.php" --include=*.php .` returns zero matches. It is dead code.
 >
 > Section-by-section corrections are marked inline below with **`VERIFIED 2026-07-15:`** callouts.
@@ -163,20 +188,41 @@ overwrite arbitrary student records in bulk with no credential check.**
 **Impact:** None currently — sending `admin_key` in POST data has no effect; the server never reads
 it.
 
-### 8. `reset_visits.php` 🔴 NOT AUTHENTICATED — DESTRUCTIVE ENDPOINT
+### 8. `reset_visits.php` 🟡 GUARDED IN SOURCE, NOT DEPLOYED — DESTRUCTIVE ENDPOINT
 
 **Changes (as originally claimed):**
-- ❌ ~~**Authentication required** - must provide valid admin_key~~
+- ✅ **Authentication required** - must provide valid admin_key — **true in repo source as of
+  2026-07-20**, false of the deployed copy
 - ❌ ~~Removed hardcoded error display~~
 
-**VERIFIED 2026-07-15:** Same grep, same result — **no auth reference in this file**. It also
-still hardcodes `error_reporting(E_ALL); ini_set('display_errors', 1);` at the top rather than
-using centralized config. The one true claim from the original list: it *does* `include "db.php"`
-for its connection. **Any caller can zero visit counts and delete visit history for an entire
-department with no credential check.**
+**VERIFIED 2026-07-15:** no auth reference in this file; any caller could zero visit counts and
+delete visit history for an entire department with no credential check.
 
-**Impact:** None currently — sending `admin_key` in POST data has no effect; the server never reads
-it.
+**UPDATED 2026-07-20:** the repo copy now calls `requireAdminAuth($conn)` at `reset_visits.php:12`,
+before the payload is read and before any DB write, so a 401 cannot leave a department half-reset.
+Two further facts, stated precisely:
+
+- **Not deployed.** The deployed web root still holds the pre-guard copy. The running system
+  accepts an unauthenticated reset. Do not treat the ✅ above as a live protection.
+- **Still hardcodes** `error_reporting(E_ALL); ini_set('display_errors', 1);` at the top rather than
+  using centralized config — unchanged, tracked separately.
+
+Also updated 2026-07-20 (correctness, not auth): the `UPDATE students` and the `DELETE lv …` are now
+wrapped in `$conn->begin_transaction()` / `commit()`, with `rollback()` and a
+`{"status":"error","message":"…"}` response if either `execute()` fails. Previously they were two
+autocommitted statements with unchecked return values, so a mid-operation failure could zero the
+visit counters while leaving the history in place — a half-reset the admin would then retry against.
+Both `students` and `library_visits` are **InnoDB** (verified via `information_schema.TABLES`), so
+the transaction is genuinely transactional rather than a MyISAM no-op.
+
+**Impact:** callers must now send a valid `admin_key` **once the deploy happens**. Until then,
+sending it still has no effect on the live endpoint.
+
+### 8b. `update_admin_info.php` 🟡 GUARDED IN SOURCE, NOT DEPLOYED
+
+**VERIFIED 2026-07-20:** the repo copy calls `requireAdminAuth($conn)` at `update_admin_info.php:13`.
+The deployed web root holds the pre-guard copy, so the live endpoint is **not** protected. This file
+is not otherwise described in the original document.
 
 ### 9. `api.php`
 **Changes (as originally claimed):**
@@ -226,12 +272,13 @@ hardcoded at the top of the file and does not include `config.php`.
 
 ### For Admin Operations (Critical)
 
-**VERIFIED 2026-07-15: this section is aspirational, not current behavior.** None of the four
-endpoints below actually check `admin_key` server-side today (see the per-file verification notes
-above) — `save_branding.php` is the only endpoint in this API that enforces `admin_key` via
-`requireAdminAuth()`. The examples are left in place as the *intended* contract if/when auth is
-added to these endpoints, but sending `admin_key` today has no effect: the requests succeed
-identically without it.
+**VERIFIED 2026-07-15 / UPDATED 2026-07-20: mostly still aspirational.** `delete_students.php`,
+`bulk_update_students.php`, and `upload_students_zip.php` do not check `admin_key` server-side in
+any copy — repo or deployed. `reset_visits.php` **does** check it in repo source (`:12`) but that
+guard is **not deployed**, so against the live server the request still succeeds without a key.
+`save_branding.php` and `update_admin_info.php` also enforce `admin_key` in repo source, and
+`save_branding.php` is not present in the deployed web root at all. The examples below are the
+intended contract; treat them as effective only after a deploy.
 
 These endpoints were intended to require `admin_key` in the POST data (not currently enforced —
 see above):
@@ -303,9 +350,12 @@ fetch('/loams_api/upload_students_zip.php', {
    (`grep -rn "utf8mb4\|set_charset" --include=*.php .` → no matches). Queries do use prepared
    statements/`bind_param` in the files reviewed, which is the real mitigation already present —
    the "charset" claim specifically is false.
-5. ❌ **Unauthorized Access** - `requireAdminAuth()` has exactly one real caller in the whole API:
-   `save_branding.php`. `delete_students.php`, `bulk_update_students.php`, `reset_visits.php`, and
-   `upload_students_zip.php` — all destructive or write operations — have **no authentication**.
+5. ⚠️ **Unauthorized Access** — *partially* addressed in source, **nothing deployed**. As of
+   2026-07-20 `requireAdminAuth()` has three callers: `save_branding.php`, `reset_visits.php`, and
+   `update_admin_info.php`. `delete_students.php`, `bulk_update_students.php`, and
+   `upload_students_zip.php` — all destructive or write operations — still have **no
+   authentication** anywhere. And because the guards are not deployed, the **live** system today
+   enforces `admin_key` on **no endpoint at all**.
 6. ❌ **Insecure Permissions** - `upload_students_zip.php` still creates directories with `0777`
    (verified twice in the file), not `0755`.
 7. ❌ **CORS Misconfiguration** - `api.php` hardcodes `Access-Control-Allow-Origin: *` and does not
@@ -313,7 +363,12 @@ fetch('/loams_api/upload_students_zip.php', {
 
 ### What is actually true today:
 
-- `save_branding.php` genuinely enforces `admin_key` via `requireAdminAuth()` (`auth_helper.php`).
+- `save_branding.php`, `reset_visits.php`, and `update_admin_info.php` genuinely enforce `admin_key`
+  via `requireAdminAuth()` (`auth_helper.php`) **in repo source**. None of those three guards are
+  live: the first file is absent from the deployed web root, and the other two are deployed only in
+  their pre-guard form.
+- `reset_visits.php` performs its two destructive statements inside a single InnoDB transaction,
+  rolling back if either fails, so it cannot leave a department half-reset.
 - `delete_students.php`, `bulk_update_students.php`, and `reset_visits.php` use parameterized
   queries (`bind_param`) for the values they do handle, which mitigates classic SQL injection on
   those parameters even without the claimed charset change.
@@ -325,11 +380,12 @@ fetch('/loams_api/upload_students_zip.php', {
 
 ## Testing Checklist
 
-**VERIFIED 2026-07-15:** the four "with admin_key" items below describe intended future behavior,
-not current behavior — as of this verification, `delete_students.php`, `bulk_update_students.php`,
-`reset_visits.php`, and `upload_students_zip.php` accept requests with or without `admin_key`
-identically, because none of them check it. Don't treat a passing test here as evidence of
-authentication; it currently only proves the endpoint still works.
+**VERIFIED 2026-07-15 / UPDATED 2026-07-20:** the "with admin_key" items below describe intended
+behavior, not what a test against the live server proves. `delete_students.php`,
+`bulk_update_students.php`, and `upload_students_zip.php` never check `admin_key` in any copy.
+`reset_visits.php` checks it in repo source but the deployed copy does not, so **every** endpoint
+below currently accepts requests with or without `admin_key` identically **against the live server**.
+Don't treat a passing test here as evidence of authentication; it only proves the endpoint works.
 
 - [ ] Test student login (should work without changes)
 - [ ] Test guest login (should work without changes)
@@ -337,7 +393,9 @@ authentication; it currently only proves the endpoint still works.
 - [ ] Test admin login (should work without changes)
 - [ ] Test delete students with admin_key (⚠️ not enforced server-side — endpoint has no auth)
 - [ ] Test bulk update with admin_key (⚠️ not enforced server-side — endpoint has no auth)
-- [ ] Test reset visits with admin_key (⚠️ not enforced server-side — endpoint has no auth)
+- [ ] Test reset visits with admin_key (⚠️ enforced in repo source only — the deployed copy is
+      pre-guard, so a live test proves nothing about auth until a deploy happens)
+- [ ] Test reset visits failure path: both statements must roll back together (no half-reset)
 - [ ] Test upload ZIP with admin_key (⚠️ not enforced server-side — endpoint has no auth)
 - [ ] Verify error logs are created in `logs/php_errors.log` (⚠️ `config.php`'s log-to-file path is
       not wired into any endpoint checked; endpoints still call `ini_set('display_errors', 1)` directly)
@@ -351,6 +409,15 @@ the notice at the top of this document. `config.php` is not included by `api.php
 endpoint, so editing it does not change the CORS header actually sent. Adding `admin_key` to the
 frontend for step 3 will not add protection either, since the four endpoints listed above never
 read it. Treat these as a to-do list for wiring the auth/config work in, not as already effective.
+
+**UPDATED 2026-07-20:** step 3 now half-matters — the Qt client does send `admin_key` to
+`reset_visits.php` and `update_admin_info.php`, and those endpoints read it **in repo source**. It
+still buys no protection until the repo copies are deployed, so step 0 comes first.
+
+0. **Deploy the guarded PHP.** Copy the current `deliverables/loams_api/` sources over the web root,
+   including `save_branding.php` and `get_branding.php`, which are **absent from the deployed web
+   root entirely** (verified 2026-07-20 by listing it). Until this happens, no endpoint enforces
+   `admin_key` on the live system.
 
 1. Update `config.php`:
    ```php

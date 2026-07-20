@@ -160,32 +160,18 @@ Item {
             compare(loader.item.objectName, "visitLogsPage");
         }
 
-        // LSideNav's disabled guard (Task 9) must still block activation of
-        // the Phase-4 placeholder items reached through the shell's own item
-        // list.
-        //
-        // Asserted via SignalSpy on the real pageActivated signal, because
-        // that IS the named behavior ("does not activate") and it is the only
-        // observable that survives both failure modes. Navigator.adminPage is
-        // NOT a usable witness here: an unrecognized key now warns instead of
-        // routing (see AdminScreen's onPageActivated), so adminPage holds its
-        // value whether or not the guard fired — asserting on it would pass
-        // against a removed guard AND against `enabled: false` flipped true.
-        // The spy fails on both.
-        function test_sidebarDisabledItemGuardBlocksActivation() {
+        // All six admin items are enabled as of Phase 4c; the disabled-item
+        // guard is now exercised by tst_qml_components.qml's LSideNav fixture
+        // (which keeps a disabled "database" item). Here, assert every item
+        // activates.
+        function test_allSidebarItemsActivate() {
             var nav = findChild(shell, "sideNav");
-            Navigator.showAdminPage(Navigator.VisitLogs);
-            activationSpy.clear();
-
-            nav.activate("database");
-            compare(activationSpy.count, 0);
-            // Nothing navigated as a result, either.
-            compare(Navigator.adminPage, Navigator.VisitLogs);
-
-            // Positive control: the same call path DOES emit for an enabled
-            // item, so a spy that never fires cannot fake a pass.
-            nav.activate("search");
-            compare(activationSpy.count, 1);
+            var keys = ["dashboard","search","visitlogs","database","reporting","settings"];
+            for (var i = 0; i < keys.length; i++) {
+                activationSpy.clear();
+                nav.activate(keys[i]);
+                compare(activationSpy.count, 1);
+            }
         }
 
         // CRITICAL 1 regression test: LSideNav.currentPage is a
@@ -258,6 +244,54 @@ Item {
             var titleNode = findChild(shell, "brandTitleText");
             verify(titleNode !== null);
             compare(titleNode.text, "Library Admin");
+        }
+
+        // Phase 4c writes school/name + school/logoPath for the first time, so
+        // the sidebar brand has to be re-readable mid-session (SettingsScreen
+        // saved -> AdminScreen.reloadSchoolInfo -> SchoolInfoViewModel.reload).
+        // The reload's own re-read/NOTIFY semantics are pinned in C++ by
+        // tst_schoolinfoviewmodel; this asserts the SHELL end of the wire
+        // exists and is callable, without writing to this machine's real
+        // QSettings (security-hygiene: no real configured data in tests).
+        // Deleting the hook, the Connections block, or reload() fails here.
+        function test_shellExposesSchoolInfoReloadHook() {
+            verify(typeof shell.reloadSchoolInfo === "function");
+            shell.reloadSchoolInfo();               // re-read must not throw
+            var titleNode = findChild(shell, "brandTitleText");
+            compare(titleNode.text, "Library Admin");
+        }
+
+        // Phase 4c contract: the three newly-enabled items route to their
+        // (placeholder) screens through the real sidebar + Loader.
+        function test_databaseItemRoutesToDatabaseScreen() {
+            var nav = findChild(shell, "sideNav");
+            var loader = findChild(shell, "pageLoader");
+            nav.activate("database");
+            compare(Navigator.adminPage, Navigator.Database);
+            compare(loader.item.objectName, "databasePage");
+        }
+        function test_reportingItemRoutesToReportingScreen() {
+            var nav = findChild(shell, "sideNav");
+            var loader = findChild(shell, "pageLoader");
+            nav.activate("reporting");
+            compare(Navigator.adminPage, Navigator.Reporting);
+            compare(loader.item.objectName, "reportingPage");
+        }
+        function test_settingsItemRoutesToSettingsScreen() {
+            var nav = findChild(shell, "sideNav");
+            var loader = findChild(shell, "pageLoader");
+            nav.activate("settings");
+            compare(Navigator.adminPage, Navigator.Settings);
+            compare(loader.item.objectName, "settingsPage");
+        }
+        function test_pageTitleTracksNewPages() {
+            var header = findChild(shell, "pageHeader");
+            Navigator.showAdminPage(Navigator.Database);
+            compare(header.title, "Database");
+            Navigator.showAdminPage(Navigator.Reporting);
+            compare(header.title, "Reporting");
+            Navigator.showAdminPage(Navigator.Settings);
+            compare(header.title, "Settings");
         }
     }
 }

@@ -45,6 +45,9 @@ qt_add_qml_module(witsquickmodule
         qml/admin/DashboardScreen.qml
         qml/admin/SearchScreen.qml
         qml/admin/VisitLogsScreen.qml
+        qml/admin/DatabaseScreen.qml
+        qml/admin/ReportingScreen.qml
+        qml/admin/SettingsScreen.qml
         qml/components/LButton.qml
         qml/components/LCard.qml
         qml/components/LTable.qml
@@ -55,14 +58,18 @@ qt_add_qml_module(witsquickmodule
         qml/components/LStatTile.qml
         qml/components/LBarChart.qml
         qml/components/LPageHeader.qml
+        qml/components/LTextField.qml
         qml/components/LPulseDot.qml
         qml/components/LEyebrow.qml
         qml/components/LKioskGradient.qml
         qml/components/LSidebarBrand.qml
+        qml/components/LConfirmDialog.qml
+        qml/components/LComboBox.qml
         qml/kiosk/GuestDialog.qml
     SOURCES
         HttpForm.h HttpForm.cpp
         Initials.h Initials.cpp
+        AdminSession.h AdminSession.cpp
         RfidQuickFilter.h RfidQuickFilter.cpp
         viewmodels/ThemeViewModel.h viewmodels/ThemeViewModel.cpp
         viewmodels/Navigator.h viewmodels/Navigator.cpp
@@ -76,6 +83,7 @@ qt_add_qml_module(witsquickmodule
         viewmodels/VisitLogsViewModel.h viewmodels/VisitLogsViewModel.cpp
         models/SearchResultsModel.h models/SearchResultsModel.cpp
         viewmodels/SearchViewModel.h viewmodels/SearchViewModel.cpp
+        viewmodels/SettingsViewModel.h viewmodels/SettingsViewModel.cpp
 )
 
 target_link_libraries(witsquickmodule PUBLIC
@@ -156,6 +164,13 @@ wits_add_qttest(tst_qml_theme
 wits_add_qttest(tst_navigator
     SOURCES tests/tst_navigator.cpp
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Qml
+    OFFSCREEN)
+
+# --- AdminSession unit test (C++ QtTest, offscreen: house consistency —
+# witsquickmodule PUBLIC-propagates Qt::Gui). ---
+wits_add_qttest(tst_adminsession
+    SOURCES tests/tst_adminsession.cpp
+    LIBS witsquickmodule
     OFFSCREEN)
 
 # --- KioskViewModel + RecentLoginsModel unit test (C++ QtTest, offscreen) ---
@@ -246,4 +261,11 @@ wits_add_qttest(tst_qml_admin
     LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
          Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
     DEFINES QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
+    OFFSCREEN)
+
+# --- SettingsViewModel unit test (C++ QtTest, offscreen). Uses Network for
+# the async POST paths (T10-T13) and Gui via witsquickmodule propagation. ---
+wits_add_qttest(tst_settingsviewmodel
+    SOURCES tests/tst_settingsviewmodel.cpp
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
     OFFSCREEN)

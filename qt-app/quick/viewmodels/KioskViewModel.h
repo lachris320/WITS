@@ -83,6 +83,12 @@ public:
     // network reply handlers AND directly by unit tests).
     void applyStudentLogin(const QJsonObject &student);
 
+    // Network-free seam: decode an admin_login.php / student_login.php
+    // response exactly as the reply handler does. On the admin branch it
+    // captures heldKey (the admin key that was POSTed) into AdminSession
+    // BEFORE emitting adminRequested(). Used by the reply handler AND tests.
+    void applyLoginResponse(const QByteArray &json, const QString &heldKey);
+
 signals:
     void currentChanged();
     void statsChanged();

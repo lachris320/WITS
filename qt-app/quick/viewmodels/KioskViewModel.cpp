@@ -3,12 +3,15 @@
 #include <QNetworkAccessManager>
 #include <QTimer>
 #include <QSettings>
+
+#include "appsettings.h"
 #include <QDateTime>
 #include <QQuickWindow>   // complete type: installRfid() calls window->installEventFilter()
 #include "apiconfig.h"
 #include "loginparser.h"
 #include "HttpForm.h"
 #include "RfidQuickFilter.h"
+#include "AdminSession.h"
 
 KioskViewModel::KioskViewModel(QObject *parent)
     : QObject(parent)
@@ -19,7 +22,7 @@ KioskViewModel::KioskViewModel(QObject *parent)
 
     // School info + guest toggle: cache the legacy QSettings keys. The admin
     // surface (Phase 4) will write these live; here we read them at startup.
-    QSettings s(QStringLiteral("MyCompany"), QStringLiteral("MyApp"));
+    AppSettings s;
     m_schoolName    = s.value(QStringLiteral("school/name")).toString();
     m_schoolAddress = s.value(QStringLiteral("school/address")).toString();
     m_libraryHours  = s.value(QStringLiteral("school/libraryHours"),
@@ -82,21 +85,35 @@ void KioskViewModel::applyStudentLogin(const QJsonObject &student)
     setStatus(QString(), QString());   // clear any prior error toast
 }
 
+void KioskViewModel::applyLoginResponse(const QByteArray &body, const QString &heldKey)
+{
+    const LoginParser::LoginResult r = LoginParser::parseLoginResponse(body);
+    if (r.ok && r.isStudent) {
+        applyStudentLogin(r.student);
+    } else if (r.ok && r.isAdmin) {
+        AdminSession::instance().setKey(heldKey);   // §3.3 capture, before the signal
+        emit adminRequested();
+    } else {
+        setStatus(r.message, QStringLiteral("Error"));
+    }
+}
+
 void KioskViewModel::postForm(const QUrl &url, const QString &key,
                               const QString &value, bool rfid)
 {
     HttpForm::submit(m_nam, url, {{key, value}}, this,
-        [this, rfid](const QByteArray &body) {
+        [this, rfid, value](const QByteArray &body) {
             if (rfid) {
                 const LoginParser::RfidResult r = LoginParser::parseRfidResponse(body);
                 if (r.ok) applyStudentLogin(r.student);
                 else      setStatus(r.message, QStringLiteral("Error"));
                 return;
             }
-            const LoginParser::LoginResult r = LoginParser::parseLoginResponse(body);
-            if (r.ok && r.isStudent)      applyStudentLogin(r.student);
-            else if (r.ok && r.isAdmin)   emit adminRequested();
-            else                          setStatus(r.message, QStringLiteral("Error"));
+            // Non-RFID: student_login.php or admin_login.php. `value` is the
+            // POSTed credential — for the admin branch it IS the admin key, so
+            // the reply handler already has the key in scope (spec §3.3's
+            // "thread it through postForm into the reply handler").
+            applyLoginResponse(body, value);
         },
         [this]() {
             setStatus(QStringLiteral("Network error. Please try again."),

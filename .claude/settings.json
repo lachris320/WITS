@@ -1,0 +1,30 @@
+{
+  "$comment": [
+    "WITS is a Qt 6 / C++17 / CMake project. A user-level 'kane-claude-standalone'",
+    "install ships same-named, Next.js/React/TypeScript-oriented skills that have",
+    "shadowed this repo's Qt-adapted copies in practice (a /create-pr run once",
+    "dispatched a four-agent gate including api-checker, which this repo does not",
+    "define). See the 'Skill precedence' section of CLAUDE.md.",
+    "",
+    "The deny list below names ONLY skills that this project does not define and",
+    "that superpowers provides a Qt-safe equivalent for. Denying the bare name",
+    "forces the explicit 'superpowers:'-prefixed skill, which is unambiguous.",
+    "",
+    "Deliberately NOT denied:",
+    "  commit, claude-review, codex-review, create-pr - this repo DEFINES these in",
+    "    .claude/skills/; denying the bare name would kill the project copy too.",
+    "    Precedence for these is enforced by the CLAUDE.md tell (the project",
+    "    create-pr dispatches exactly three agents, never api-checker).",
+    "  merge-pr - exists only at user level, has no project or superpowers",
+    "    equivalent, and is generic git plumbing, so it is safe as-is."
+  ],
+  "permissions": {
+    "deny": [
+      "Skill(brainstorming)",
+      "Skill(debug)",
+      "Skill(subagent-build)",
+      "Skill(worktrees)",
+      "Skill(writing-plans)"
+    ]
+  }
+}

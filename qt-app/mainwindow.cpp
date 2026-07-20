@@ -3,6 +3,7 @@
 #include "apiconfig.h"
 #include "adminwindow.h"
 #include "guestwindow.h"
+#include "appsettings.h"
 #include <QDateTime>
 #include <QTimer>
 #include <QStandardPaths>
@@ -96,7 +97,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(rfidFilter, &RfidKeyboardFilter::rfidScanned, this, &MainWindow::handleRfidLogin);
     m_rfidDebounceClock.start();
 
-    QSettings settings("MyCompany", "MyApp");
+    AppSettings settings;
     QString schoolName = settings.value("school/name", "").toString();
     QString address = settings.value("school/address", "").toString();
     QString fontFamily = settings.value("school/fontFamily", "Arial").toString();
@@ -157,13 +158,13 @@ MainWindow::MainWindow(QWidget *parent)
     // applied immediately (no network wait); the backend is fetched in the
     // background and re-applied + re-cached only if strictly newer.
     {
-        QSettings brandingStore(QLatin1String("MyCompany"), QLatin1String("MyApp"));
+        AppSettings brandingStore;
         BrandTheme::setCurrent(BrandTheme::loadCachedConfig(brandingStore).palette);
     }
     m_brandingController = new BrandingController(networkManager, this);
     connect(m_brandingController, &BrandingController::remoteConfigLoaded, this,
             [](const BrandingConfig &remote) {
-        QSettings store(QLatin1String("MyCompany"), QLatin1String("MyApp"));
+        AppSettings store;
         if (BrandTheme::isNewer(remote, BrandTheme::loadCachedConfig(store))) {
             BrandTheme::setCurrent(remote.palette);
             BrandTheme::saveCachedConfig(store, remote);
@@ -203,7 +204,7 @@ void MainWindow::handleLogin() {
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
     QNetworkReply *reply = networkManager->post(request, postData.toString(QUrl::FullyEncoded).toUtf8());
 
-    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+    connect(reply, &QNetworkReply::finished, this, [this, reply, input]() {
         if (reply->error() != QNetworkReply::NoError) {
             QMessageBox::critical(this, "Network Error", reply->errorString());
             reply->deleteLater();
@@ -223,6 +224,9 @@ void MainWindow::handleLogin() {
             if (obj.contains("student")) {
                 displayStudent(obj["student"].toObject());
             } else {
+                // Retain the just-verified key in RAM for the guarded POSTs the
+                // admin window makes (requireAdminAuth); never persisted (Phase 4c).
+                adminWin->setAdminKey(input);
                 adminWin->show();
             }
         } else {
@@ -405,7 +409,7 @@ void MainWindow::refreshRightPanel() {
 void MainWindow::resizeEvent(QResizeEvent *event) {
     QMainWindow::resizeEvent(event);
 
-    QSettings settings("MyCompany", "MyApp");
+    AppSettings settings;
     QString logoPath = settings.value("school/logoPath", "").toString();
     updateLogo(logoPath);
     syncPosterBg();          // keep the poster layer covering frame_2 on resize

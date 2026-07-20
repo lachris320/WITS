@@ -98,6 +98,11 @@ Item {
     }
     LToast     { id: to; message: "hi" }
     LDialog    { id: dg; title: "T" }
+    LTextField { id: tf; label: "School Name"; text: "Acme" }
+    LTextField { id: pf; label: "Admin Key"; isPassword: true; text: "secret" }
+    LConfirmDialog { id: cd1; tier: 1; title: "Confirm"; message: "Proceed?" }
+    LConfirmDialog { id: cd2; tier: 2; title: "Reset Visits"; message: "Deletes history."; confirmText: "Reset" }
+    LComboBox { id: cb; model: ["CE", "IT", "BA"]; placeholder: "Select Department" }
     LStatTile  { id: st; label: "L"; value: "1" }
     ListModel {
         id: barsFixture
@@ -801,6 +806,184 @@ Item {
             tryCompare(image, "status", Image.Ready, 5000);
             tryCompare(canvas, "visible", true, 5000);
             compare(placeholder.visible, false);
+        }
+    }
+
+    TestCase {
+        name: "LTextFieldBehavior"
+        when: windowShown
+        // test_editingRoundTripsToTextProperty mutates the shared `tf`
+        // fixture's text; TestCase runs test_ functions in alphabetical
+        // order (not declaration order — see LTableRendersRows/
+        // LBarChartRenders above for the same pattern), so
+        // "test_editingRoundTripsToTextProperty" runs before
+        // "test_labelAndTextExposed" and would leak "New Value" into it
+        // without this reset.
+        function init() {
+            tf.text = "Acme";
+        }
+        function test_labelAndTextExposed() {
+            verify(tf !== null);
+            compare(tf.label, "School Name");
+            compare(tf.text, "Acme");
+        }
+        function test_bindsThemeTokensNotLiterals() {
+            // Text color must be the Theme token, proving no raw hex leaked in.
+            var input = findChild(tf, "fieldInput");
+            verify(input !== null);
+            compare(input.color, Theme.text);
+        }
+        function test_passwordModeMasksInput() {
+            var input = findChild(pf, "fieldInput");
+            verify(input !== null);
+            compare(input.echoMode, TextInput.Password);
+        }
+        function test_defaultModeShowsPlainText() {
+            var input = findChild(tf, "fieldInput");
+            compare(input.echoMode, TextInput.Normal);
+        }
+        function test_editingRoundTripsToTextProperty() {
+            tf.text = "";
+            var input = findChild(tf, "fieldInput");
+            input.text = "New Value";
+            compare(tf.text, "New Value");
+        }
+    }
+
+    TestCase {
+        name: "LConfirmDialogTiers"
+        when: windowShown
+        function init() {
+            cd1.visible = false; cd1.busy = false;
+            cd2.visible = false; cd2.busy = false;
+            var keyField = findChild(cd2, "confirmKeyField");
+            if (keyField) keyField.text = "";
+        }
+
+        // LDialog is the only modal primitive, so anything a consumer ever
+        // pipes into title/message (backend "message" fields reach the UI over
+        // cleartext HTTP elsewhere in this screen) must not be parsed as
+        // markup. Text defaults to AutoText, which auto-detects and RENDERS
+        // rich text — including remote <img> fetches.
+        function test_dialogTextIsPlainNotRichText() {
+            compare(findChild(cd2, "dialogTitleText").textFormat, Text.PlainText);
+            compare(findChild(cd2, "dialogMessageText").textFormat, Text.PlainText);
+        }
+        function test_tier1HasNoKeyField() {
+            compare(findChild(cd1, "confirmKeyField"), null);
+        }
+        function test_tier2HasKeyField() {
+            verify(findChild(cd2, "confirmKeyField") !== null);
+        }
+        function test_tier1ConfirmEnabledByDefault() {
+            var btn = findChild(cd1, "confirmButton");
+            verify(btn !== null);
+            compare(btn.enabled, true);
+        }
+        function test_tier2ConfirmDisabledUntilKeyEntered() {
+            var btn = findChild(cd2, "confirmButton");
+            compare(btn.enabled, false);            // key empty
+            findChild(cd2, "confirmKeyField").text = "mykey";
+            compare(btn.enabled, true);
+        }
+        function test_busyDisablesConfirmBothTiers() {
+            var b1 = findChild(cd1, "confirmButton");
+            cd1.busy = true;
+            compare(b1.enabled, false);
+            var b2 = findChild(cd2, "confirmButton");
+            findChild(cd2, "confirmKeyField").text = "mykey";
+            cd2.busy = true;
+            compare(b2.enabled, false);             // in-flight blocks even with a key
+        }
+        function test_tier2ConfirmedEmitsTypedKey() {
+            var got = null;
+            cd2.confirmed.connect(function(k) { got = k; });
+            cd2.visible = true; waitForRendering(cd2);   // invisible items get no synthesized input
+            findChild(cd2, "confirmKeyField").text = "typed-key";
+            mouseClick(findChild(cd2, "confirmButton"));
+            compare(got, "typed-key");
+        }
+        function test_tier1ConfirmedEmitsEmptyKey() {
+            var got = "sentinel";
+            cd1.confirmed.connect(function(k) { got = k; });
+            cd1.visible = true; waitForRendering(cd1);   // invisible items get no synthesized input
+            mouseClick(findChild(cd1, "confirmButton"));
+            compare(got, "");
+        }
+        function test_cancelHidesAndEmitsCancelled() {
+            cd1.visible = true;
+            var cancelled = 0;
+            cd1.cancelled.connect(function() { cancelled++; });
+            mouseClick(findChild(cd1, "cancelButton"));
+            compare(cancelled, 1);
+        }
+        // The re-typed key is deliberate friction in front of an irreversible
+        // op — it must not survive one use. Reopening must land on a blank
+        // field with Confirm disabled again, for EVERY tier-2 consumer.
+        function test_tier2KeyClearedOnReopenSoConfirmIsDisabledAgain() {
+            var btn = findChild(cd2, "confirmButton");
+            cd2.visible = true; waitForRendering(cd2);
+            findChild(cd2, "confirmKeyField").text = "typed-key";
+            compare(btn.enabled, true);
+            mouseClick(btn);
+
+            cd2.visible = false;
+            cd2.visible = true; waitForRendering(cd2);      // reopen
+            compare(findChild(cd2, "confirmKeyField").text, "");
+            compare(btn.enabled, false);
+        }
+        // The Confirm gate keys off text.trim(), so a key typed with stray
+        // whitespace passed the client check and then 401'd server-side —
+        // surfacing as "Admin key rejected. Please sign in again." on the most
+        // destructive operation in the app. Gate and payload must agree.
+        function test_tier2ConfirmedEmitsTrimmedKey() {
+            var got = null;
+            cd2.confirmed.connect(function(k) { got = k; });
+            cd2.visible = true; waitForRendering(cd2);
+            findChild(cd2, "confirmKeyField").text = "  typed-key  ";
+            mouseClick(findChild(cd2, "confirmButton"));
+            compare(got, "typed-key");
+        }
+        // Whitespace-only is not a key: the gate already rejects it, and the
+        // payload must never become an empty admin_key that reads as "no key".
+        function test_tier2WhitespaceOnlyKeyLeavesConfirmDisabled() {
+            var btn = findChild(cd2, "confirmButton");
+            cd2.visible = true; waitForRendering(cd2);
+            findChild(cd2, "confirmKeyField").text = "   ";
+            compare(btn.enabled, false);
+        }
+        function test_clearKeyIsCallableByConsumers() {
+            findChild(cd2, "confirmKeyField").text = "typed-key";
+            cd2.clearKey();
+            compare(findChild(cd2, "confirmKeyField").text, "");
+            compare(findChild(cd2, "confirmButton").enabled, false);
+        }
+    }
+
+    TestCase {
+        name: "LComboBoxBehavior"
+        when: windowShown
+        function init() { cb.currentValue = ""; }
+        function test_startsWithNoSelection() {
+            compare(cb.currentValue, "");
+        }
+        function test_selectingEmitsCurrentValue() {
+            var got = null;
+            cb.selected.connect(function(v) { got = v; });
+            cb.selectValue("IT");            // test hook == the click path
+            compare(cb.currentValue, "IT");
+            compare(got, "IT");
+        }
+        function test_bindsThemeCardTokenNotLiteral() {
+            compare(cb.color, Theme.card);
+        }
+        // The model is server-supplied (get_departments.php), so the value
+        // label must never be parsed as markup — Text defaults to AutoText.
+        function test_valueLabelIsPlainNotRichText() {
+            compare(findChild(cb, "comboValueText").textFormat, Text.PlainText);
+        }
+        function test_modelDrivesOptionCount() {
+            compare(cb.count, 3);
         }
     }
 }

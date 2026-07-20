@@ -4,10 +4,14 @@ ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 header("Content-Type: application/json");
 include "db.php";
+include "auth_helper.php";
 
 $response = ["status" => "error", "message" => "Unknown error."];
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
+    // Guard BEFORE reading the payload or updating the admin row.
+    requireAdminAuth($conn);
+
     $name = isset($_POST['admin_name']) ? $_POST['admin_name'] : '';
     $position = isset($_POST['admin_position']) ? $_POST['admin_position'] : '';
 

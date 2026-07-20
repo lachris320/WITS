@@ -44,3 +44,30 @@
 - **Rules** (`.claude/rules/`) — the binding policy. `workflow.md` governs how work flows (orchestration discipline → TDD → review → finish). `security-hygiene.md` governs what may be committed (no secrets, no admin keys, no real student PII).
 - **Skills** (`.claude/skills/`) — `commit`, `codex-review`, `claude-review`, `create-pr`. Invoke via the Skill tool / slash commands.
 - **Agents** (`.claude/agents/`) — `dry-checker`, `security-reviewer`, `general-code-reviewer`, all adapted for this Qt/C++ codebase. Dispatched in diff-scoped mode by `create-pr`, or manually for full-project sweeps.
+
+## Skill precedence — project + superpowers ONLY
+
+A user-level **kane-claude-standalone** install (`~/.claude/skills/`, `~/.claude/agents/`) ships
+same-named, **web-stack-oriented** copies of several skills. They are NOT for this repo and have
+shadowed the project copies before — a `/create-pr` run once dispatched a four-agent gate including
+`api-checker`, which this project does not define.
+
+**Binding resolution order for this repo:**
+
+1. **Project skills** (`.claude/skills/`) always win for `commit`, `claude-review`, `codex-review`,
+   `create-pr`. Before acting on one, confirm you loaded the project copy — the project `create-pr`
+   dispatches exactly **three** agents (`dry-checker`, `security-reviewer`, `general-code-reviewer`).
+   If a loaded skill names `api-checker` or a fourth agent, you loaded the standalone copy: **stop and
+   re-read `.claude/skills/create-pr/SKILL.md` directly**, and follow that instead.
+2. **superpowers** provides everything the project does not define — `brainstorming`,
+   `systematic-debugging`, `writing-plans`, `using-git-worktrees`, `subagent-driven-development`,
+   `finishing-a-development-branch`. Prefer the `superpowers:`-prefixed name so resolution is unambiguous.
+3. **Never** use the standalone `~/.claude/skills/` copies of `debug`, `worktrees`, `subagent-build`,
+   `writing-plans`, or `brainstorming` here — they assume Next.js/React/TypeScript conventions that do
+   not apply to a Qt 6 / C++17 / CMake codebase.
+
+`merge-pr` exists **only** at user level and has no project or superpowers equivalent; it is generic
+git plumbing, so it is the one standalone skill that is safe to use as-is.
+
+Agents: dispatch only the three defined in `.claude/agents/`. There is deliberately no `api-checker`
+here — the client↔PHP contract is checked by the `general-code-reviewer` and `security-reviewer`.

@@ -5,6 +5,7 @@
 #include "theme.h"
 #include "attachfilesdialog.h"
 #include "brandtheme.h"
+#include "appsettings.h"
 #include <QGraphicsDropShadowEffect>
 #include <QGraphicsLayout>
 #include <QStyle>
@@ -63,6 +64,27 @@
 #include <QtCharts/QPieSlice>
 #include <QtCharts/QLineSeries>
 #include <QtCharts/QValueAxis>
+
+namespace {
+
+// Mirrors the shared contract documented on HttpForm::isServerAnswer()
+// (qt-app/quick/HttpForm.h). Deliberately duplicated here rather than linked:
+// this legacy Widgets app is the rollback path for the Qt Quick UI, so it must
+// not take a link dependency on the very module it rolls back from.
+//
+// The useful question is not "did reply->error() get set" but "did the server
+// answer at all". requireAdminAuth() answers a bad admin key with HTTP 401 plus
+// {"status":"error","message":"..."} — Qt reports that as ContentAccessDenied,
+// yet the body is exactly what the admin needs to see. Returns false only for a
+// genuine transport failure (no status line, or a status with an empty body).
+bool isServerAnswer(bool replyHadError, int httpStatus, const QByteArray &body)
+{
+    if (!replyHadError)
+        return true;
+    return httpStatus > 0 && !body.isEmpty();
+}
+
+} // namespace
 
 void adminWindow::setActiveSidebar(QPushButton* activeBtn){
     QList<QPushButton*> buttons = {
@@ -598,24 +620,35 @@ adminWindow::adminWindow(QWidget *parent)
 
         QUrlQuery postData;
         postData.addQueryItem("department", dept);
+        // reset_visits.php is guarded by requireAdminAuth; without the key it 401s.
+        postData.addQueryItem("admin_key", m_adminKey);
 
         QNetworkReply *reply = networkManager->post(request, postData.toString(QUrl::FullyEncoded).toUtf8());
 
         connect(reply, &QNetworkReply::finished, this, [=]() {
-            if (reply->error() != QNetworkReply::NoError) {
-                QMessageBox::critical(this, "Error", reply->errorString());
-                reply->deleteLater();
+            const QByteArray resp = reply->readAll();
+            const bool replyHadError = reply->error() != QNetworkReply::NoError;
+            const int httpStatus = reply->attribute(
+                QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const QString transportError = reply->errorString();
+            reply->deleteLater();
+
+            // A 401 from requireAdminAuth is the server answering, not a
+            // transport failure: show its message, not "Content Access Denied".
+            if (!isServerAnswer(replyHadError, httpStatus, resp)) {
+                QMessageBox::critical(this, "Error", transportError);
                 return;
             }
-
-            QByteArray resp = reply->readAll();
-            reply->deleteLater();
 
             QJsonDocument doc = QJsonDocument::fromJson(resp);
             if (doc.isObject() && doc["status"].toString() == "success") {
                 QMessageBox::information(this, "Success", doc["message"].toString());
             } else {
-                QMessageBox::warning(this, "Failed", doc["message"].toString());
+                const QString message = doc.isObject() ? doc["message"].toString() : QString();
+                QMessageBox::warning(this, "Failed",
+                                     message.isEmpty()
+                                         ? QStringLiteral("The server rejected the request.")
+                                         : message);
             }
         });
     });
@@ -782,8 +815,9 @@ adminWindow::adminWindow(QWidget *parent)
         request.setHeader(QNetworkRequest::ContentTypeHeader, "application/x-www-form-urlencoded");
 
         QUrlQuery postData;
+        const QString newKey = ui->lineEdit_2->text();
         postData.addQueryItem("old_key", ui->lineEdit->text());
-        postData.addQueryItem("new_key", ui->lineEdit_2->text());
+        postData.addQueryItem("new_key", newKey);
 
         QNetworkReply *reply = networkManager->post(request, postData.toString(QUrl::FullyEncoded).toUtf8());
 
@@ -806,6 +840,9 @@ adminWindow::adminWindow(QWidget *parent)
             QJsonObject obj = jsonDoc.object();
             if (obj["status"].toString() == "success") {
                 QMessageBox::information(this, "Success", obj["message"].toString());
+                // The held key just became stale server-side; refresh it so the
+                // guarded POSTs above keep authenticating (Phase 4c).
+                m_adminKey = newKey;
                 ui->lineEdit->clear();
                 ui->lineEdit_2->clear();
             } else {
@@ -1175,7 +1212,7 @@ void adminWindow::bindSettingsSignals()
     // Auto mode (Manual mode skips regeneration — the v1 code hook).
     connect(m_settingsController, &SettingsController::logoChanged, this,
             [](const QString &destinationPath) {
-        QSettings store(QLatin1String("MyCompany"), QLatin1String("MyApp"));
+        AppSettings store;
         BrandingConfig config = BrandTheme::loadCachedConfig(store);
         QString errorMsg;
         if (BrandTheme::regenerateFromLogo(config, destinationPath, &errorMsg)) {
@@ -1304,6 +1341,21 @@ void adminWindow::closeEvent(QCloseEvent *event) {
     } else {
         event->accept();
     }
+
+    // The window is only HIDDEN on close (mainwindow.cpp constructs one
+    // adminWindow that lives for the whole app lifetime), so without this the
+    // plaintext admin key stayed in process memory from the first admin login
+    // until the kiosk was rebooted. Closing the admin surface ends the admin
+    // session; the key is re-captured by MainWindow's login gate on the next
+    // entry (setAdminKey), so nothing legitimate depends on it surviving.
+    //
+    // Safe for in-flight requests: every guarded POST above copies m_adminKey
+    // into its QUrlQuery body synchronously before send, so a reply still on
+    // the wire carries its own copy and its finished-lambda never re-reads the
+    // member. That includes the Save branch's onApplyChangesBtnClicked() call
+    // above, which runs to completion before this line.
+    if (event->isAccepted())
+        m_adminKey.clear();
 }
 
 
@@ -1399,7 +1451,7 @@ void adminWindow::loadDepartments() {
 }
 
 ReportHeaderInfo adminWindow::collectHeaderInfo() const {
-    QSettings settings("MyCompany", "MyApp");
+    AppSettings settings;
     ReportHeaderInfo info;
     info.schoolName = settings.value("school/name", "Your School Name").toString();
     info.address    = settings.value("school/address", "Your Address").toString();

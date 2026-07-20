@@ -26,11 +26,26 @@ Rectangle {
     DashboardViewModel { id: dashboardVm }
     SearchViewModel    { id: searchVm }
     VisitLogsViewModel { id: visitLogsVm }
+    SettingsViewModel  { id: settingsVm }
 
     // Read-only school identity (logo + name) for the sidebar brand block.
-    // Reads QSettings once at construction (see SchoolInfoViewModel.cpp) —
-    // no refresh() to gate, unlike the three VMs above.
+    // Reads QSettings at construction and again on demand via reload().
     SchoolInfoViewModel { id: schoolInfoVm }
+
+    // Phase 4c's Settings screen is the FIRST code that writes school/name and
+    // school/logoPath, so the sidebar brand can now go stale mid-session: a
+    // rename or logo import re-coloured the palette live while the sidebar
+    // kept the old name/logo until restart — a visibly half-applied change.
+    // settingsVm.save() is the only moment those keys move (importLogo()
+    // deliberately does NOT persist; see SettingsViewModel.cpp), so one
+    // handler covers both. reload() is signal-quiet when nothing this VM reads
+    // changed, so an unrelated save costs nothing. Named function so the
+    // shell QuickTest can drive the same path a save takes.
+    function reloadSchoolInfo() { schoolInfoVm.reload() }
+    Connections {
+        target: settingsVm
+        function onSaved() { admin.reloadSchoolInfo() }
+    }
 
     // Live clock + date for the header. Same "dddd, MMMM d, yyyy" format
     // KioskViewModel::tickClock() already uses for clockDate, so the date
@@ -49,6 +64,9 @@ Rectangle {
         switch (Navigator.adminPage) {
         case Navigator.Search:     return qsTr("Search");
         case Navigator.VisitLogs:  return qsTr("Visit Logs");
+        case Navigator.Database:   return qsTr("Database");
+        case Navigator.Reporting:  return qsTr("Reporting");
+        case Navigator.Settings:   return qsTr("Settings");
         default:                   return qsTr("Dashboard");
         }
     }
@@ -72,22 +90,24 @@ Rectangle {
             // matches the string keys Task 9 already built/tested it with.
             currentPage: Navigator.adminPage === Navigator.Search    ? "search"
                        : Navigator.adminPage === Navigator.VisitLogs ? "visitlogs"
+                       : Navigator.adminPage === Navigator.Database  ? "database"
+                       : Navigator.adminPage === Navigator.Reporting ? "reporting"
+                       : Navigator.adminPage === Navigator.Settings  ? "settings"
                        : "dashboard"
             items: [
                 { page: "dashboard", label: qsTr("Dashboard"),  enabled: true },
                 { page: "search",    label: qsTr("Search"),     enabled: true },
                 { page: "visitlogs", label: qsTr("Visit Logs"), enabled: true },
-                { page: "database",  label: qsTr("Database"),   enabled: false },
-                { page: "reporting", label: qsTr("Reporting"),  enabled: false },
-                { page: "settings",  label: qsTr("Settings"),   enabled: false }
+                { page: "database",  label: qsTr("Database"),   enabled: true },
+                { page: "reporting", label: qsTr("Reporting"),  enabled: true },
+                { page: "settings",  label: qsTr("Settings"),   enabled: true }
             ]
             // Every key is matched explicitly, including "dashboard". A bare
             // `else -> Dashboard` fallthrough would silently route ANY
             // unrecognized key to the Dashboard: harmless today (LSideNav's
-            // own guard blocks the disabled Phase-4 items before they ever
-            // emit), but the moment Phase 4 enables "database"/"reporting"/
-            // "settings" they would land on the Dashboard instead of failing
-            // loudly. Warn rather than route. Phase 4 adds the real cases.
+            // own guard blocks any disabled items before they ever emit),
+            // but a typo'd key would otherwise land on the Dashboard instead
+            // of failing loudly. Warn rather than route.
             onPageActivated: function(page) {
                 if (page === "dashboard")
                     Navigator.showAdminPage(Navigator.Dashboard)
@@ -95,6 +115,12 @@ Rectangle {
                     Navigator.showAdminPage(Navigator.Search)
                 else if (page === "visitlogs")
                     Navigator.showAdminPage(Navigator.VisitLogs)
+                else if (page === "database")
+                    Navigator.showAdminPage(Navigator.Database)
+                else if (page === "reporting")
+                    Navigator.showAdminPage(Navigator.Reporting)
+                else if (page === "settings")
+                    Navigator.showAdminPage(Navigator.Settings)
                 else
                     console.warn("AdminScreen: no route for page key", page)
             }
@@ -135,14 +161,29 @@ Rectangle {
                     switch (Navigator.adminPage) {
                     case Navigator.Search:    return searchComponent;
                     case Navigator.VisitLogs: return visitLogsComponent;
+                    case Navigator.Database:  return databaseComponent;
+                    case Navigator.Reporting: return reportingComponent;
+                    case Navigator.Settings:  return settingsComponent;
                     default:                  return dashboardComponent;
                     }
                 }
                 // Fetch once when a page is shown (spec §5.1 "fetch on
                 // navigation"). Each of the three VMs exposes Q_INVOKABLE
                 // refresh(); gated by autoLoad so tests can suppress network.
-                onLoaded: if (admin.autoLoad && item && item.vm && item.vm.refresh)
-                              item.vm.refresh()
+                // Settings has no refresh(): it reads QSettings via load() and
+                // fetches the reset-visits department list via loadDepartments().
+                // Each call is feature-detected, so a screen (or a QuickTest
+                // stub VM) that lacks the method is simply skipped — the
+                // screens themselves deliberately have no Component.onCompleted
+                // fetch, which is what keeps stub-driven QuickTests offline.
+                onLoaded: {
+                    if (admin.autoLoad && item && item.vm && item.vm.refresh)
+                        item.vm.refresh()
+                    if (admin.autoLoad && item && item.vm && item.vm.load)
+                        item.vm.load()
+                    if (admin.autoLoad && item && item.vm && item.vm.loadDepartments)
+                        item.vm.loadDepartments()
+                }
             }
         }
     }
@@ -150,4 +191,7 @@ Rectangle {
     Component { id: dashboardComponent; DashboardScreen { objectName: "dashboardPage"; vm: dashboardVm } }
     Component { id: searchComponent;    SearchScreen    { objectName: "searchPage";    vm: searchVm } }
     Component { id: visitLogsComponent; VisitLogsScreen { objectName: "visitLogsPage"; vm: visitLogsVm } }
+    Component { id: databaseComponent;  DatabaseScreen  { objectName: "databasePage" } }
+    Component { id: reportingComponent; ReportingScreen { objectName: "reportingPage" } }
+    Component { id: settingsComponent;  SettingsScreen  { objectName: "settingsPage";  vm: settingsVm } }
 }

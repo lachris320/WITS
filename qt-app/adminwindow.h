@@ -61,6 +61,11 @@ public:
     explicit adminWindow(QWidget *parent = nullptr);
     ~adminWindow();
 
+    // Hand over the admin key entered at the login gate so guarded endpoints
+    // (requireAdminAuth) still accept this window's POSTs. RAM only — never
+    // persisted, never logged (Phase 4c).
+    void setAdminKey(const QString &key) { m_adminKey = key; }
+
 signals:
     void schoolInfoUpdated(const QString &schoolName, const QString &address, const QFont &font);
     void logoChanged(const QString &logoPath);
@@ -77,6 +82,7 @@ private:
     QString selectedPhotoPath;
     QString selectedExcelPath;
     QString selectedZipPath;
+    QString m_adminKey;   // captured at the login gate; threaded into guarded POSTs (Phase 4c)
 
     bool changesMade = false;
     bool reportEdited = false;

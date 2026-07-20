@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <QSignalSpy>
 #include <QSettings>
 #include <QTemporaryDir>
 #include <QFile>
@@ -21,6 +22,9 @@ private slots:
     void missingLogoFileDegradesToNoLogo();
     void emptyLogoPathDegradesToNoLogo();
     void unsetKeysDegradeToEmptyNotNull();
+    void reloadPicksUpARenamedSchoolAndNotifies();
+    void reloadPicksUpANewlyImportedLogoAndNotifies();
+    void reloadWithNoChangeEmitsNothing();
 
 private:
     QTemporaryDir m_dir;
@@ -100,6 +104,73 @@ void TestSchoolInfoViewModel::unsetKeysDegradeToEmptyNotNull()
     QVERIFY(vm.schoolAddress().isEmpty());
     QVERIFY(!vm.hasLogo());
     QVERIFY(vm.logoUrl().isEmpty());
+}
+
+// Phase 4c is the first code that WRITES school/name and school/logoPath, so
+// the sidebar brand (bound to this VM in AdminScreen.qml) has to be able to
+// re-read them after a Settings save. Without reload() + a NOTIFY signal the
+// palette re-colored live while the name/logo stayed stale until restart.
+void TestSchoolInfoViewModel::reloadPicksUpARenamedSchoolAndNotifies()
+{
+    QSettings s(iniPath(QStringLiteral("rename.ini")), QSettings::IniFormat);
+    s.setValue(QStringLiteral("school/name"), QStringLiteral("Old Name"));
+    s.sync();
+
+    SchoolInfoViewModel vm(s);
+    QCOMPARE(vm.schoolName(), QStringLiteral("Old Name"));
+
+    QSignalSpy spy(&vm, &SchoolInfoViewModel::schoolInfoChanged);
+    s.setValue(QStringLiteral("school/name"), QStringLiteral("New Name"));
+    s.setValue(QStringLiteral("school/address"), QStringLiteral("2 New Road"));
+    s.sync();
+
+    vm.reload();
+
+    QCOMPARE(vm.schoolName(), QStringLiteral("New Name"));
+    QCOMPARE(vm.schoolAddress(), QStringLiteral("2 New Road"));
+    QCOMPARE(spy.count(), 1);
+}
+
+void TestSchoolInfoViewModel::reloadPicksUpANewlyImportedLogoAndNotifies()
+{
+    QSettings s(iniPath(QStringLiteral("logo-later.ini")), QSettings::IniFormat);
+    s.sync();
+
+    SchoolInfoViewModel vm(s);
+    QVERIFY(!vm.hasLogo());
+
+    const QString logoPath = iniPath(QStringLiteral("imported-logo.jpg"));
+    QFile f(logoPath);
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.write("not a real jpeg, just needs to exist on disk");
+    f.close();
+    s.setValue(QStringLiteral("school/logoPath"), logoPath);
+    s.sync();
+
+    QSignalSpy spy(&vm, &SchoolInfoViewModel::schoolInfoChanged);
+    vm.reload();
+
+    QVERIFY(vm.hasLogo());
+    QCOMPARE(vm.logoUrl(), QUrl::fromLocalFile(logoPath));
+    QCOMPARE(spy.count(), 1);
+}
+
+// A save that changed nothing this VM reads must not churn the sidebar's
+// bindings — and a signal-per-reload would be a needless re-layout on every
+// unrelated Settings save (hours, guest toggle, admin info).
+void TestSchoolInfoViewModel::reloadWithNoChangeEmitsNothing()
+{
+    QSettings s(iniPath(QStringLiteral("no-change.ini")), QSettings::IniFormat);
+    s.setValue(QStringLiteral("school/name"), QStringLiteral("Same Name"));
+    s.sync();
+
+    SchoolInfoViewModel vm(s);
+    QSignalSpy spy(&vm, &SchoolInfoViewModel::schoolInfoChanged);
+
+    vm.reload();
+
+    QCOMPARE(vm.schoolName(), QStringLiteral("Same Name"));
+    QCOMPARE(spy.count(), 0);
 }
 
 QTEST_MAIN(TestSchoolInfoViewModel)
