@@ -38,7 +38,25 @@ QUrl SettingsViewModel::logoUrl() const
     // A bare path is not a valid Image.source — mirror SchoolInfoViewModel.
     if (m_cur.logoPath.isEmpty() || !QFileInfo::exists(m_cur.logoPath))
         return {};
-    return QUrl::fromLocalFile(m_cur.logoPath);
+    QUrl url = QUrl::fromLocalFile(m_cur.logoPath);
+    // Cache-busting token, bumped by every successful import.
+    //
+    // SettingsController names the destination after the SOURCE basename
+    // ("logo_" + fileName), so importing a DIFFERENT image that happens to
+    // share a filename overwrites the same destination and leaves logoPath
+    // untouched. Without the token the URL is then byte-identical, QML's
+    // `source:` binding re-evaluates to the value it already holds, and
+    // QQuickImage neither re-reads the file nor misses its URL-keyed pixmap
+    // cache — the preview keeps painting the OLD logo while the palette
+    // re-theme (which reads the file from disk) correctly picks up the new
+    // one. That exact split is what the GUI smoke test reported.
+    //
+    // Only the URL carries the token: logoPath stays a clean filesystem path
+    // for QSettings and for Theme's regenerateFromImportedLogo(), and
+    // QUrl::toLocalFile() ignores the query, so Image resolves the same file.
+    if (m_logoRevision > 0)
+        url.setQuery(QStringLiteral("v=%1").arg(m_logoRevision));
+    return url;
 }
 
 bool SettingsViewModel::hasLogo() const
@@ -108,6 +126,9 @@ void SettingsViewModel::importLogo(const QUrl &sourceUrl)
         return;
     }
     m_cur.logoPath = dest;
+    // Bump BEFORE emitting logoChanged so the binding that re-reads logoUrl
+    // already sees the new revision (see logoUrl() for why this exists).
+    ++m_logoRevision;
     // NO QSettings write here. An import marks the form dirty, i.e. the UI
     // presents it as an unsaved edit — persisting it immediately made that a
     // lie: the logo was already applied for good, navigating away could not

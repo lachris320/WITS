@@ -3,6 +3,7 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QDir>
 #include <QImage>
 #include <QFile>
 #include <QFileInfo>
@@ -51,6 +52,7 @@ private slots:
     void importMissingFileSurfacesTheControllersReason();
     void importNonImageSurfacesTheControllersReason();
     void importLogoIsNotPersistedUntilSave();
+    void reimportingADifferentImageChangesTheLogoUrl();
     void loadKeepsUnsavedEdits();
     void defaultManifestUrlIsALocalFileNamedForTheDepartment();
     void adminInfoSuccessEmitsSaved();
@@ -261,6 +263,51 @@ void TestSettingsViewModel::importLogoIsNotPersistedUntilSave()
     QVERIFY(!vm.dirty());
     QSettings s2(QStringLiteral("MyCompany"), QStringLiteral("MyApp"));
     QCOMPARE(s2.value(QStringLiteral("school/logoPath")).toString(), vm.logoPath());
+}
+
+void TestSettingsViewModel::reimportingADifferentImageChangesTheLogoUrl()
+{
+    // GUI-smoke regression: SettingsController names the destination after the
+    // SOURCE basename ("logo_" + fileName), so two DIFFERENT images that happen
+    // to share a filename land on the SAME destination path. logoPath is then
+    // unchanged, so logoUrl is byte-identical, so QML's `source:` binding
+    // re-evaluates to a value it already holds — Image never re-reads the file
+    // and keeps painting the previously decoded (now stale) pixmap. The admin
+    // sees the palette re-theme (which reads the file from disk) but the old
+    // logo. logoUrl must therefore change whenever a new import lands, even
+    // when the destination path does not.
+    const QString dirA = m_tmp.path() + QStringLiteral("/a");
+    const QString dirB = m_tmp.path() + QStringLiteral("/b");
+    QVERIFY(QDir().mkpath(dirA));
+    QVERIFY(QDir().mkpath(dirB));
+
+    QImage blue(2, 2, QImage::Format_ARGB32);
+    blue.fill(Qt::blue);
+    QImage red(4, 4, QImage::Format_ARGB32);
+    red.fill(Qt::red);
+    QVERIFY(blue.save(dirA + QStringLiteral("/same_name.png"), "PNG"));
+    QVERIFY(red.save(dirB + QStringLiteral("/same_name.png"), "PNG"));
+
+    SettingsViewModel vm;
+    vm.load();
+
+    vm.importLogo(QUrl::fromLocalFile(dirA + QStringLiteral("/same_name.png")));
+    const QString firstPath = vm.logoPath();
+    const QUrl firstUrl = vm.logoUrl();
+    QVERIFY(!firstPath.isEmpty());
+    QVERIFY(firstUrl.isValid());
+
+    QSignalSpy logo(&vm, &SettingsViewModel::logoChanged);
+    vm.importLogo(QUrl::fromLocalFile(dirB + QStringLiteral("/same_name.png")));
+
+    QCOMPARE(logo.count(), 1);
+    // The collision itself is expected — the destination is basename-derived.
+    QCOMPARE(vm.logoPath(), firstPath);
+    // ...but the URL handed to QML must not be, or the preview goes stale.
+    QVERIFY2(vm.logoUrl() != firstUrl,
+             "logoUrl must change per import so Image re-reads the file");
+    // The busting token must not corrupt the path QML/Image resolves to.
+    QCOMPARE(vm.logoUrl().toLocalFile(), firstPath);
 }
 
 void TestSettingsViewModel::loadKeepsUnsavedEdits()

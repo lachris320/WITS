@@ -183,6 +183,11 @@ private:
     QString m_statusMessage;
     bool m_dirty = false;
     bool m_busy = false;
+    // Import counter appended to logoUrl() as a "?v=" query so a re-import that
+    // lands on the SAME destination path still hands QML a URL it has not seen.
+    // 0 == "never imported in this session", which keeps the persisted-logo URL
+    // read at load() byte-identical to a plain QUrl::fromLocalFile().
+    int m_logoRevision = 0;
     // Set by the SettingsController::importError relay so importLogo() knows a
     // specific reason already reached statusMessage and must not be clobbered
     // by its generic fallback.
