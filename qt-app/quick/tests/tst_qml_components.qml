@@ -352,27 +352,30 @@ Item {
         // `wait(450)` returns well past 450ms of animation time, row 8 has
         // already settled at 1, and the strict-inequality check fails for
         // reasons unrelated to the code under test. Same flake class as the
-        // pageIn tests fixed just before this one — and since both
-        // tst_qml_admin and tst_qml_components compile this whole directory
-        // via QUICK_TEST_SOURCE_DIR, one flake here reddens several ctest
-        // entries at once.
+        // pageIn entrance tests de-flaked just before this one — and since
+        // both tst_qml_admin and tst_qml_components compile this whole
+        // directory via QUICK_TEST_SOURCE_DIR, one flake here reddens several
+        // ctest entries at once.
         //
-        // The job is split into two parts that are collectively STRICTER —
-        // see the twin comment on SearchScreen's
-        // test_staggerDelayReadsThemeRowStaggerToken (tst_qml_admin.qml) for
-        // the full reasoning:
-        //   (a) the token arithmetic asserted directly on the pure
-        //       Theme.motion.staggerDelay — zero clock, load-immune, and it
-        //       pins the clamp and the negative-index guard the timing
-        //       sample never reached at all;
-        //   (b) a polling wiring proof of the invariant that holds under ANY
-        //       load — monotonic lead, row0.opacity >= row8.opacity at EVERY
-        //       sample (same duration and easing for both, index 8 merely
-        //       starts later) — requiring that a STRICT lead be observed at
-        //       least once, which is what separates real stagger from all
-        //       rows animating in lockstep, inside a bounded retry so one
-        //       scheduler stall swallowing the whole 600ms window can't
-        //       redden the suite.
+        // The timed sample is replaced by a polling WIRING proof — see the
+        // twin comment on SearchScreen's test of the same name
+        // (tst_qml_admin.qml) for the full reasoning — asserting the
+        // invariant that holds under ANY load: monotonic lead,
+        // row0.opacity >= row8.opacity at EVERY sample (same duration and
+        // easing for both, index 8 merely starts later), requiring that a
+        // STRICT lead be observed at least once, which is what separates real
+        // stagger from all rows animating in lockstep, inside a bounded retry
+        // so one scheduler stall swallowing the whole 600ms window can't
+        // redden the suite.
+        //
+        // The stagger ARITHMETIC itself (clamp at staggerCap, multiply by the
+        // step, and the negative-index guard) is deliberately NOT re-asserted
+        // here: tst_qml_theme.qml's
+        // test_staggerDelayClampsIndexToStaggerCapThenMultipliesByStep covers
+        // it on the pure Theme.motion.staggerDelay function, with zero clock,
+        // and QUICK_TEST_SOURCE_DIR means that test runs inside THIS binary
+        // too — repeating it here would only duplicate coverage already
+        // executing in the same process.
         //
         // RETRY POLICY (twin of the one in tst_qml_admin.qml): a retry is
         // legitimate ONLY when the entrance window was missed entirely —
@@ -383,23 +386,13 @@ Item {
         // because retrying it would also pass a product bug where the
         // stagger fires only sometimes. Running out of attempts without ever
         // sampling the window fails as well, but with a distinct message —
-        // "could not observe" is an honest claim, "stagger is broken" would
-        // not be.
+        // one that must NOT blame the machine alone, because a deleted or
+        // disabled populate Transition produces the IDENTICAL observation
+        // (rows sit at opacity 1, `lateStarted` never becomes true). The
+        // message names both causes and points at the row-entrance tests,
+        // which distinguish them.
         function test_rowStaggerDelaysHigherIndexRows() {
-            // (a) Token arithmetic — fully deterministic, no clock involved.
-            var step = Theme.motion.rowStagger;
-            compare(Theme.motion.staggerDelay(0, step), 0);
-            compare(Theme.motion.staggerDelay(8, step), 8 * step);
-            // Above the cap the delay stops growing, so a long list's
-            // entrance can't take seconds.
-            compare(Theme.motion.staggerDelay(Theme.motion.staggerCap + 4, step),
-                    Theme.motion.staggerCap * step);
-            // A delegate's index transiently goes to -1 during model-reset
-            // teardown; the max(0, ...) guard must keep that out of a
-            // PauseAnimation duration.
-            compare(Theme.motion.staggerDelay(-1, step), 0);
-
-            // (b) Wiring: index 8's entrance really trails index 0's.
+            // Wiring: index 8's entrance really trails index 0's.
             //
             // The SHAPE of the opacity signal, measured rather than assumed:
             // the delegate declares no `opacity: 0` default (see the populate
@@ -479,8 +472,10 @@ Item {
             }
             verify(sawStrictLead,
                    "row 8's entrance window was never sampled in 3 attempts — "
-                   + "the machine was too loaded to observe the stagger, which "
-                   + "is not the same as stagger being broken");
+                   + "either the row entrance never ran at all, or the machine "
+                   + "was too loaded to sample it; check "
+                   + "test_animateRowsTrueRepopulatesFreshRowsOnModelReset, "
+                   + "which fails with an accurate message in the first case");
             tryCompare(row8, "opacity", 1);
         }
 
@@ -594,8 +589,9 @@ Item {
         // targetWidth)`. The second half is two-sided and becomes FALSE the
         // moment the glide finishes, so any stall that pushes `wait(120)`
         // past the Behavior's duration reddens it for reasons unrelated to
-        // the code under test — the last member of the flake class fixed in
-        // 4efc6a9 (pageIn) and e2e1127 (row stagger). Both tst_qml_admin and
+        // the code under test — the last member of the flake class already
+        // de-flaked in the pageIn entrance tests and the row-stagger tests
+        // above. Both tst_qml_admin and
         // tst_qml_components compile this whole directory via
         // QUICK_TEST_SOURCE_DIR, so one flake here reddens several ctest
         // entries at once.
@@ -620,8 +616,9 @@ Item {
         //       than betting on one fixed offset. A single stall long enough
         //       to swallow the whole 800ms flight would see no intermediate
         //       value, so the observation is wrapped in a bounded retry that
-        //       re-triggers the glide (per e2e1127); only "no attempt ever
-        //       saw an intermediate width" fails.
+        //       re-triggers the glide (the same bounded-retry idiom the
+        //       row-stagger tests above use); only "no attempt ever saw an
+        //       intermediate width" fails.
         //   (c) the end state, via the existing poll-based (hence
         //       load-tolerant) tryCompare.
         // The two tryCompares also pin the resting-width arithmetic

@@ -542,8 +542,8 @@ Item {
         }
 
         // Stagger differential (mutation target: Theme.motion.rowStagger /
-        // staggerCap) — mirrors LTable's test_rowStaggerDelaysHigherIndexRows
-        // (tst_qml_components.qml). The migration means there is no more
+        // staggerCap) — mirrors its twin of the same name over LTable in
+        // tst_qml_components.qml. The migration means there is no more
         // per-delegate entranceAnim/PauseAnimation to read a duration off
         // directly: populate/add CLONE their whole animation tree per
         // transitioning item and the pause duration is assigned
@@ -565,25 +565,28 @@ Item {
         // via QUICK_TEST_SOURCE_DIR, one flake here reddens several ctest
         // entries at once.
         //
-        // The job is split into two parts that are collectively STRICTER:
-        //   (a) the token arithmetic, asserted directly on
-        //       Theme.motion.staggerDelay — a pure function on the singleton
-        //       and the actual named mutation target. Zero clock, so it is
-        //       load-immune, and it pins the clamp and the negative-index
-        //       guard that the timing sample never reached at all.
-        //   (b) the wiring proof: that row 5 really LAGS row 0 on screen.
-        //       Instead of betting on one instant, poll and assert the
-        //       invariant that holds under ANY load — monotonic lead,
-        //       row0.opacity >= row5.opacity at EVERY sample (both fades are
-        //       the same duration and easing, row 5 merely starts later, so
-        //       row 5 can never be ahead) — while recording whether a STRICT
-        //       lead was ever seen. A strict lead is REQUIRED to pass: that
-        //       is what separates real stagger from all rows animating in
-        //       lockstep. A single scheduler stall long enough to swallow
-        //       the entire 525ms window would leave both rows settled with
-        //       no strict lead observed, so the observation is wrapped in a
-        //       bounded retry that re-triggers the entrance via the same
-        //       model reset.
+        // This test therefore asserts the WIRING only: that row 5 really LAGS
+        // row 0 on screen. Instead of betting on one instant, poll and assert
+        // the invariant that holds under ANY load — monotonic lead,
+        // row0.opacity >= row5.opacity at EVERY sample (both fades are the
+        // same duration and easing, row 5 merely starts later, so row 5 can
+        // never be ahead) — while recording whether a STRICT lead was ever
+        // seen. A strict lead is REQUIRED to pass: that is what separates real
+        // stagger from all rows animating in lockstep. A single scheduler
+        // stall long enough to swallow the entire 525ms window would leave
+        // both rows settled with no strict lead observed, so the observation
+        // is wrapped in a bounded retry that re-triggers the entrance via the
+        // same model reset.
+        //
+        // The stagger ARITHMETIC itself (clamp at staggerCap, multiply by the
+        // step, and the negative-index guard) is deliberately NOT re-asserted
+        // here: tst_qml_theme.qml's
+        // test_staggerDelayClampsIndexToStaggerCapThenMultipliesByStep covers
+        // it on the pure Theme.motion.staggerDelay function, with zero clock,
+        // and every QuickTest binary compiles the whole tests/ directory via
+        // QUICK_TEST_SOURCE_DIR — so that test runs inside THIS binary too.
+        // Repeating it here would only duplicate coverage already executing in
+        // the same process.
         //
         // RETRY POLICY — a retry is only ever legitimate for ONE of the two
         // reasons an attempt can end without a strict lead, and the loop
@@ -604,23 +607,13 @@ Item {
         // in flight (⇒ the window, which a working stagger always leads in),
         // so a healthy run can never trip the fast fail. Exhausting all 3
         // attempts without ever observing the window fails too, but with a
-        // distinct, honest message: the suite could not sample the window,
-        // which is not the same claim as "stagger is broken".
-        function test_staggerDelayReadsThemeRowStaggerToken() {
-            // (a) Token arithmetic — fully deterministic, no clock involved.
-            var step = Theme.motion.rowStagger;
-            compare(Theme.motion.staggerDelay(0, step), 0);
-            compare(Theme.motion.staggerDelay(5, step), 5 * step);
-            // Above the cap the delay stops growing, so a long list's
-            // entrance can't take seconds.
-            compare(Theme.motion.staggerDelay(Theme.motion.staggerCap + 7, step),
-                    Theme.motion.staggerCap * step);
-            // A delegate's index transiently goes to -1 during model-reset
-            // teardown; the max(0, ...) guard must keep that out of a
-            // PauseAnimation duration.
-            compare(Theme.motion.staggerDelay(-1, step), 0);
-
-            // (b) Wiring: row 5's entrance really trails row 0's.
+        // distinct message — and that message must NOT blame the machine
+        // alone, because a deleted or disabled populate Transition produces
+        // the IDENTICAL observation (rows sit at opacity 1, `lateStarted`
+        // never becomes true). The message names both causes and points at the
+        // entrance tests, which distinguish them.
+        function test_rowStaggerDelaysHigherIndexRows() {
+            // Wiring: row 5's entrance really trails row 0's.
             //
             // resultsList's viewport (fixed screen height in this test host)
             // is only ~422px tall — fully containing rows 0-5 (row 5 ends at
@@ -712,8 +705,10 @@ Item {
             }
             verify(sawStrictLead,
                    "row 5's entrance window was never sampled in 3 attempts — "
-                   + "the machine was too loaded to observe the stagger, which "
-                   + "is not the same as stagger being broken");
+                   + "either the row entrance never ran at all, or the machine "
+                   + "was too loaded to sample it; check "
+                   + "test_entranceUsesThemeBezierEasing, which fails with an "
+                   + "accurate message in the first case");
             tryCompare(row5, "opacity", 1);
         }
 
