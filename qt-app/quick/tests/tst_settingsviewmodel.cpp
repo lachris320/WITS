@@ -11,6 +11,7 @@
 #include "SettingsViewModel.h"
 #include "AdminSession.h"
 #include "HttpForm.h"
+#include "appsettings.h"
 
 class TestSettingsViewModel : public QObject
 {
@@ -20,14 +21,22 @@ private slots:
     void initTestCase()
     {
         QVERIFY(m_tmp.isValid());
-        QStandardPaths::setTestModeEnabled(true);
-        QSettings::setDefaultFormat(QSettings::IniFormat);
-        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, m_tmp.path());
+        // NOTE: this test deliberately does NOT redirect QSettings itself.
+        // The old attempt (setDefaultFormat(IniFormat) + setPath(IniFormat,...))
+        // looked correct and was a complete no-op: Qt 6's
+        // QSettings(organization, application) constructor is hardcoded to
+        // NativeFormat and ignores defaultFormat(), so every seed below went
+        // straight into the developer's real registry hive and s.clear()
+        // deleted whatever was there. Isolation is now the harness's job —
+        // testsupport/settingsisolation.cpp, linked into every
+        // wits_add_qttest() target, calls AppSettings::isolateForTesting()
+        // before main(). settingsStoreIsIsolatedFromTheRealUserStore() below
+        // asserts it actually took.
     }
     void init()
     {
-        // Seed a known baseline in the redirected QSettings before each test.
-        QSettings s(QStringLiteral("MyCompany"), QStringLiteral("MyApp"));
+        // Seed a known baseline in the (harness-isolated) settings store.
+        AppSettings s;
         s.clear();
         s.setValue(QStringLiteral("school/name"), QStringLiteral("Acme Library"));
         s.setValue(QStringLiteral("school/address"), QStringLiteral("123 Main St"));
@@ -39,6 +48,7 @@ private slots:
         s.sync();
     }
 
+    void settingsStoreIsIsolatedFromTheRealUserStore();
     void loadPopulatesPropertiesFromSettings();
     void loadStartsClean();
     void editingASettingMarksDirtyAndSignals();
@@ -76,6 +86,37 @@ private slots:
     void transportFailureStillMeansNetworkError();
     void httpErrorWithNonJsonBodyFailsLoudlyNotSilently();
 };
+
+// REGRESSION TEST for the Phase 4c data-loss bug: running the suite
+// overwrote the developer's real HKCU\Software\MyCompany\MyApp hive with this
+// file's fixture values, because QSettings("MyCompany","MyApp") is NativeFormat
+// on Qt 6 no matter what redirection was configured first. Every other test in
+// this file passed happily while doing it, so this is the assertion that makes
+// the isolation itself observable. It fails if the harness seam is removed,
+// bypassed, or stops taking effect.
+void TestSettingsViewModel::settingsStoreIsIsolatedFromTheRealUserStore()
+{
+    QVERIFY(AppSettings::isIsolatedForTesting());
+
+    AppSettings s;
+    // Not the native store. On Windows that is the registry, whose fileName()
+    // is a "\HKEY_CURRENT_USER\Software\..." pseudo-path; on Linux/macOS it is
+    // a file in the real user config dir. Assert the format directly, which
+    // covers every platform, then pin the Windows symptom explicitly.
+    QCOMPARE(s.format(), QSettings::IniFormat);
+    QVERIFY(!s.fileName().contains(QLatin1String("HKEY_"), Qt::CaseInsensitive));
+
+    // ...and the INI actually lives under the system temp area, not the user's
+    // real config location.
+    QVERIFY2(s.fileName().startsWith(QDir::tempPath(), Qt::CaseInsensitive),
+             qPrintable(QStringLiteral("settings file %1 is not under %2")
+                            .arg(s.fileName(), QDir::tempPath())));
+
+    // A write here must be invisible to the real store: the values this file
+    // seeds in init() are only ever reachable through the redirected scope.
+    QCOMPARE(s.value(QStringLiteral("school/name")).toString(),
+             QStringLiteral("Acme Library"));
+}
 
 void TestSettingsViewModel::loadPopulatesPropertiesFromSettings()
 {
@@ -126,7 +167,7 @@ void TestSettingsViewModel::saveePersistsAllFieldsAndEmitsSaved()
     QSignalSpy saved(&vm, &SettingsViewModel::saved);
     vm.save();
     QCOMPARE(saved.count(), 1);
-    QSettings s(QStringLiteral("MyCompany"), QStringLiteral("MyApp"));
+    AppSettings s;
     QCOMPARE(s.value(QStringLiteral("school/name")).toString(), QStringLiteral("Renamed Library"));
     QCOMPARE(s.value(QStringLiteral("library/openHour")).toInt(), 7);
 }
@@ -137,14 +178,14 @@ void TestSettingsViewModel::saveMirrorsGuestFlagOntoKioskKey()
     vm.load();
     vm.setGuestEnabled(false);
     vm.save();
-    QSettings s(QStringLiteral("MyCompany"), QStringLiteral("MyApp"));
+    AppSettings s;
     // Both the controller's key AND the key the kiosk reads must be set.
     QCOMPARE(s.value(QStringLiteral("features/guestLogin")).toBool(), false);
     QCOMPARE(s.value(QStringLiteral("kiosk/guestEnabled")).toBool(), false);
 
     vm.setGuestEnabled(true);
     vm.save();
-    QSettings s2(QStringLiteral("MyCompany"), QStringLiteral("MyApp"));
+    AppSettings s2;
     QCOMPARE(s2.value(QStringLiteral("features/guestLogin")).toBool(), true);
     QCOMPARE(s2.value(QStringLiteral("kiosk/guestEnabled")).toBool(), true);
 }
@@ -254,14 +295,14 @@ void TestSettingsViewModel::importLogoIsNotPersistedUntilSave()
     QVERIFY(!vm.logoPath().isEmpty());
 
     {
-        QSettings s(QStringLiteral("MyCompany"), QStringLiteral("MyApp"));
+        AppSettings s;
         QVERIFY2(s.value(QStringLiteral("school/logoPath")).toString().isEmpty(),
                  "importLogo() must not persist behind the Save gate");
     }
 
     vm.save();
     QVERIFY(!vm.dirty());
-    QSettings s2(QStringLiteral("MyCompany"), QStringLiteral("MyApp"));
+    AppSettings s2;
     QCOMPARE(s2.value(QStringLiteral("school/logoPath")).toString(), vm.logoPath());
 }
 

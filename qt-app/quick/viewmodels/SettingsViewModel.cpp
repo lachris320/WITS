@@ -9,6 +9,8 @@
 #include <QJsonObject>
 #include <QRegularExpression>
 #include <QSettings>
+
+#include "appsettings.h"
 #include <QStandardPaths>
 #include <QUrl>
 
@@ -96,7 +98,7 @@ void SettingsViewModel::save()
     // the flag onto the kiosk's key so the toggle actually reaches the kiosk,
     // without changing the shared controller's key contract (legacy
     // adminwindow.cpp still reads features/guestLogin).
-    QSettings s(QStringLiteral("MyCompany"), QStringLiteral("MyApp"));
+    AppSettings s;
     s.setValue(QStringLiteral("kiosk/guestEnabled"), m_cur.guestLoginEnabled);
     s.sync();
 

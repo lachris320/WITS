@@ -11,9 +11,20 @@
 # OFFSCREEN is given). Centralizes the boilerplate every Phase-1 test repeated.
 function(wits_add_qttest name)
     cmake_parse_arguments(T "OFFSCREEN" "" "SOURCES;LIBS;DEFINES;INCLUDES" ${ARGN})
-    qt_add_executable(${name} ${T_SOURCES})
+    # Settings isolation is compiled into EVERY test target, not opted into per
+    # test. Qt 6's QSettings(org, app) constructor is hardcoded to NativeFormat
+    # and ignores setDefaultFormat(), and setPath() is a no-op for NativeFormat
+    # on Windows — so a test that opens the app's scope directly reads and
+    # WRITES the developer's real HKCU\Software\MyCompany\MyApp hive. That is a
+    # silent data-loss bug a green suite cannot reveal, so the fix belongs here,
+    # where no future test can forget it. See testsupport/settingsisolation.cpp
+    # and core/appsettings.h.
+    qt_add_executable(${name}
+        ${T_SOURCES}
+        ${CMAKE_SOURCE_DIR}/testsupport/settingsisolation.cpp)
     set_target_properties(${name} PROPERTIES WIN32_EXECUTABLE FALSE)
-    target_link_libraries(${name} PRIVATE Qt${QT_VERSION_MAJOR}::Test ${T_LIBS})
+    target_link_libraries(${name} PRIVATE
+        Qt${QT_VERSION_MAJOR}::Test witsappsettings ${T_LIBS})
     if(T_INCLUDES)
         target_include_directories(${name} PRIVATE ${T_INCLUDES})
     endif()

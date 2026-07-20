@@ -5,6 +5,7 @@
 #include "theme.h"
 #include "attachfilesdialog.h"
 #include "brandtheme.h"
+#include "appsettings.h"
 #include <QGraphicsDropShadowEffect>
 #include <QGraphicsLayout>
 #include <QStyle>
@@ -1211,7 +1212,7 @@ void adminWindow::bindSettingsSignals()
     // Auto mode (Manual mode skips regeneration — the v1 code hook).
     connect(m_settingsController, &SettingsController::logoChanged, this,
             [](const QString &destinationPath) {
-        QSettings store(QLatin1String("MyCompany"), QLatin1String("MyApp"));
+        AppSettings store;
         BrandingConfig config = BrandTheme::loadCachedConfig(store);
         QString errorMsg;
         if (BrandTheme::regenerateFromLogo(config, destinationPath, &errorMsg)) {
@@ -1450,7 +1451,7 @@ void adminWindow::loadDepartments() {
 }
 
 ReportHeaderInfo adminWindow::collectHeaderInfo() const {
-    QSettings settings("MyCompany", "MyApp");
+    AppSettings settings;
     ReportHeaderInfo info;
     info.schoolName = settings.value("school/name", "Your School Name").toString();
     info.address    = settings.value("school/address", "Your Address").toString();

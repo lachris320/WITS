@@ -4,6 +4,18 @@
 # link leaks PUBLIC into every consumer — an accepted Phase 1–5 trade-off,
 # a Phase-6 split candidate (witscore_reports), not a defect to fix now.
 
+# witsappsettings — the single QSettings scope factory + its test seam, kept
+# in its OWN tiny Qt::Core-only library on purpose: cmake/WitsTest.cmake links
+# it into every test target (including the three pure-parser ones that link no
+# other project code) so testsupport/settingsisolation.cpp always resolves.
+# One library, so there is never a duplicate definition with witscore.
+add_library(witsappsettings STATIC
+    appsettings.h appsettings.cpp
+)
+set_target_properties(witsappsettings PROPERTIES AUTOMOC OFF AUTOUIC OFF)
+target_link_libraries(witsappsettings PUBLIC Qt${QT_VERSION_MAJOR}::Core)
+target_include_directories(witsappsettings PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+
 add_library(witscore STATIC
     apiconfig.h
     settingsdata.h
@@ -39,6 +51,7 @@ set_target_properties(witscore PROPERTIES
 )
 
 target_link_libraries(witscore PUBLIC
+    witsappsettings
     Qt${QT_VERSION_MAJOR}::Core
     Qt${QT_VERSION_MAJOR}::Network
     Qt${QT_VERSION_MAJOR}::Gui

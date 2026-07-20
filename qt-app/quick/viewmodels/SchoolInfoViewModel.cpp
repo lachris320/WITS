@@ -1,12 +1,14 @@
 #include "SchoolInfoViewModel.h"
 
 #include <QSettings>
+
+#include "appsettings.h"
 #include <QFileInfo>
 
 SchoolInfoViewModel::SchoolInfoViewModel(QObject *parent)
     : QObject(parent)
 {
-    QSettings s(QStringLiteral("MyCompany"), QStringLiteral("MyApp"));
+    AppSettings s;
     loadFrom(s);
 }
 
@@ -26,7 +28,7 @@ void SchoolInfoViewModel::reload()
         m_settings->sync();
         changed = loadFrom(*m_settings);
     } else {
-        QSettings s(QStringLiteral("MyCompany"), QStringLiteral("MyApp"));
+        AppSettings s;
         s.sync();
         changed = loadFrom(s);
     }

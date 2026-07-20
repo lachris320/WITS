@@ -3,6 +3,8 @@
 #include <QNetworkAccessManager>
 #include <QTimer>
 #include <QSettings>
+
+#include "appsettings.h"
 #include <QDateTime>
 #include <QQuickWindow>   // complete type: installRfid() calls window->installEventFilter()
 #include "apiconfig.h"
@@ -20,7 +22,7 @@ KioskViewModel::KioskViewModel(QObject *parent)
 
     // School info + guest toggle: cache the legacy QSettings keys. The admin
     // surface (Phase 4) will write these live; here we read them at startup.
-    QSettings s(QStringLiteral("MyCompany"), QStringLiteral("MyApp"));
+    AppSettings s;
     m_schoolName    = s.value(QStringLiteral("school/name")).toString();
     m_schoolAddress = s.value(QStringLiteral("school/address")).toString();
     m_libraryHours  = s.value(QStringLiteral("school/libraryHours"),
