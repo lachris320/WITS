@@ -15,6 +15,7 @@ private slots:
     void refreshEmitsChangedAfterExternalSetCurrent();
     void regenerateFromLogoRethemesAndNotifies();
     void getterIsLiveNotCached();
+    void roleAccessorsMatchDeprecatedAliases();
 
 private:
     QString writeSolidPng(const QString &path, const QColor &fill);
@@ -77,6 +78,24 @@ void TestThemeViewModel::getterIsLiveNotCached()
 
     // Single source of truth: the getter reflects the engine immediately.
     QCOMPARE(vm.adminPrimary(), QColor(0x0A, 0x0B, 0x0C));
+}
+
+void TestThemeViewModel::roleAccessorsMatchDeprecatedAliases()
+{
+    BrandTheme::setCurrent(BrandTheme::fallbackPalette());
+    ThemeViewModel vm;
+
+    // New role accessors are the one source of truth; old names must forward.
+    QCOMPARE(vm.brandBase(), BrandTheme::current().brandBase);
+    QCOMPARE(vm.accentBase(), BrandTheme::current().accentBase);
+    QCOMPARE(vm.adminPrimary(), vm.brandBase());
+    QCOMPARE(vm.secondary(), vm.accentBase());
+
+    // Metaobject check: proves the Q_PROPERTY (what QML sees), not just the
+    // C++ method, is registered under the new role name — catches a typo'd
+    // READ name that would otherwise only surface in Task 3's QML.
+    QVERIFY(vm.property("brandBase").isValid());
+    QCOMPARE(vm.property("brandBase").value<QColor>(), vm.brandBase());
 }
 
 QTEST_MAIN(TestThemeViewModel)
