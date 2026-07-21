@@ -334,19 +334,12 @@ bool validateLogoFile(const QString &logoPath, QString *errorMsg)
 BrandPalette buildPalette(const QColor &primarySeed, const QColor &secondarySeed)
 {
     const QColor white(Qt::white);
-    BrandPalette p;
 
-    // Neutrals first — brandText/accentText are enforced against p.card, so the
-    // neutral paper colour must be populated before those roles are derived.
-    const BrandPalette fb = fallbackPalette();
-    p.sidebarBase   = fb.sidebarBase;
-    p.card          = fb.card;
-    p.appBackground = fb.appBackground;
-    p.border        = fb.border;
-    p.text          = fb.text;
-    p.mutedText     = fb.mutedText;
-    p.success       = fb.success;
-    p.error         = fb.error;
+    // Start from the fallback so every neutral role (sidebarBase/card/appBackground/
+    // border/text/mutedText/success/error) is inherited in one place — brandText/
+    // accentText are enforced against p.card below, so the neutral paper colour must
+    // be populated first. The brand/accent roles are all overwritten immediately after.
+    BrandPalette p = fallbackPalette();
 
     // Brand roles (§4).
     p.brandBase    = enforceContrast(primarySeed, white, kTextContrast);
