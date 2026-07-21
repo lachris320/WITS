@@ -50,6 +50,7 @@ private slots:
     void twoToneLogoMapsPrimaryAndSecondary();
     void generatedPalettesMeetMinContrast();
     void greyscaleLogoFallsBack();
+    void buildPaletteIsCallableFromSeeds();
 
     // Cache, freshness, Manual-mode hook, current palette (Task 3)
     void cacheRoundTrip();
@@ -407,6 +408,17 @@ void TestBrandTheme::greyscaleLogoFallsBack()
     const BrandPalette fb = BrandTheme::fallbackPalette();
     QVERIFY2(err.isEmpty(), qPrintable(err));
     QVERIFY(p == fb);
+}
+
+void TestBrandTheme::buildPaletteIsCallableFromSeeds()
+{
+    // Maroon primary, gold secondary — the reference case. buildPalette is
+    // the pure build step: callable directly from two seed colors, without
+    // a logo image, for deterministic unit testing of the derivation.
+    const BrandPalette p = BrandTheme::buildPalette(QColor("#7E1A15"), QColor("#E8B10E"));
+    QVERIFY(p.brandBase.isValid());
+    QVERIFY(p.accentBase.isValid());
+    QVERIFY(p.brandBase != p.accentBase);
 }
 
 void TestBrandTheme::cacheRoundTrip()

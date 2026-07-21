@@ -293,6 +293,54 @@ bool validateLogoFile(const QString &logoPath, QString *errorMsg)
     return !img.isNull();
 }
 
+// Pure build step: derives a full palette from an already-picked
+// primary/secondary seed pair. No I/O, no errorMsg — reads only the two
+// seeds plus file-scope helpers/constants, so it's directly unit-testable
+// without a logo image.
+BrandPalette buildPalette(const QColor &primarySeed, const QColor &secondarySeed)
+{
+    const QColor white(Qt::white);
+    BrandPalette p;
+
+    p.brandBase = enforceOnWhite(primarySeed);
+    p.brandOn = white;
+
+    QColor accentBase;
+    QColor accentOn;
+    if (contrastRatio(secondarySeed, white) >= MinContrast) {
+        accentBase = secondarySeed;
+        accentOn = white;
+    } else if (contrastRatio(secondarySeed, shade(secondarySeed, kOnColorDeepShade)) >= MinContrast) {
+        accentBase = secondarySeed;
+        accentOn = shade(secondarySeed, kOnColorDeepShade);
+    } else {
+        accentBase = enforceOnWhite(secondarySeed);
+        accentOn = white;
+    }
+    p.accentBase = accentBase;
+    p.accentOn = accentOn;
+
+    p.brandDeep = shade(p.brandBase, kHoverShade);
+    p.accentDeep = shade(p.accentBase, kHoverShade);
+    p.brandSoft = mix(p.brandBase, white, kSoftMixToWhite);
+    p.accentSoft = mix(p.accentBase, white, kSoftMixToWhite);
+    p.brandOnMuted = QColor("#EFC9A8");
+    p.brandText = p.brandBase;
+    p.accentText = QColor("#8a6a08");
+
+    const BrandPalette fb = fallbackPalette();
+    p.sidebarBase   = fb.sidebarBase;
+    p.card          = fb.card;
+    p.appBackground = fb.appBackground;
+    p.border        = fb.border;
+    p.text          = fb.text;
+    p.mutedText     = fb.mutedText;
+    p.success       = fb.success;
+    p.error         = fb.error;
+
+    return p;
+}
+
 BrandPalette extractPalette(const QString &logoPath, QString *errorMsg)
 {
     QString err;
@@ -349,48 +397,8 @@ BrandPalette extractPalette(const QString &logoPath, QString *errorMsg)
         secondarySeed = QColor::fromHsvF(fmod(static_cast<double>(h) + 0.125, 1.0), s, v);
     }
 
-    // Build the palette.
-    const QColor white(Qt::white);
-    BrandPalette p;
-
-    p.brandBase = enforceOnWhite(primarySeed);
-    p.brandOn = white;
-
-    QColor accentBase;
-    QColor accentOn;
-    if (contrastRatio(secondarySeed, white) >= MinContrast) {
-        accentBase = secondarySeed;
-        accentOn = white;
-    } else if (contrastRatio(secondarySeed, shade(secondarySeed, kOnColorDeepShade)) >= MinContrast) {
-        accentBase = secondarySeed;
-        accentOn = shade(secondarySeed, kOnColorDeepShade);
-    } else {
-        accentBase = enforceOnWhite(secondarySeed);
-        accentOn = white;
-    }
-    p.accentBase = accentBase;
-    p.accentOn = accentOn;
-
-    p.brandDeep = shade(p.brandBase, kHoverShade);
-    p.accentDeep = shade(p.accentBase, kHoverShade);
-    p.brandSoft = mix(p.brandBase, white, kSoftMixToWhite);
-    p.accentSoft = mix(p.accentBase, white, kSoftMixToWhite);
-    p.brandOnMuted = QColor("#EFC9A8");
-    p.brandText = p.brandBase;
-    p.accentText = QColor("#8a6a08");
-
-    const BrandPalette fb = fallbackPalette();
-    p.sidebarBase   = fb.sidebarBase;
-    p.card          = fb.card;
-    p.appBackground = fb.appBackground;
-    p.border        = fb.border;
-    p.text          = fb.text;
-    p.mutedText     = fb.mutedText;
-    p.success       = fb.success;
-    p.error         = fb.error;
-
     if (errorMsg) errorMsg->clear();
-    return p;
+    return buildPalette(primarySeed, secondarySeed);
 }
 
 // --- Local cache (Task 3) ---

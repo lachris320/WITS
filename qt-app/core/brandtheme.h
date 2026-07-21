@@ -39,6 +39,12 @@ bool validateLogoFile(const QString &logoPath, QString *errorMsg);
 // fallbackPalette() with *errorMsg cleared.
 BrandPalette extractPalette(const QString &logoPath, QString *errorMsg);
 
+// Pure, deterministic build step from two seeds; no I/O. Derives a full
+// palette (brand/accent roles plus neutrals from fallbackPalette()) from an
+// already-extracted primary/secondary seed pair — the same math extractPalette
+// runs after picking seeds from a logo, exposed so tests can drive it directly.
+BrandPalette buildPalette(const QColor &primarySeed, const QColor &secondarySeed);
+
 // --- Serialization (Task 1) ---
 QJsonObject paletteToJson(const BrandPalette &p);
 BrandPalette paletteFromJson(const QJsonObject &o); // missing/invalid fields -> fallback values
