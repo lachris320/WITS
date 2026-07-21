@@ -349,7 +349,7 @@ BrandPalette buildPalette(const QColor &primarySeed, const QColor &secondarySeed
     p.brandOn      = white;
     p.brandOnMuted = mix(p.brandOn, p.brandBase, kBrandOnMutedMix);
     if (contrastRatio(p.brandOnMuted, p.brandBase) < kTextContrast)
-        p.brandOnMuted = enforceContrast(p.brandOnMuted, p.brandBase, kTextContrast);
+        p.brandOnMuted = raiseToContrast(p.brandOnMuted, p.brandBase, kTextContrast);
     p.brandText    = enforceContrast(p.brandBase, p.card, kTextContrast);
 
     // Accent roles (§4).

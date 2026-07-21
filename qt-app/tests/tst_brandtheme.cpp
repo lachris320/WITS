@@ -5,7 +5,6 @@
 #include <QImageReader>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QPainter>
 #include <QRegularExpression>
 #include <QSettings>
 #include <QTemporaryDir>
@@ -49,6 +48,7 @@ private slots:
     void differentLogosDifferentPalettes();
     void brandAndAccentAreDistinctHues();
     void rolePaletteMeetsSplitContrastFloors();
+    void brandOnMutedRecoversByLightening();
     void greyscaleLogoFallsBack();
     void buildPaletteIsCallableFromSeeds();
 
@@ -66,7 +66,6 @@ private slots:
 
 private:
     QString writePng(const QString &name, const QColor &fill);
-    QString writeTwoTonePng(const QString &name, const QColor &left, const QColor &right);
     QString writeSvg(const QString &name, const QString &fillHex);
     QString writeGarbage(const QString &name);
 
@@ -82,19 +81,6 @@ QString TestBrandTheme::writePng(const QString &name, const QColor &fill)
 {
     QImage img(64, 64, QImage::Format_ARGB32);
     img.fill(fill);
-    const QString path = m_dir.filePath(name);
-    if (!img.save(path, "PNG"))
-        qWarning("failed to write test PNG: %s", qPrintable(path));
-    return path;
-}
-
-QString TestBrandTheme::writeTwoTonePng(const QString &name, const QColor &left, const QColor &right)
-{
-    QImage img(64, 64, QImage::Format_ARGB32);
-    img.fill(left);
-    QPainter p(&img);
-    p.fillRect(32, 0, 32, 64, right);
-    p.end();
     const QString path = m_dir.filePath(name);
     if (!img.save(path, "PNG"))
         qWarning("failed to write test PNG: %s", qPrintable(path));
@@ -364,6 +350,21 @@ void TestBrandTheme::rolePaletteMeetsSplitContrastFloors()
     QVERIFY(contrastRatio(p.accentText,  p.accentSoft) >= 4.5); // accent-as-text on its tint
     QVERIFY(contrastRatio(p.brandText,   p.card)       >= 4.5); // brand-as-text on paper
     QVERIFY(contrastRatio(p.brandOnMuted, p.brandBase) >= 4.5); // muted nav label on brand
+}
+
+void TestBrandTheme::brandOnMutedRecoversByLightening()
+{
+    using BrandColorMath::contrastRatio;
+    // Steel-blue primary: brandBase stays #407090 (5.33:1 vs white), and the
+    // un-clamped brandOnMuted = mix(white, brandBase, 0.25) is #CFDBE3 at only
+    // 3.78:1 vs brandBase — so the recovery clamp MUST fire. The OLD darken clamp
+    // drove it to near-black #1C1D1F (3.16:1, still failing); the LIGHTEN fix
+    // reaches #E9F6FF (4.85:1). This asserts BOTH the floor and the direction.
+    const BrandPalette p = BrandTheme::buildPalette(QColor("#407090"), QColor("#E8B10E"));
+    const QColor rawMix = BrandColorMath::mix(QColor(Qt::white), p.brandBase, 0.25);
+    QVERIFY(contrastRatio(rawMix, p.brandBase) < 4.5);              // precondition: clamp fires
+    QVERIFY(contrastRatio(p.brandOnMuted, p.brandBase) >= 4.5);     // floor met
+    QVERIFY(p.brandOnMuted.valueF() > rawMix.valueF());            // it got LIGHTER, not darker
 }
 
 void TestBrandTheme::brandAndAccentAreDistinctHues()
