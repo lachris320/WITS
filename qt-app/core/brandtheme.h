@@ -45,6 +45,17 @@ BrandPalette extractPalette(const QString &logoPath, QString *errorMsg);
 // runs after picking seeds from a logo, exposed so tests can drive it directly.
 BrandPalette buildPalette(const QColor &primarySeed, const QColor &secondarySeed);
 
+// --- Parameterised contrast enforcement (Task 5) ---
+// Darkens c (via shade) until contrastRatio(c, against) >= target, capped at
+// kEnforceMaxIterations. Use when c must sit ON a lighter background.
+QColor enforceContrast(const QColor &c, const QColor &against, double target);
+
+// LIGHTENS c (raises HSV value, preserving hue/saturation) until
+// contrastRatio(c, against) >= target, capped. CONTRACT: only meaningful when
+// `against` is DARK — lightening against a light background reduces contrast and
+// the result will silently fail the target. Callers must pass a dark `against`.
+QColor raiseToContrast(const QColor &c, const QColor &against, double target);
+
 // --- Serialization (Task 1) ---
 QJsonObject paletteToJson(const BrandPalette &p);
 BrandPalette paletteFromJson(const QJsonObject &o); // missing/invalid fields -> fallback values

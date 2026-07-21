@@ -52,6 +52,10 @@ private slots:
     void greyscaleLogoFallsBack();
     void buildPaletteIsCallableFromSeeds();
 
+    // Parameterised contrast enforcement (Task 5)
+    void enforceContrastReachesTarget();
+    void raiseToContrastLightensDarkAccent();
+
     // Cache, freshness, Manual-mode hook, current palette (Task 3)
     void cacheRoundTrip();
     void cacheLoadNeverBranded();
@@ -419,6 +423,21 @@ void TestBrandTheme::buildPaletteIsCallableFromSeeds()
     QVERIFY(p.brandBase.isValid());
     QVERIFY(p.accentBase.isValid());
     QVERIFY(p.brandBase != p.accentBase);
+}
+
+void TestBrandTheme::enforceContrastReachesTarget()
+{
+    const QColor white(Qt::white);
+    const QColor out = BrandTheme::enforceContrast(QColor("#999999"), white, 4.5);
+    QVERIFY(BrandColorMath::contrastRatio(out, white) >= 4.5);
+}
+
+void TestBrandTheme::raiseToContrastLightensDarkAccent()
+{
+    const QColor brand("#4A0E0B");   // dark maroon
+    const QColor out = BrandTheme::raiseToContrast(QColor("#1A2340"), brand, 3.0); // dark navy
+    QVERIFY(BrandColorMath::contrastRatio(out, brand) >= 3.0);
+    QVERIFY(out.valueF() > QColor("#1A2340").valueF()); // it got lighter, not darker
 }
 
 void TestBrandTheme::cacheRoundTrip()

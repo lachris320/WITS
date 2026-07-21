@@ -168,6 +168,7 @@ constexpr double kSoftMixToWhite = 0.90;
 constexpr double kOnColorDeepShade = -0.60;
 constexpr double kEnforceStep = -0.08;
 constexpr int kEnforceMaxIterations = 24;
+constexpr float kRaiseValueStep = 0.06f;
 
 // Decode a logo file into a 64x64 ARGB32 image. On any failure returns a
 // null QImage and sets *err to a specific, user-readable reason.
@@ -271,19 +272,45 @@ int highestCountKey(const QHash<int, int> &histogram)
 }
 
 // Darken c until it meets MinContrast against white, capped iterations.
+// Forwards to the parameterised BrandTheme::enforceContrast — identical
+// behaviour (same step, cap, strict comparison), white as `against`.
 QColor enforceOnWhite(const QColor &c)
 {
+    return enforceContrast(c, QColor(Qt::white), MinContrast);
+}
+
+} // namespace
+
+// Darkens c (via shade) until contrastRatio(c, against) >= target, capped at
+// kEnforceMaxIterations. The generalisation of enforceOnWhite: white/MinContrast
+// were the only baked-in constants, now parameters.
+QColor enforceContrast(const QColor &c, const QColor &against, double target)
+{
     QColor result = c;
-    const QColor white(Qt::white);
     int iterations = 0;
-    while (contrastRatio(result, white) < MinContrast && iterations < kEnforceMaxIterations) {
-        result = shade(result, kEnforceStep);
+    while (contrastRatio(result, against) < target && iterations < kEnforceMaxIterations) {
+        result = shade(result, kEnforceStep);   // darken toward the target
         ++iterations;
     }
     return result;
 }
 
-} // namespace
+// LIGHTENS c by raising HSV value (preserving hue/saturation) until it meets
+// `target` against a DARK `against`. The accent-lighten seam for Task 6.
+QColor raiseToContrast(const QColor &c, const QColor &against, double target)
+{
+    float h, s, v, a;
+    c.getHsvF(&h, &s, &v, &a);
+    if (h < 0.0f) h = 0.0f;                       // achromatic guard: getHsvF returns hue -1 for greys
+    int iterations = 0;
+    QColor result = c;
+    while (contrastRatio(result, against) < target && iterations < kEnforceMaxIterations) {
+        v = qMin(1.0f, v + kRaiseValueStep);      // raise value (lighten), preserve hue/sat
+        result = QColor::fromHsvF(h, s, v, a);
+        ++iterations;
+    }
+    return result;
+}
 
 bool validateLogoFile(const QString &logoPath, QString *errorMsg)
 {
