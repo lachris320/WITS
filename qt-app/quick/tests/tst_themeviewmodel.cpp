@@ -32,7 +32,7 @@ void TestThemeViewModel::mapsCurrentBrandRole()
 {
     BrandTheme::setCurrent(BrandTheme::fallbackPalette());
     ThemeViewModel vm;
-    QCOMPARE(vm.adminPrimary(), BrandTheme::current().adminPrimary);
+    QCOMPARE(vm.adminPrimary(), BrandTheme::current().brandBase);
 }
 
 void TestThemeViewModel::refreshEmitsChangedAfterExternalSetCurrent()
@@ -42,7 +42,7 @@ void TestThemeViewModel::refreshEmitsChangedAfterExternalSetCurrent()
     QSignalSpy spy(&vm, &ThemeViewModel::changed);
 
     BrandPalette custom = BrandTheme::fallbackPalette();
-    custom.adminPrimary = QColor(0x12, 0x34, 0x56);
+    custom.brandBase = QColor(0x12, 0x34, 0x56);
     BrandTheme::setCurrent(custom);
 
     vm.refresh();
@@ -63,7 +63,7 @@ void TestThemeViewModel::regenerateFromLogoRethemesAndNotifies()
     QVERIFY(vm.regenerateFromImportedLogo(logo));   // Auto mode -> re-extracts
     QCOMPARE(spy.count(), 1);
     // A chromatic logo yields a branded admin role distinct from the fallback.
-    QVERIFY(vm.adminPrimary() != BrandTheme::fallbackPalette().adminPrimary);
+    QVERIFY(vm.adminPrimary() != BrandTheme::fallbackPalette().brandBase);
 }
 
 void TestThemeViewModel::getterIsLiveNotCached()
@@ -72,7 +72,7 @@ void TestThemeViewModel::getterIsLiveNotCached()
     ThemeViewModel vm;
 
     BrandPalette custom = BrandTheme::fallbackPalette();
-    custom.adminPrimary = QColor(0x0A, 0x0B, 0x0C);
+    custom.brandBase = QColor(0x0A, 0x0B, 0x0C);
     BrandTheme::setCurrent(custom);   // change the engine, do NOT call vm.refresh()
 
     // Single source of truth: the getter reflects the engine immediately.

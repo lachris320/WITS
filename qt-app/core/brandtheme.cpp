@@ -28,15 +28,17 @@ BrandPalette fallbackPalette()
     const QColor white(Qt::white);
     BrandPalette p;
     // Brand roles — verbatim theme.h constants (the PRD's fallback rule).
-    p.adminPrimary      = QColor(WitsTheme::Color::AdminPrimary);
-    p.adminPrimaryHover = QColor(WitsTheme::Color::AdminPrimaryHover);
-    p.adminOnPrimary    = white;
-    p.adminPrimarySoft  = mix(p.adminPrimary, white, 0.90);
-    p.kioskPrimary      = QColor(WitsTheme::Color::KioskPrimary);
-    p.kioskPrimaryHover = QColor(WitsTheme::Color::KioskPrimaryHover);
-    p.kioskOnPrimary    = white; // legacy-faithful; fallback is exempt from MinContrast
-    p.kioskPrimarySoft  = mix(p.kioskPrimary, white, 0.90);
-    p.secondary         = QColor(WitsTheme::Color::Secondary);
+    p.brandBase    = QColor(WitsTheme::Color::AdminPrimary);
+    p.brandDeep    = QColor(WitsTheme::Color::AdminPrimaryHover);
+    p.brandOn      = white;
+    p.brandSoft    = mix(p.brandBase, white, 0.90);
+    p.brandOnMuted = QColor("#EFC9A8"); // legacy onBrandMuted literal, now a palette field
+    p.brandText    = p.brandBase;       // brand-as-text on light; fallback == base
+    p.accentBase   = QColor(WitsTheme::Color::KioskPrimary);
+    p.accentDeep   = QColor(WitsTheme::Color::KioskPrimaryHover);
+    p.accentOn     = white; // legacy-faithful; fallback is exempt from MinContrast
+    p.accentSoft   = mix(p.accentBase, white, 0.90);
+    p.accentText   = QColor("#8a6a08"); // legacy accent-as-text; fallback constant
     // Neutral roles
     p.sidebarBase   = QColor(WitsTheme::Color::SidebarBase);
     p.card          = QColor(WitsTheme::Color::Card);
@@ -54,23 +56,43 @@ namespace {
 // One place defines the JSON field order/names for both directions.
 struct FieldMap { const char *key; QColor BrandPalette::*member; };
 const FieldMap kPaletteFields[] = {
-    {"admin_primary",       &BrandPalette::adminPrimary},
-    {"admin_primary_hover", &BrandPalette::adminPrimaryHover},
-    {"admin_on_primary",    &BrandPalette::adminOnPrimary},
-    {"admin_primary_soft",  &BrandPalette::adminPrimarySoft},
-    {"kiosk_primary",       &BrandPalette::kioskPrimary},
-    {"kiosk_primary_hover", &BrandPalette::kioskPrimaryHover},
-    {"kiosk_on_primary",    &BrandPalette::kioskOnPrimary},
-    {"kiosk_primary_soft",  &BrandPalette::kioskPrimarySoft},
-    {"secondary",           &BrandPalette::secondary},
-    {"sidebar_base",        &BrandPalette::sidebarBase},
-    {"card",                &BrandPalette::card},
-    {"app_background",      &BrandPalette::appBackground},
-    {"border",              &BrandPalette::border},
-    {"text",                &BrandPalette::text},
-    {"muted_text",          &BrandPalette::mutedText},
-    {"success",             &BrandPalette::success},
-    {"error",               &BrandPalette::error},
+    {"brand_base",      &BrandPalette::brandBase},
+    {"brand_deep",      &BrandPalette::brandDeep},
+    {"brand_on",        &BrandPalette::brandOn},
+    {"brand_soft",      &BrandPalette::brandSoft},
+    {"brand_on_muted",  &BrandPalette::brandOnMuted},
+    {"brand_text",      &BrandPalette::brandText},
+    {"accent_base",     &BrandPalette::accentBase},
+    {"accent_deep",     &BrandPalette::accentDeep},
+    {"accent_on",       &BrandPalette::accentOn},
+    {"accent_soft",     &BrandPalette::accentSoft},
+    {"accent_text",     &BrandPalette::accentText},
+    {"sidebar_base",    &BrandPalette::sidebarBase},
+    {"card",            &BrandPalette::card},
+    {"app_background",  &BrandPalette::appBackground},
+    {"border",          &BrandPalette::border},
+    {"text",            &BrandPalette::text},
+    {"muted_text",      &BrandPalette::mutedText},
+    {"success",         &BrandPalette::success},
+    {"error",           &BrandPalette::error},
+};
+// PERMANENT read-compat: pre-4d configs hold only these old keys. NEVER delete.
+// "secondary" is listed BEFORE "kiosk_primary" — both alias accentBase, and
+// the alias-apply loop is last-writer-wins; kiosk_primary is the semantically
+// correct accent source, so it must be applied (and win) after secondary. A
+// pre-4d cached fallback palette held BOTH kiosk_primary (#10B981) and
+// secondary (#3B82F6); if secondary were applied last it would silently
+// recolor every accent surface blue on migration.
+const FieldMap kOldPaletteAliasFields[] = {
+    {"secondary",           &BrandPalette::accentBase},
+    {"admin_primary",       &BrandPalette::brandBase},
+    {"admin_primary_hover", &BrandPalette::brandDeep},
+    {"admin_on_primary",    &BrandPalette::brandOn},
+    {"admin_primary_soft",  &BrandPalette::brandSoft},
+    {"kiosk_primary",       &BrandPalette::accentBase},
+    {"kiosk_primary_hover", &BrandPalette::accentDeep},
+    {"kiosk_on_primary",    &BrandPalette::accentOn},
+    {"kiosk_primary_soft",  &BrandPalette::accentSoft},
 };
 
 const QString kDateTimeFormat = QStringLiteral("yyyy-MM-dd HH:mm:ss");
@@ -82,12 +104,21 @@ QJsonObject paletteToJson(const BrandPalette &p)
     QJsonObject o;
     for (const FieldMap &f : kPaletteFields)
         o.insert(QLatin1String(f.key), (p.*(f.member)).name());
+    // Dual-write old keys so an older build reading this config still finds them.
+    for (const FieldMap &f : kOldPaletteAliasFields)
+        o.insert(QLatin1String(f.key), (p.*(f.member)).name());
     return o;
 }
 
 BrandPalette paletteFromJson(const QJsonObject &o)
 {
     BrandPalette p = fallbackPalette();
+    // Old aliases first...
+    for (const FieldMap &f : kOldPaletteAliasFields) {
+        const QColor c(o.value(QLatin1String(f.key)).toString());
+        if (c.isValid()) p.*(f.member) = c;
+    }
+    // ...then new keys, which therefore win when both are present.
     for (const FieldMap &f : kPaletteFields) {
         const QColor c(o.value(QLatin1String(f.key)).toString());
         if (c.isValid())
@@ -322,29 +353,31 @@ BrandPalette extractPalette(const QString &logoPath, QString *errorMsg)
     const QColor white(Qt::white);
     BrandPalette p;
 
-    p.adminPrimary = enforceOnWhite(primarySeed);
-    p.adminOnPrimary = white;
+    p.brandBase = enforceOnWhite(primarySeed);
+    p.brandOn = white;
 
-    QColor kioskPrimary;
-    QColor kioskOnPrimary;
+    QColor accentBase;
+    QColor accentOn;
     if (contrastRatio(secondarySeed, white) >= MinContrast) {
-        kioskPrimary = secondarySeed;
-        kioskOnPrimary = white;
+        accentBase = secondarySeed;
+        accentOn = white;
     } else if (contrastRatio(secondarySeed, shade(secondarySeed, kOnColorDeepShade)) >= MinContrast) {
-        kioskPrimary = secondarySeed;
-        kioskOnPrimary = shade(secondarySeed, kOnColorDeepShade);
+        accentBase = secondarySeed;
+        accentOn = shade(secondarySeed, kOnColorDeepShade);
     } else {
-        kioskPrimary = enforceOnWhite(secondarySeed);
-        kioskOnPrimary = white;
+        accentBase = enforceOnWhite(secondarySeed);
+        accentOn = white;
     }
-    p.kioskPrimary = kioskPrimary;
-    p.kioskOnPrimary = kioskOnPrimary;
+    p.accentBase = accentBase;
+    p.accentOn = accentOn;
 
-    p.adminPrimaryHover = shade(p.adminPrimary, kHoverShade);
-    p.kioskPrimaryHover = shade(p.kioskPrimary, kHoverShade);
-    p.adminPrimarySoft = mix(p.adminPrimary, white, kSoftMixToWhite);
-    p.kioskPrimarySoft = mix(p.kioskPrimary, white, kSoftMixToWhite);
-    p.secondary = p.kioskPrimary;
+    p.brandDeep = shade(p.brandBase, kHoverShade);
+    p.accentDeep = shade(p.accentBase, kHoverShade);
+    p.brandSoft = mix(p.brandBase, white, kSoftMixToWhite);
+    p.accentSoft = mix(p.accentBase, white, kSoftMixToWhite);
+    p.brandOnMuted = QColor("#EFC9A8");
+    p.brandText = p.brandBase;
+    p.accentText = QColor("#8a6a08");
 
     const BrandPalette fb = fallbackPalette();
     p.sidebarBase   = fb.sidebarBase;

@@ -33,6 +33,10 @@ private slots:
     void paletteJsonRoundTrip();
     void configJsonRoundTrip();
     void paletteFromJsonMissingFieldsFallsBack();
+    void paletteFromJsonReadsOldKeys();
+    void paletteFromJsonMixedKeysNewWins();
+    void paletteToJsonDualWritesBothKeySets();
+    void paletteFromJsonOldKioskPrimaryBeatsSecondary();
 
     // Logo validation + extraction (Task 2)
     void validPngProducesBrandedPalette();
@@ -151,11 +155,10 @@ void TestBrandTheme::mixReachesEndpoints()
 void TestBrandTheme::fallbackMatchesWitsThemeConstants()
 {
     const BrandPalette p = BrandTheme::fallbackPalette();
-    QCOMPARE(p.adminPrimary,      QColor(WitsTheme::Color::AdminPrimary));
-    QCOMPARE(p.adminPrimaryHover, QColor(WitsTheme::Color::AdminPrimaryHover));
-    QCOMPARE(p.kioskPrimary,      QColor(WitsTheme::Color::KioskPrimary));
-    QCOMPARE(p.kioskPrimaryHover, QColor(WitsTheme::Color::KioskPrimaryHover));
-    QCOMPARE(p.secondary,         QColor(WitsTheme::Color::Secondary));
+    QCOMPARE(p.brandBase,         QColor(WitsTheme::Color::AdminPrimary));
+    QCOMPARE(p.brandDeep,         QColor(WitsTheme::Color::AdminPrimaryHover));
+    QCOMPARE(p.accentBase,        QColor(WitsTheme::Color::KioskPrimary));
+    QCOMPARE(p.accentDeep,        QColor(WitsTheme::Color::KioskPrimaryHover));
     QCOMPARE(p.sidebarBase,       QColor(WitsTheme::Color::SidebarBase));
     QCOMPARE(p.card,              QColor(WitsTheme::Color::Card));
     QCOMPARE(p.appBackground,     QColor(WitsTheme::Color::AppBackground));
@@ -164,19 +167,19 @@ void TestBrandTheme::fallbackMatchesWitsThemeConstants()
     QCOMPARE(p.mutedText,         QColor(WitsTheme::Color::MutedText));
     QCOMPARE(p.success,           QColor(WitsTheme::Color::Success));
     QCOMPARE(p.error,             QColor(WitsTheme::Color::Error));
-    QCOMPARE(p.adminOnPrimary,    QColor(Qt::white));
-    QCOMPARE(p.kioskOnPrimary,    QColor(Qt::white));
-    QCOMPARE(p.adminPrimarySoft,
-             BrandColorMath::mix(p.adminPrimary, QColor(Qt::white), 0.90));
-    QCOMPARE(p.kioskPrimarySoft,
-             BrandColorMath::mix(p.kioskPrimary, QColor(Qt::white), 0.90));
+    QCOMPARE(p.brandOn,           QColor(Qt::white));
+    QCOMPARE(p.accentOn,          QColor(Qt::white));
+    QCOMPARE(p.brandSoft,
+             BrandColorMath::mix(p.brandBase, QColor(Qt::white), 0.90));
+    QCOMPARE(p.accentSoft,
+             BrandColorMath::mix(p.accentBase, QColor(Qt::white), 0.90));
 }
 
 void TestBrandTheme::fallbackKeepsAdminAndKioskDistinct()
 {
     const BrandPalette p = BrandTheme::fallbackPalette();
-    QVERIFY(p.adminPrimary != p.kioskPrimary);
-    QVERIFY(p.adminPrimaryHover != p.kioskPrimaryHover);
+    QVERIFY(p.brandBase != p.accentBase);
+    QVERIFY(p.brandDeep != p.accentDeep);
 }
 
 void TestBrandTheme::paletteJsonRoundTrip()
@@ -208,9 +211,57 @@ void TestBrandTheme::paletteFromJsonMissingFieldsFallsBack()
     o.insert(QStringLiteral("kiosk_primary"), QStringLiteral("not-a-color"));
     const BrandPalette p = BrandTheme::paletteFromJson(o);
     const BrandPalette fb = BrandTheme::fallbackPalette();
-    QCOMPARE(p.adminPrimary, QColor("#7E1A15"));
-    QCOMPARE(p.kioskPrimary, fb.kioskPrimary); // invalid -> fallback
-    QCOMPARE(p.text, fb.text);                 // missing -> fallback
+    QCOMPARE(p.brandBase, QColor("#7E1A15"));
+    QCOMPARE(p.accentBase, fb.accentBase); // invalid -> fallback
+    QCOMPARE(p.text, fb.text);              // missing -> fallback
+}
+
+void TestBrandTheme::paletteFromJsonReadsOldKeys()
+{
+    // A config written by ANY pre-4d build holds only the OLD snake_case keys.
+    // Read-compat must land them in the new role fields, not silently fall back.
+    QJsonObject o;
+    o.insert("admin_primary", "#123456");        // -> brandBase
+    o.insert("kiosk_primary", "#abcdef");        // -> accentBase
+    o.insert("admin_on_primary", "#ffffff");     // -> brandOn
+    const BrandPalette p = BrandTheme::paletteFromJson(o);
+    QCOMPARE(p.brandBase,  QColor("#123456"));
+    QCOMPARE(p.accentBase, QColor("#abcdef"));
+    QCOMPARE(p.brandOn,    QColor("#ffffff"));
+}
+
+void TestBrandTheme::paletteFromJsonMixedKeysNewWins()
+{
+    // When both keys for the same field are present, the NEW key is authoritative.
+    QJsonObject o;
+    o.insert("admin_primary", "#111111");  // old alias for brandBase
+    o.insert("brand_base",    "#222222");  // new key for brandBase
+    const BrandPalette p = BrandTheme::paletteFromJson(o);
+    QCOMPARE(p.brandBase, QColor("#222222"));
+}
+
+void TestBrandTheme::paletteToJsonDualWritesBothKeySets()
+{
+    BrandPalette p = BrandTheme::fallbackPalette();
+    p.brandBase = QColor("#123456");
+    const QJsonObject o = BrandTheme::paletteToJson(p);
+    QCOMPARE(o.value("brand_base").toString(),    QString("#123456")); // new key
+    QCOMPARE(o.value("admin_primary").toString(), QString("#123456")); // old key, equal value
+}
+
+void TestBrandTheme::paletteFromJsonOldKioskPrimaryBeatsSecondary()
+{
+    // A pre-4d cached fallback palette wrote BOTH "kiosk_primary" (#10B981,
+    // the semantically correct accent source) and "secondary" (#3B82F6, a
+    // distinct legacy field collapsed into accentBase in 4d). The alias
+    // table must apply "secondary" before "kiosk_primary" so kiosk_primary
+    // wins — otherwise every accent surface silently recolors blue on
+    // migration from an old cached config.
+    QJsonObject o;
+    o.insert("secondary",     "#3B82F6");
+    o.insert("kiosk_primary", "#10B981");
+    const BrandPalette p = BrandTheme::paletteFromJson(o);
+    QCOMPARE(p.accentBase, QColor("#10B981"));
 }
 
 void TestBrandTheme::validPngProducesBrandedPalette()
@@ -220,8 +271,8 @@ void TestBrandTheme::validPngProducesBrandedPalette()
     const BrandPalette p = BrandTheme::extractPalette(path, &err);
     QVERIFY2(err.isEmpty(), qPrintable(err));
     const BrandPalette fb = BrandTheme::fallbackPalette();
-    QVERIFY(p.adminPrimary != fb.adminPrimary);
-    QVERIFY(p.adminPrimary.isValid());
+    QVERIFY(p.brandBase != fb.brandBase);
+    QVERIFY(p.brandBase.isValid());
 }
 
 void TestBrandTheme::validSvgProducesBrandedPalette()
@@ -231,8 +282,8 @@ void TestBrandTheme::validSvgProducesBrandedPalette()
     const BrandPalette p = BrandTheme::extractPalette(path, &err);
     QVERIFY2(err.isEmpty(), qPrintable(err));
     const BrandPalette fb = BrandTheme::fallbackPalette();
-    QVERIFY(p.adminPrimary != fb.adminPrimary);
-    QVERIFY(p.adminPrimary.isValid());
+    QVERIFY(p.brandBase != fb.brandBase);
+    QVERIFY(p.brandBase.isValid());
 }
 
 void TestBrandTheme::corruptFileRejectedWithSpecificError()
@@ -301,7 +352,7 @@ void TestBrandTheme::differentLogosDifferentPalettes()
     const BrandPalette pBlue = BrandTheme::extractPalette(bluePath, &errBlue);
     QVERIFY2(errRed.isEmpty(), qPrintable(errRed));
     QVERIFY2(errBlue.isEmpty(), qPrintable(errBlue));
-    QVERIFY(pRed.adminPrimary != pBlue.adminPrimary);
+    QVERIFY(pRed.brandBase != pBlue.brandBase);
 }
 
 void TestBrandTheme::twoToneLogoMapsPrimaryAndSecondary()
@@ -315,15 +366,15 @@ void TestBrandTheme::twoToneLogoMapsPrimaryAndSecondary()
 
     const int maroonHue = maroon.hsvHue();
     const int goldHue = gold.hsvHue();
-    QVERIFY2(qAbs(p.adminPrimary.hsvHue() - maroonHue) <= 30,
-             qPrintable(QStringLiteral("adminPrimary hue %1 vs maroon hue %2")
-                            .arg(p.adminPrimary.hsvHue())
+    QVERIFY2(qAbs(p.brandBase.hsvHue() - maroonHue) <= 30,
+             qPrintable(QStringLiteral("brandBase hue %1 vs maroon hue %2")
+                            .arg(p.brandBase.hsvHue())
                             .arg(maroonHue)));
-    QVERIFY2(qAbs(p.kioskPrimary.hsvHue() - goldHue) <= 30,
-             qPrintable(QStringLiteral("kioskPrimary hue %1 vs gold hue %2")
-                            .arg(p.kioskPrimary.hsvHue())
+    QVERIFY2(qAbs(p.accentBase.hsvHue() - goldHue) <= 30,
+             qPrintable(QStringLiteral("accentBase hue %1 vs gold hue %2")
+                            .arg(p.accentBase.hsvHue())
                             .arg(goldHue)));
-    QVERIFY(p.adminPrimary != p.kioskPrimary);
+    QVERIFY(p.brandBase != p.accentBase);
 }
 
 void TestBrandTheme::generatedPalettesMeetMinContrast()
@@ -339,8 +390,8 @@ void TestBrandTheme::generatedPalettesMeetMinContrast()
         QString err;
         const BrandPalette p = BrandTheme::extractPalette(path, &err);
         QVERIFY2(err.isEmpty(), qPrintable(err));
-        const double adminContrast = BrandColorMath::contrastRatio(p.adminPrimary, p.adminOnPrimary);
-        const double kioskContrast = BrandColorMath::contrastRatio(p.kioskPrimary, p.kioskOnPrimary);
+        const double adminContrast = BrandColorMath::contrastRatio(p.brandBase, p.brandOn);
+        const double kioskContrast = BrandColorMath::contrastRatio(p.accentBase, p.accentOn);
         QVERIFY2(adminContrast >= BrandTheme::MinContrast,
                  qPrintable(QStringLiteral("%1: admin contrast %2").arg(c.first).arg(adminContrast)));
         QVERIFY2(kioskContrast >= BrandTheme::MinContrast,

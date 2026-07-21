@@ -18,16 +18,19 @@ enum class ThemeMode { Auto, Manual };
 // primary maps onto Admin, its secondary/accent onto Kiosk.
 struct BrandPalette
 {
-    // Brand roles (logo-derived in Auto mode)
-    QColor adminPrimary;
-    QColor adminPrimaryHover;
-    QColor adminOnPrimary;    // text/icon color on adminPrimary fills
-    QColor adminPrimarySoft;  // tinted background (design: brand-soft)
-    QColor kioskPrimary;
-    QColor kioskPrimaryHover;
-    QColor kioskOnPrimary;
-    QColor kioskPrimarySoft;
-    QColor secondary;
+    // Brand roles (logo-derived in Auto mode). Renamed to role names in 4d;
+    // both surfaces draw from both families by element role.
+    QColor brandBase;      // was adminPrimary
+    QColor brandDeep;      // was adminPrimaryHover
+    QColor brandOn;        // was adminOnPrimary
+    QColor brandSoft;      // was adminPrimarySoft
+    QColor brandOnMuted;   // NEW — muted text on the brand sidebar
+    QColor brandText;      // NEW — brand colour used AS text on a light card
+    QColor accentBase;     // was kioskPrimary
+    QColor accentDeep;     // was kioskPrimaryHover
+    QColor accentOn;       // was kioskOnPrimary
+    QColor accentSoft;     // was kioskPrimarySoft
+    QColor accentText;     // NEW — accent colour used AS text on a light card
 
     // Neutral roles (fallback values in v1)
     QColor sidebarBase;
@@ -41,15 +44,17 @@ struct BrandPalette
 
     bool operator==(const BrandPalette &o) const
     {
-        return adminPrimary == o.adminPrimary
-            && adminPrimaryHover == o.adminPrimaryHover
-            && adminOnPrimary == o.adminOnPrimary
-            && adminPrimarySoft == o.adminPrimarySoft
-            && kioskPrimary == o.kioskPrimary
-            && kioskPrimaryHover == o.kioskPrimaryHover
-            && kioskOnPrimary == o.kioskOnPrimary
-            && kioskPrimarySoft == o.kioskPrimarySoft
-            && secondary == o.secondary
+        return brandBase == o.brandBase
+            && brandDeep == o.brandDeep
+            && brandOn == o.brandOn
+            && brandSoft == o.brandSoft
+            && brandOnMuted == o.brandOnMuted
+            && brandText == o.brandText
+            && accentBase == o.accentBase
+            && accentDeep == o.accentDeep
+            && accentOn == o.accentOn
+            && accentSoft == o.accentSoft
+            && accentText == o.accentText
             && sidebarBase == o.sidebarBase
             && card == o.card
             && appBackground == o.appBackground
