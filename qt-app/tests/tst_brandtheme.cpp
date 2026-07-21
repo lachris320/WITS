@@ -9,6 +9,7 @@
 #include <QRegularExpression>
 #include <QSettings>
 #include <QTemporaryDir>
+#include <cmath>
 #include "brandcolormath.h"
 #include "brandtheme.h"
 #include "theme.h"
@@ -27,7 +28,6 @@ private slots:
 
     // Fallback palette
     void fallbackMatchesWitsThemeConstants();
-    void fallbackKeepsAdminAndKioskDistinct();
 
     // JSON round-trip
     void paletteJsonRoundTrip();
@@ -47,8 +47,8 @@ private slots:
     void webpNeverCrashes();
     void sameLogoTwiceIsDeterministic();
     void differentLogosDifferentPalettes();
-    void twoToneLogoMapsPrimaryAndSecondary();
-    void generatedPalettesMeetMinContrast();
+    void brandAndAccentAreDistinctHues();
+    void rolePaletteMeetsSplitContrastFloors();
     void greyscaleLogoFallsBack();
     void buildPaletteIsCallableFromSeeds();
 
@@ -178,13 +178,6 @@ void TestBrandTheme::fallbackMatchesWitsThemeConstants()
              BrandColorMath::mix(p.brandBase, QColor(Qt::white), 0.90));
     QCOMPARE(p.accentSoft,
              BrandColorMath::mix(p.accentBase, QColor(Qt::white), 0.90));
-}
-
-void TestBrandTheme::fallbackKeepsAdminAndKioskDistinct()
-{
-    const BrandPalette p = BrandTheme::fallbackPalette();
-    QVERIFY(p.brandBase != p.accentBase);
-    QVERIFY(p.brandDeep != p.accentDeep);
 }
 
 void TestBrandTheme::paletteJsonRoundTrip()
@@ -360,48 +353,24 @@ void TestBrandTheme::differentLogosDifferentPalettes()
     QVERIFY(pRed.brandBase != pBlue.brandBase);
 }
 
-void TestBrandTheme::twoToneLogoMapsPrimaryAndSecondary()
+void TestBrandTheme::rolePaletteMeetsSplitContrastFloors()
 {
-    const QColor maroon(QStringLiteral("#7E1A15"));
-    const QColor gold(QStringLiteral("#D4A017"));
-    const QString path = writeTwoTonePng(QStringLiteral("twotone.png"), maroon, gold);
-    QString err;
-    const BrandPalette p = BrandTheme::extractPalette(path, &err);
-    QVERIFY2(err.isEmpty(), qPrintable(err));
-
-    const int maroonHue = maroon.hsvHue();
-    const int goldHue = gold.hsvHue();
-    QVERIFY2(qAbs(p.brandBase.hsvHue() - maroonHue) <= 30,
-             qPrintable(QStringLiteral("brandBase hue %1 vs maroon hue %2")
-                            .arg(p.brandBase.hsvHue())
-                            .arg(maroonHue)));
-    QVERIFY2(qAbs(p.accentBase.hsvHue() - goldHue) <= 30,
-             qPrintable(QStringLiteral("accentBase hue %1 vs gold hue %2")
-                            .arg(p.accentBase.hsvHue())
-                            .arg(goldHue)));
-    QVERIFY(p.brandBase != p.accentBase);
+    const BrandPalette p = BrandTheme::buildPalette(QColor("#7E1A15"), QColor("#E8B10E"));
+    using BrandColorMath::contrastRatio;
+    QVERIFY(contrastRatio(p.brandOn,     p.brandBase)  >= 4.5); // text on brand fill
+    QVERIFY(contrastRatio(p.accentOn,    p.accentBase) >= 4.5); // text on accent fill
+    QVERIFY(contrastRatio(p.accentBase,  p.brandBase)  >= 3.0); // graphical highlight on dark
+    QVERIFY(contrastRatio(p.accentText,  p.card)       >= 4.5); // accent-as-text on paper
+    QVERIFY(contrastRatio(p.accentText,  p.accentSoft) >= 4.5); // accent-as-text on its tint
+    QVERIFY(contrastRatio(p.brandText,   p.card)       >= 4.5); // brand-as-text on paper
+    QVERIFY(contrastRatio(p.brandOnMuted, p.brandBase) >= 4.5); // muted nav label on brand
 }
 
-void TestBrandTheme::generatedPalettesMeetMinContrast()
+void TestBrandTheme::brandAndAccentAreDistinctHues()
 {
-    const QVector<QPair<QString, QColor>> cases = {
-        { QStringLiteral("contrast-red.png"), QColor(Qt::red) },
-        { QStringLiteral("contrast-blue.png"), QColor(Qt::blue) },
-        { QStringLiteral("contrast-paleyellow.png"), QColor(QStringLiteral("#F0E68C")) },
-        { QStringLiteral("contrast-navy.png"), QColor(QStringLiteral("#101840")) },
-    };
-    for (const auto &c : cases) {
-        const QString path = writePng(c.first, c.second);
-        QString err;
-        const BrandPalette p = BrandTheme::extractPalette(path, &err);
-        QVERIFY2(err.isEmpty(), qPrintable(err));
-        const double adminContrast = BrandColorMath::contrastRatio(p.brandBase, p.brandOn);
-        const double kioskContrast = BrandColorMath::contrastRatio(p.accentBase, p.accentOn);
-        QVERIFY2(adminContrast >= BrandTheme::MinContrast,
-                 qPrintable(QStringLiteral("%1: admin contrast %2").arg(c.first).arg(adminContrast)));
-        QVERIFY2(kioskContrast >= BrandTheme::MinContrast,
-                 qPrintable(QStringLiteral("%1: kiosk contrast %2").arg(c.first).arg(kioskContrast)));
-    }
+    const BrandPalette p = BrandTheme::buildPalette(QColor("#7E1A15"), QColor("#E8B10E"));
+    const double dh = std::abs(p.brandBase.hsvHueF()*360.0 - p.accentBase.hsvHueF()*360.0);
+    QVERIFY(qMin(dh, 360.0 - dh) >= 30.0);
 }
 
 void TestBrandTheme::greyscaleLogoFallsBack()

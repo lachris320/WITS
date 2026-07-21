@@ -166,6 +166,15 @@ constexpr double kMinHueSeparationDeg = 60.0;
 constexpr double kHoverShade = -0.28;
 constexpr double kSoftMixToWhite = 0.90;
 constexpr double kOnColorDeepShade = -0.60;
+// Accent tint is deliberately stronger toward white than kSoftMixToWhite so the
+// (typically lighter) accent hue stays legible as a soft fill (§4).
+constexpr double kAccentSoftMixToWhite = 0.88;
+// Darken the accent seed for use as text; same tunable family as kOnColorDeepShade (§4).
+constexpr double kAccentTextShade = -0.40;
+// Muted nav label: 25% from brandOn toward brandBase (§4).
+constexpr double kBrandOnMutedMix = 0.25;
+// WCAG AA text floor — the split-contrast target for every text/label role (§4).
+constexpr double kTextContrast = 4.5;
 constexpr double kEnforceStep = -0.08;
 constexpr int kEnforceMaxIterations = 24;
 constexpr float kRaiseValueStep = 0.06f;
@@ -271,19 +280,11 @@ int highestCountKey(const QHash<int, int> &histogram)
     return bestKey;
 }
 
-// Darken c until it meets MinContrast against white, capped iterations.
-// Forwards to the parameterised BrandTheme::enforceContrast — identical
-// behaviour (same step, cap, strict comparison), white as `against`.
-QColor enforceOnWhite(const QColor &c)
-{
-    return enforceContrast(c, QColor(Qt::white), MinContrast);
-}
-
 } // namespace
 
 // Darkens c (via shade) until contrastRatio(c, against) >= target, capped at
-// kEnforceMaxIterations. The generalisation of enforceOnWhite: white/MinContrast
-// were the only baked-in constants, now parameters.
+// kEnforceMaxIterations. The `against` colour and `target` ratio are parameters,
+// so any role can be enforced against any background (§4 split-contrast floors).
 QColor enforceContrast(const QColor &c, const QColor &against, double target)
 {
     QColor result = c;
@@ -329,32 +330,8 @@ BrandPalette buildPalette(const QColor &primarySeed, const QColor &secondarySeed
     const QColor white(Qt::white);
     BrandPalette p;
 
-    p.brandBase = enforceOnWhite(primarySeed);
-    p.brandOn = white;
-
-    QColor accentBase;
-    QColor accentOn;
-    if (contrastRatio(secondarySeed, white) >= MinContrast) {
-        accentBase = secondarySeed;
-        accentOn = white;
-    } else if (contrastRatio(secondarySeed, shade(secondarySeed, kOnColorDeepShade)) >= MinContrast) {
-        accentBase = secondarySeed;
-        accentOn = shade(secondarySeed, kOnColorDeepShade);
-    } else {
-        accentBase = enforceOnWhite(secondarySeed);
-        accentOn = white;
-    }
-    p.accentBase = accentBase;
-    p.accentOn = accentOn;
-
-    p.brandDeep = shade(p.brandBase, kHoverShade);
-    p.accentDeep = shade(p.accentBase, kHoverShade);
-    p.brandSoft = mix(p.brandBase, white, kSoftMixToWhite);
-    p.accentSoft = mix(p.accentBase, white, kSoftMixToWhite);
-    p.brandOnMuted = QColor("#EFC9A8");
-    p.brandText = p.brandBase;
-    p.accentText = QColor("#8a6a08");
-
+    // Neutrals first — brandText/accentText are enforced against p.card, so the
+    // neutral paper colour must be populated before those roles are derived.
     const BrandPalette fb = fallbackPalette();
     p.sidebarBase   = fb.sidebarBase;
     p.card          = fb.card;
@@ -364,6 +341,31 @@ BrandPalette buildPalette(const QColor &primarySeed, const QColor &secondarySeed
     p.mutedText     = fb.mutedText;
     p.success       = fb.success;
     p.error         = fb.error;
+
+    // Brand roles (§4).
+    p.brandBase    = enforceContrast(primarySeed, white, kTextContrast);
+    p.brandDeep    = shade(p.brandBase, kHoverShade);
+    p.brandSoft    = mix(p.brandBase, white, kSoftMixToWhite);
+    p.brandOn      = white;
+    p.brandOnMuted = mix(p.brandOn, p.brandBase, kBrandOnMutedMix);
+    if (contrastRatio(p.brandOnMuted, p.brandBase) < kTextContrast)
+        p.brandOnMuted = enforceContrast(p.brandOnMuted, p.brandBase, kTextContrast);
+    p.brandText    = enforceContrast(p.brandBase, p.card, kTextContrast);
+
+    // Accent roles (§4).
+    p.accentBase   = raiseToContrast(secondarySeed, p.brandBase, MinContrast);
+    p.accentDeep   = shade(p.accentBase, kHoverShade);
+    p.accentSoft   = mix(p.accentBase, white, kAccentSoftMixToWhite);
+    if (contrastRatio(p.brandDeep, p.accentBase) >= kTextContrast)
+        p.accentOn = p.brandDeep;
+    else if (contrastRatio(shade(p.accentBase, kOnColorDeepShade), p.accentBase) >= kTextContrast)
+        p.accentOn = shade(p.accentBase, kOnColorDeepShade);
+    else
+        p.accentOn = (contrastRatio(white, p.accentBase) >= contrastRatio(QColor(Qt::black), p.accentBase))
+                     ? white : QColor(Qt::black);
+    p.accentText   = enforceContrast(shade(p.accentBase, kAccentTextShade), p.card, kTextContrast);
+    if (contrastRatio(p.accentText, p.accentSoft) < kTextContrast)
+        p.accentText = enforceContrast(p.accentText, p.accentSoft, kTextContrast);
 
     return p;
 }
