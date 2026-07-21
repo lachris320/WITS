@@ -46,6 +46,16 @@ TestCase {
         verify(Theme.scrim.a > 0 && Theme.scrim.a < 1);
     }
 
+    // --- Phase 4d Task 3: role-based brand/accent tokens, old names as aliases ---
+
+    function test_roleTokensExistAndAliasesMatch() {
+        verify(Theme.brand.base !== undefined);
+        verify(Theme.accent.base !== undefined);
+        // The deprecated alias must resolve to the same colour as the new token.
+        compare(Theme.brand.admin.toString(), Theme.brand.base.toString());
+        compare(Theme.secondary.toString(),   Theme.accent.base.toString());
+    }
+
     // --- A1: easing extended to the 6-value BezierSpline form ---
 
     function test_easingIsSixValueBezierForm() {
