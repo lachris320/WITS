@@ -322,13 +322,16 @@ void TestBrandTheme::webpNeverCrashes()
 
 void TestBrandTheme::sameLogoTwiceIsDeterministic()
 {
-    const QString path = writePng(QStringLiteral("red-det.png"), QColor(Qt::red));
+    // A gate-surviving maroon (not Qt::red, which now falls back) so this
+    // asserts determinism of *branded* extraction, not just the fallback path.
+    const QString path = writePng(QStringLiteral("maroon-det.png"), QColor("#7E1A15"));
     QString err1, err2;
     const BrandPalette p1 = BrandTheme::extractPalette(path, &err1);
     const BrandPalette p2 = BrandTheme::extractPalette(path, &err2);
     QVERIFY2(err1.isEmpty(), qPrintable(err1));
     QVERIFY2(err2.isEmpty(), qPrintable(err2));
     QVERIFY(p1 == p2);
+    QVERIFY(p1.brandBase != BrandTheme::fallbackPalette().brandBase); // on the branded path
 }
 
 void TestBrandTheme::differentLogosDifferentPalettes()

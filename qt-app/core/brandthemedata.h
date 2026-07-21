@@ -75,7 +75,7 @@ struct BrandingConfig
     BrandPalette palette;   // callers default this to BrandTheme::fallbackPalette()
     QString      logoHash;  // SHA-256 hex of the source logo file bytes
     QDateTime    updatedAt; // invalid == never branded
-    bool         didFallBack = false; // true when the last regen produced the fallback palette
+    bool         didFallBack = false; // set on a successful regen: true when it produced the fallback palette
 };
 
 #endif // BRANDTHEMEDATA_H
