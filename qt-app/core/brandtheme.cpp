@@ -163,6 +163,12 @@ constexpr int kMinAlpha = 128;
 constexpr double kMinSaturation = 0.15;
 constexpr double kMinValue = 0.15;
 constexpr double kMinHueSeparationDeg = 60.0;
+// Quality-gate floors (Task 7). Distinct from kMinHueSeparationDeg (60°): the
+// gate's seed-hue floor is deliberately looser so the reference maroon/gold
+// brand (~42° apart) and every mono-colour logo (synthetic +45° accent) pass.
+constexpr double kMinSeedHueSeparationDeg = 30.0;
+constexpr double kMinAccentSaturation = 0.15; // accentBase must not be washed out
+constexpr double kMaxAccentValue = 0.97;      // accentBase must not be near-white
 constexpr double kHoverShade = -0.28;
 constexpr double kSoftMixToWhite = 0.90;
 constexpr double kOnColorDeepShade = -0.60;
@@ -370,6 +376,47 @@ BrandPalette buildPalette(const QColor &primarySeed, const QColor &secondarySeed
     return p;
 }
 
+// Quality gate for a derived palette — see brandtheme.h for the check list.
+// Anon-namespace helpers/constants (hueDistanceDeg, kMinSaturation, ...) keep
+// file-scope visibility here even though their namespace already closed.
+bool paletteIsUsable(const BrandPalette &p, const QColor &primarySeed,
+                     const QColor &secondarySeed)
+{
+    // (0) Achromatic guard: hsvHueF() returns -1 for greys; feeding that into
+    // hueDistanceDeg would yield a bogus negative distance. A colourless seed
+    // can never satisfy a chromatic gate, so reject up front.
+    if (primarySeed.hsvHueF() < 0.0 || secondarySeed.hsvHueF() < 0.0)
+        return false;
+
+    // (1) The primary seed must carry real brand colour.
+    if (primarySeed.hsvSaturationF() < kMinSaturation)
+        return false;
+
+    // (2) The two seeds must be far enough apart in hue to read as distinct.
+    const double primaryHue = primarySeed.hsvHueF() * 360.0;
+    const double secondaryHue = secondarySeed.hsvHueF() * 360.0;
+    if (hueDistanceDeg(primaryHue, secondaryHue) < kMinSeedHueSeparationDeg)
+        return false;
+
+    // (3) The derived accent must not be washed out or near-white.
+    if (p.accentBase.hsvSaturationF() < kMinAccentSaturation
+        || p.accentBase.valueF() > kMaxAccentValue)
+        return false;
+
+    // (4) Split-contrast floors for the text/graphical roles.
+    if (contrastRatio(p.brandOn, p.brandBase) < kTextContrast) return false;
+    if (contrastRatio(p.accentOn, p.accentBase) < kTextContrast) return false;
+    if (contrastRatio(p.accentBase, p.brandBase) < MinContrast) return false;
+    if (contrastRatio(p.brandText, p.card) < kTextContrast) return false;
+    if (contrastRatio(p.accentText, p.card) < kTextContrast) return false;
+
+    // (5) The muted nav label must stay legible on the brand fill — LOAD-BEARING
+    // (Task 6 review): nothing in (0)-(4) catches an illegible muted label.
+    if (contrastRatio(p.brandOnMuted, p.brandBase) < kTextContrast) return false;
+
+    return true;
+}
+
 BrandPalette extractPalette(const QString &logoPath, QString *errorMsg)
 {
     QString err;
@@ -427,7 +474,14 @@ BrandPalette extractPalette(const QString &logoPath, QString *errorMsg)
     }
 
     if (errorMsg) errorMsg->clear();
-    return buildPalette(primarySeed, secondarySeed);
+    // Quality gate: a chromatic logo can still derive an unusable palette
+    // (washed-out accent, illegible muted label, seeds too close). Fall back
+    // rather than ship it. This is an ADDITIONAL net beyond the two early
+    // greyscale/empty-histogram fallbacks above.
+    const BrandPalette p = buildPalette(primarySeed, secondarySeed);
+    if (!paletteIsUsable(p, primarySeed, secondarySeed))
+        return fallbackPalette();
+    return p;
 }
 
 // --- Local cache (Task 3) ---
@@ -503,6 +557,11 @@ bool regenerateFromLogo(BrandingConfig &config, const QString &logoPath, QString
     }
 
     config.palette = palette;
+    // The gate returns THE fallback object on failure, so an exact palette
+    // compare labels a gate/greyscale/empty-histogram fallback correctly.
+    // BrandPalette::operator== is a full field compare; fallbackPalette() is
+    // deterministic and Rgb-spec on both sides, so this is exact.
+    config.didFallBack = (palette == fallbackPalette());
     config.logoHash = hash;
     config.updatedAt = QDateTime::currentDateTime();
     if (errorMsg) errorMsg->clear();

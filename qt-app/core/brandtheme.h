@@ -45,6 +45,21 @@ BrandPalette extractPalette(const QString &logoPath, QString *errorMsg);
 // runs after picking seeds from a logo, exposed so tests can drive it directly.
 BrandPalette buildPalette(const QColor &primarySeed, const QColor &secondarySeed);
 
+// Quality gate (Task 7): true if the derived palette p is fit to ship. A
+// chromatic logo can still yield an unusable palette (washed-out accent,
+// illegible muted label, seeds too close in hue); extractPalette falls back to
+// fallbackPalette() when this returns false. Checks, in order:
+//  (0) neither seed is achromatic (hsvHueF() >= 0),
+//  (1) primarySeed saturation >= floor (a near-grey logo has no brand colour),
+//  (2) hue separation between the two seeds >= floor,
+//  (3) post-clamp accentBase saturation >= floor AND value <= cap (not washed out / near-white),
+//  (4) the split-contrast floors: brandOn/brandBase, accentOn/accentBase and
+//      brandText/card, accentText/card at the text floor; accentBase/brandBase at MinContrast,
+//  (5) brandOnMuted/brandBase at the text floor (an illegible muted nav label
+//      that no other check catches — LOAD-BEARING, carried from Task 6's review).
+bool paletteIsUsable(const BrandPalette &p, const QColor &primarySeed,
+                     const QColor &secondarySeed);
+
 // --- Parameterised contrast enforcement (Task 5) ---
 // Darkens c (via shade) until contrastRatio(c, against) >= target, capped at
 // kEnforceMaxIterations. Use when c must sit ON a lighter background.

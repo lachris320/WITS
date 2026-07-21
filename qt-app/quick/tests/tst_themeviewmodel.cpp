@@ -59,9 +59,12 @@ void TestThemeViewModel::regenerateFromLogoRethemesAndNotifies()
 
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
-    const QString logo = writeSolidPng(dir.filePath("logo.png"), QColor(0x2E, 0x86, 0xC1));
+    // Solid maroon #7E1A15 — a gate-surviving logo (a steel-blue solid would
+    // fail the quality gate and fall back, which is a different code path).
+    const QString logo = writeSolidPng(dir.filePath("logo.png"), QColor(0x7E, 0x1A, 0x15));
 
-    QVERIFY(vm.regenerateFromImportedLogo(logo));   // Auto mode -> re-extracts
+    QCOMPARE(vm.regenerateFromImportedLogo(logo),
+             ThemeViewModel::RegenResult::Ok);   // Auto mode -> re-extracts a usable palette
     QCOMPARE(spy.count(), 1);
     // A chromatic logo yields a branded admin role distinct from the fallback.
     QVERIFY(vm.adminPrimary() != BrandTheme::fallbackPalette().brandBase);

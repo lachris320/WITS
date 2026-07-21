@@ -50,6 +50,17 @@ class ThemeViewModel : public QObject
     Q_PROPERTY(QColor error             READ error             NOTIFY changed)
 
 public:
+    // Outcome of a logo-driven re-theme, exposed to QML (QML sees
+    // ThemeViewModel.Ok / .FellBack / .Failed via Q_ENUM + QML_ELEMENT):
+    //   Ok       — a usable logo palette was derived and applied,
+    //   FellBack — the logo read but its palette failed the quality gate, so the
+    //              fallback palette was applied (still a valid visible result),
+    //   Failed   — the logo could not be read/decoded (or Manual mode).
+    // Q_ENUM requires a member enum of a Q_OBJECT class; the engine returns
+    // bool + BrandingConfig::didFallBack, mapped to this in the .cpp.
+    enum class RegenResult { Ok, FellBack, Failed };
+    Q_ENUM(RegenResult)
+
     explicit ThemeViewModel(QObject *parent = nullptr);
 
     // DEPRECATED API aliases — removed in PR 2. Forward to the new accessors so
@@ -94,9 +105,10 @@ public:
     Q_INVOKABLE void refresh();
 
     // Live re-theme hook (§13.2). Auto mode re-extracts from the logo, applies
-    // it via BrandTheme::setCurrent, and emits changed(); Manual mode is a
-    // no-op returning false (brandtheme.cpp:414-419). Returns success.
-    Q_INVOKABLE bool regenerateFromImportedLogo(const QString &path);
+    // it via BrandTheme::setCurrent, and emits changed() (for both Ok and
+    // FellBack — the fallback palette IS the correct visible result); Manual
+    // mode / unreadable logo is a no-op returning Failed. See RegenResult.
+    Q_INVOKABLE RegenResult regenerateFromImportedLogo(const QString &path);
 
 signals:
     void changed();
