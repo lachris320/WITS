@@ -19,7 +19,7 @@ Rectangle {
     Rectangle {
         anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
         width: 4
-        color: row.rowFresh ? Theme.secondary : "transparent"
+        color: row.rowFresh ? Theme.accent.base : "transparent"
     }
     Rectangle {   // bottom hairline
         anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
@@ -35,11 +35,14 @@ Rectangle {
         Rectangle {   // avatar chip
             Layout.preferredWidth: 34; Layout.preferredHeight: 34
             radius: width / 2
-            color: row.rowFresh ? Theme.brand.kiosk : Theme.brand.kioskSoft
+            // Phase 4d role map: feed avatar = maroon brand, NOT gold (Kiosk:179-180),
+            // matching the admin search avatar. Fresh: brand.base bg + brand.on cream
+            // initials; non-fresh: brand.soft bg + brand.base maroon initials.
+            color: row.rowFresh ? Theme.brand.base : Theme.brand.soft
             Text {
                 anchors.centerIn: parent
                 text: row.rowInitials
-                color: row.rowFresh ? Theme.brand.onKiosk : Theme.brand.kiosk
+                color: row.rowFresh ? Theme.brand.on : Theme.brand.base
                 font.family: Theme.typography.sans
                 font.pixelSize: Theme.typography.control
                 font.weight: Font.ExtraBold
@@ -71,7 +74,9 @@ Rectangle {
         }
         Text {
             text: row.rowTime
-            color: row.rowFresh ? Theme.brand.kiosk : Theme.mutedText
+            // Phase 4d role map: fresh login-time = brand.text maroon on light
+            // (Kiosk:181), NOT gold; non-fresh stays mutedText.
+            color: row.rowFresh ? Theme.brand.text : Theme.mutedText
             font.family: Theme.typography.sans
             font.pixelSize: Theme.typography.control
             font.weight: Font.ExtraBold
