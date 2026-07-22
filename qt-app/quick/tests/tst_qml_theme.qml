@@ -108,4 +108,21 @@ TestCase {
         // place the negative branch is covered.
         compare(Theme.motion.staggerDelay(-1, 25), 0);
     }
+
+    // --- Task 10: brand-tinted elevation shadows derived from tokens ---
+    // The hover/heroFill/ctaGold shadow colours must be LIVE Qt.alpha bindings
+    // to the role tokens (brand.deep / accent.base), not frozen maroon/gold
+    // rgba() literals, so they track the logo-derived palette on re-theme.
+    // Geometry (x/y/blur) parsed from the old CSS-shadow strings is preserved;
+    // modal stays neutral black.
+    function test_elevationShadowsTrackBrand() {
+        compare(Theme.elevation.hover.shadowColor.toString(),    Qt.alpha(Theme.brand.deep, 0.10).toString());
+        compare(Theme.elevation.heroFill.shadowColor.toString(), Qt.alpha(Theme.brand.deep, 0.25).toString());
+        compare(Theme.elevation.ctaGold.shadowColor.toString(),  Qt.alpha(Theme.accent.base, 0.30).toString());
+        // geometry preserved
+        compare(Theme.elevation.hover.y, 12);
+        compare(Theme.elevation.ctaGold.blur, 14);
+        // modal stays neutral black
+        compare(Theme.elevation.modal.shadowColor.toString(), Qt.rgba(0, 0, 0, 0.30).toString());
+    }
 }
