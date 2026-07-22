@@ -11,8 +11,8 @@ Item {
     property var model: null                     // BarsModel / ListModel {label,value}
     property real maxValue: 100
     property int barRadius: Theme.radius.xs
-    property color barColor: Theme.brand.admin
-    property color highlightColor: Theme.secondary
+    property color barColor: Theme.brand.base
+    property color highlightColor: Theme.accent.base
     property int highlightIndex: -1
 
     // Motion (Phase 3 Task B, advisor §6): opt-in, default false. The bar
@@ -217,7 +217,7 @@ Item {
                     Layout.fillWidth: true
                     implicitHeight: 14
                     radius: chart.barRadius
-                    color: Qt.alpha(Theme.brand.admin, 0.10)
+                    color: Qt.alpha(Theme.brand.base, 0.10)
                     Rectangle {   // fill
                         objectName: "deptBarFill_" + index
                         height: parent.height

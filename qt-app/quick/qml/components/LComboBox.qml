@@ -53,7 +53,7 @@ Item {
             radius: Theme.radius.sm
             color: Theme.card
             border.width: 2
-            border.color: combo.activeFocus ? Theme.brand.admin : Theme.border
+            border.color: combo.activeFocus ? Theme.brand.base : Theme.border
         }
         contentItem: Text {
             objectName: "comboValueText"

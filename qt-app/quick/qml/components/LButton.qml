@@ -8,9 +8,9 @@ Button {
     id: control
     property string variant: "Primary"   // Primary | Accent | Outline | Danger | Ghost
     property bool compact: false
-    readonly property color fillColor: variant === "Accent" ? Theme.secondary
+    readonly property color fillColor: variant === "Accent" ? Theme.accent.base
                                      : variant === "Danger" ? Theme.error
-                                     : Theme.brand.admin
+                                     : Theme.brand.base
 
     padding: compact ? Theme.spacing.sm : Theme.spacing.md
     font.family: Theme.typography.sans
