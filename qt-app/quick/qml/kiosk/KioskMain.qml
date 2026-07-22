@@ -109,14 +109,14 @@ Item {
                               ? (mainArea.vm.currentCourse + " · " + mainArea.vm.currentYear
                                  + " · " + mainArea.vm.currentDept + " · " + mainArea.vm.currentTime)
                               : ""
-                        color: Theme.onBrandMuted
+                        color: Theme.brand.onMuted
                         font.family: Theme.typography.sans
                         font.pixelSize: Theme.typography.body
                     }
                     Text {
                         visible: mainArea.vm ? !mainArea.vm.hasStudent : true
                         text: qsTr("Scan your ID to begin")
-                        color: Theme.onBrandMuted
+                        color: Theme.brand.onMuted
                         font.family: Theme.typography.serif
                         font.pixelSize: Theme.typography.cardTitle
                     }

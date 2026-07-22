@@ -119,7 +119,7 @@ RowLayout {
             objectName: "brandSchoolNameText"
             text: brand.schoolName
             visible: brand.schoolName.length > 0
-            color: Theme.onBrandMuted
+            color: Theme.brand.onMuted
             elide: Text.ElideRight
             Layout.maximumWidth: 150
             font.family: Theme.typography.sans

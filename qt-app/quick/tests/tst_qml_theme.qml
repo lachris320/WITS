@@ -42,7 +42,7 @@ TestCase {
     function test_kioskTokensExposed() {
         verify(Theme.motion.toastHold >= 1000);
         verify(Theme.brand.onKiosk.a === 1.0);
-        compare(Theme.onBrandMuted.toString().length, 7);   // "#RRGGBB"
+        compare(Theme.brand.onMuted.toString().length, 7);   // "#RRGGBB" (was onBrandMuted literal, now derived)
         verify(Theme.scrim.a > 0 && Theme.scrim.a < 1);
     }
 

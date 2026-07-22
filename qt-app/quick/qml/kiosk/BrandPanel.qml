@@ -66,7 +66,7 @@ Rectangle {
                 Text {
                     text: (panel.vm ? panel.vm.schoolName : "") + " · "
                           + (panel.vm ? panel.vm.schoolAddress : "")
-                    color: Theme.onBrandMuted
+                    color: Theme.brand.onMuted
                     font.family: Theme.typography.sans
                     font.pixelSize: Theme.typography.control
                     wrapMode: Text.WordWrap
@@ -156,7 +156,7 @@ Rectangle {
             Text {
                 text: (panel.vm ? panel.vm.clockDate : "") + qsTr("  ·  Open ")
                       + (panel.vm ? panel.vm.libraryHours : "")
-                color: Theme.onBrandMuted
+                color: Theme.brand.onMuted
                 font.family: Theme.typography.sans
                 font.pixelSize: Theme.typography.control
             }

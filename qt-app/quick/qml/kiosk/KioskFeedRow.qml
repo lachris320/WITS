@@ -14,7 +14,7 @@ Rectangle {
     property bool rowFresh: false
 
     implicitHeight: 60
-    color: rowFresh ? Theme.secondarySoft : Theme.card
+    color: rowFresh ? Theme.accent.soft : Theme.card
     // Left edge highlight for the freshest row.
     Rectangle {
         anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom

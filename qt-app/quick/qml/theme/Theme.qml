@@ -50,14 +50,12 @@ QtObject {
     readonly property color sidebarBase:   root._vm.sidebarBase
 
     // Extra design tokens (no BrandPalette field — literals, §12.1).
-    readonly property color secondarySoft:    "#FDF3E0"
     readonly property color mutedTextCaption: "#B0A08A"
     readonly property color tableHeaderBg:    "#F7F1E6"
     readonly property color rowHairline:      "#F3ECDD"
     readonly property color errorSoft:        "#FDF4F3"
     readonly property color errorBorder:      "#F3D9D6"
     readonly property color scrim:            Qt.rgba(15/255, 23/255, 42/255, 0.45)
-    readonly property color onBrandMuted:     "#EFC9A8"
 
     // Structural scales (§12.2/12.3).
     readonly property QtObject spacing: QtObject {
