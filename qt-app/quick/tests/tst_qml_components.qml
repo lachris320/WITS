@@ -229,8 +229,10 @@ Item {
         function test_kioskGradientStopsMatchBrandTokens() {
             verify(gr.gradient !== null);
             compare(gr.gradient.stops.length, 2);
-            compare(gr.gradient.stops[0].color, Theme.brand.kiosk);
-            compare(gr.gradient.stops[1].color, Theme.brand.kioskHover);
+            // Phase 4d role map: kiosk structure flipped gold->maroon; the gradient
+            // now derives from brand.base->brand.deep (was brand.kiosk/kioskHover).
+            compare(gr.gradient.stops[0].color, Theme.brand.base);
+            compare(gr.gradient.stops[1].color, Theme.brand.deep);
         }
     }
 

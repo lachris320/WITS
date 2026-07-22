@@ -36,8 +36,11 @@ Item {
             }
             RowLayout {
                 spacing: Theme.spacing.sm
-                LPulseDot { color: Theme.brand.kiosk; pulseDuration: 800 }
-                LEyebrow { text: qsTr("LIVE FEED"); color: Theme.brand.kiosk }
+                // Phase 4d role map: LIVE FEED = brand.text (maroon on the light
+                // main area, Kiosk:71), NOT gold. accent.base (gold-on-light) is
+                // both a mockup mismatch and a contrast hazard here.
+                LPulseDot { color: Theme.brand.text; pulseDuration: 800 }
+                LEyebrow { text: qsTr("LIVE FEED"); color: Theme.brand.text }
             }
         }
 
@@ -46,12 +49,12 @@ Item {
             Layout.fillWidth: true
             spacing: Theme.spacing.md
 
-            // Signed-in hero: NOT an LCard { filled: true } — that hard-codes
-            // Theme.brand.admin (maroon meant for the admin brand), which left
-            // this kiosk-brand-themed text (onKiosk/onBrandMuted/secondary)
-            // low-contrast against the wrong fill. Built as its own themed
-            // Rectangle filled with the kiosk brand gradient instead, mirroring
-            // the reference's signed-in card (Library Kiosk v2.dc.html ~L76).
+            // Signed-in hero: NOT an LCard { filled: true } — a filled card is a
+            // flat brand.base fill, whereas the reference draws the signed-in card
+            // as the maroon brand gradient (Library Kiosk v2.dc.html ~L76). Built
+            // as its own themed Rectangle with LKioskGradient so the hero text
+            // (brand.on cream, brand.onMuted peach, accent.base gold eyebrow) sits
+            // on the intended gradient rather than a flat fill.
             Rectangle {
                 id: hero
                 Layout.fillWidth: true
@@ -82,18 +85,20 @@ Item {
                     anchors.rightMargin: -50
                     color: "transparent"
                     border.width: 24
-                    border.color: Qt.alpha(Theme.secondary, 0.15)
+                    border.color: Qt.alpha(Theme.accent.base, 0.15)
                 }
 
                 ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: Theme.spacing.xl
                     spacing: Theme.spacing.xs
-                    LEyebrow { text: qsTr("NOW SIGNED IN"); color: Theme.secondary }
+                    LEyebrow { text: qsTr("NOW SIGNED IN"); color: Theme.accent.base }
                     Text {
                         visible: mainArea.vm ? mainArea.vm.hasStudent : false
                         text: mainArea.vm ? mainArea.vm.currentFullName : ""
-                        color: Theme.brand.onKiosk
+                        // Phase 4d role map: hero is the maroon gradient; name =
+                        // cream brand.on (Kiosk:76). onKiosk would be invisible.
+                        color: Theme.brand.on
                         font.family: Theme.typography.serif
                         font.pixelSize: Theme.typography.heroName
                         font.weight: Font.Bold
