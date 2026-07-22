@@ -1218,6 +1218,22 @@ Item {
             compare(status.color, Theme.success);
         }
 
+        // SectionStatus must offer a non-alarming informational tone (rendered
+        // in Theme.mutedText) for notices that are neither an error (red) nor a
+        // success (green) — e.g. the bad-logo fallback notice.
+        function test_sectionStatusHasNeutralInfoState() {
+            var s = findChild(settings, "settingsStatus");
+            verify(s !== null);
+            // Set ONLY isNeutral — never text/isError, which are bound to
+            // screen.statusText / screen.statusIsError. An imperative assignment
+            // to those would clobber the binding and break later saveFailed()-
+            // driven tests. The color ternary evaluates isNeutral regardless of
+            // text, so this is sufficient to prove the neutral tone.
+            s.isNeutral = true;
+            compare(s.color.toString(), Theme.mutedText.toString());
+            s.isNeutral = false;   // restore so neutral state can't leak forward
+        }
+
         // The status line renders the backend's "message" field verbatim over
         // cleartext HTTP. Text defaults to AutoText, which auto-detects and
         // RENDERS rich text — a tampered response carrying

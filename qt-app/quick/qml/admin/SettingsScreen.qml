@@ -81,10 +81,11 @@ Rectangle {
     // be fetched by an unattended kiosk. Status is never markup.
     component SectionStatus: Text {
         property bool isError: false
+        property bool isNeutral: false
         Layout.fillWidth: true
         textFormat: Text.PlainText
         visible: text.length > 0
-        color: isError ? Theme.error : Theme.success
+        color: isNeutral ? Theme.mutedText : (isError ? Theme.error : Theme.success)
         wrapMode: Text.WordWrap
         font.family: Theme.typography.sans
         font.pixelSize: Theme.typography.body
