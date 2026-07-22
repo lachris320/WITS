@@ -25,8 +25,12 @@ Button {
     }
     contentItem: Text {
         text: control.text
+        // Phase 4d role map: Accent button label = accent.on (brand-deep) on the
+        // gold fill (Admin Dashboard.dc.html:201, Library Kiosk v2.dc.html:48);
+        // Primary/Danger keep brand.on (cream). Was a flat brand.onPrimary.
         color: control.variant === "Outline" || control.variant === "Ghost"
-               ? Theme.text : Theme.brand.onPrimary
+               ? Theme.text
+               : control.variant === "Accent" ? Theme.accent.on : Theme.brand.on
         font: control.font
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
