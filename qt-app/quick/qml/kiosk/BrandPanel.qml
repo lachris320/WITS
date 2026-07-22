@@ -97,7 +97,7 @@ Rectangle {
                 Layout.fillWidth: true
                 placeholderText: qsTr("ID number…")
                 // Phase 4d role map: cream typed text on the maroon input
-                // (Kiosk:47 color:#FFF6E8); onKiosk would be invisible on maroon.
+                // (Kiosk:47, cream on-brand); onKiosk would be invisible on maroon.
                 color: Theme.brand.on
                 font.family: Theme.typography.sans
                 font.pixelSize: Theme.typography.cardTitle
