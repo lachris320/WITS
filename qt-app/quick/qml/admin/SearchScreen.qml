@@ -177,6 +177,10 @@ Rectangle {
                     }
                     LButton {
                         objectName: "searchButton"
+                        // Phase 4d role map: Search CTA = Accent (gold fill +
+                        // brand-deep text) per mockup SEARCH button (Admin:201).
+                        // Was default Primary (maroon).
+                        variant: "Accent"
                         text: qsTr("Search")
                         onClicked: { debounceTimer.stop(); screen.runSearch(); }
                     }
@@ -205,14 +209,14 @@ Rectangle {
                                 implicitHeight: 28
                                 implicitWidth: deptChipText.implicitWidth + Theme.spacing.xl
                                 readonly property bool active: screen.selectedDepartment === modelData
-                                color: deptChip.active ? Theme.brand.admin : Theme.card
+                                color: deptChip.active ? Theme.brand.base : Theme.card
                                 border.width: 2
-                                border.color: deptChip.active ? Theme.brand.admin : Theme.border
+                                border.color: deptChip.active ? Theme.brand.base : Theme.border
                                 Text {
                                     id: deptChipText
                                     anchors.centerIn: parent
                                     text: deptChip.modelData
-                                    color: deptChip.active ? Theme.brand.onPrimary : Theme.text
+                                    color: deptChip.active ? Theme.brand.on : Theme.text
                                     font.family: Theme.typography.sans
                                     font.pixelSize: Theme.typography.control
                                 }
@@ -248,14 +252,14 @@ Rectangle {
                                 implicitHeight: 28
                                 implicitWidth: chipText.implicitWidth + Theme.spacing.xl
                                 readonly property bool active: screen.selectedCourse === modelData
-                                color: chip.active ? Theme.brand.admin : Theme.card
+                                color: chip.active ? Theme.brand.base : Theme.card
                                 border.width: 2
-                                border.color: chip.active ? Theme.brand.admin : Theme.border
+                                border.color: chip.active ? Theme.brand.base : Theme.border
                                 Text {
                                     id: chipText
                                     anchors.centerIn: parent
                                     text: chip.modelData
-                                    color: chip.active ? Theme.brand.onPrimary : Theme.text
+                                    color: chip.active ? Theme.brand.on : Theme.text
                                     font.family: Theme.typography.sans
                                     font.pixelSize: Theme.typography.control
                                 }
@@ -281,9 +285,9 @@ Rectangle {
                             radius: Theme.radius.pill
                             implicitHeight: 26
                             implicitWidth: pillRow.implicitWidth + Theme.spacing.lg
-                            color: Qt.alpha(Theme.brand.admin, 0.10)
+                            color: Qt.alpha(Theme.brand.base, 0.10)
                             border.width: 1
-                            border.color: Theme.brand.admin
+                            border.color: Theme.brand.base
                             // Row (a positioner), not RowLayout: RowLayout's
                             // implicitWidth is not reliably available as a
                             // free-floating child outside an actual Layout,
@@ -298,14 +302,14 @@ Rectangle {
                                 spacing: Theme.spacing.xs
                                 Text {
                                     text: pill.modelData.label
-                                    color: Theme.brand.admin
+                                    color: Theme.brand.base
                                     font.family: Theme.typography.sans
                                     font.pixelSize: Theme.typography.eyebrow
                                     font.weight: Font.DemiBold
                                 }
                                 Text {
                                     text: "×"
-                                    color: Theme.brand.admin
+                                    color: Theme.brand.base
                                     font.family: Theme.typography.sans
                                     font.pixelSize: Theme.typography.control
                                     font.weight: Font.ExtraBold
@@ -469,7 +473,7 @@ Rectangle {
                             objectName: "resultRow_" + model.schoolId
                             width: ListView.view ? ListView.view.width : 0
                             implicitHeight: 64
-                            color: rowHover.hovered ? Qt.alpha(Theme.brand.admin, 0.06) : "transparent"
+                            color: rowHover.hovered ? Qt.alpha(Theme.brand.base, 0.06) : "transparent"
                             Behavior on color {
                                 ColorAnimation { duration: Theme.motion.enabled ? Theme.motion.hoverLift : 0 }
                             }
@@ -500,12 +504,12 @@ Rectangle {
                                     Layout.preferredHeight: 40
                                     Layout.alignment: Qt.AlignVCenter
                                     radius: width / 2
-                                    color: Theme.brand.adminSoft
+                                    color: Theme.brand.soft
                                     Text {
                                         objectName: "avatarInitials"
                                         anchors.centerIn: parent
                                         text: model.initials
-                                        color: Theme.brand.admin
+                                        color: Theme.brand.base
                                         font.family: Theme.typography.sans
                                         font.pixelSize: Theme.typography.control
                                         font.weight: Font.ExtraBold
