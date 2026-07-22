@@ -9,18 +9,37 @@ QtObject {
     // works because these are property bindings that re-evaluate on changed().
     readonly property ThemeViewModel _vm: ThemeViewModel {}
 
-    readonly property QtObject brand: QtObject {
-        readonly property color admin:        root._vm.adminPrimary
-        readonly property color adminHover:   root._vm.adminPrimaryHover
-        readonly property color adminSoft:    root._vm.adminPrimarySoft
-        readonly property color kiosk:        root._vm.kioskPrimary
-        readonly property color kioskHover:   root._vm.kioskPrimaryHover
-        readonly property color kioskSoft:    root._vm.kioskPrimarySoft
-        readonly property color onPrimary:    root._vm.adminOnPrimary
-        readonly property color onKiosk:      root._vm.kioskOnPrimary
+    // `accent` is declared before `brand` so `brand`'s deprecated kiosk/*
+    // aliases (below) reference an already-instantiated sibling object.
+    readonly property QtObject accent: QtObject {
+        readonly property color base: root._vm.accentBase
+        readonly property color deep: root._vm.accentDeep
+        readonly property color soft: root._vm.accentSoft
+        readonly property color on:   root._vm.accentOn
+        readonly property color text: root._vm.accentText
     }
 
-    readonly property color secondary:     root._vm.secondary
+    readonly property QtObject brand: QtObject {
+        // New role tokens (4d).
+        readonly property color base:     root._vm.brandBase
+        readonly property color deep:     root._vm.brandDeep
+        readonly property color soft:     root._vm.brandSoft
+        readonly property color on:       root._vm.brandOn
+        readonly property color onMuted:  root._vm.brandOnMuted
+        readonly property color text:     root._vm.brandText
+        // DEPRECATED aliases — removed in PR 2. Pure bindings to the new tokens.
+        readonly property color admin:      base
+        readonly property color adminHover: deep
+        readonly property color adminSoft:  soft
+        readonly property color kiosk:      root.accent.base
+        readonly property color kioskHover: root.accent.deep
+        readonly property color kioskSoft:  root.accent.soft
+        readonly property color onPrimary:  on
+        readonly property color onKiosk:    root.accent.on
+    }
+
+    // DEPRECATED alias — removed in PR 2.
+    readonly property color secondary:     accent.base
     readonly property color card:          root._vm.card
     readonly property color appBackground: root._vm.appBackground
     readonly property color border:        root._vm.border

@@ -5,10 +5,10 @@
 #include <QImageReader>
 #include <QJsonDocument>
 #include <QJsonObject>
-#include <QPainter>
 #include <QRegularExpression>
 #include <QSettings>
 #include <QTemporaryDir>
+#include <cmath>
 #include "brandcolormath.h"
 #include "brandtheme.h"
 #include "theme.h"
@@ -27,12 +27,15 @@ private slots:
 
     // Fallback palette
     void fallbackMatchesWitsThemeConstants();
-    void fallbackKeepsAdminAndKioskDistinct();
 
     // JSON round-trip
     void paletteJsonRoundTrip();
     void configJsonRoundTrip();
     void paletteFromJsonMissingFieldsFallsBack();
+    void paletteFromJsonReadsOldKeys();
+    void paletteFromJsonMixedKeysNewWins();
+    void paletteToJsonDualWritesBothKeySets();
+    void paletteFromJsonOldKioskPrimaryBeatsSecondary();
 
     // Logo validation + extraction (Task 2)
     void validPngProducesBrandedPalette();
@@ -43,9 +46,16 @@ private slots:
     void webpNeverCrashes();
     void sameLogoTwiceIsDeterministic();
     void differentLogosDifferentPalettes();
-    void twoToneLogoMapsPrimaryAndSecondary();
-    void generatedPalettesMeetMinContrast();
+    void brandAndAccentAreDistinctHues();
+    void rolePaletteMeetsSplitContrastFloors();
+    void brandOnMutedRecoversByLightening();
     void greyscaleLogoFallsBack();
+    void buildPaletteIsCallableFromSeeds();
+    void badSeedsEitherMeetInvariantsOrFallBack();
+
+    // Parameterised contrast enforcement (Task 5)
+    void enforceContrastReachesTarget();
+    void raiseToContrastLightensDarkAccent();
 
     // Cache, freshness, Manual-mode hook, current palette (Task 3)
     void cacheRoundTrip();
@@ -57,7 +67,6 @@ private slots:
 
 private:
     QString writePng(const QString &name, const QColor &fill);
-    QString writeTwoTonePng(const QString &name, const QColor &left, const QColor &right);
     QString writeSvg(const QString &name, const QString &fillHex);
     QString writeGarbage(const QString &name);
 
@@ -73,19 +82,6 @@ QString TestBrandTheme::writePng(const QString &name, const QColor &fill)
 {
     QImage img(64, 64, QImage::Format_ARGB32);
     img.fill(fill);
-    const QString path = m_dir.filePath(name);
-    if (!img.save(path, "PNG"))
-        qWarning("failed to write test PNG: %s", qPrintable(path));
-    return path;
-}
-
-QString TestBrandTheme::writeTwoTonePng(const QString &name, const QColor &left, const QColor &right)
-{
-    QImage img(64, 64, QImage::Format_ARGB32);
-    img.fill(left);
-    QPainter p(&img);
-    p.fillRect(32, 0, 32, 64, right);
-    p.end();
     const QString path = m_dir.filePath(name);
     if (!img.save(path, "PNG"))
         qWarning("failed to write test PNG: %s", qPrintable(path));
@@ -151,11 +147,10 @@ void TestBrandTheme::mixReachesEndpoints()
 void TestBrandTheme::fallbackMatchesWitsThemeConstants()
 {
     const BrandPalette p = BrandTheme::fallbackPalette();
-    QCOMPARE(p.adminPrimary,      QColor(WitsTheme::Color::AdminPrimary));
-    QCOMPARE(p.adminPrimaryHover, QColor(WitsTheme::Color::AdminPrimaryHover));
-    QCOMPARE(p.kioskPrimary,      QColor(WitsTheme::Color::KioskPrimary));
-    QCOMPARE(p.kioskPrimaryHover, QColor(WitsTheme::Color::KioskPrimaryHover));
-    QCOMPARE(p.secondary,         QColor(WitsTheme::Color::Secondary));
+    QCOMPARE(p.brandBase,         QColor(WitsTheme::Color::AdminPrimary));
+    QCOMPARE(p.brandDeep,         QColor(WitsTheme::Color::AdminPrimaryHover));
+    QCOMPARE(p.accentBase,        QColor(WitsTheme::Color::KioskPrimary));
+    QCOMPARE(p.accentDeep,        QColor(WitsTheme::Color::KioskPrimaryHover));
     QCOMPARE(p.sidebarBase,       QColor(WitsTheme::Color::SidebarBase));
     QCOMPARE(p.card,              QColor(WitsTheme::Color::Card));
     QCOMPARE(p.appBackground,     QColor(WitsTheme::Color::AppBackground));
@@ -164,19 +159,12 @@ void TestBrandTheme::fallbackMatchesWitsThemeConstants()
     QCOMPARE(p.mutedText,         QColor(WitsTheme::Color::MutedText));
     QCOMPARE(p.success,           QColor(WitsTheme::Color::Success));
     QCOMPARE(p.error,             QColor(WitsTheme::Color::Error));
-    QCOMPARE(p.adminOnPrimary,    QColor(Qt::white));
-    QCOMPARE(p.kioskOnPrimary,    QColor(Qt::white));
-    QCOMPARE(p.adminPrimarySoft,
-             BrandColorMath::mix(p.adminPrimary, QColor(Qt::white), 0.90));
-    QCOMPARE(p.kioskPrimarySoft,
-             BrandColorMath::mix(p.kioskPrimary, QColor(Qt::white), 0.90));
-}
-
-void TestBrandTheme::fallbackKeepsAdminAndKioskDistinct()
-{
-    const BrandPalette p = BrandTheme::fallbackPalette();
-    QVERIFY(p.adminPrimary != p.kioskPrimary);
-    QVERIFY(p.adminPrimaryHover != p.kioskPrimaryHover);
+    QCOMPARE(p.brandOn,           QColor(Qt::white));
+    QCOMPARE(p.accentOn,          QColor(Qt::white));
+    QCOMPARE(p.brandSoft,
+             BrandColorMath::mix(p.brandBase, QColor(Qt::white), 0.90));
+    QCOMPARE(p.accentSoft,
+             BrandColorMath::mix(p.accentBase, QColor(Qt::white), 0.90));
 }
 
 void TestBrandTheme::paletteJsonRoundTrip()
@@ -208,20 +196,71 @@ void TestBrandTheme::paletteFromJsonMissingFieldsFallsBack()
     o.insert(QStringLiteral("kiosk_primary"), QStringLiteral("not-a-color"));
     const BrandPalette p = BrandTheme::paletteFromJson(o);
     const BrandPalette fb = BrandTheme::fallbackPalette();
-    QCOMPARE(p.adminPrimary, QColor("#7E1A15"));
-    QCOMPARE(p.kioskPrimary, fb.kioskPrimary); // invalid -> fallback
-    QCOMPARE(p.text, fb.text);                 // missing -> fallback
+    QCOMPARE(p.brandBase, QColor("#7E1A15"));
+    QCOMPARE(p.accentBase, fb.accentBase); // invalid -> fallback
+    QCOMPARE(p.text, fb.text);              // missing -> fallback
+}
+
+void TestBrandTheme::paletteFromJsonReadsOldKeys()
+{
+    // A config written by ANY pre-4d build holds only the OLD snake_case keys.
+    // Read-compat must land them in the new role fields, not silently fall back.
+    QJsonObject o;
+    o.insert("admin_primary", "#123456");        // -> brandBase
+    o.insert("kiosk_primary", "#abcdef");        // -> accentBase
+    o.insert("admin_on_primary", "#ffffff");     // -> brandOn
+    const BrandPalette p = BrandTheme::paletteFromJson(o);
+    QCOMPARE(p.brandBase,  QColor("#123456"));
+    QCOMPARE(p.accentBase, QColor("#abcdef"));
+    QCOMPARE(p.brandOn,    QColor("#ffffff"));
+}
+
+void TestBrandTheme::paletteFromJsonMixedKeysNewWins()
+{
+    // When both keys for the same field are present, the NEW key is authoritative.
+    QJsonObject o;
+    o.insert("admin_primary", "#111111");  // old alias for brandBase
+    o.insert("brand_base",    "#222222");  // new key for brandBase
+    const BrandPalette p = BrandTheme::paletteFromJson(o);
+    QCOMPARE(p.brandBase, QColor("#222222"));
+}
+
+void TestBrandTheme::paletteToJsonDualWritesBothKeySets()
+{
+    BrandPalette p = BrandTheme::fallbackPalette();
+    p.brandBase = QColor("#123456");
+    const QJsonObject o = BrandTheme::paletteToJson(p);
+    QCOMPARE(o.value("brand_base").toString(),    QString("#123456")); // new key
+    QCOMPARE(o.value("admin_primary").toString(), QString("#123456")); // old key, equal value
+}
+
+void TestBrandTheme::paletteFromJsonOldKioskPrimaryBeatsSecondary()
+{
+    // A pre-4d cached fallback palette wrote BOTH "kiosk_primary" (#10B981,
+    // the semantically correct accent source) and "secondary" (#3B82F6, a
+    // distinct legacy field collapsed into accentBase in 4d). The alias
+    // table must apply "secondary" before "kiosk_primary" so kiosk_primary
+    // wins — otherwise every accent surface silently recolors blue on
+    // migration from an old cached config.
+    QJsonObject o;
+    o.insert("secondary",     "#3B82F6");
+    o.insert("kiosk_primary", "#10B981");
+    const BrandPalette p = BrandTheme::paletteFromJson(o);
+    QCOMPARE(p.accentBase, QColor("#10B981"));
 }
 
 void TestBrandTheme::validPngProducesBrandedPalette()
 {
-    const QString path = writePng(QStringLiteral("red.png"), QColor(Qt::red));
+    // Gate-surviving maroon solid (#7E1A15): a pure-red solid would derive an
+    // accent that fails the Task 7 quality gate and fall back, which is not what
+    // this "produces a branded palette" case is asserting.
+    const QString path = writePng(QStringLiteral("maroon.png"), QColor("#7E1A15"));
     QString err;
     const BrandPalette p = BrandTheme::extractPalette(path, &err);
     QVERIFY2(err.isEmpty(), qPrintable(err));
     const BrandPalette fb = BrandTheme::fallbackPalette();
-    QVERIFY(p.adminPrimary != fb.adminPrimary);
-    QVERIFY(p.adminPrimary.isValid());
+    QVERIFY(p.brandBase != fb.brandBase);
+    QVERIFY(p.brandBase.isValid());
 }
 
 void TestBrandTheme::validSvgProducesBrandedPalette()
@@ -231,8 +270,8 @@ void TestBrandTheme::validSvgProducesBrandedPalette()
     const BrandPalette p = BrandTheme::extractPalette(path, &err);
     QVERIFY2(err.isEmpty(), qPrintable(err));
     const BrandPalette fb = BrandTheme::fallbackPalette();
-    QVERIFY(p.adminPrimary != fb.adminPrimary);
-    QVERIFY(p.adminPrimary.isValid());
+    QVERIFY(p.brandBase != fb.brandBase);
+    QVERIFY(p.brandBase.isValid());
 }
 
 void TestBrandTheme::corruptFileRejectedWithSpecificError()
@@ -283,69 +322,66 @@ void TestBrandTheme::webpNeverCrashes()
 
 void TestBrandTheme::sameLogoTwiceIsDeterministic()
 {
-    const QString path = writePng(QStringLiteral("red-det.png"), QColor(Qt::red));
+    // A gate-surviving maroon (not Qt::red, which now falls back) so this
+    // asserts determinism of *branded* extraction, not just the fallback path.
+    const QString path = writePng(QStringLiteral("maroon-det.png"), QColor("#7E1A15"));
     QString err1, err2;
     const BrandPalette p1 = BrandTheme::extractPalette(path, &err1);
     const BrandPalette p2 = BrandTheme::extractPalette(path, &err2);
     QVERIFY2(err1.isEmpty(), qPrintable(err1));
     QVERIFY2(err2.isEmpty(), qPrintable(err2));
     QVERIFY(p1 == p2);
+    QVERIFY(p1.brandBase != BrandTheme::fallbackPalette().brandBase); // on the branded path
 }
 
 void TestBrandTheme::differentLogosDifferentPalettes()
 {
-    const QString redPath = writePng(QStringLiteral("red-diff.png"), QColor(Qt::red));
-    const QString bluePath = writePng(QStringLiteral("blue-diff.png"), QColor(Qt::blue));
-    QString errRed, errBlue;
-    const BrandPalette pRed = BrandTheme::extractPalette(redPath, &errRed);
-    const BrandPalette pBlue = BrandTheme::extractPalette(bluePath, &errBlue);
-    QVERIFY2(errRed.isEmpty(), qPrintable(errRed));
-    QVERIFY2(errBlue.isEmpty(), qPrintable(errBlue));
-    QVERIFY(pRed.adminPrimary != pBlue.adminPrimary);
+    // Gate-surviving solids: pure red/blue derive accents that fail the Task 7
+    // quality gate and both fall back to the SAME palette, so use a maroon and a
+    // dark green whose palettes clear the gate and stay distinct.
+    const QString maroonPath = writePng(QStringLiteral("maroon-diff.png"), QColor("#7E1A15"));
+    const QString greenPath = writePng(QStringLiteral("green-diff.png"), QColor("#145A32"));
+    QString errMaroon, errGreen;
+    const BrandPalette pMaroon = BrandTheme::extractPalette(maroonPath, &errMaroon);
+    const BrandPalette pGreen = BrandTheme::extractPalette(greenPath, &errGreen);
+    QVERIFY2(errMaroon.isEmpty(), qPrintable(errMaroon));
+    QVERIFY2(errGreen.isEmpty(), qPrintable(errGreen));
+    QVERIFY(pMaroon.brandBase != pGreen.brandBase);
 }
 
-void TestBrandTheme::twoToneLogoMapsPrimaryAndSecondary()
+void TestBrandTheme::rolePaletteMeetsSplitContrastFloors()
 {
-    const QColor maroon(QStringLiteral("#7E1A15"));
-    const QColor gold(QStringLiteral("#D4A017"));
-    const QString path = writeTwoTonePng(QStringLiteral("twotone.png"), maroon, gold);
-    QString err;
-    const BrandPalette p = BrandTheme::extractPalette(path, &err);
-    QVERIFY2(err.isEmpty(), qPrintable(err));
-
-    const int maroonHue = maroon.hsvHue();
-    const int goldHue = gold.hsvHue();
-    QVERIFY2(qAbs(p.adminPrimary.hsvHue() - maroonHue) <= 30,
-             qPrintable(QStringLiteral("adminPrimary hue %1 vs maroon hue %2")
-                            .arg(p.adminPrimary.hsvHue())
-                            .arg(maroonHue)));
-    QVERIFY2(qAbs(p.kioskPrimary.hsvHue() - goldHue) <= 30,
-             qPrintable(QStringLiteral("kioskPrimary hue %1 vs gold hue %2")
-                            .arg(p.kioskPrimary.hsvHue())
-                            .arg(goldHue)));
-    QVERIFY(p.adminPrimary != p.kioskPrimary);
+    const BrandPalette p = BrandTheme::buildPalette(QColor("#7E1A15"), QColor("#E8B10E"));
+    using BrandColorMath::contrastRatio;
+    QVERIFY(contrastRatio(p.brandOn,     p.brandBase)  >= 4.5); // text on brand fill
+    QVERIFY(contrastRatio(p.accentOn,    p.accentBase) >= 4.5); // text on accent fill
+    QVERIFY(contrastRatio(p.accentBase,  p.brandBase)  >= 3.0); // graphical highlight on dark
+    QVERIFY(contrastRatio(p.accentText,  p.card)       >= 4.5); // accent-as-text on paper
+    QVERIFY(contrastRatio(p.accentText,  p.accentSoft) >= 4.5); // accent-as-text on its tint
+    QVERIFY(contrastRatio(p.brandText,   p.card)       >= 4.5); // brand-as-text on paper
+    QVERIFY(contrastRatio(p.brandOnMuted, p.brandBase) >= 4.5); // muted nav label on brand
 }
 
-void TestBrandTheme::generatedPalettesMeetMinContrast()
+void TestBrandTheme::brandOnMutedRecoversByLightening()
 {
-    const QVector<QPair<QString, QColor>> cases = {
-        { QStringLiteral("contrast-red.png"), QColor(Qt::red) },
-        { QStringLiteral("contrast-blue.png"), QColor(Qt::blue) },
-        { QStringLiteral("contrast-paleyellow.png"), QColor(QStringLiteral("#F0E68C")) },
-        { QStringLiteral("contrast-navy.png"), QColor(QStringLiteral("#101840")) },
-    };
-    for (const auto &c : cases) {
-        const QString path = writePng(c.first, c.second);
-        QString err;
-        const BrandPalette p = BrandTheme::extractPalette(path, &err);
-        QVERIFY2(err.isEmpty(), qPrintable(err));
-        const double adminContrast = BrandColorMath::contrastRatio(p.adminPrimary, p.adminOnPrimary);
-        const double kioskContrast = BrandColorMath::contrastRatio(p.kioskPrimary, p.kioskOnPrimary);
-        QVERIFY2(adminContrast >= BrandTheme::MinContrast,
-                 qPrintable(QStringLiteral("%1: admin contrast %2").arg(c.first).arg(adminContrast)));
-        QVERIFY2(kioskContrast >= BrandTheme::MinContrast,
-                 qPrintable(QStringLiteral("%1: kiosk contrast %2").arg(c.first).arg(kioskContrast)));
-    }
+    using BrandColorMath::contrastRatio;
+    // Steel-blue primary: brandBase stays #407090 (5.33:1 vs white), and the
+    // un-clamped brandOnMuted = mix(white, brandBase, 0.25) is #CFDBE3 at only
+    // 3.78:1 vs brandBase — so the recovery clamp MUST fire. The OLD darken clamp
+    // drove it to near-black #1C1D1F (3.16:1, still failing); the LIGHTEN fix
+    // reaches #E9F6FF (4.85:1). This asserts BOTH the floor and the direction.
+    const BrandPalette p = BrandTheme::buildPalette(QColor("#407090"), QColor("#E8B10E"));
+    const QColor rawMix = BrandColorMath::mix(QColor(Qt::white), p.brandBase, 0.25);
+    QVERIFY(contrastRatio(rawMix, p.brandBase) < 4.5);              // precondition: clamp fires
+    QVERIFY(contrastRatio(p.brandOnMuted, p.brandBase) >= 4.5);     // floor met
+    QVERIFY(p.brandOnMuted.valueF() > rawMix.valueF());            // it got LIGHTER, not darker
+}
+
+void TestBrandTheme::brandAndAccentAreDistinctHues()
+{
+    const BrandPalette p = BrandTheme::buildPalette(QColor("#7E1A15"), QColor("#E8B10E"));
+    const double dh = std::abs(p.brandBase.hsvHueF()*360.0 - p.accentBase.hsvHueF()*360.0);
+    QVERIFY(qMin(dh, 360.0 - dh) >= 30.0);
 }
 
 void TestBrandTheme::greyscaleLogoFallsBack()
@@ -356,6 +392,60 @@ void TestBrandTheme::greyscaleLogoFallsBack()
     const BrandPalette fb = BrandTheme::fallbackPalette();
     QVERIFY2(err.isEmpty(), qPrintable(err));
     QVERIFY(p == fb);
+}
+
+void TestBrandTheme::buildPaletteIsCallableFromSeeds()
+{
+    // Maroon primary, gold secondary — the reference case. buildPalette is
+    // the pure build step: callable directly from two seed colors, without
+    // a logo image, for deterministic unit testing of the derivation.
+    const BrandPalette p = BrandTheme::buildPalette(QColor("#7E1A15"), QColor("#E8B10E"));
+    QVERIFY(p.brandBase.isValid());
+    QVERIFY(p.accentBase.isValid());
+    QVERIFY(p.brandBase != p.accentBase);
+}
+
+void TestBrandTheme::badSeedsEitherMeetInvariantsOrFallBack()
+{
+    struct Case { QColor a, b; };
+    const QVector<Case> cases = {
+        {QColor("#FDFDFD"), QColor("#FCFCFC")},  // near-white / near-white
+        {QColor("#050505"), QColor("#0A1030")},  // black / navy (both dark)
+        {QColor("#FF00FF"), QColor("#00FF00")},  // neon / neon
+        {QColor("#888888"), QColor("#8A8A8A")},  // greyscale-ish, near-mono
+        {QColor("#7E1A15"), QColor("#E8B10E")},  // reference brand — MUST be usable
+    };
+    using BrandColorMath::contrastRatio;
+    for (const Case &c : cases) {
+        const BrandPalette p = BrandTheme::buildPalette(c.a, c.b);
+        const bool usable = BrandTheme::paletteIsUsable(p, c.a, c.b);
+        if (!usable) continue;  // gate would fall back — acceptable
+        QVERIFY(contrastRatio(p.brandOn,    p.brandBase)  >= 4.5);
+        QVERIFY(contrastRatio(p.accentBase, p.brandBase)  >= 3.0);
+        QVERIFY(p.accentBase.hsvSaturationF() >= 0.15);   // not washed out
+        QVERIFY(p.accentBase.valueF() <= 0.97);           // not near-white
+    }
+
+    // The reference maroon/gold brand MUST survive the gate — pins it against
+    // over-rejection regressions and guarantees the loop body above executes.
+    QVERIFY(BrandTheme::paletteIsUsable(
+        BrandTheme::buildPalette(QColor("#7E1A15"), QColor("#E8B10E")),
+        QColor("#7E1A15"), QColor("#E8B10E")));
+}
+
+void TestBrandTheme::enforceContrastReachesTarget()
+{
+    const QColor white(Qt::white);
+    const QColor out = BrandTheme::enforceContrast(QColor("#999999"), white, 4.5);
+    QVERIFY(BrandColorMath::contrastRatio(out, white) >= 4.5);
+}
+
+void TestBrandTheme::raiseToContrastLightensDarkAccent()
+{
+    const QColor brand("#4A0E0B");   // dark maroon
+    const QColor out = BrandTheme::raiseToContrast(QColor("#1A2340"), brand, 3.0); // dark navy
+    QVERIFY(BrandColorMath::contrastRatio(out, brand) >= 3.0);
+    QVERIFY(out.valueF() > QColor("#1A2340").valueF()); // it got lighter, not darker
 }
 
 void TestBrandTheme::cacheRoundTrip()
@@ -440,7 +530,10 @@ void TestBrandTheme::manualModeSkipsRegeneration()
 
 void TestBrandTheme::autoModeRegenerates()
 {
-    const QString path = writePng(QStringLiteral("auto-red.png"), QColor(Qt::red));
+    // Gate-surviving maroon solid: a pure-red logo would fall back (equal to the
+    // fallback palette) even though regeneration succeeds, defeating the
+    // "auto mode re-themes" assertion below.
+    const QString path = writePng(QStringLiteral("auto-maroon.png"), QColor("#7E1A15"));
     BrandingConfig cfg;
     cfg.mode = ThemeMode::Auto;
     cfg.palette = BrandTheme::fallbackPalette();
@@ -450,6 +543,7 @@ void TestBrandTheme::autoModeRegenerates()
 
     QVERIFY2(result, qPrintable(err));
     QVERIFY(cfg.palette != BrandTheme::fallbackPalette());
+    QVERIFY(!cfg.didFallBack);
     QCOMPARE(cfg.logoHash.length(), 64);
     QVERIFY(!cfg.logoHash.contains(QRegularExpression(QStringLiteral("[^0-9a-f]"))));
     QVERIFY(cfg.updatedAt.isValid());

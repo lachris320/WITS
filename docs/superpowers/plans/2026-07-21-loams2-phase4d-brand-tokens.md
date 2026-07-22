@@ -553,7 +553,7 @@ void TestBrandTheme::brandAndAccentAreDistinctHues()
     p.brandOn      = white;
     p.brandOnMuted = mix(p.brandOn, p.brandBase, 0.25);
     if (contrastRatio(p.brandOnMuted, p.brandBase) < 4.5)      // clamp if the mix fails
-        p.brandOnMuted = enforceContrast(p.brandOnMuted, p.brandBase, 4.5);
+        p.brandOnMuted = raiseToContrast(p.brandOnMuted, p.brandBase, 4.5);  // LIGHTEN: a light label on a dark fill gains contrast by moving toward white, not by darkening
     p.brandText    = enforceContrast(p.brandBase, p.card, 4.5);
 
     p.accentBase   = raiseToContrast(secondarySeed, p.brandBase, 3.0);
@@ -632,7 +632,7 @@ void TestBrandTheme::badSeedsEitherMeetInvariantsOrFallBack()
 - [ ] **Step 3: Implement the gate + flag + enum.**
   - `brandthemedata.h`: add `bool didFallBack = false;` to `BrandingConfig`.
   - `brandtheme.h`: `enum class RegenResult { Ok, FellBack, Failed };` and `bool paletteIsUsable(const BrandPalette &p, const QColor &primarySeed, const QColor &secondarySeed);`
-  - `brandtheme.cpp`: implement `paletteIsUsable` checking (a) `hueDistanceDeg` between seeds ≥ floor, (b) `primarySeed.hsvSaturationF() ≥` floor, (c) post-clamp `p.accentBase.hsvSaturationF() ≥ 0.15 && p.accentBase.valueF() ≤ 0.97`, (d) the required 4.5/3.0 floors hold via `contrastRatio`. In `extractPalette`, after `buildPalette`, `if (!paletteIsUsable(p, primarySeed, secondarySeed)) return fallbackPalette();`. In `regenerateFromLogo`, set `config.didFallBack = (the palette is the fallback)` — compute it from the usable check so the flag reflects reality.
+  - `brandtheme.cpp`: implement `paletteIsUsable` checking (a) `hueDistanceDeg` between seeds ≥ floor, (b) `primarySeed.hsvSaturationF() ≥` floor, (c) post-clamp `p.accentBase.hsvSaturationF() ≥ 0.15 && p.accentBase.valueF() ≤ 0.97`, (d) the required 4.5/3.0 floors hold via `contrastRatio`, **(e) `contrastRatio(p.brandOnMuted, p.brandBase) ≥ 4.5`**. Check (e) is load-bearing: Task 6's `brandOnMuted` recovery lightens toward white, but for ~half of clamp-firing brand seeds (vivid violet/blue/magenta hues) even a fully-lightened muted label caps below 4.5 against a mid-luminance `brandBase` — no other gate check detects an illegible muted nav label, so without (e) such a palette ships. In `extractPalette`, after `buildPalette`, `if (!paletteIsUsable(p, primarySeed, secondarySeed)) return fallbackPalette();`. In `regenerateFromLogo`, set `config.didFallBack = (the palette is the fallback)` — compute it from the usable check so the flag reflects reality.
   - `ThemeViewModel.cpp`: change `regenerateFromImportedLogo` to return `RegenResult` — `Failed` if the logo can't be read, `FellBack` if `config.didFallBack`, else `Ok`. `ThemeViewModel.h`: change the signature and register the enum for QML with `Q_ENUM(RegenResult)` (declare the enum on the class or expose the C++ enum via `qmlRegisterUncreatableMetaObject`/`Q_ENUM`; simplest: re-declare `enum class RegenResult` on `ThemeViewModel` with `Q_ENUM` and map).
 
 > QML call site `SettingsScreen.qml:530` currently ignores the return — it keeps compiling and stays invisible. Consuming `FellBack` is Task 9.

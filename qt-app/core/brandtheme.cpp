@@ -28,15 +28,17 @@ BrandPalette fallbackPalette()
     const QColor white(Qt::white);
     BrandPalette p;
     // Brand roles — verbatim theme.h constants (the PRD's fallback rule).
-    p.adminPrimary      = QColor(WitsTheme::Color::AdminPrimary);
-    p.adminPrimaryHover = QColor(WitsTheme::Color::AdminPrimaryHover);
-    p.adminOnPrimary    = white;
-    p.adminPrimarySoft  = mix(p.adminPrimary, white, 0.90);
-    p.kioskPrimary      = QColor(WitsTheme::Color::KioskPrimary);
-    p.kioskPrimaryHover = QColor(WitsTheme::Color::KioskPrimaryHover);
-    p.kioskOnPrimary    = white; // legacy-faithful; fallback is exempt from MinContrast
-    p.kioskPrimarySoft  = mix(p.kioskPrimary, white, 0.90);
-    p.secondary         = QColor(WitsTheme::Color::Secondary);
+    p.brandBase    = QColor(WitsTheme::Color::AdminPrimary);
+    p.brandDeep    = QColor(WitsTheme::Color::AdminPrimaryHover);
+    p.brandOn      = white;
+    p.brandSoft    = mix(p.brandBase, white, 0.90);
+    p.brandOnMuted = QColor("#EFC9A8"); // legacy onBrandMuted literal, now a palette field
+    p.brandText    = p.brandBase;       // brand-as-text on light; fallback == base
+    p.accentBase   = QColor(WitsTheme::Color::KioskPrimary);
+    p.accentDeep   = QColor(WitsTheme::Color::KioskPrimaryHover);
+    p.accentOn     = white; // legacy-faithful; fallback is exempt from MinContrast
+    p.accentSoft   = mix(p.accentBase, white, 0.90);
+    p.accentText   = QColor("#8a6a08"); // legacy accent-as-text; fallback constant
     // Neutral roles
     p.sidebarBase   = QColor(WitsTheme::Color::SidebarBase);
     p.card          = QColor(WitsTheme::Color::Card);
@@ -54,23 +56,43 @@ namespace {
 // One place defines the JSON field order/names for both directions.
 struct FieldMap { const char *key; QColor BrandPalette::*member; };
 const FieldMap kPaletteFields[] = {
-    {"admin_primary",       &BrandPalette::adminPrimary},
-    {"admin_primary_hover", &BrandPalette::adminPrimaryHover},
-    {"admin_on_primary",    &BrandPalette::adminOnPrimary},
-    {"admin_primary_soft",  &BrandPalette::adminPrimarySoft},
-    {"kiosk_primary",       &BrandPalette::kioskPrimary},
-    {"kiosk_primary_hover", &BrandPalette::kioskPrimaryHover},
-    {"kiosk_on_primary",    &BrandPalette::kioskOnPrimary},
-    {"kiosk_primary_soft",  &BrandPalette::kioskPrimarySoft},
-    {"secondary",           &BrandPalette::secondary},
-    {"sidebar_base",        &BrandPalette::sidebarBase},
-    {"card",                &BrandPalette::card},
-    {"app_background",      &BrandPalette::appBackground},
-    {"border",              &BrandPalette::border},
-    {"text",                &BrandPalette::text},
-    {"muted_text",          &BrandPalette::mutedText},
-    {"success",             &BrandPalette::success},
-    {"error",               &BrandPalette::error},
+    {"brand_base",      &BrandPalette::brandBase},
+    {"brand_deep",      &BrandPalette::brandDeep},
+    {"brand_on",        &BrandPalette::brandOn},
+    {"brand_soft",      &BrandPalette::brandSoft},
+    {"brand_on_muted",  &BrandPalette::brandOnMuted},
+    {"brand_text",      &BrandPalette::brandText},
+    {"accent_base",     &BrandPalette::accentBase},
+    {"accent_deep",     &BrandPalette::accentDeep},
+    {"accent_on",       &BrandPalette::accentOn},
+    {"accent_soft",     &BrandPalette::accentSoft},
+    {"accent_text",     &BrandPalette::accentText},
+    {"sidebar_base",    &BrandPalette::sidebarBase},
+    {"card",            &BrandPalette::card},
+    {"app_background",  &BrandPalette::appBackground},
+    {"border",          &BrandPalette::border},
+    {"text",            &BrandPalette::text},
+    {"muted_text",      &BrandPalette::mutedText},
+    {"success",         &BrandPalette::success},
+    {"error",           &BrandPalette::error},
+};
+// PERMANENT read-compat: pre-4d configs hold only these old keys. NEVER delete.
+// "secondary" is listed BEFORE "kiosk_primary" — both alias accentBase, and
+// the alias-apply loop is last-writer-wins; kiosk_primary is the semantically
+// correct accent source, so it must be applied (and win) after secondary. A
+// pre-4d cached fallback palette held BOTH kiosk_primary (#10B981) and
+// secondary (#3B82F6); if secondary were applied last it would silently
+// recolor every accent surface blue on migration.
+const FieldMap kOldPaletteAliasFields[] = {
+    {"secondary",           &BrandPalette::accentBase},
+    {"admin_primary",       &BrandPalette::brandBase},
+    {"admin_primary_hover", &BrandPalette::brandDeep},
+    {"admin_on_primary",    &BrandPalette::brandOn},
+    {"admin_primary_soft",  &BrandPalette::brandSoft},
+    {"kiosk_primary",       &BrandPalette::accentBase},
+    {"kiosk_primary_hover", &BrandPalette::accentDeep},
+    {"kiosk_on_primary",    &BrandPalette::accentOn},
+    {"kiosk_primary_soft",  &BrandPalette::accentSoft},
 };
 
 const QString kDateTimeFormat = QStringLiteral("yyyy-MM-dd HH:mm:ss");
@@ -82,12 +104,21 @@ QJsonObject paletteToJson(const BrandPalette &p)
     QJsonObject o;
     for (const FieldMap &f : kPaletteFields)
         o.insert(QLatin1String(f.key), (p.*(f.member)).name());
+    // Dual-write old keys so an older build reading this config still finds them.
+    for (const FieldMap &f : kOldPaletteAliasFields)
+        o.insert(QLatin1String(f.key), (p.*(f.member)).name());
     return o;
 }
 
 BrandPalette paletteFromJson(const QJsonObject &o)
 {
     BrandPalette p = fallbackPalette();
+    // Old aliases first...
+    for (const FieldMap &f : kOldPaletteAliasFields) {
+        const QColor c(o.value(QLatin1String(f.key)).toString());
+        if (c.isValid()) p.*(f.member) = c;
+    }
+    // ...then new keys, which therefore win when both are present.
     for (const FieldMap &f : kPaletteFields) {
         const QColor c(o.value(QLatin1String(f.key)).toString());
         if (c.isValid())
@@ -132,11 +163,27 @@ constexpr int kMinAlpha = 128;
 constexpr double kMinSaturation = 0.15;
 constexpr double kMinValue = 0.15;
 constexpr double kMinHueSeparationDeg = 60.0;
+// Quality-gate floors (Task 7). Distinct from kMinHueSeparationDeg (60°): the
+// gate's seed-hue floor is deliberately looser so the reference maroon/gold
+// brand (~42° apart) and every mono-colour logo (synthetic +45° accent) pass.
+constexpr double kMinSeedHueSeparationDeg = 30.0;
+constexpr double kMinAccentSaturation = 0.15; // accentBase must not be washed out
+constexpr double kMaxAccentValue = 0.97;      // accentBase must not be near-white
 constexpr double kHoverShade = -0.28;
 constexpr double kSoftMixToWhite = 0.90;
 constexpr double kOnColorDeepShade = -0.60;
+// Accent tint is deliberately stronger toward white than kSoftMixToWhite so the
+// (typically lighter) accent hue stays legible as a soft fill (§4).
+constexpr double kAccentSoftMixToWhite = 0.88;
+// Darken the accent seed for use as text; same tunable family as kOnColorDeepShade (§4).
+constexpr double kAccentTextShade = -0.40;
+// Muted nav label: 25% from brandOn toward brandBase (§4).
+constexpr double kBrandOnMutedMix = 0.25;
+// WCAG AA text floor — the split-contrast target for every text/label role (§4).
+constexpr double kTextContrast = 4.5;
 constexpr double kEnforceStep = -0.08;
 constexpr int kEnforceMaxIterations = 24;
+constexpr float kRaiseValueStep = 0.06f;
 
 // Decode a logo file into a 64x64 ARGB32 image. On any failure returns a
 // null QImage and sets *err to a specific, user-readable reason.
@@ -239,20 +286,38 @@ int highestCountKey(const QHash<int, int> &histogram)
     return bestKey;
 }
 
-// Darken c until it meets MinContrast against white, capped iterations.
-QColor enforceOnWhite(const QColor &c)
+} // namespace
+
+// Darkens c (via shade) until contrastRatio(c, against) >= target, capped at
+// kEnforceMaxIterations. The `against` colour and `target` ratio are parameters,
+// so any role can be enforced against any background (§4 split-contrast floors).
+QColor enforceContrast(const QColor &c, const QColor &against, double target)
 {
     QColor result = c;
-    const QColor white(Qt::white);
     int iterations = 0;
-    while (contrastRatio(result, white) < MinContrast && iterations < kEnforceMaxIterations) {
-        result = shade(result, kEnforceStep);
+    while (contrastRatio(result, against) < target && iterations < kEnforceMaxIterations) {
+        result = shade(result, kEnforceStep);   // darken toward the target
         ++iterations;
     }
     return result;
 }
 
-} // namespace
+// LIGHTENS c by raising HSV value (preserving hue/saturation) until it meets
+// `target` against a DARK `against`. The accent-lighten seam for Task 6.
+QColor raiseToContrast(const QColor &c, const QColor &against, double target)
+{
+    float h, s, v, a;
+    c.getHsvF(&h, &s, &v, &a);
+    if (h < 0.0f) h = 0.0f;                       // achromatic guard: getHsvF returns hue -1 for greys
+    int iterations = 0;
+    QColor result = c;
+    while (contrastRatio(result, against) < target && iterations < kEnforceMaxIterations) {
+        v = qMin(1.0f, v + kRaiseValueStep);      // raise value (lighten), preserve hue/sat
+        result = QColor::fromHsvF(h, s, v, a);
+        ++iterations;
+    }
+    return result;
+}
 
 bool validateLogoFile(const QString &logoPath, QString *errorMsg)
 {
@@ -260,6 +325,89 @@ bool validateLogoFile(const QString &logoPath, QString *errorMsg)
     const QImage img = renderLogo(logoPath, &err);
     if (errorMsg) *errorMsg = err;
     return !img.isNull();
+}
+
+// Pure build step: derives a full palette from an already-picked
+// primary/secondary seed pair. No I/O, no errorMsg — reads only the two
+// seeds plus file-scope helpers/constants, so it's directly unit-testable
+// without a logo image.
+BrandPalette buildPalette(const QColor &primarySeed, const QColor &secondarySeed)
+{
+    const QColor white(Qt::white);
+
+    // Start from the fallback so every neutral role (sidebarBase/card/appBackground/
+    // border/text/mutedText/success/error) is inherited in one place — brandText/
+    // accentText are enforced against p.card below, so the neutral paper colour must
+    // be populated first. The brand/accent roles are all overwritten immediately after.
+    BrandPalette p = fallbackPalette();
+
+    // Brand roles (§4).
+    p.brandBase    = enforceContrast(primarySeed, white, kTextContrast);
+    p.brandDeep    = shade(p.brandBase, kHoverShade);
+    p.brandSoft    = mix(p.brandBase, white, kSoftMixToWhite);
+    p.brandOn      = white;
+    p.brandOnMuted = mix(p.brandOn, p.brandBase, kBrandOnMutedMix);
+    if (contrastRatio(p.brandOnMuted, p.brandBase) < kTextContrast)
+        p.brandOnMuted = raiseToContrast(p.brandOnMuted, p.brandBase, kTextContrast);
+    p.brandText    = enforceContrast(p.brandBase, p.card, kTextContrast);
+
+    // Accent roles (§4).
+    p.accentBase   = raiseToContrast(secondarySeed, p.brandBase, MinContrast);
+    p.accentDeep   = shade(p.accentBase, kHoverShade);
+    p.accentSoft   = mix(p.accentBase, white, kAccentSoftMixToWhite);
+    if (contrastRatio(p.brandDeep, p.accentBase) >= kTextContrast)
+        p.accentOn = p.brandDeep;
+    else if (contrastRatio(shade(p.accentBase, kOnColorDeepShade), p.accentBase) >= kTextContrast)
+        p.accentOn = shade(p.accentBase, kOnColorDeepShade);
+    else
+        p.accentOn = (contrastRatio(white, p.accentBase) >= contrastRatio(QColor(Qt::black), p.accentBase))
+                     ? white : QColor(Qt::black);
+    p.accentText   = enforceContrast(shade(p.accentBase, kAccentTextShade), p.card, kTextContrast);
+    if (contrastRatio(p.accentText, p.accentSoft) < kTextContrast)
+        p.accentText = enforceContrast(p.accentText, p.accentSoft, kTextContrast);
+
+    return p;
+}
+
+// Quality gate for a derived palette — see brandtheme.h for the check list.
+// Anon-namespace helpers/constants (hueDistanceDeg, kMinSaturation, ...) keep
+// file-scope visibility here even though their namespace already closed.
+bool paletteIsUsable(const BrandPalette &p, const QColor &primarySeed,
+                     const QColor &secondarySeed)
+{
+    // (0) Achromatic guard: hsvHueF() returns -1 for greys; feeding that into
+    // hueDistanceDeg would yield a bogus negative distance. A colourless seed
+    // can never satisfy a chromatic gate, so reject up front.
+    if (primarySeed.hsvHueF() < 0.0 || secondarySeed.hsvHueF() < 0.0)
+        return false;
+
+    // (1) The primary seed must carry real brand colour.
+    if (primarySeed.hsvSaturationF() < kMinSaturation)
+        return false;
+
+    // (2) The two seeds must be far enough apart in hue to read as distinct.
+    const double primaryHue = primarySeed.hsvHueF() * 360.0;
+    const double secondaryHue = secondarySeed.hsvHueF() * 360.0;
+    if (hueDistanceDeg(primaryHue, secondaryHue) < kMinSeedHueSeparationDeg)
+        return false;
+
+    // (3) The derived accent must not be washed out or near-white.
+    if (p.accentBase.hsvSaturationF() < kMinAccentSaturation
+        || p.accentBase.valueF() > kMaxAccentValue)
+        return false;
+
+    // (4) Split-contrast floors for the text/graphical roles.
+    if (contrastRatio(p.brandOn, p.brandBase) < kTextContrast) return false;
+    if (contrastRatio(p.accentOn, p.accentBase) < kTextContrast) return false;
+    if (contrastRatio(p.accentBase, p.brandBase) < MinContrast) return false;
+    if (contrastRatio(p.brandText, p.card) < kTextContrast) return false;
+    if (contrastRatio(p.accentText, p.card) < kTextContrast) return false;
+
+    // (5) The muted nav label must stay legible on the brand fill — LOAD-BEARING
+    // (Task 6 review): nothing in (0)-(4) catches an illegible muted label.
+    if (contrastRatio(p.brandOnMuted, p.brandBase) < kTextContrast) return false;
+
+    return true;
 }
 
 BrandPalette extractPalette(const QString &logoPath, QString *errorMsg)
@@ -318,45 +466,14 @@ BrandPalette extractPalette(const QString &logoPath, QString *errorMsg)
         secondarySeed = QColor::fromHsvF(fmod(static_cast<double>(h) + 0.125, 1.0), s, v);
     }
 
-    // Build the palette.
-    const QColor white(Qt::white);
-    BrandPalette p;
-
-    p.adminPrimary = enforceOnWhite(primarySeed);
-    p.adminOnPrimary = white;
-
-    QColor kioskPrimary;
-    QColor kioskOnPrimary;
-    if (contrastRatio(secondarySeed, white) >= MinContrast) {
-        kioskPrimary = secondarySeed;
-        kioskOnPrimary = white;
-    } else if (contrastRatio(secondarySeed, shade(secondarySeed, kOnColorDeepShade)) >= MinContrast) {
-        kioskPrimary = secondarySeed;
-        kioskOnPrimary = shade(secondarySeed, kOnColorDeepShade);
-    } else {
-        kioskPrimary = enforceOnWhite(secondarySeed);
-        kioskOnPrimary = white;
-    }
-    p.kioskPrimary = kioskPrimary;
-    p.kioskOnPrimary = kioskOnPrimary;
-
-    p.adminPrimaryHover = shade(p.adminPrimary, kHoverShade);
-    p.kioskPrimaryHover = shade(p.kioskPrimary, kHoverShade);
-    p.adminPrimarySoft = mix(p.adminPrimary, white, kSoftMixToWhite);
-    p.kioskPrimarySoft = mix(p.kioskPrimary, white, kSoftMixToWhite);
-    p.secondary = p.kioskPrimary;
-
-    const BrandPalette fb = fallbackPalette();
-    p.sidebarBase   = fb.sidebarBase;
-    p.card          = fb.card;
-    p.appBackground = fb.appBackground;
-    p.border        = fb.border;
-    p.text          = fb.text;
-    p.mutedText     = fb.mutedText;
-    p.success       = fb.success;
-    p.error         = fb.error;
-
     if (errorMsg) errorMsg->clear();
+    // Quality gate: a chromatic logo can still derive an unusable palette
+    // (washed-out accent, illegible muted label, seeds too close). Fall back
+    // rather than ship it. This is an ADDITIONAL net beyond the two early
+    // greyscale/empty-histogram fallbacks above.
+    const BrandPalette p = buildPalette(primarySeed, secondarySeed);
+    if (!paletteIsUsable(p, primarySeed, secondarySeed))
+        return fallbackPalette();
     return p;
 }
 
@@ -433,6 +550,11 @@ bool regenerateFromLogo(BrandingConfig &config, const QString &logoPath, QString
     }
 
     config.palette = palette;
+    // The gate returns THE fallback object on failure, so an exact palette
+    // compare labels a gate/greyscale/empty-histogram fallback correctly.
+    // BrandPalette::operator== is a full field compare; fallbackPalette() is
+    // deterministic and Rgb-spec on both sides, so this is exact.
+    config.didFallBack = (palette == fallbackPalette());
     config.logoHash = hash;
     config.updatedAt = QDateTime::currentDateTime();
     if (errorMsg) errorMsg->clear();

@@ -15,6 +15,7 @@ private slots:
     void refreshEmitsChangedAfterExternalSetCurrent();
     void regenerateFromLogoRethemesAndNotifies();
     void getterIsLiveNotCached();
+    void roleAccessorsMatchDeprecatedAliases();
 
 private:
     QString writeSolidPng(const QString &path, const QColor &fill);
@@ -32,7 +33,7 @@ void TestThemeViewModel::mapsCurrentBrandRole()
 {
     BrandTheme::setCurrent(BrandTheme::fallbackPalette());
     ThemeViewModel vm;
-    QCOMPARE(vm.adminPrimary(), BrandTheme::current().adminPrimary);
+    QCOMPARE(vm.adminPrimary(), BrandTheme::current().brandBase);
 }
 
 void TestThemeViewModel::refreshEmitsChangedAfterExternalSetCurrent()
@@ -42,7 +43,7 @@ void TestThemeViewModel::refreshEmitsChangedAfterExternalSetCurrent()
     QSignalSpy spy(&vm, &ThemeViewModel::changed);
 
     BrandPalette custom = BrandTheme::fallbackPalette();
-    custom.adminPrimary = QColor(0x12, 0x34, 0x56);
+    custom.brandBase = QColor(0x12, 0x34, 0x56);
     BrandTheme::setCurrent(custom);
 
     vm.refresh();
@@ -58,12 +59,15 @@ void TestThemeViewModel::regenerateFromLogoRethemesAndNotifies()
 
     QTemporaryDir dir;
     QVERIFY(dir.isValid());
-    const QString logo = writeSolidPng(dir.filePath("logo.png"), QColor(0x2E, 0x86, 0xC1));
+    // Solid maroon #7E1A15 — a gate-surviving logo (a steel-blue solid would
+    // fail the quality gate and fall back, which is a different code path).
+    const QString logo = writeSolidPng(dir.filePath("logo.png"), QColor(0x7E, 0x1A, 0x15));
 
-    QVERIFY(vm.regenerateFromImportedLogo(logo));   // Auto mode -> re-extracts
+    QCOMPARE(vm.regenerateFromImportedLogo(logo),
+             ThemeViewModel::RegenResult::Ok);   // Auto mode -> re-extracts a usable palette
     QCOMPARE(spy.count(), 1);
     // A chromatic logo yields a branded admin role distinct from the fallback.
-    QVERIFY(vm.adminPrimary() != BrandTheme::fallbackPalette().adminPrimary);
+    QVERIFY(vm.adminPrimary() != BrandTheme::fallbackPalette().brandBase);
 }
 
 void TestThemeViewModel::getterIsLiveNotCached()
@@ -72,11 +76,29 @@ void TestThemeViewModel::getterIsLiveNotCached()
     ThemeViewModel vm;
 
     BrandPalette custom = BrandTheme::fallbackPalette();
-    custom.adminPrimary = QColor(0x0A, 0x0B, 0x0C);
+    custom.brandBase = QColor(0x0A, 0x0B, 0x0C);
     BrandTheme::setCurrent(custom);   // change the engine, do NOT call vm.refresh()
 
     // Single source of truth: the getter reflects the engine immediately.
     QCOMPARE(vm.adminPrimary(), QColor(0x0A, 0x0B, 0x0C));
+}
+
+void TestThemeViewModel::roleAccessorsMatchDeprecatedAliases()
+{
+    BrandTheme::setCurrent(BrandTheme::fallbackPalette());
+    ThemeViewModel vm;
+
+    // New role accessors are the one source of truth; old names must forward.
+    QCOMPARE(vm.brandBase(), BrandTheme::current().brandBase);
+    QCOMPARE(vm.accentBase(), BrandTheme::current().accentBase);
+    QCOMPARE(vm.adminPrimary(), vm.brandBase());
+    QCOMPARE(vm.secondary(), vm.accentBase());
+
+    // Metaobject check: proves the Q_PROPERTY (what QML sees), not just the
+    // C++ method, is registered under the new role name — catches a typo'd
+    // READ name that would otherwise only surface in Task 3's QML.
+    QVERIFY(vm.property("brandBase").isValid());
+    QCOMPARE(vm.property("brandBase").value<QColor>(), vm.brandBase());
 }
 
 QTEST_MAIN(TestThemeViewModel)

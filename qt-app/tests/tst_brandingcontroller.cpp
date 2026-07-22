@@ -37,8 +37,8 @@ void TestBrandingController::parseSuccessWithConfig()
     QVERIFY(hasConfig);
     QVERIFY(errorMsg.isEmpty());
     QVERIFY(config.mode == ThemeMode::Auto);
-    QCOMPARE(config.palette.adminPrimary, QColor("#123456"));
-    QCOMPARE(config.palette.kioskPrimary, QColor("#654321"));
+    QCOMPARE(config.palette.brandBase, QColor("#123456"));
+    QCOMPARE(config.palette.accentBase, QColor("#654321"));
     // Fields absent from the wire palette keep their fallback values.
     QCOMPARE(config.palette.card, BrandTheme::fallbackPalette().card);
     QCOMPARE(config.logoHash,

@@ -25,6 +25,21 @@ class ThemeViewModel : public QObject
     Q_PROPERTY(QColor kioskOnPrimary    READ kioskOnPrimary    NOTIFY changed)
     Q_PROPERTY(QColor kioskPrimarySoft  READ kioskPrimarySoft  NOTIFY changed)
     Q_PROPERTY(QColor secondary         READ secondary         NOTIFY changed)
+
+    // Role-named properties (Phase 4d). Same underlying colours as the
+    // deprecated block above; old names now forward to these accessors.
+    Q_PROPERTY(QColor brandBase     READ brandBase     NOTIFY changed)
+    Q_PROPERTY(QColor brandDeep     READ brandDeep     NOTIFY changed)
+    Q_PROPERTY(QColor brandSoft     READ brandSoft     NOTIFY changed)
+    Q_PROPERTY(QColor brandOn       READ brandOn       NOTIFY changed)
+    Q_PROPERTY(QColor brandOnMuted  READ brandOnMuted  NOTIFY changed)
+    Q_PROPERTY(QColor brandText     READ brandText     NOTIFY changed)
+    Q_PROPERTY(QColor accentBase    READ accentBase    NOTIFY changed)
+    Q_PROPERTY(QColor accentDeep    READ accentDeep    NOTIFY changed)
+    Q_PROPERTY(QColor accentSoft    READ accentSoft    NOTIFY changed)
+    Q_PROPERTY(QColor accentOn      READ accentOn      NOTIFY changed)
+    Q_PROPERTY(QColor accentText    READ accentText    NOTIFY changed)
+
     Q_PROPERTY(QColor sidebarBase       READ sidebarBase       NOTIFY changed)
     Q_PROPERTY(QColor card              READ card              NOTIFY changed)
     Q_PROPERTY(QColor appBackground     READ appBackground     NOTIFY changed)
@@ -35,17 +50,47 @@ class ThemeViewModel : public QObject
     Q_PROPERTY(QColor error             READ error             NOTIFY changed)
 
 public:
+    // Outcome of a logo-driven re-theme, exposed to QML (QML sees
+    // ThemeViewModel.Ok / .FellBack / .Failed via Q_ENUM + QML_ELEMENT):
+    //   Ok       — a usable logo palette was derived and applied,
+    //   FellBack — the logo read but its palette failed the quality gate, so the
+    //              fallback palette was applied (still a valid visible result),
+    //   Failed   — the logo could not be read/decoded (or Manual mode).
+    // Q_ENUM requires a member enum of a Q_OBJECT class; the engine returns
+    // bool + BrandingConfig::didFallBack, mapped to this in the .cpp.
+    enum class RegenResult { Ok, FellBack, Failed };
+    Q_ENUM(RegenResult)
+
     explicit ThemeViewModel(QObject *parent = nullptr);
 
-    QColor adminPrimary() const      { return BrandTheme::current().adminPrimary; }
-    QColor adminPrimaryHover() const { return BrandTheme::current().adminPrimaryHover; }
-    QColor adminOnPrimary() const    { return BrandTheme::current().adminOnPrimary; }
-    QColor adminPrimarySoft() const  { return BrandTheme::current().adminPrimarySoft; }
-    QColor kioskPrimary() const      { return BrandTheme::current().kioskPrimary; }
-    QColor kioskPrimaryHover() const { return BrandTheme::current().kioskPrimaryHover; }
-    QColor kioskOnPrimary() const    { return BrandTheme::current().kioskOnPrimary; }
-    QColor kioskPrimarySoft() const  { return BrandTheme::current().kioskPrimarySoft; }
-    QColor secondary() const         { return BrandTheme::current().secondary; }
+    // DEPRECATED API aliases — removed in PR 2. Forward to the new accessors so
+    // there is one source of truth (no second copy of any colour). secondary()
+    // and kioskPrimary() both forward to accentBase() intentionally: two
+    // deprecated names for one role.
+    QColor adminPrimary() const      { return brandBase(); }
+    QColor adminPrimaryHover() const { return brandDeep(); }
+    QColor adminOnPrimary() const    { return brandOn(); }
+    QColor adminPrimarySoft() const  { return brandSoft(); }
+    QColor kioskPrimary() const      { return accentBase(); }
+    QColor kioskPrimaryHover() const { return accentDeep(); }
+    QColor kioskOnPrimary() const    { return accentOn(); }
+    QColor kioskPrimarySoft() const  { return accentSoft(); }
+    QColor secondary() const         { return accentBase(); }
+
+    // Role-named accessors (Phase 4d) — single source of truth for the
+    // brand/accent colours; read directly from the engine.
+    QColor brandBase() const     { return BrandTheme::current().brandBase; }
+    QColor brandDeep() const     { return BrandTheme::current().brandDeep; }
+    QColor brandSoft() const     { return BrandTheme::current().brandSoft; }
+    QColor brandOn() const       { return BrandTheme::current().brandOn; }
+    QColor brandOnMuted() const  { return BrandTheme::current().brandOnMuted; }
+    QColor brandText() const     { return BrandTheme::current().brandText; }
+    QColor accentBase() const    { return BrandTheme::current().accentBase; }
+    QColor accentDeep() const    { return BrandTheme::current().accentDeep; }
+    QColor accentSoft() const    { return BrandTheme::current().accentSoft; }
+    QColor accentOn() const      { return BrandTheme::current().accentOn; }
+    QColor accentText() const    { return BrandTheme::current().accentText; }
+
     QColor sidebarBase() const       { return BrandTheme::current().sidebarBase; }
     QColor card() const              { return BrandTheme::current().card; }
     QColor appBackground() const     { return BrandTheme::current().appBackground; }
@@ -60,9 +105,10 @@ public:
     Q_INVOKABLE void refresh();
 
     // Live re-theme hook (§13.2). Auto mode re-extracts from the logo, applies
-    // it via BrandTheme::setCurrent, and emits changed(); Manual mode is a
-    // no-op returning false (brandtheme.cpp:414-419). Returns success.
-    Q_INVOKABLE bool regenerateFromImportedLogo(const QString &path);
+    // it via BrandTheme::setCurrent, and emits changed() (for both Ok and
+    // FellBack — the fallback palette IS the correct visible result); Manual
+    // mode / unreadable logo is a no-op returning Failed. See RegenResult.
+    Q_INVOKABLE RegenResult regenerateFromImportedLogo(const QString &path);
 
 signals:
     void changed();
