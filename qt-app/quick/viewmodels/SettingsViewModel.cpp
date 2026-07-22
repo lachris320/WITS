@@ -1,6 +1,7 @@
 #include "SettingsViewModel.h"
 
 #include <QNetworkAccessManager>
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -360,6 +361,32 @@ QUrl SettingsViewModel::defaultManifestUrl(const QString &department) const
     const QString name = QStringLiteral("Reset_Manifest_%1_%2.csv")
         .arg(dept, QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
     return QUrl::fromLocalFile(QDir(dir).filePath(name));
+}
+
+QString SettingsViewModel::logoHashFor(const QString &path) const
+{
+    // Recomputed inline (not shared with BrandTheme) — a logo file is tiny, the
+    // double read is negligible, and extracting a helper would widen this task
+    // into witscore for three lines. The expression and format are byte-identical
+    // to brandtheme.cpp:548-549 so the two hashes are directly comparable.
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return QString();
+    return QString::fromLatin1(
+        QCryptographicHash::hash(file.readAll(), QCryptographicHash::Sha256).toHex());
+}
+
+QString SettingsViewModel::lastFallbackLogoHash() const
+{
+    AppSettings s;
+    return s.value(QStringLiteral("branding/lastFallbackLogoHash")).toString();
+}
+
+void SettingsViewModel::recordFallbackLogoHash(const QString &hash)
+{
+    AppSettings s;
+    s.setValue(QStringLiteral("branding/lastFallbackLogoHash"), hash);
+    s.sync();
 }
 
 void SettingsViewModel::recomputeDirty()

@@ -196,6 +196,12 @@ Item {
         property url lastImportedLogo: ""
         property bool manifestWriteResult: true
 
+        // Task 9: fire-once fallback-notice surface. fallbackHashStore models
+        // the AppSettings persistence (branding/lastFallbackLogoHash) so the
+        // record -> re-check round trip is real inside one test.
+        property string fallbackHashStore: ""
+        property string lastHashedLogoPath: ""
+
         signal saved()
         signal saveFailed(string message)
         signal adminInfoSaved()
@@ -217,6 +223,9 @@ Item {
         function changeAdminKey(o, n) { lastOldKey = o; lastNewKey = n }
         function resetVisits(d, k) { lastResetDept = d; lastResetKey = k }
         function importLogo(u) { lastImportedLogo = u }
+        function logoHashFor(p) { lastHashedLogoPath = "" + p; return p ? "hash-of-" + p : ""; }
+        function lastFallbackLogoHash() { return fallbackHashStore; }
+        function recordFallbackLogoHash(h) { fallbackHashStore = h; }
         function loadDepartments() { loadDepartmentsCount++ }
         function defaultManifestUrl(d) {
             lastManifestDept = d;
@@ -1157,6 +1166,15 @@ Item {
             var dlg = findChild(settings, "resetConfirmDialog");
             dlg.visible = false;
             dlg.clearKey();
+            // Task 9: reset the fire-once surface. Tests run alphabetically and
+            // share the screen; without this a notice/record from one test
+            // leaks into the next. The imperative reset is safe because
+            // schoolStatus is bare (no binding to clobber).
+            settingsVmStub.fallbackHashStore = "";
+            settingsVmStub.lastHashedLogoPath = "";
+            var school = findChild(settings, "schoolStatus");
+            school.text = "";
+            school.isNeutral = false;
         }
 
         // Opens the tier-2 dialog for `dept` and returns it, ready to type in.
@@ -1522,6 +1540,52 @@ Item {
             compare(status.visible, true);
             compare(status.text, "Could not copy the logo file.");
             compare(status.color, Theme.error);
+        }
+
+        // --- Bad-logo fallback notice (fire-once) ---
+
+        function test_badLogoFallbackNoticeShowsOnceThenNotForSameLogo() {
+            var status = findChild(settings, "schoolStatus");
+            verify(status !== null);
+            compare(status.visible, false);
+
+            settings.applyLogoRegenResult(ThemeViewModel.FellBack, "/logos/grey.png");
+            compare(status.visible, true);
+            compare(status.isNeutral, true);
+            compare(status.color.toString(), Theme.mutedText.toString());
+            compare(settingsVmStub.fallbackHashStore, "hash-of-/logos/grey.png");
+
+            // Same logo again: fire-once. Clear the node first so "not
+            // re-shown" is distinguishable from "left over from the first".
+            status.text = "";
+            settings.applyLogoRegenResult(ThemeViewModel.FellBack, "/logos/grey.png");
+            compare(status.visible, false);
+        }
+
+        function test_okRegenClearsNoticeAndReArmsFireOnce() {
+            var status = findChild(settings, "schoolStatus");
+            settings.applyLogoRegenResult(ThemeViewModel.FellBack, "/logos/grey.png");
+            compare(status.visible, true);
+
+            settings.applyLogoRegenResult(ThemeViewModel.Ok, "/logos/good.png");
+            compare(status.visible, false);
+            compare(settingsVmStub.fallbackHashStore, "");
+
+            // Re-armed: the SAME bad logo fires again after a good one.
+            settings.applyLogoRegenResult(ThemeViewModel.FellBack, "/logos/grey.png");
+            compare(status.visible, true);
+        }
+
+        function test_failedRegenLeavesExistingNoticeUntouched() {
+            var status = findChild(settings, "schoolStatus");
+            settings.applyLogoRegenResult(ThemeViewModel.FellBack, "/logos/grey.png");
+            compare(status.visible, true);
+            var shown = status.text;
+
+            // Failed leaves the theme untouched, so a visible notice stays true.
+            settings.applyLogoRegenResult(ThemeViewModel.Failed, "/logos/broken.png");
+            compare(status.visible, true);
+            compare(status.text, shown);
         }
 
         // --- No-vm fallback path ---

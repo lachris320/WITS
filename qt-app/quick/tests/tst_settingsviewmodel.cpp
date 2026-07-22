@@ -5,6 +5,7 @@
 #include <QTemporaryDir>
 #include <QDir>
 #include <QImage>
+#include <QCryptographicHash>
 #include <QFile>
 #include <QFileInfo>
 #include <QUrl>
@@ -85,6 +86,8 @@ private slots:
     void http200SuccessBodyStillReachesDecodeSeam();
     void transportFailureStillMeansNetworkError();
     void httpErrorWithNonJsonBodyFailsLoudlyNotSilently();
+    void fallbackLogoHashPersistsAcrossVmInstances();
+    void logoHashForMatchesSha256HexAndEmptyOnUnreadable();
 };
 
 // REGRESSION TEST for the Phase 4c data-loss bug: running the suite
@@ -637,6 +640,38 @@ void TestSettingsViewModel::httpErrorWithNonJsonBodyFailsLoudlyNotSilently()
     QCOMPARE(failed.count(), 1);
     QCOMPARE(failed.at(0).at(0).toString(), QStringLiteral("Reset failed."));
     QVERIFY(!vm.busy());   // the busy spinner is always cleared
+}
+
+// --- Task 9: fire-once bad-logo fallback notice support ---
+
+void TestSettingsViewModel::fallbackLogoHashPersistsAcrossVmInstances()
+{
+    // The record survives VM re-construction because it lives in AppSettings,
+    // not the VM: AdminScreen's Loader destroys/recreates SettingsScreen on
+    // every navigation, so the fire-once record must outlive the instance.
+    SettingsViewModel vm;
+    QCOMPARE(vm.lastFallbackLogoHash(), QString());   // cleared by init()
+    vm.recordFallbackLogoHash(QStringLiteral("abc123"));
+    SettingsViewModel vm2;                            // fresh instance, same store
+    QCOMPARE(vm2.lastFallbackLogoHash(), QStringLiteral("abc123"));
+}
+
+void TestSettingsViewModel::logoHashForMatchesSha256HexAndEmptyOnUnreadable()
+{
+    // Byte-identical to BrandTheme::regenerateFromLogo (brandtheme.cpp:548-549):
+    // lowercase SHA-256 hex of the raw file bytes, so the two hashes are
+    // directly comparable if anything ever cross-checks them.
+    const QString p = m_tmp.path() + QStringLiteral("/hash_me.bin");
+    QFile f(p);
+    QVERIFY(f.open(QIODevice::WriteOnly));
+    f.write("wits");
+    f.close();
+    SettingsViewModel vm;
+    QCOMPARE(vm.logoHashFor(p), QString::fromLatin1(
+        QCryptographicHash::hash(QByteArrayLiteral("wits"),
+                                 QCryptographicHash::Sha256).toHex()));
+    // Unreadable path contracts to an empty string.
+    QCOMPARE(vm.logoHashFor(m_tmp.path() + QStringLiteral("/absent.bin")), QString());
 }
 
 QTEST_MAIN(TestSettingsViewModel)

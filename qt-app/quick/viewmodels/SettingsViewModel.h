@@ -128,6 +128,15 @@ public:
     // Named "Reset_Manifest_…", never "Backup"/"Export" (owner decision).
     Q_INVOKABLE QUrl defaultManifestUrl(const QString &department) const;
 
+    // Fire-once bad-logo notice support (Phase 4d Task 9). The hash format MUST
+    // match BrandTheme::regenerateFromLogo (brandtheme.cpp:548-549): lowercase
+    // SHA-256 hex of the raw file bytes, empty string if the file is unreadable.
+    // The record is kept in AppSettings (branding/lastFallbackLogoHash) so it
+    // outlives the VM instance the Loader recreates on every navigation.
+    Q_INVOKABLE QString logoHashFor(const QString &path) const;
+    Q_INVOKABLE QString lastFallbackLogoHash() const;
+    Q_INVOKABLE void recordFallbackLogoHash(const QString &hash);
+
 signals:
     void schoolNameChanged();
     void schoolAddressChanged();
