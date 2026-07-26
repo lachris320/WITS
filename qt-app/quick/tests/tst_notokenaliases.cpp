@@ -20,6 +20,10 @@
 // The C++ paletteFromJson read-compat aliases in brandtheme.cpp are NOT in
 // scope: they live outside qt-app/quick/ and are permanent (spec 6.4), so this
 // guard never sees them.
+//
+// SCOPE CAVEAT: this guard scans *.qml only. Re-adding the deleted C++ VM
+// forwarding accessors (ThemeViewModel.h) would NOT be caught here — QML is
+// where the alias surface is actually consumed, so that is what we police.
 class TestNoTokenAliases : public QObject
 {
     Q_OBJECT
@@ -32,14 +36,20 @@ private:
 
 // Remove // line-comments (to EOL) and /* */ block-comments, preserving
 // newlines so the remaining text still maps to the original line structure.
-// A minimal two-state machine: this codebase has no `//` inside QML string
-// literals, so no string-literal tracking is needed.
+// String literals ARE tracked: while inside a double- or single-quoted string,
+// `//` and `/*` are NOT treated as comment starts but preserved verbatim as
+// code. This matters because the tree already has `//` inside QML strings (e.g.
+// 'http://attacker/beacon', "file:///manifests/…" in tst_qml_admin.qml); without
+// string tracking, a future banned token trailing an in-string `//` on the same
+// line would be silently stripped and the guard would wrongly pass.
 QString TestNoTokenAliases::stripComments(const QString &src)
 {
     QString out;
     out.reserve(src.size());
-    enum State { Code, LineComment, BlockComment };
+    enum State { Code, LineComment, BlockComment, StringLit };
     State state = Code;
+    QChar quote;      // which quote opened the current StringLit
+    bool escaped = false;   // previous char was an unescaped backslash
     for (int i = 0; i < src.size(); ++i) {
         const QChar c = src.at(i);
         const QChar n = (i + 1 < src.size()) ? src.at(i + 1) : QChar();
@@ -51,8 +61,29 @@ QString TestNoTokenAliases::stripComments(const QString &src)
             } else if (c == QLatin1Char('/') && n == QLatin1Char('*')) {
                 state = BlockComment;
                 ++i;
+            } else if (c == QLatin1Char('"') || c == QLatin1Char('\'')) {
+                state = StringLit;
+                quote = c;
+                escaped = false;
+                out.append(c);
             } else {
                 out.append(c);
+            }
+            break;
+        case StringLit:
+            // String content is code: preserve it verbatim so in-string
+            // `//` and `/*` are never mistaken for comments.
+            out.append(c);
+            if (escaped) {
+                escaped = false;
+            } else if (c == QLatin1Char('\\')) {
+                escaped = true;
+            } else if (c == quote) {
+                state = Code;
+            } else if (c == QLatin1Char('\n')) {
+                // QML strings don't span raw newlines; treat an unterminated
+                // quote as ended here rather than swallowing the rest of the file.
+                state = Code;
             }
             break;
         case LineComment:
