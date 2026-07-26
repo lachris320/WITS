@@ -34,26 +34,23 @@ TestCase {
         compare(Theme.radius.card, 16);
     }
 
-    function test_brandAdminResolvesToOpaqueColor() {
-        verify(Theme.brand.admin.a === 1.0);
-        verify(Theme.brand.admin !== Theme.card);
+    function test_brandBaseResolvesToOpaqueColor() {
+        verify(Theme.brand.base.a === 1.0);
+        verify(Theme.brand.base !== Theme.card);
     }
 
     function test_kioskTokensExposed() {
         verify(Theme.motion.toastHold >= 1000);
-        verify(Theme.brand.onKiosk.a === 1.0);
-        compare(Theme.brand.onMuted.toString().length, 7);   // "#RRGGBB" (was onBrandMuted literal, now derived)
+        verify(Theme.accent.on.a === 1.0);
+        compare(Theme.brand.onMuted.toString().length, 7);   // "#RRGGBB" (a derived brand-on-muted token)
         verify(Theme.scrim.a > 0 && Theme.scrim.a < 1);
     }
 
-    // --- Phase 4d Task 3: role-based brand/accent tokens, old names as aliases ---
+    // --- Phase 4d: role-based brand/accent tokens ---
 
-    function test_roleTokensExistAndAliasesMatch() {
+    function test_roleTokensExist() {
         verify(Theme.brand.base !== undefined);
         verify(Theme.accent.base !== undefined);
-        // The deprecated alias must resolve to the same colour as the new token.
-        compare(Theme.brand.admin.toString(), Theme.brand.base.toString());
-        compare(Theme.secondary.toString(),   Theme.accent.base.toString());
     }
 
     // --- A1: easing extended to the 6-value BezierSpline form ---

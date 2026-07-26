@@ -9,8 +9,8 @@ QtObject {
     // works because these are property bindings that re-evaluate on changed().
     readonly property ThemeViewModel _vm: ThemeViewModel {}
 
-    // `accent` is declared before `brand` so `brand`'s deprecated kiosk/*
-    // aliases (below) reference an already-instantiated sibling object.
+    // `accent` is declared before `brand` for readability; both are populated
+    // from the same ThemeViewModel and are independent QtObjects.
     readonly property QtObject accent: QtObject {
         readonly property color base: root._vm.accentBase
         readonly property color deep: root._vm.accentDeep
@@ -27,19 +27,8 @@ QtObject {
         readonly property color on:       root._vm.brandOn
         readonly property color onMuted:  root._vm.brandOnMuted
         readonly property color text:     root._vm.brandText
-        // DEPRECATED aliases — removed in PR 2. Pure bindings to the new tokens.
-        readonly property color admin:      base
-        readonly property color adminHover: deep
-        readonly property color adminSoft:  soft
-        readonly property color kiosk:      root.accent.base
-        readonly property color kioskHover: root.accent.deep
-        readonly property color kioskSoft:  root.accent.soft
-        readonly property color onPrimary:  on
-        readonly property color onKiosk:    root.accent.on
     }
 
-    // DEPRECATED alias — removed in PR 2.
-    readonly property color secondary:     accent.base
     readonly property color card:          root._vm.card
     readonly property color appBackground: root._vm.appBackground
     readonly property color border:        root._vm.border

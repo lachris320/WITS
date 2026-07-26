@@ -15,7 +15,7 @@ private slots:
     void refreshEmitsChangedAfterExternalSetCurrent();
     void regenerateFromLogoRethemesAndNotifies();
     void getterIsLiveNotCached();
-    void roleAccessorsMatchDeprecatedAliases();
+    void roleAccessorsReadEngine();
 
 private:
     QString writeSolidPng(const QString &path, const QColor &fill);
@@ -33,7 +33,7 @@ void TestThemeViewModel::mapsCurrentBrandRole()
 {
     BrandTheme::setCurrent(BrandTheme::fallbackPalette());
     ThemeViewModel vm;
-    QCOMPARE(vm.adminPrimary(), BrandTheme::current().brandBase);
+    QCOMPARE(vm.brandBase(), BrandTheme::current().brandBase);
 }
 
 void TestThemeViewModel::refreshEmitsChangedAfterExternalSetCurrent()
@@ -48,7 +48,7 @@ void TestThemeViewModel::refreshEmitsChangedAfterExternalSetCurrent()
 
     vm.refresh();
     QCOMPARE(spy.count(), 1);
-    QCOMPARE(vm.adminPrimary(), QColor(0x12, 0x34, 0x56));
+    QCOMPARE(vm.brandBase(), QColor(0x12, 0x34, 0x56));
 }
 
 void TestThemeViewModel::regenerateFromLogoRethemesAndNotifies()
@@ -66,8 +66,8 @@ void TestThemeViewModel::regenerateFromLogoRethemesAndNotifies()
     QCOMPARE(vm.regenerateFromImportedLogo(logo),
              ThemeViewModel::RegenResult::Ok);   // Auto mode -> re-extracts a usable palette
     QCOMPARE(spy.count(), 1);
-    // A chromatic logo yields a branded admin role distinct from the fallback.
-    QVERIFY(vm.adminPrimary() != BrandTheme::fallbackPalette().brandBase);
+    // A chromatic logo yields a branded base role distinct from the fallback.
+    QVERIFY(vm.brandBase() != BrandTheme::fallbackPalette().brandBase);
 }
 
 void TestThemeViewModel::getterIsLiveNotCached()
@@ -80,19 +80,18 @@ void TestThemeViewModel::getterIsLiveNotCached()
     BrandTheme::setCurrent(custom);   // change the engine, do NOT call vm.refresh()
 
     // Single source of truth: the getter reflects the engine immediately.
-    QCOMPARE(vm.adminPrimary(), QColor(0x0A, 0x0B, 0x0C));
+    QCOMPARE(vm.brandBase(), QColor(0x0A, 0x0B, 0x0C));
 }
 
-void TestThemeViewModel::roleAccessorsMatchDeprecatedAliases()
+void TestThemeViewModel::roleAccessorsReadEngine()
 {
     BrandTheme::setCurrent(BrandTheme::fallbackPalette());
     ThemeViewModel vm;
 
-    // New role accessors are the one source of truth; old names must forward.
+    // The role accessors are the one source of truth, read straight from the
+    // engine's current palette.
     QCOMPARE(vm.brandBase(), BrandTheme::current().brandBase);
     QCOMPARE(vm.accentBase(), BrandTheme::current().accentBase);
-    QCOMPARE(vm.adminPrimary(), vm.brandBase());
-    QCOMPARE(vm.secondary(), vm.accentBase());
 
     // Metaobject check: proves the Q_PROPERTY (what QML sees), not just the
     // C++ method, is registered under the new role name — catches a typo'd

@@ -176,8 +176,8 @@ Item {
         dateText: "Monday, July 6, 2026"
         clockText: "8:04:11 AM"
     }
-    LPulseDot  { id: pd; color: Theme.secondary; pulseDuration: 900 }
-    LEyebrow   { id: eb; text: "EYEBROW"; color: Theme.secondary }
+    LPulseDot  { id: pd; color: Theme.accent.base; pulseDuration: 900 }
+    LEyebrow   { id: eb; text: "EYEBROW"; color: Theme.accent.base }
     Rectangle  { id: gr; width: 10; height: 10; gradient: LKioskGradient {} }
 
     // LSidebarBrand fixtures: no-logo (placeholder path) and a synthetic
@@ -204,21 +204,21 @@ Item {
             verify(ph !== null); verify(brandNoLogo !== null); verify(brandWithLogo !== null);
         }
         function test_buttonBindsBrandToken() {
-            // LButton Primary fill binds Theme.brand.admin — not a local literal.
-            compare(b.fillColor, Theme.brand.admin);
+            // LButton Primary fill binds Theme.brand.base — not a local literal.
+            compare(b.fillColor, Theme.brand.base);
         }
         function test_cardBindsCardToken() {
             compare(c.color, Theme.card);
         }
         function test_pulseDotCreatedWithColorAndDuration() {
             verify(pd !== null);
-            compare(pd.color, Theme.secondary);
+            compare(pd.color, Theme.accent.base);
             compare(pd.pulseDuration, 900);
         }
         function test_eyebrowDefaultsAndOverrides() {
             verify(eb !== null);
             compare(eb.text, "EYEBROW");
-            compare(eb.color, Theme.secondary);
+            compare(eb.color, Theme.accent.base);
             // QFont stores letterSpacing in 26.6 fixed-point (1/64px), so a
             // literal 1.4 round-trips as 1.390625 regardless of call site —
             // fuzzyCompare tolerates that quirk without weakening the check.
@@ -230,7 +230,7 @@ Item {
             verify(gr.gradient !== null);
             compare(gr.gradient.stops.length, 2);
             // Phase 4d role map: kiosk structure flipped gold->maroon; the gradient
-            // now derives from brand.base->brand.deep (was brand.kiosk/kioskHover).
+            // now derives from brand.base->brand.deep.
             compare(gr.gradient.stops[0].color, Theme.brand.base);
             compare(gr.gradient.stops[1].color, Theme.brand.deep);
         }
@@ -498,7 +498,7 @@ Item {
             verify(row !== null);
             tryCompare(row, "opacity", 1); // let any pending entrance settle first
             var restColor = row.color;
-            var hoverColor = Qt.alpha(Theme.brand.admin, 0.06);
+            var hoverColor = Qt.alpha(Theme.brand.base, 0.06);
 
             mouseMove(tAnimated, 2, 2); // neutral point, away from any row
             compare(row.isHovered, false);
