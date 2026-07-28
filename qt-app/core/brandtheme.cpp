@@ -532,6 +532,15 @@ bool isNewer(const BrandingConfig &remote, const BrandingConfig &local)
         && (!local.updatedAt.isValid() || remote.updatedAt > local.updatedAt);
 }
 
+QString logoContentHash(const QString &logoPath)
+{
+    QFile file(logoPath);
+    if (!file.open(QIODevice::ReadOnly))
+        return QString();
+    return QString::fromLatin1(
+        QCryptographicHash::hash(file.readAll(), QCryptographicHash::Sha256).toHex());
+}
+
 bool regenerateFromLogo(BrandingConfig &config, const QString &logoPath, QString *errorMsg)
 {
     // Manual-mode hook (PRD condition 8): auto-regeneration is skipped
@@ -548,12 +557,7 @@ bool regenerateFromLogo(BrandingConfig &config, const QString &logoPath, QString
         return false;
     }
 
-    QFile file(logoPath);
-    QString hash;
-    if (file.open(QIODevice::ReadOnly)) {
-        hash = QString::fromLatin1(
-            QCryptographicHash::hash(file.readAll(), QCryptographicHash::Sha256).toHex());
-    }
+    const QString hash = logoContentHash(logoPath);
 
     config.palette = palette;
     // The gate returns THE fallback object on failure, so an exact palette

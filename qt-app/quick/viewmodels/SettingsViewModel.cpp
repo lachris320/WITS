@@ -18,6 +18,7 @@
 #include "AdminSession.h"
 #include "HttpForm.h"
 #include "apiconfig.h"
+#include "brandtheme.h"
 #include "reportcontroller.h"
 
 SettingsViewModel::SettingsViewModel(QObject *parent)
@@ -365,15 +366,8 @@ QUrl SettingsViewModel::defaultManifestUrl(const QString &department) const
 
 QString SettingsViewModel::logoHashFor(const QString &path) const
 {
-    // Recomputed inline (not shared with BrandTheme) — a logo file is tiny, the
-    // double read is negligible, and extracting a helper would widen this task
-    // into witscore for three lines. The expression and format are byte-identical
-    // to brandtheme.cpp:548-549 so the two hashes are directly comparable.
-    QFile file(path);
-    if (!file.open(QIODevice::ReadOnly))
-        return QString();
-    return QString::fromLatin1(
-        QCryptographicHash::hash(file.readAll(), QCryptographicHash::Sha256).toHex());
+    // Single source of truth for logo content hashing (see BrandTheme).
+    return BrandTheme::logoContentHash(path);
 }
 
 QString SettingsViewModel::lastFallbackLogoHash() const
