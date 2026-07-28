@@ -451,11 +451,22 @@ void TestBrandTheme::vividBrightAccentIsUsable()
 
 void TestBrandTheme::palePastelAccentStillFallsBack()
 {
-    // A genuinely washed-out accent — bright AND low-saturation (a pale
-    // near-white) — must STILL be rejected so the gate keeps its purpose.
-    const QColor blue("#1E40AF"), paleYellow("#FBFBEA"); // val~0.98, sat~0.08
-    const BrandPalette p = BrandTheme::buildPalette(blue, paleYellow);
-    QVERIFY(!BrandTheme::paletteIsUsable(p, blue, paleYellow));
+    // A genuinely washed-out accent must STILL be rejected. This targets the
+    // NEW near-white sub-clause specifically: an accent that is bright
+    // (value > 0.97) AND partly-desaturated (0.15 <= saturation < 0.40) — the
+    // discriminating band. A too-low-saturation colour (< 0.15) would trip the
+    // separate clause-1 and give this fix's band no coverage, so we assert the
+    // derived accent lands IN the band before asserting rejection.
+    const QColor blue("#1E40AF"), paleGold("#FFF0C0");
+    const BrandPalette p = BrandTheme::buildPalette(blue, paleGold);
+    QVERIFY2(p.accentBase.hsvSaturationF() >= 0.15
+             && p.accentBase.hsvSaturationF() < 0.40,
+             qPrintable(QStringLiteral("accent sat=%1 (want [0.15,0.40))")
+                            .arg(p.accentBase.hsvSaturationF())));
+    QVERIFY2(p.accentBase.valueF() > 0.97,
+             qPrintable(QStringLiteral("accent val=%1 (want > 0.97)")
+                            .arg(p.accentBase.valueF())));
+    QVERIFY(!BrandTheme::paletteIsUsable(p, blue, paleGold));
 }
 
 void TestBrandTheme::enforceContrastReachesTarget()
