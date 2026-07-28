@@ -125,6 +125,11 @@ Rectangle {
                 id: guestBtn
                 Layout.fillWidth: true
                 variant: "Outline"
+                // Phase 4d role map: this panel is maroon after the gradient
+                // flip, so the Outline default (dark-slate Theme.text on a
+                // Theme.border edge) would be illegible. onBrand renders a
+                // cream brand.on label + a translucent light border instead.
+                onBrand: true
                 text: qsTr("Guest log in")
                 visible: panel.vm ? panel.vm.guestEnabled : false
                 onClicked: if (panel.vm) panel.vm.requestGuest()

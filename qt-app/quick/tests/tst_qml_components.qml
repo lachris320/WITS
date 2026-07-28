@@ -14,6 +14,13 @@ Item {
 
     LButton    { id: b;  text: "OK" }
     LCard      { id: c }
+    // Outline-variant factory for the onBrand label-colour test: each case
+    // needs a fresh instance so onBrand can be set at construction, matching
+    // how BrandPanel's guest button opts in.
+    Component {
+        id: outlineBtnComponent
+        LButton { variant: "Outline"; text: "Guest" }
+    }
     ListModel {
         id: tableFixture
         ListElement { date: "2026-07-13"; name: "Maria Santos"; timeIn: "08:14" }
@@ -206,6 +213,15 @@ Item {
         function test_buttonBindsBrandToken() {
             // LButton Primary fill binds Theme.brand.base — not a local literal.
             compare(b.fillColor, Theme.brand.base);
+        }
+        function test_outlineButtonOnBrandUsesCreamLabel() {
+            // Outline on a maroon brand panel must render its label in brand.on
+            // (cream), not the light-bg Theme.text (dark slate) which is illegible.
+            var onB = createTemporaryObject(outlineBtnComponent, host, { onBrand: true });
+            verify(onB !== null);
+            compare(onB.contentItem.color.toString(), Theme.brand.on.toString());
+            var offB = createTemporaryObject(outlineBtnComponent, host, { onBrand: false });
+            compare(offB.contentItem.color.toString(), Theme.text.toString());
         }
         function test_cardBindsCardToken() {
             compare(c.color, Theme.card);
