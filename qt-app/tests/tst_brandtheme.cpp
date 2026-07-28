@@ -52,6 +52,8 @@ private slots:
     void greyscaleLogoFallsBack();
     void buildPaletteIsCallableFromSeeds();
     void badSeedsEitherMeetInvariantsOrFallBack();
+    void vividBrightAccentIsUsable();
+    void palePastelAccentStillFallsBack();
 
     // Parameterised contrast enforcement (Task 5)
     void enforceContrastReachesTarget();
@@ -423,7 +425,7 @@ void TestBrandTheme::badSeedsEitherMeetInvariantsOrFallBack()
         QVERIFY(contrastRatio(p.brandOn,    p.brandBase)  >= 4.5);
         QVERIFY(contrastRatio(p.accentBase, p.brandBase)  >= 3.0);
         QVERIFY(p.accentBase.hsvSaturationF() >= 0.15);   // not washed out
-        QVERIFY(p.accentBase.valueF() <= 0.97);           // not near-white
+        QVERIFY(p.accentBase.valueF() <= 0.97 || p.accentBase.hsvSaturationF() >= 0.40); // vivid OR not-bright
     }
 
     // The reference maroon/gold brand MUST survive the gate — pins it against
@@ -431,6 +433,29 @@ void TestBrandTheme::badSeedsEitherMeetInvariantsOrFallBack()
     QVERIFY(BrandTheme::paletteIsUsable(
         BrandTheme::buildPalette(QColor("#7E1A15"), QColor("#E8B10E")),
         QColor("#7E1A15"), QColor("#E8B10E")));
+}
+
+void TestBrandTheme::vividBrightAccentIsUsable()
+{
+    using BrandColorMath::contrastRatio;
+    // A blue+vivid-yellow brand (value≈1.0, saturation≈1.0) must NOT be
+    // rejected as "near-white" — it is vivid, and its logo must theme the app.
+    const QColor blue("#1E40AF"), yellow("#FFD700");
+    const BrandPalette p = BrandTheme::buildPalette(blue, yellow);
+    QVERIFY(BrandTheme::paletteIsUsable(p, blue, yellow));
+    // And the accent it produced is actually yellow-ish, not the fallback.
+    const double h = p.accentBase.hsvHueF() * 360.0;
+    QVERIFY2(h >= 40.0 && h <= 70.0, qPrintable(QString::number(h))); // yellow band
+    QVERIFY(p.accentBase != BrandTheme::fallbackPalette().accentBase);
+}
+
+void TestBrandTheme::palePastelAccentStillFallsBack()
+{
+    // A genuinely washed-out accent — bright AND low-saturation (a pale
+    // near-white) — must STILL be rejected so the gate keeps its purpose.
+    const QColor blue("#1E40AF"), paleYellow("#FBFBEA"); // val~0.98, sat~0.08
+    const BrandPalette p = BrandTheme::buildPalette(blue, paleYellow);
+    QVERIFY(!BrandTheme::paletteIsUsable(p, blue, paleYellow));
 }
 
 void TestBrandTheme::enforceContrastReachesTarget()

@@ -169,6 +169,7 @@ constexpr double kMinHueSeparationDeg = 60.0;
 constexpr double kMinSeedHueSeparationDeg = 30.0;
 constexpr double kMinAccentSaturation = 0.15; // accentBase must not be washed out
 constexpr double kMaxAccentValue = 0.97;      // accentBase must not be near-white
+constexpr double kNearWhiteMaxSaturation = 0.40; // above this, a bright colour is vivid, not near-white
 constexpr double kHoverShade = -0.28;
 constexpr double kSoftMixToWhite = 0.90;
 constexpr double kOnColorDeepShade = -0.60;
@@ -391,9 +392,14 @@ bool paletteIsUsable(const BrandPalette &p, const QColor &primarySeed,
     if (hueDistanceDeg(primaryHue, secondaryHue) < kMinSeedHueSeparationDeg)
         return false;
 
-    // (3) The derived accent must not be washed out or near-white.
+    // (3) The derived accent must not be washed out. "Washed out" = either too
+    // grey (low saturation) OR near-white (bright AND desaturated). A vivid,
+    // fully-saturated bright colour (e.g. a pure yellow at value 1.0) is NOT
+    // washed out and must pass — rejecting it silently fell legitimate
+    // bright-brand logos (e.g. blue+yellow) back to the default theme.
     if (p.accentBase.hsvSaturationF() < kMinAccentSaturation
-        || p.accentBase.valueF() > kMaxAccentValue)
+        || (p.accentBase.valueF() > kMaxAccentValue
+            && p.accentBase.hsvSaturationF() < kNearWhiteMaxSaturation))
         return false;
 
     // (4) Split-contrast floors for the text/graphical roles.
