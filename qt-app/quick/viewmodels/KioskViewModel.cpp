@@ -6,13 +6,13 @@
 
 #include "appsettings.h"
 #include <QDateTime>
-#include <QFileInfo>
 #include <QQuickWindow>   // complete type: installRfid() calls window->installEventFilter()
 #include "apiconfig.h"
 #include "loginparser.h"
 #include "HttpForm.h"
 #include "RfidQuickFilter.h"
 #include "AdminSession.h"
+#include "SchoolInfoUtil.h"
 
 KioskViewModel::KioskViewModel(QObject *parent)
     : QObject(parent)
@@ -40,15 +40,15 @@ bool KioskViewModel::loadSchoolInfo(QSettings &settings)
     const QString hours   = settings.value(QStringLiteral("school/libraryHours"),
                                            QStringLiteral("6 AM – 5 PM")).toString();
 
-    // Only expose a URL when the configured file is actually there right now.
-    // This is the graceful-degradation seam (identical to
-    // SchoolInfoViewModel::loadFrom): QML keys its placeholder fallback off
-    // hasLogo, never off "is logoUrl non-empty" or a raw path string, so a
-    // rotted path can never reach an Image element. Re-statting on every
-    // reload is also what lets a deleted logo flip hasLogo back to false.
+    // Graceful-degradation logo seam, shared with SchoolInfoViewModel via
+    // SchoolInfoUtil::resolveLogoUrl so the two surfaces cannot drift: QML
+    // keys its placeholder fallback off hasLogo, never off "is logoUrl
+    // non-empty" or a raw path string, so a rotted path can never reach an
+    // Image element. Re-statting on every reload is what lets a deleted logo
+    // flip hasLogo back to false.
     const QString logoPath = settings.value(QStringLiteral("school/logoPath")).toString();
-    const bool hasLogo = !logoPath.isEmpty() && QFileInfo::exists(logoPath);
-    const QUrl logoUrl = hasLogo ? QUrl::fromLocalFile(logoPath) : QUrl();
+    bool hasLogo = false;
+    const QUrl logoUrl = SchoolInfoUtil::resolveLogoUrl(logoPath, &hasLogo);
 
     const bool changed = name != m_schoolName || address != m_schoolAddress
                       || hours != m_libraryHours || hasLogo != m_hasLogo

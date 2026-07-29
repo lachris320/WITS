@@ -76,6 +76,7 @@ qt_add_qml_module(witsquickmodule
         viewmodels/Navigator.h viewmodels/Navigator.cpp
         viewmodels/KioskViewModel.h viewmodels/KioskViewModel.cpp
         viewmodels/SchoolInfoViewModel.h viewmodels/SchoolInfoViewModel.cpp
+        viewmodels/SchoolInfoUtil.h viewmodels/SchoolInfoUtil.cpp
         viewmodels/GuestViewModel.h viewmodels/GuestViewModel.cpp
         viewmodels/DashboardViewModel.h viewmodels/DashboardViewModel.cpp
         models/RecentLoginsModel.h models/RecentLoginsModel.cpp
@@ -188,6 +189,14 @@ wits_add_qttest(tst_schoolinfoviewmodel
     SOURCES tests/tst_schoolinfoviewmodel.cpp
     LIBS witsquickmodule
     OFFSCREEN)
+
+# --- SchoolInfoUtil pure-helper unit test (C++ QtTest). Pure logic over
+# QString/QUrl/QFileInfo (no GUI, no rendering -> QTEST_APPLESS_MAIN, no
+# OFFSCREEN). Guards the shared logo graceful-degradation seam that both
+# KioskViewModel and SchoolInfoViewModel delegate to. ---
+wits_add_qttest(tst_schoolinfoutil
+    SOURCES tests/tst_schoolinfoutil.cpp
+    LIBS witsquickmodule)
 
 # --- GuestViewModel unit test (C++ QtTest, offscreen) ---
 wits_add_qttest(tst_guestviewmodel
