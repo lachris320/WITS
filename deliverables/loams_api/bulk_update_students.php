@@ -1,16 +1,21 @@
 <?php
 header('Content-Type: application/json');
-
-// Enable error logging for debugging
 error_reporting(E_ALL);
 ini_set('display_errors', 0);
 ini_set('log_errors', 1);
 
-$data = json_decode(file_get_contents('php://input'), true);
+include "db.php";
+include "auth_helper.php";
+requireAdminAuth($conn);   // 401s before any read of the payload / any UPDATE
+
+// The student array is a JSON string in a single form field (the 8-field
+// objects do not urlencode cleanly); admin_key is a sibling form field.
+$studentsJson = isset($_POST['students']) ? $_POST['students'] : '';
+$data = array('students' => json_decode($studentsJson, true));
 
 if (!isset($data['students']) || !is_array($data['students'])) {
     echo json_encode(array(
-        'status' => 'error', 
+        'status' => 'error',
         'message' => 'Invalid data format. Expected students array.'
     ));
     exit;
@@ -18,18 +23,8 @@ if (!isset($data['students']) || !is_array($data['students'])) {
 
 if (count($data['students']) === 0) {
     echo json_encode(array(
-        'status' => 'error', 
+        'status' => 'error',
         'message' => 'No students provided for update.'
-    ));
-    exit;
-}
-
-$conn = new mysqli("localhost", "root", "", "wits_app");
-
-if ($conn->connect_error) {
-    echo json_encode(array(
-        'status' => 'error', 
-        'message' => 'Database connection failed: ' . $conn->connect_error
     ));
     exit;
 }
@@ -40,13 +35,13 @@ $errors = array();
 
 $conn->autocommit(FALSE); // Start transaction (compatible with older MySQL)
 
-$stmt = $conn->prepare("UPDATE students 
-    SET name=?, course=?, year_level=?, department=?, gender=?, status=? 
+$stmt = $conn->prepare("UPDATE students
+    SET name=?, course=?, year_level=?, department=?, gender=?, status=?
     WHERE school_id=?");
 
 if (!$stmt) {
     echo json_encode(array(
-        'status' => 'error', 
+        'status' => 'error',
         'message' => 'Prepare failed: ' . $conn->error
     ));
     $conn->close();
@@ -60,7 +55,7 @@ foreach ($data['students'] as $index => $student) {
         $failed++;
         continue;
     }
-    
+
     // Use isset() instead of ?? for PHP 5.x compatibility
     $name = isset($student['name']) ? $student['name'] : '';
     $course = isset($student['course']) ? $student['course'] : '';
@@ -69,8 +64,8 @@ foreach ($data['students'] as $index => $student) {
     $gender = isset($student['gender']) ? $student['gender'] : '';
     $status = isset($student['status']) ? $student['status'] : '';
     $school_id = $student['school_id'];
-    
-    $stmt->bind_param("sssssss", 
+
+    $stmt->bind_param("sssssss",
         $name,
         $course,
         $year_level,
@@ -79,7 +74,7 @@ foreach ($data['students'] as $index => $student) {
         $status,
         $school_id
     );
-    
+
     if ($stmt->execute()) {
         if ($stmt->affected_rows > 0) {
             $updated++;
@@ -103,9 +98,9 @@ if ($failed > 0) {
     ));
 } else {
     $conn->commit();
-    
+
     $message = "$updated student(s) updated successfully";
-    
+
     echo json_encode(array(
         'status' => 'success',
         'updated' => $updated,
