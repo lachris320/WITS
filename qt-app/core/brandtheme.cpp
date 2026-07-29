@@ -23,22 +23,38 @@ using BrandColorMath::shade;
 
 namespace BrandTheme {
 
+// Default (fallback) brand palette — an intentional navy + amber product
+// palette, decoupled from the legacy blue/green theme.h constants. Shown on a
+// fresh install and as the graceful fallback when a logo can't produce a
+// usable palette, so it must be internally legible on its own. Named here
+// (the anon namespace lower in the file is out of scope at fallbackPalette())
+// so the navy literal is defined ONCE and shared by brandDeep and accentOn.
+namespace {
+const char *const kDefaultBrandBase   = "#1E3A8A"; // navy
+const char *const kDefaultBrandDeep   = "#172554"; // darker navy (hover/pressed)
+const char *const kDefaultBrandOnMuted = "#B9C7E6"; // light periwinkle; inactive nav labels on navy
+const char *const kDefaultAccentBase  = "#F59E0B"; // amber
+const char *const kDefaultAccentDeep  = "#D97706"; // darker amber (hover/pressed)
+const char *const kDefaultAccentOn    = kDefaultBrandDeep; // on-amber text = brand-deep navy
+const char *const kDefaultAccentText  = "#92400E"; // dark amber-brown; gold-as-text on white cards
+} // namespace
+
 BrandPalette fallbackPalette()
 {
     const QColor white(Qt::white);
     BrandPalette p;
-    // Brand roles — verbatim theme.h constants (the PRD's fallback rule).
-    p.brandBase    = QColor(WitsTheme::Color::AdminPrimary);
-    p.brandDeep    = QColor(WitsTheme::Color::AdminPrimaryHover);
+    // Brand roles — intentional navy product palette (decoupled from theme.h).
+    p.brandBase    = QColor(kDefaultBrandBase);
+    p.brandDeep    = QColor(kDefaultBrandDeep);
     p.brandOn      = white;
     p.brandSoft    = mix(p.brandBase, white, 0.90);
-    p.brandOnMuted = QColor("#EFC9A8"); // legacy onBrandMuted literal, now a palette field
+    p.brandOnMuted = QColor(kDefaultBrandOnMuted); // muted nav label on the navy sidebar
     p.brandText    = p.brandBase;       // brand-as-text on light; fallback == base
-    p.accentBase   = QColor(WitsTheme::Color::KioskPrimary);
-    p.accentDeep   = QColor(WitsTheme::Color::KioskPrimaryHover);
-    p.accentOn     = white; // legacy-faithful; fallback is exempt from MinContrast
+    p.accentBase   = QColor(kDefaultAccentBase);
+    p.accentDeep   = QColor(kDefaultAccentDeep);
+    p.accentOn     = QColor(kDefaultAccentOn); // navy text on amber (white ~1.9:1 is illegible)
     p.accentSoft   = mix(p.accentBase, white, 0.90);
-    p.accentText   = QColor("#8a6a08"); // legacy accent-as-text; fallback constant
+    p.accentText   = QColor(kDefaultAccentText); // gold-as-text on a light card
     // Neutral roles
     p.sidebarBase   = QColor(WitsTheme::Color::SidebarBase);
     p.card          = QColor(WitsTheme::Color::Card);
