@@ -37,19 +37,17 @@ Rectangle {
         // title's own width, fitting inside 390px with margin.
         ColumnLayout {
             spacing: Theme.spacing.xl
-            Rectangle {
-                Layout.preferredWidth: 96; Layout.preferredHeight: 96
-                radius: width / 2
-                color: Theme.card
-                border.width: 3
-                border.color: Theme.accent.base
-                // Logo image lands in Phase 4 (admin logo import); circle placeholder now.
-                Text {
-                    anchors.centerIn: parent
-                    text: qsTr("LOGO"); color: Theme.mutedText
-                    font.family: Theme.typography.sans
-                    font.pixelSize: Theme.typography.eyebrow
-                }
+            // The school logo imported in admin Settings, cropped to a circle
+            // by the same LLogoCircle the admin sidebar uses; it falls back to
+            // a "LOGO" placeholder circle when no logo is configured. 96px /
+            // 3px ring here vs the sidebar's 52 / 2 — this is the hero badge.
+            LLogoCircle {
+                logoUrl: panel.vm ? panel.vm.logoUrl : ""
+                hasLogo: panel.vm ? panel.vm.hasLogo : false
+                size: 96
+                ringWidth: 3
+                Layout.preferredWidth: 96
+                Layout.preferredHeight: 96
             }
             ColumnLayout {
                 spacing: Theme.spacing.xs

@@ -6,6 +6,7 @@
 
 #include "appsettings.h"
 #include <QDateTime>
+#include <QFileInfo>
 #include <QQuickWindow>   // complete type: installRfid() calls window->installEventFilter()
 #include "apiconfig.h"
 #include "loginparser.h"
@@ -21,17 +22,54 @@ KioskViewModel::KioskViewModel(QObject *parent)
     m_rfidClock.start();
 
     // School info + guest toggle: cache the legacy QSettings keys. The admin
-    // surface (Phase 4) will write these live; here we read them at startup.
+    // Settings screen writes these live; loadSchoolInfo() is re-run by
+    // reload() whenever the kiosk surface comes back into view.
     AppSettings s;
-    m_schoolName    = s.value(QStringLiteral("school/name")).toString();
-    m_schoolAddress = s.value(QStringLiteral("school/address")).toString();
-    m_libraryHours  = s.value(QStringLiteral("school/libraryHours"),
-                              QStringLiteral("6 AM – 5 PM")).toString();
-    m_guestEnabled  = s.value(QStringLiteral("kiosk/guestEnabled"), false).toBool();
+    loadSchoolInfo(s);
+    m_guestEnabled = s.value(QStringLiteral("kiosk/guestEnabled"), false).toBool();
 
     connect(m_clockTimer, &QTimer::timeout, this, &KioskViewModel::tickClock);
     m_clockTimer->start(1000);
     tickClock();   // populate immediately, no 1s blank
+}
+
+bool KioskViewModel::loadSchoolInfo(QSettings &settings)
+{
+    const QString name    = settings.value(QStringLiteral("school/name")).toString();
+    const QString address = settings.value(QStringLiteral("school/address")).toString();
+    const QString hours   = settings.value(QStringLiteral("school/libraryHours"),
+                                           QStringLiteral("6 AM – 5 PM")).toString();
+
+    // Only expose a URL when the configured file is actually there right now.
+    // This is the graceful-degradation seam (identical to
+    // SchoolInfoViewModel::loadFrom): QML keys its placeholder fallback off
+    // hasLogo, never off "is logoUrl non-empty" or a raw path string, so a
+    // rotted path can never reach an Image element. Re-statting on every
+    // reload is also what lets a deleted logo flip hasLogo back to false.
+    const QString logoPath = settings.value(QStringLiteral("school/logoPath")).toString();
+    const bool hasLogo = !logoPath.isEmpty() && QFileInfo::exists(logoPath);
+    const QUrl logoUrl = hasLogo ? QUrl::fromLocalFile(logoPath) : QUrl();
+
+    const bool changed = name != m_schoolName || address != m_schoolAddress
+                      || hours != m_libraryHours || hasLogo != m_hasLogo
+                      || logoUrl != m_logoUrl;
+
+    m_schoolName    = name;
+    m_schoolAddress = address;
+    m_libraryHours  = hours;
+    m_hasLogo       = hasLogo;
+    m_logoUrl       = logoUrl;
+    return changed;
+}
+
+void KioskViewModel::reload()
+{
+    // The writer (SettingsController::save) uses its own QSettings object over
+    // the same store; sync() is what makes those writes visible here.
+    AppSettings s;
+    s.sync();
+    if (loadSchoolInfo(s))
+        emit schoolInfoChanged();
 }
 
 void KioskViewModel::tickClock()

@@ -121,5 +121,15 @@ Item {
             // No student yet -> hero shows the idle prompt path (hasStudent false).
             verify(realScreen.width === 1280);
         }
+
+        // The refresh hook the Navigator handler (and Component.onCompleted)
+        // fire when the kiosk surface is shown. Mirrors AdminScreen's
+        // reloadSchoolInfo() contract: present, callable, and harmless when
+        // nothing in QSettings moved.
+        function test_kioskExposesSchoolInfoReloadHook() {
+            verify(typeof realScreen.reloadSchoolInfo === "function");
+            realScreen.reloadSchoolInfo();   // idempotent, signal-quiet no-op
+            realScreen.reloadSchoolInfo();
+        }
     }
 }
