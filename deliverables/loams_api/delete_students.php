@@ -1,32 +1,42 @@
 <?php
 header('Content-Type: application/json');
+include "db.php";
+include "auth_helper.php";
+requireAdminAuth($conn);   // 401s before any read of the payload / any DELETE
 
-$data = json_decode(file_get_contents('php://input'), true);
-
-if (!isset($data['school_ids']) || !is_array($data['school_ids'])) {
+// school_ids arrives as a repeated form field: school_ids[]=A&school_ids[]=B
+$schoolIds = isset($_POST['school_ids']) ? $_POST['school_ids'] : null;
+if (!is_array($schoolIds) || count($schoolIds) === 0) {
     echo json_encode(['status' => 'error', 'message' => 'Invalid data']);
     exit;
 }
 
-$conn = new mysqli("localhost", "root", "", "wits_app");
+$conn->begin_transaction();
+try {
+    // 1. Cascade: delete the affected students' visit history first.
+    $delVisits = $conn->prepare("DELETE FROM library_visits WHERE student_id = ?");
+    $delStudent = $conn->prepare("DELETE FROM students WHERE school_id = ?");
 
-if ($conn->connect_error) {
-    echo json_encode(['status' => 'error', 'message' => 'Connection failed']);
-    exit;
-}
+    $deleted = 0;
+    foreach ($schoolIds as $id) {
+        $delVisits->bind_param("s", $id);
+        $delVisits->execute();
 
-$deleted = 0;
-$stmt = $conn->prepare("DELETE FROM students WHERE school_id = ?");
-
-foreach ($data['school_ids'] as $id) {
-    $stmt->bind_param("s", $id);
-    if ($stmt->execute() && $stmt->affected_rows > 0) {
-        $deleted++;
+        $delStudent->bind_param("s", $id);
+        if ($delStudent->execute() && $delStudent->affected_rows > 0) {
+            $deleted++;
+        }
     }
+
+    $conn->commit();
+    echo json_encode(['status' => 'success', 'deleted' => $deleted]);
+
+    $delVisits->close();
+    $delStudent->close();
+} catch (Exception $e) {
+    $conn->rollback();
+    echo json_encode(['status' => 'error', 'message' => 'Failed to delete students.']);
 }
 
-echo json_encode(['status' => 'success', 'deleted' => $deleted]);
-
-$stmt->close();
 $conn->close();
 ?>
