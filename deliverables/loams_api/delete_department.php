@@ -4,6 +4,8 @@ ini_set('display_errors',1);
 
 header("Content-Type: application/json");
 include "db.php";
+include "auth_helper.php";
+requireAdminAuth($conn);   // 401s on missing/invalid admin_key before any mutation
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $department = isset($_POST['department']) ? trim($_POST['department']) : '';
