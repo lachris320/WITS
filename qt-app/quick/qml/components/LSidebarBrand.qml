@@ -9,14 +9,8 @@ import LOAMS
 // stays independently testable with literal fixture values and reusable
 // without a SchoolInfoViewModel in scope.
 //
-// Circular photo crop: QtQuick has no built-in rounded-image clip (Rectangle
-// clip:true clips to the bounding box, not the rounded shape), and this repo
-// links no shader-effects module (no QtQuick.Effects / Qt5Compat.GraphicalEffects
-// dependency exists yet). Rather than add one for a single decorative crop,
-// this draws the loaded Image onto a Canvas with a circular clip path — both
-// types are part of the core QtQuick module already in use everywhere else,
-// so this needs no new CMake link and no GPU/shader support, which keeps it
-// safe under the OFFSCREEN QuickTest platform.
+// The circular logo badge itself lives in LLogoCircle (shared with the kiosk's
+// BrandPanel) — see that file for why the circular crop is drawn on a Canvas.
 RowLayout {
     id: brand
     property string schoolName: ""
@@ -27,78 +21,13 @@ RowLayout {
 
     readonly property int logoSize: 52
 
-    Item {
-        id: logoFrame
+    LLogoCircle {
+        logoUrl: brand.logoUrl
+        hasLogo: brand.hasLogo
+        size: brand.logoSize
+        ringWidth: 2                 // reference: 2px gold border on the <img>
         Layout.preferredWidth: brand.logoSize
         Layout.preferredHeight: brand.logoSize
-
-        // Loads off-scene; Image loading is independent of `visible`, so
-        // this still decodes even though nothing ever draws it directly.
-        Image {
-            id: logoImage
-            objectName: "logoImage"
-            anchors.fill: parent
-            source: brand.hasLogo ? brand.logoUrl : ""
-            fillMode: Image.PreserveAspectCrop
-            asynchronous: true
-            cache: false
-            visible: false
-            onStatusChanged: logoCanvas.requestPaint()
-        }
-
-        Canvas {
-            id: logoCanvas
-            objectName: "logoCanvas"
-            anchors.fill: parent
-            renderTarget: Canvas.Image
-            visible: brand.hasLogo && logoImage.status === Image.Ready
-            onVisibleChanged: if (visible) requestPaint()
-            onPaint: {
-                var ctx = getContext("2d");
-                ctx.reset();
-                if (logoImage.status !== Image.Ready)
-                    return;
-                ctx.save();
-                ctx.beginPath();
-                ctx.arc(width / 2, height / 2, width / 2, 0, Math.PI * 2, true);
-                ctx.closePath();
-                ctx.clip();
-                ctx.drawImage(logoImage, 0, 0, width, height);
-                ctx.restore();
-            }
-        }
-
-        // Fallback placeholder: no logo configured, path rotted (VM already
-        // filters that out via hasLogo), or the file hasn't finished/failed
-        // loading yet. Same visual language as the kiosk's BrandPanel circle.
-        Rectangle {
-            id: placeholder
-            objectName: "logoPlaceholder"
-            anchors.fill: parent
-            radius: width / 2
-            visible: !logoCanvas.visible
-            color: Theme.card
-            border.width: 2
-            border.color: Theme.accent.base
-            Text {
-                anchors.centerIn: parent
-                text: qsTr("LOGO")
-                color: Theme.mutedText
-                font.family: Theme.typography.sans
-                font.pixelSize: Theme.typography.eyebrow
-            }
-        }
-
-        // Gold ring over the real photo (reference: 2px gold border on the
-        // <img> itself) — the placeholder above already carries its own.
-        Rectangle {
-            anchors.fill: parent
-            radius: width / 2
-            color: "transparent"
-            border.width: 2
-            border.color: Theme.accent.base
-            visible: logoCanvas.visible
-        }
     }
 
     ColumnLayout {

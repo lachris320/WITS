@@ -346,15 +346,29 @@ Item {
             var anim = findChild(dash, "pageInAnimation");
             verify(anim !== null);
 
+            // The t=0 bindings are asserted with the animation STOPPED. Doing
+            // this while it runs is a race: the animation driver can tick
+            // between restart() and the compares, leaving pageInT already > 0.
+            // Stopped, pageInT is ours alone and the bindings evaluate
+            // synchronously, so these are exact.
+            anim.stop();
             dash.pageInT = 0;
-            anim.restart();
-            // Immediately after reset: content is invisible and raised 16px;
-            // the root Rectangle (background) must never move or fade.
+            // At pageInT === 0: content is invisible and raised 16px; the root
+            // Rectangle (background) must never move or fade.
             compare(contentCol.opacity, 0);
             compare(contentCol.transform[0].y, 16);
             compare(dash.opacity, 1);
 
-            tryCompare(dash, "pageInT", 1);
+            // Now prove the animation actually drives pageInT to 1. Wait on
+            // `running` going false rather than on pageInT reaching 1:
+            // tryCompare compares reals FUZZILY, so it accepts pageInT at
+            // 0.99999914 while the animation is still mid-flight — and the
+            // derived y, (1 - pageInT) * 16, is then a tiny non-zero that
+            // fails compare(y, 0). Waiting for the animation to finish
+            // guarantees it has written the exact `to` value of 1.
+            anim.restart();
+            tryCompare(anim, "running", false);
+            compare(dash.pageInT, 1);
             compare(contentCol.opacity, 1);
             compare(contentCol.transform[0].y, 0);
 

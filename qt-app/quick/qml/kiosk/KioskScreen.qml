@@ -27,8 +27,39 @@ Rectangle {
     }
     GuestViewModel { id: guestVm }
 
+    // Pick up school/name, school/address, school/libraryHours and
+    // school/logoPath written by the admin Settings screen. The kiosk cannot
+    // see SettingsViewModel (it lives inside AdminScreen, which is torn down
+    // before the kiosk is shown), so the hook is the surface change itself —
+    // returning to the kiosk is exactly the moment a stale name or logo would
+    // be looked at. Named function so QuickTests can drive the same path.
+    //
+    // Both call sites are needed and neither is redundant:
+    //  * Component.onCompleted covers today's AppShell, whose Loader swaps
+    //    sourceComponent and so DESTROYS and rebuilds this screen (and its VM)
+    //    on every surface change. The VM constructor re-reads QSettings but
+    //    does not sync() it first; reload() does, which is what actually makes
+    //    another QSettings object's writes visible.
+    //  * The Navigator handler covers a retained screen — if AppShell ever
+    //    keeps the kiosk alive behind admin (a StackView, a visible toggle),
+    //    onCompleted fires once at startup and the screen would otherwise
+    //    never refresh again.
+    // reload() is signal-quiet when nothing moved, so the overlap is free.
+    function reloadSchoolInfo() { kioskVm.reload() }
+    Connections {
+        target: Navigator
+        function onCurrentSurfaceChanged() {
+            if (Navigator.currentSurface === Navigator.Kiosk)
+                screen.reloadSchoolInfo();
+        }
+    }
+
     // Install the RFID filter on the real window once it exists.
-    Component.onCompleted: if (screen.appWindow) kioskVm.installRfid(screen.appWindow)
+    Component.onCompleted: {
+        screen.reloadSchoolInfo();
+        if (screen.appWindow)
+            kioskVm.installRfid(screen.appWindow);
+    }
 
     // Responsive split: side-by-side on wide screens, stacked when narrow.
     GridLayout {

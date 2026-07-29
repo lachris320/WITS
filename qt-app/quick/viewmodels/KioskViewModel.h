@@ -11,6 +11,7 @@
 
 class QNetworkAccessManager;
 class QQuickWindow;
+class QSettings;
 class QTimer;
 class RfidQuickFilter;
 
@@ -45,6 +46,14 @@ class KioskViewModel : public QObject
     Q_PROPERTY(QString schoolName READ schoolName NOTIFY schoolInfoChanged)
     Q_PROPERTY(QString schoolAddress READ schoolAddress NOTIFY schoolInfoChanged)
     Q_PROPERTY(QString libraryHours READ libraryHours NOTIFY schoolInfoChanged)
+    // Kiosk BrandPanel logo. Mirrors SchoolInfoViewModel (the admin sidebar
+    // equivalent) exactly: a bare filesystem path is not a valid Image.source,
+    // so the path from school/logoPath is exposed as a file:// QUrl — and ONLY
+    // when the file actually exists. The path is user-configured and can rot
+    // (moved, deleted, never set), so hasLogo is the single explicit flag QML
+    // keys its placeholder fallback off — never "is logoUrl non-empty".
+    Q_PROPERTY(QUrl logoUrl READ logoUrl NOTIFY schoolInfoChanged)
+    Q_PROPERTY(bool hasLogo READ hasLogo NOTIFY schoolInfoChanged)
     Q_PROPERTY(bool guestEnabled READ guestEnabled NOTIFY guestEnabledChanged)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusChanged)
     Q_PROPERTY(QString statusSeverity READ statusSeverity NOTIFY statusChanged)
@@ -69,6 +78,8 @@ public:
     QString schoolName() const { return m_schoolName; }
     QString schoolAddress() const { return m_schoolAddress; }
     QString libraryHours() const { return m_libraryHours; }
+    QUrl logoUrl() const { return m_logoUrl; }
+    bool hasLogo() const { return m_hasLogo; }
     bool guestEnabled() const { return m_guestEnabled; }
     QString statusMessage() const { return m_statusMessage; }
     QString statusSeverity() const { return m_statusSeverity; }
@@ -78,6 +89,17 @@ public:
     Q_INVOKABLE void handleRfidScan(const QString &code);
     Q_INVOKABLE void installRfid(QQuickWindow *window);
     Q_INVOKABLE void requestGuest();
+
+    // Re-read the school-identity keys (school/name, school/address,
+    // school/libraryHours, school/logoPath) and emit schoolInfoChanged if any
+    // of them actually moved. The kiosk twin of SchoolInfoViewModel::reload():
+    // Phase 4c's admin Settings screen writes those keys mid-session, so a
+    // kiosk VM that only read them in its constructor showed a stale name and
+    // a stale (or vanished) logo until the process restarted. Called from
+    // KioskScreen when the kiosk surface is (re)shown. Idempotent and
+    // signal-quiet when nothing changed, so a save that touched only unrelated
+    // settings does not churn the kiosk's bindings.
+    Q_INVOKABLE void reload();
 
     // Network-free seam: apply an already-parsed student record (used by the
     // network reply handlers AND directly by unit tests).
@@ -100,6 +122,11 @@ signals:
     void guestRequested();
 
 private:
+    // Single reader for every schoolInfoChanged-backed property. Shared by the
+    // constructor and reload() so the two can never drift apart. Returns true
+    // iff any exposed value differs from what it held before.
+    bool loadSchoolInfo(QSettings &settings);
+
     void tickClock();
     void setStatus(const QString &message, const QString &severity);
     void postForm(const QUrl &url, const QString &key, const QString &value,
@@ -118,6 +145,8 @@ private:
     int m_currentHour = -1;
     QString m_clockTime, m_clockMeridiem, m_clockDate, m_greeting;
     QString m_schoolName, m_schoolAddress, m_libraryHours;
+    QUrl m_logoUrl;
+    bool m_hasLogo = false;
     bool m_guestEnabled = false;
     QString m_statusMessage, m_statusSeverity;
 

@@ -10,7 +10,7 @@ Item {
     // own band below all of them for the same reason: interactive fixtures
     // sharing a position/z with a later-declared sibling silently absorb
     // synthetic mouse events meant for the earlier one.
-    width: 400; height: 1100
+    width: 400; height: 1620
 
     LButton    { id: b;  text: "OK" }
     LCard      { id: c }
@@ -200,6 +200,72 @@ Item {
         schoolName: "Example Community Library"
         hasLogo: true
         logoUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    }
+
+    // LLogoCircle fixtures — the badge LSidebarBrand and the kiosk BrandPanel
+    // now share. Same synthetic data-URI PNG as above (1x1 transparent pixel:
+    // no real school asset, no filesystem/network access).
+    LLogoCircle { id: logoCircleEmpty;  hasLogo: false }
+    LLogoCircle {
+        id: logoCircleLoaded
+        hasLogo: true
+        size: 96
+        ringWidth: 3
+        logoUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    }
+    // hasLogo:false must veto a set logoUrl — the VM reports hasLogo:false for
+    // a configured-but-missing file, and loading it anyway would flash a
+    // broken image where the placeholder belongs.
+    LLogoCircle {
+        id: logoCircleVetoed
+        hasLogo: false
+        logoUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    }
+
+    // Pixel-proof fixture for LLogoCircle. The other LLogoCircle fixtures use a
+    // 1x1 transparent PNG, which can only prove *visibility* — a canvas that
+    // paints nothing at all looks identical. This one is a synthetic 24x8
+    // (3:1 landscape) PNG whose horizontal thirds are solid blue | red | green,
+    // so a grabImage() pixel sample can prove three separate things at once:
+    //   - something was actually painted (centre pixel is opaque red, not blank),
+    //   - the paint is a centred "cover" crop, not a stretch (a pixel well left
+    //     of centre is still red; a stretch would put the blue third there),
+    //   - the circular clip still holds (a bounding-box corner is not red).
+    // Synthetic test data, not a school asset: no filesystem/network access.
+    LLogoCircle {
+        id: logoCirclePixel
+        objectName: "logoCirclePixel"
+        y: 1500
+        size: 96
+        ringWidth: 3
+        hasLogo: true
+        logoUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABgAAAAICAIAAABsw6g0AAAAGUlEQVR42mNgYPiPFf3HIcGAU2LUoBFsEAA0Dr9B3WEGXAAAAABJRU5ErkJggg=="
+    }
+
+    // Kiosk BrandPanel fixture with a stub vm, in its own vertical band below
+    // every other fixture: an interactive fixture sharing a position with a
+    // sibling silently absorbs synthetic mouse events meant for the other one
+    // (see the LBarChart/LTable notes above).
+    QtObject {
+        id: kioskStubVm
+        property string schoolName: "Example Community Library"
+        property string schoolAddress: "Test City"
+        property string libraryHours: "6 AM – 5 PM"
+        property string clockTime: "8:04:11"
+        property string clockMeridiem: "AM"
+        property string clockDate: "Monday, July 6, 2026"
+        property bool guestEnabled: false
+        property url logoUrl: ""
+        property bool hasLogo: false
+        function submitLogin(v) {}
+        function requestGuest() {}
+    }
+    BrandPanel {
+        id: kioskPanel
+        objectName: "kioskPanelFixture"
+        y: 1150
+        width: 390; height: 340
+        vm: kioskStubVm
     }
 
     TestCase {
@@ -1002,6 +1068,146 @@ Item {
         }
         function test_modelDrivesOptionCount() {
             compare(cb.count, 3);
+        }
+    }
+
+    TestCase {
+        name: "LLogoCircleRendersLogoOrPlaceholder"
+        when: windowShown
+
+        // No logo: the placeholder circle carries the block, and nothing is
+        // ever handed to the Image. Deleting the `visible: !logoCanvas.visible`
+        // binding on logoPlaceholder (or hardcoding it true) makes this fail.
+        function test_noLogoShowsPlaceholderAndLoadsNothing() {
+            var placeholder = findChild(logoCircleEmpty, "logoPlaceholder");
+            var canvas = findChild(logoCircleEmpty, "logoCanvas");
+            var image = findChild(logoCircleEmpty, "logoImage");
+            verify(placeholder !== null);
+            verify(canvas !== null);
+            compare(placeholder.visible, true);
+            compare(canvas.visible, false);
+            compare(image.source.toString(), "");
+        }
+
+        // A loadable source must switch to the canvas-rendered circular crop
+        // and retire the placeholder. Deleting
+        // `source: hasLogo ? logoUrl : ""` (leaving it always "") makes this
+        // fail: the image never reaches Ready and the placeholder never goes away.
+        function test_loadedLogoHidesPlaceholder() {
+            var image = findChild(logoCircleLoaded, "logoImage");
+            var canvas = findChild(logoCircleLoaded, "logoCanvas");
+            var placeholder = findChild(logoCircleLoaded, "logoPlaceholder");
+            verify(image !== null);
+            tryCompare(image, "status", Image.Ready, 5000);
+            tryCompare(canvas, "visible", true, 5000);
+            compare(placeholder.visible, false);
+        }
+
+        // hasLogo:false wins over a set logoUrl — the veto, not just the
+        // absence of a URL, is what keeps the placeholder up.
+        function test_hasLogoFalseVetoesSetUrl() {
+            var image = findChild(logoCircleVetoed, "logoImage");
+            var placeholder = findChild(logoCircleVetoed, "logoPlaceholder");
+            compare(image.source.toString(), "");
+            compare(placeholder.visible, true);
+        }
+
+        // size drives the badge box; ringWidth drives the gold ring so the
+        // 52/2 sidebar and the 96/3 kiosk badge stay one component.
+        function test_sizeAndRingWidthAreConsumerControlled() {
+            compare(logoCircleEmpty.implicitWidth, 52);
+            compare(logoCircleEmpty.implicitHeight, 52);
+            compare(findChild(logoCircleEmpty, "logoPlaceholder").border.width, 2);
+            compare(logoCircleLoaded.implicitWidth, 96);
+            compare(findChild(logoCircleLoaded, "logoPlaceholder").border.width, 3);
+        }
+    }
+
+    TestCase {
+        name: "LLogoCirclePaintsCroppedPixels"
+        when: windowShown
+
+        // Sampling helper: grabImage()'s image object exposes per-channel
+        // accessors, which compare far more legibly than a packed colour.
+        function isRed(img, x, y) {
+            return img.red(x, y) > 200 && img.green(x, y) < 60 && img.blue(x, y) < 60;
+        }
+
+        // THE regression guard for "the circle is empty". Every other logo test
+        // asserts visibility only, so a Canvas that paints nothing whatsoever
+        // passes them all. Grab the real rendered item and require the centre
+        // pixel to be the source image's colour.
+        function test_canvasActuallyPaintsThePixels() {
+            var canvas = findChild(logoCirclePixel, "logoCanvas");
+            tryCompare(canvas, "visible", true, 5000);
+            wait(50);   // let the queued requestPaint() land before grabbing
+            var img = grabImage(logoCirclePixel);
+            compare(img.width, 96);
+            verify(isRed(img, 48, 48));
+        }
+
+        // Aspect: the source is 3:1 landscape, so a naive
+        // drawImage(src, 0, 0, w, h) stretch would squash all three colour
+        // bands into the circle and paint x=14 blue. A centred cover-crop takes
+        // only the middle (red) square, so every in-circle pixel is red.
+        function test_paintIsCenterCroppedNotStretched() {
+            var canvas = findChild(logoCirclePixel, "logoCanvas");
+            tryCompare(canvas, "visible", true, 5000);
+            wait(50);
+            var img = grabImage(logoCirclePixel);
+            verify(isRed(img, 14, 48));   // left of centre, still inside r=48
+            verify(isRed(img, 82, 48));   // right of centre, still inside r=48
+        }
+
+        // ...and the crop is still a *circle*: a bounding-box corner sits
+        // outside r=48 and must never receive image pixels.
+        function test_paintStaysInsideTheCircle() {
+            var canvas = findChild(logoCirclePixel, "logoCanvas");
+            tryCompare(canvas, "visible", true, 5000);
+            wait(50);
+            var img = grabImage(logoCirclePixel);
+            verify(!isRed(img, 3, 3));
+        }
+    }
+
+    TestCase {
+        name: "BrandPanelSurfacesSchoolLogo"
+        when: windowShown
+
+        function init() {
+            kioskStubVm.hasLogo = false;
+            kioskStubVm.logoUrl = "";
+        }
+
+        // The kiosk used to hardcode a "LOGO" circle Rectangle that could
+        // never show the school's logo. It must now render the shared
+        // LLogoCircle, bound to the vm.
+        function test_kioskUsesSharedLogoCircleBoundToVm() {
+            var placeholder = findChild(kioskPanel, "logoPlaceholder");
+            var canvas = findChild(kioskPanel, "logoCanvas");
+            verify(placeholder !== null);
+            verify(canvas !== null);
+            compare(placeholder.visible, true);   // vm.hasLogo === false
+            compare(canvas.visible, false);
+        }
+
+        // The hero badge keeps the kiosk's 96px / 3px-ring proportions.
+        function test_kioskBadgeKeepsItsSizeAndRing() {
+            compare(findChild(kioskPanel, "logoPlaceholder").border.width, 3);
+            compare(findChild(kioskPanel, "logoCanvas").width, 96);
+        }
+
+        // Flipping the vm's logo state must reach the badge through the
+        // binding — proof the panel reads the vm rather than a literal.
+        function test_vmLogoStateDrivesTheBadge() {
+            var image = findChild(kioskPanel, "logoImage");
+            var canvas = findChild(kioskPanel, "logoCanvas");
+            var placeholder = findChild(kioskPanel, "logoPlaceholder");
+            kioskStubVm.logoUrl = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+            kioskStubVm.hasLogo = true;
+            tryCompare(image, "status", Image.Ready, 5000);
+            tryCompare(canvas, "visible", true, 5000);
+            compare(placeholder.visible, false);
         }
     }
 }
