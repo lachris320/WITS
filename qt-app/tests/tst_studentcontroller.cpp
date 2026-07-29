@@ -1,8 +1,11 @@
 #include <QtTest>
 #include <QByteArray>
 #include <QList>
+#include <QNetworkAccessManager>
 #include <QString>
 #include <QStringList>
+#include <QUrlQuery>
+#include "capturingnam.h"
 #include "studentcontroller.h"
 #include "studentdata.h"
 
@@ -42,6 +45,9 @@ private slots:
     void parseDeleteResponse_success_returnsTrueEmptyMessage();
     void parseDeleteResponse_failure_returnsFalseWithMessage();
     void parseDeleteResponse_invalidJson_returnsFalseEmptyMessage();
+
+    // request assembly (harmonized FORM + admin_key)
+    void deleteStudents_buildsFormBodyWithAdminKey();
 };
 
 void TestStudentController::normalizeFilterPlaceholdersBecomeEmpty()
@@ -251,6 +257,26 @@ void TestStudentController::parseSearchDefaultsVisitsToZero()
     StudentController::parseSearchResponse(raw, recs, msg, term);
     QCOMPARE(recs.size(), 1);
     QCOMPARE(recs.at(0).visits, 0);   // field absent -> QJsonValue::toInt() default
+}
+
+void TestStudentController::deleteStudents_buildsFormBodyWithAdminKey()
+{
+    CapturingNam nam;
+    StudentController ctrl(&nam);
+
+    ctrl.deleteStudents(QStringList() << "2023-001" << "2023-002", "test-key");
+
+    // Form-encoded POST (not JSON), carrying admin_key + repeated school_ids[].
+    QCOMPARE(nam.lastOp, QNetworkAccessManager::PostOperation);
+    QCOMPARE(nam.lastContentType, QStringLiteral("application/x-www-form-urlencoded"));
+
+    const QUrlQuery q(QString::fromUtf8(nam.lastBody));
+    QCOMPARE(q.queryItemValue("admin_key"), QStringLiteral("test-key"));
+    const QStringList ids = q.allQueryItemValues("school_ids[]", QUrl::FullyDecoded);
+    QCOMPARE(ids.size(), 2);
+    QVERIFY(ids.contains("2023-001"));
+    QVERIFY(ids.contains("2023-002"));
+    QVERIFY(!nam.lastBody.contains("{"));   // not a JSON body
 }
 
 QTEST_MAIN(TestStudentController)

@@ -44,8 +44,9 @@ public:
     // Async — result arrives via bulkUpdateFinished / bulkUpdateFailed.
     void bulkUpdateStudents(const QList<StudentRecord> &updates);
 
-    // Async — result arrives via deleteFinished / deleteFailed.
-    void deleteStudents(const QStringList &schoolIds);
+    // Async — result arrives via deleteFinished / deleteFailed. adminKey is
+    // sent as a FORM field (delete_students.php is requireAdminAuth-guarded).
+    void deleteStudents(const QStringList &schoolIds, const QString &adminKey);
 
     // Async — result arrives via departmentsLoaded (empty on error/!success).
     void loadDepartments();
