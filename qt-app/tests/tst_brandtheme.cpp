@@ -27,6 +27,7 @@ private slots:
 
     // Fallback palette
     void fallbackMatchesWitsThemeConstants();
+    void fallbackPaletteIsLegible();
 
     // JSON round-trip
     void paletteJsonRoundTrip();
@@ -149,10 +150,13 @@ void TestBrandTheme::mixReachesEndpoints()
 void TestBrandTheme::fallbackMatchesWitsThemeConstants()
 {
     const BrandPalette p = BrandTheme::fallbackPalette();
-    QCOMPARE(p.brandBase,         QColor(WitsTheme::Color::AdminPrimary));
-    QCOMPARE(p.brandDeep,         QColor(WitsTheme::Color::AdminPrimaryHover));
-    QCOMPARE(p.accentBase,        QColor(WitsTheme::Color::KioskPrimary));
-    QCOMPARE(p.accentDeep,        QColor(WitsTheme::Color::KioskPrimaryHover));
+    // Brand/accent roles are the intentional navy+amber product palette (4d),
+    // decoupled from the legacy blue/green theme.h constants.
+    QCOMPARE(p.brandBase,         QColor("#1E3A8A"));
+    QCOMPARE(p.brandDeep,         QColor("#172554"));
+    QCOMPARE(p.accentBase,        QColor("#F59E0B"));
+    QCOMPARE(p.accentDeep,        QColor("#D97706"));
+    // Neutral roles still track the WitsTheme fallback greys/whites unchanged.
     QCOMPARE(p.sidebarBase,       QColor(WitsTheme::Color::SidebarBase));
     QCOMPARE(p.card,              QColor(WitsTheme::Color::Card));
     QCOMPARE(p.appBackground,     QColor(WitsTheme::Color::AppBackground));
@@ -162,11 +166,28 @@ void TestBrandTheme::fallbackMatchesWitsThemeConstants()
     QCOMPARE(p.success,           QColor(WitsTheme::Color::Success));
     QCOMPARE(p.error,             QColor(WitsTheme::Color::Error));
     QCOMPARE(p.brandOn,           QColor(Qt::white));
-    QCOMPARE(p.accentOn,          QColor(Qt::white));
+    // Correctness fix: on-amber text is navy, NOT white (white ~1.9:1 on amber).
+    QCOMPARE(p.accentOn,          QColor("#172554"));
+    QVERIFY(p.accentOn != QColor(Qt::white));
     QCOMPARE(p.brandSoft,
              BrandColorMath::mix(p.brandBase, QColor(Qt::white), 0.90));
     QCOMPARE(p.accentSoft,
              BrandColorMath::mix(p.accentBase, QColor(Qt::white), 0.90));
+}
+
+void TestBrandTheme::fallbackPaletteIsLegible()
+{
+    // The DEFAULT palette is shown on a fresh install and as the graceful
+    // fallback when a logo can't produce a usable palette (e.g. a greyscale
+    // logo), so it must clear the app's own contrast floors on its own.
+    const BrandPalette p = BrandTheme::fallbackPalette();
+    using BrandColorMath::contrastRatio;
+    QVERIFY(contrastRatio(p.brandOn,     p.brandBase) >= 4.5); // text on navy fill
+    QVERIFY(contrastRatio(p.brandText,   p.card)      >= 4.5); // navy-as-text on card
+    QVERIFY(contrastRatio(p.brandOnMuted, p.brandBase) >= 4.5); // muted nav label on navy
+    QVERIFY(contrastRatio(p.accentOn,    p.accentBase) >= 4.5); // text on amber fill
+    QVERIFY(contrastRatio(p.accentText,  p.card)       >= 4.5); // amber-as-text on card
+    QVERIFY(contrastRatio(p.accentBase,  p.brandBase)  >= 3.0); // accent distinct from brand
 }
 
 void TestBrandTheme::paletteJsonRoundTrip()
