@@ -25,7 +25,7 @@ Rectangle {
         }
     }
 
-    color: Theme.brand.admin
+    color: Theme.brand.base
     implicitWidth: 240
     implicitHeight: 600
 
@@ -54,7 +54,9 @@ Rectangle {
                 radius: Theme.radius.sm2
                 readonly property bool isActive: row.modelData.page === nav.currentPage
                 readonly property bool isEnabled: row.modelData.enabled !== false
-                color: isActive ? Qt.alpha(Theme.brand.onPrimary, 0.14) : "transparent"
+                // Phase 4d role map: active-nav-row bg = gold wash rgba(--gold,0.16)
+                // (Admin Dashboard.dc.html:339); was a white brand.onPrimary wash.
+                color: isActive ? Qt.alpha(Theme.accent.base, 0.16) : "transparent"
 
                 RowLayout {
                     anchors.fill: parent
@@ -66,13 +68,17 @@ Rectangle {
                     Rectangle {
                         implicitWidth: 6; implicitHeight: 6; radius: 3
                         visible: row.isActive
-                        color: Theme.secondary
+                        color: Theme.accent.base
                     }
                     Text {
                         Layout.fillWidth: true
                         text: row.modelData.label !== undefined ? row.modelData.label : row.modelData
-                        color: row.isEnabled ? Theme.brand.onPrimary
-                                             : Qt.alpha(Theme.brand.onPrimary, 0.45)
+                        // Phase 4d role map: active label = accent.base (gold),
+                        // inactive-enabled = brand.onMuted peach (Admin Dashboard.dc.html:340);
+                        // disabled rides on onMuted dimmed. Was cream, varying only by enabled.
+                        color: !row.isEnabled ? Qt.alpha(Theme.brand.onMuted, 0.45)
+                                             : row.isActive ? Theme.accent.base
+                                                            : Theme.brand.onMuted
                         font.family: Theme.typography.sans
                         font.pixelSize: Theme.typography.body
                         Accessible.role: Accessible.ListItem
@@ -81,7 +87,7 @@ Rectangle {
                     Text {
                         visible: !row.isEnabled
                         text: qsTr("soon")
-                        color: Qt.alpha(Theme.brand.onPrimary, 0.55)
+                        color: Qt.alpha(Theme.brand.on, 0.55)
                         font.family: Theme.typography.sans
                         font.pixelSize: Theme.typography.eyebrow
                     }

@@ -29,7 +29,7 @@ ColumnLayout {
         radius: Theme.radius.sm
         color: Theme.card
         border.width: 2
-        border.color: input.activeFocus ? Theme.brand.admin : Theme.border
+        border.color: input.activeFocus ? Theme.brand.base : Theme.border
 
         TextInput {
             id: input
@@ -40,8 +40,8 @@ ColumnLayout {
             verticalAlignment: TextInput.AlignVCenter
             clip: true
             color: Theme.text
-            selectionColor: Theme.brand.admin
-            selectedTextColor: Theme.brand.onPrimary
+            selectionColor: Theme.brand.base
+            selectedTextColor: Theme.brand.on
             font.family: Theme.typography.sans
             font.pixelSize: Theme.typography.body
             echoMode: root.isPassword ? TextInput.Password : TextInput.Normal

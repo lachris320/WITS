@@ -79,7 +79,7 @@ RowLayout {
             visible: !logoCanvas.visible
             color: Theme.card
             border.width: 2
-            border.color: Theme.secondary
+            border.color: Theme.accent.base
             Text {
                 anchors.centerIn: parent
                 text: qsTr("LOGO")
@@ -96,7 +96,7 @@ RowLayout {
             radius: width / 2
             color: "transparent"
             border.width: 2
-            border.color: Theme.secondary
+            border.color: Theme.accent.base
             visible: logoCanvas.visible
         }
     }
@@ -106,7 +106,7 @@ RowLayout {
         Text {
             objectName: "brandTitleText"
             text: qsTr("Library Admin")
-            color: Theme.brand.onPrimary
+            color: Theme.brand.on
             font.family: Theme.typography.serif
             font.weight: Font.Bold
             // No Theme.typography token sits at the reference's literal 19px
@@ -119,7 +119,7 @@ RowLayout {
             objectName: "brandSchoolNameText"
             text: brand.schoolName
             visible: brand.schoolName.length > 0
-            color: Theme.onBrandMuted
+            color: Theme.brand.onMuted
             elide: Text.ElideRight
             Layout.maximumWidth: 150
             font.family: Theme.typography.sans

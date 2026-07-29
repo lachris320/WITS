@@ -34,26 +34,23 @@ TestCase {
         compare(Theme.radius.card, 16);
     }
 
-    function test_brandAdminResolvesToOpaqueColor() {
-        verify(Theme.brand.admin.a === 1.0);
-        verify(Theme.brand.admin !== Theme.card);
+    function test_brandBaseResolvesToOpaqueColor() {
+        verify(Theme.brand.base.a === 1.0);
+        verify(Theme.brand.base !== Theme.card);
     }
 
     function test_kioskTokensExposed() {
         verify(Theme.motion.toastHold >= 1000);
-        verify(Theme.brand.onKiosk.a === 1.0);
-        compare(Theme.onBrandMuted.toString().length, 7);   // "#RRGGBB"
+        verify(Theme.accent.on.a === 1.0);
+        compare(Theme.brand.onMuted.toString().length, 7);   // "#RRGGBB" (a derived brand-on-muted token)
         verify(Theme.scrim.a > 0 && Theme.scrim.a < 1);
     }
 
-    // --- Phase 4d Task 3: role-based brand/accent tokens, old names as aliases ---
+    // --- Phase 4d: role-based brand/accent tokens ---
 
-    function test_roleTokensExistAndAliasesMatch() {
+    function test_roleTokensExist() {
         verify(Theme.brand.base !== undefined);
         verify(Theme.accent.base !== undefined);
-        // The deprecated alias must resolve to the same colour as the new token.
-        compare(Theme.brand.admin.toString(), Theme.brand.base.toString());
-        compare(Theme.secondary.toString(),   Theme.accent.base.toString());
     }
 
     // --- A1: easing extended to the 6-value BezierSpline form ---
@@ -107,5 +104,22 @@ TestCase {
         // NEGATIVE duration; clamp it to no delay instead. This is the only
         // place the negative branch is covered.
         compare(Theme.motion.staggerDelay(-1, 25), 0);
+    }
+
+    // --- Task 10: brand-tinted elevation shadows derived from tokens ---
+    // The hover/heroFill/ctaGold shadow colours must be LIVE Qt.alpha bindings
+    // to the role tokens (brand.deep / accent.base), not frozen maroon/gold
+    // rgba() literals, so they track the logo-derived palette on re-theme.
+    // Geometry (x/y/blur) parsed from the old CSS-shadow strings is preserved;
+    // modal stays neutral black.
+    function test_elevationShadowsTrackBrand() {
+        compare(Theme.elevation.hover.shadowColor.toString(),    Qt.alpha(Theme.brand.deep, 0.10).toString());
+        compare(Theme.elevation.heroFill.shadowColor.toString(), Qt.alpha(Theme.brand.deep, 0.25).toString());
+        compare(Theme.elevation.ctaGold.shadowColor.toString(),  Qt.alpha(Theme.accent.base, 0.30).toString());
+        // geometry preserved
+        compare(Theme.elevation.hover.y, 12);
+        compare(Theme.elevation.ctaGold.blur, 14);
+        // modal stays neutral black
+        compare(Theme.elevation.modal.shadowColor.toString(), Qt.rgba(0, 0, 0, 0.30).toString());
     }
 }

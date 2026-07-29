@@ -9,7 +9,7 @@ Rectangle {
     property bool elevated: false
     default property alias content: body.data
 
-    color: filled ? Theme.brand.admin : Theme.card
+    color: filled ? Theme.brand.base : Theme.card
     radius: Theme.radius.card
     border.width: filled ? 0 : 2
     border.color: Theme.border

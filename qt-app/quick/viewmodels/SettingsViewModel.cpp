@@ -1,6 +1,7 @@
 #include "SettingsViewModel.h"
 
 #include <QNetworkAccessManager>
+#include <QCryptographicHash>
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -17,6 +18,7 @@
 #include "AdminSession.h"
 #include "HttpForm.h"
 #include "apiconfig.h"
+#include "brandtheme.h"
 #include "reportcontroller.h"
 
 SettingsViewModel::SettingsViewModel(QObject *parent)
@@ -360,6 +362,25 @@ QUrl SettingsViewModel::defaultManifestUrl(const QString &department) const
     const QString name = QStringLiteral("Reset_Manifest_%1_%2.csv")
         .arg(dept, QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss")));
     return QUrl::fromLocalFile(QDir(dir).filePath(name));
+}
+
+QString SettingsViewModel::logoHashFor(const QString &path) const
+{
+    // Single source of truth for logo content hashing (see BrandTheme).
+    return BrandTheme::logoContentHash(path);
+}
+
+QString SettingsViewModel::lastFallbackLogoHash() const
+{
+    AppSettings s;
+    return s.value(QStringLiteral("branding/lastFallbackLogoHash")).toString();
+}
+
+void SettingsViewModel::recordFallbackLogoHash(const QString &hash)
+{
+    AppSettings s;
+    s.setValue(QStringLiteral("branding/lastFallbackLogoHash"), hash);
+    s.sync();
 }
 
 void SettingsViewModel::recomputeDirty()

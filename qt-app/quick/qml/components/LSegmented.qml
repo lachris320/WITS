@@ -26,12 +26,12 @@ Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 radius: Theme.radius.sm2
-                color: modelData.value === seg.currentValue ? Theme.brand.admin
+                color: modelData.value === seg.currentValue ? Theme.brand.base
                                                             : "transparent"
                 Text {
                     anchors.centerIn: parent
                     text: modelData.label
-                    color: modelData.value === seg.currentValue ? Theme.brand.onPrimary
+                    color: modelData.value === seg.currentValue ? Theme.brand.on
                                                                : Theme.text
                     font.family: Theme.typography.sans
                     font.pixelSize: Theme.typography.control

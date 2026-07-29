@@ -9,8 +9,8 @@ QtObject {
     // works because these are property bindings that re-evaluate on changed().
     readonly property ThemeViewModel _vm: ThemeViewModel {}
 
-    // `accent` is declared before `brand` so `brand`'s deprecated kiosk/*
-    // aliases (below) reference an already-instantiated sibling object.
+    // `accent` is declared before `brand` for readability; both are populated
+    // from the same ThemeViewModel and are independent QtObjects.
     readonly property QtObject accent: QtObject {
         readonly property color base: root._vm.accentBase
         readonly property color deep: root._vm.accentDeep
@@ -27,19 +27,8 @@ QtObject {
         readonly property color on:       root._vm.brandOn
         readonly property color onMuted:  root._vm.brandOnMuted
         readonly property color text:     root._vm.brandText
-        // DEPRECATED aliases — removed in PR 2. Pure bindings to the new tokens.
-        readonly property color admin:      base
-        readonly property color adminHover: deep
-        readonly property color adminSoft:  soft
-        readonly property color kiosk:      root.accent.base
-        readonly property color kioskHover: root.accent.deep
-        readonly property color kioskSoft:  root.accent.soft
-        readonly property color onPrimary:  on
-        readonly property color onKiosk:    root.accent.on
     }
 
-    // DEPRECATED alias — removed in PR 2.
-    readonly property color secondary:     accent.base
     readonly property color card:          root._vm.card
     readonly property color appBackground: root._vm.appBackground
     readonly property color border:        root._vm.border
@@ -50,14 +39,12 @@ QtObject {
     readonly property color sidebarBase:   root._vm.sidebarBase
 
     // Extra design tokens (no BrandPalette field — literals, §12.1).
-    readonly property color secondarySoft:    "#FDF3E0"
     readonly property color mutedTextCaption: "#B0A08A"
     readonly property color tableHeaderBg:    "#F7F1E6"
     readonly property color rowHairline:      "#F3ECDD"
     readonly property color errorSoft:        "#FDF4F3"
     readonly property color errorBorder:      "#F3D9D6"
     readonly property color scrim:            Qt.rgba(15/255, 23/255, 42/255, 0.45)
-    readonly property color onBrandMuted:     "#EFC9A8"
 
     // Structural scales (§12.2/12.3).
     readonly property QtObject spacing: QtObject {
@@ -93,13 +80,19 @@ QtObject {
         readonly property int eyebrow: 11
     }
     // Elevation (§12.7): shadow specs as data (a component maps these to a
-    // DropShadow / layer effect). Kept as strings so no widget dep leaks in.
+    // DropShadow / layer effect). Each shadow is a QtObject with geometry
+    // (x/y/blur) plus a live `shadowColor` binding — the brand-tinted variants
+    // derive their colour from the role tokens via Qt.alpha so they track the
+    // logo-derived palette on re-theme. A QtObject (not a var object literal)
+    // is required: an object literal would freeze `shadowColor` at binding
+    // time and silently stop tracking `brand.deep` / `accent.base`. `modal`
+    // stays neutral black; `resting` is a zero-geometry transparent shadow.
     readonly property QtObject elevation: QtObject {
-        readonly property string resting: ""
-        readonly property string hover:   "0 12px 26px rgba(94,14,11,0.10)"
-        readonly property string heroFill: "0 12px 30px rgba(94,14,11,0.25)"
-        readonly property string ctaGold: "0 5px 14px rgba(232,177,14,0.30)"
-        readonly property string modal:   "0 24px 48px rgba(0,0,0,0.30)"
+        readonly property QtObject resting:  QtObject { readonly property int x: 0; readonly property int y: 0;  readonly property int blur: 0;  readonly property color shadowColor: "transparent" }
+        readonly property QtObject hover:    QtObject { readonly property int x: 0; readonly property int y: 12; readonly property int blur: 26; readonly property color shadowColor: Qt.alpha(root.brand.deep, 0.10) }
+        readonly property QtObject heroFill: QtObject { readonly property int x: 0; readonly property int y: 12; readonly property int blur: 30; readonly property color shadowColor: Qt.alpha(root.brand.deep, 0.25) }
+        readonly property QtObject ctaGold:  QtObject { readonly property int x: 0; readonly property int y: 5;  readonly property int blur: 14; readonly property color shadowColor: Qt.alpha(root.accent.base, 0.30) }
+        readonly property QtObject modal:    QtObject { readonly property int x: 0; readonly property int y: 24; readonly property int blur: 48; readonly property color shadowColor: Qt.rgba(0, 0, 0, 0.30) }
     }
     // Motion (§15): one shared easing for one-shot transitions + a reduce switch.
     readonly property QtObject motion: QtObject {

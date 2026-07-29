@@ -8,9 +8,14 @@ Button {
     id: control
     property string variant: "Primary"   // Primary | Accent | Outline | Danger | Ghost
     property bool compact: false
-    readonly property color fillColor: variant === "Accent" ? Theme.secondary
+    // Opt-in for Outline/Ghost sitting on a dark brand fill (e.g. the maroon
+    // kiosk BrandPanel): renders a cream (brand.on) label + a legible
+    // translucent light border. Default false keeps every light-background
+    // call site rendering Theme.text on a Theme.border edge, unchanged.
+    property bool onBrand: false
+    readonly property color fillColor: variant === "Accent" ? Theme.accent.base
                                      : variant === "Danger" ? Theme.error
-                                     : Theme.brand.admin
+                                     : Theme.brand.base
 
     padding: compact ? Theme.spacing.sm : Theme.spacing.md
     font.family: Theme.typography.sans
@@ -21,12 +26,16 @@ Button {
         color: control.variant === "Outline" || control.variant === "Ghost"
                ? "transparent" : control.fillColor
         border.width: control.variant === "Outline" ? 2 : 0
-        border.color: Theme.border
+        border.color: control.onBrand ? Qt.alpha(Theme.brand.on, 0.5) : Theme.border
     }
     contentItem: Text {
         text: control.text
+        // Phase 4d role map: Accent button label = accent.on (brand-deep) on the
+        // gold fill (Admin Dashboard.dc.html:201, Library Kiosk v2.dc.html:48);
+        // Primary/Danger keep brand.on (cream). Was a flat brand.onPrimary.
         color: control.variant === "Outline" || control.variant === "Ghost"
-               ? Theme.text : Theme.brand.onPrimary
+               ? (control.onBrand ? Theme.brand.on : Theme.text)
+               : control.variant === "Accent" ? Theme.accent.on : Theme.brand.on
         font: control.font
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter

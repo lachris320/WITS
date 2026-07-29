@@ -16,18 +16,8 @@ class ThemeViewModel : public QObject
     Q_OBJECT
     QML_ELEMENT
 
-    Q_PROPERTY(QColor adminPrimary      READ adminPrimary      NOTIFY changed)
-    Q_PROPERTY(QColor adminPrimaryHover READ adminPrimaryHover NOTIFY changed)
-    Q_PROPERTY(QColor adminOnPrimary    READ adminOnPrimary    NOTIFY changed)
-    Q_PROPERTY(QColor adminPrimarySoft  READ adminPrimarySoft  NOTIFY changed)
-    Q_PROPERTY(QColor kioskPrimary      READ kioskPrimary      NOTIFY changed)
-    Q_PROPERTY(QColor kioskPrimaryHover READ kioskPrimaryHover NOTIFY changed)
-    Q_PROPERTY(QColor kioskOnPrimary    READ kioskOnPrimary    NOTIFY changed)
-    Q_PROPERTY(QColor kioskPrimarySoft  READ kioskPrimarySoft  NOTIFY changed)
-    Q_PROPERTY(QColor secondary         READ secondary         NOTIFY changed)
-
-    // Role-named properties (Phase 4d). Same underlying colours as the
-    // deprecated block above; old names now forward to these accessors.
+    // Role-named properties (Phase 4d) — the single source of truth for the
+    // brand/accent colours, read directly from the engine.
     Q_PROPERTY(QColor brandBase     READ brandBase     NOTIFY changed)
     Q_PROPERTY(QColor brandDeep     READ brandDeep     NOTIFY changed)
     Q_PROPERTY(QColor brandSoft     READ brandSoft     NOTIFY changed)
@@ -62,20 +52,6 @@ public:
     Q_ENUM(RegenResult)
 
     explicit ThemeViewModel(QObject *parent = nullptr);
-
-    // DEPRECATED API aliases — removed in PR 2. Forward to the new accessors so
-    // there is one source of truth (no second copy of any colour). secondary()
-    // and kioskPrimary() both forward to accentBase() intentionally: two
-    // deprecated names for one role.
-    QColor adminPrimary() const      { return brandBase(); }
-    QColor adminPrimaryHover() const { return brandDeep(); }
-    QColor adminOnPrimary() const    { return brandOn(); }
-    QColor adminPrimarySoft() const  { return brandSoft(); }
-    QColor kioskPrimary() const      { return accentBase(); }
-    QColor kioskPrimaryHover() const { return accentDeep(); }
-    QColor kioskOnPrimary() const    { return accentOn(); }
-    QColor kioskPrimarySoft() const  { return accentSoft(); }
-    QColor secondary() const         { return accentBase(); }
 
     // Role-named accessors (Phase 4d) — single source of truth for the
     // brand/accent colours; read directly from the engine.

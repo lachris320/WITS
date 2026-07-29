@@ -39,6 +39,12 @@ bool validateLogoFile(const QString &logoPath, QString *errorMsg);
 // fallbackPalette() with *errorMsg cleared.
 BrandPalette extractPalette(const QString &logoPath, QString *errorMsg);
 
+// SHA-256 (lowercase hex) of the logo file's raw bytes; empty string if the
+// file cannot be opened. The single source for logo content hashing — used
+// both to stamp BrandingConfig.logoHash and (via SettingsViewModel) to
+// dedup the fire-once bad-logo notice, so the two are always comparable.
+QString logoContentHash(const QString &logoPath);
+
 // Pure, deterministic build step from two seeds; no I/O. Derives a full
 // palette (brand/accent roles plus neutrals from fallbackPalette()) from an
 // already-extracted primary/secondary seed pair — the same math extractPalette

@@ -74,6 +74,37 @@ Rectangle {
             screen.showStatus(text, isError);
     }
 
+    // Consumes the RegenResult of a live re-theme. The regenerate call itself
+    // ALWAYS runs on Theme._vm (LOCKED, see logoDialog.onAccepted); this is
+    // split out solely so a QuickTest can drive the fire-once logic with an
+    // injected result — Theme._vm is the real singleton engine and cannot be
+    // stubbed. schoolStatus is written imperatively, so it must stay a BARE
+    // SectionStatus with no text/isError/isNeutral bindings (Task 8 lesson:
+    // an imperative write to a bound property clobbers the binding for good).
+    function applyLogoRegenResult(result, logoPath) {
+        if (!vm)
+            return;
+        if (result === ThemeViewModel.FellBack) {
+            var h = vm.logoHashFor(logoPath);
+            // Fire-once per bad logo. An empty hash (unreadable file) always
+            // shows and records nothing — losing the dedup beats losing the
+            // notice ("" === "" would suppress the very first one).
+            if (h.length === 0 || h !== vm.lastFallbackLogoHash()) {
+                schoolStatus.isNeutral = true;
+                schoolStatus.text = qsTr("This logo couldn't produce a usable colour palette. LOAMS is using the default theme instead.");
+                if (h.length > 0)
+                    vm.recordFallbackLogoHash(h);
+            }
+        } else if (result === ThemeViewModel.Ok) {
+            // A good logo clears the notice AND re-arms the record, so a
+            // later return to a previously-seen bad logo is reported again.
+            schoolStatus.text = "";
+            vm.recordFallbackLogoHash("");
+        }
+        // Failed: the engine left the theme untouched (Manual mode /
+        // unreadable), so any visible notice is still accurate — leave it.
+    }
+
     // One definition for all three status lines. textFormat is the load-bearing
     // part: these carry backend "message" fields verbatim over cleartext HTTP,
     // and Text defaults to AutoText — which auto-detects and RENDERS rich text,
@@ -81,10 +112,11 @@ Rectangle {
     // be fetched by an unattended kiosk. Status is never markup.
     component SectionStatus: Text {
         property bool isError: false
+        property bool isNeutral: false
         Layout.fillWidth: true
         textFormat: Text.PlainText
         visible: text.length > 0
-        color: isError ? Theme.error : Theme.success
+        color: isNeutral ? Theme.mutedText : (isError ? Theme.error : Theme.success)
         wrapMode: Text.WordWrap
         font.family: Theme.typography.sans
         font.pixelSize: Theme.typography.body
@@ -172,6 +204,13 @@ Rectangle {
                             onClicked: screen.openLogoDialog()
                         }
                         Item { Layout.fillWidth: true }
+                    }
+                    // Bad-logo fallback notice (fire-once). BARE — written only
+                    // imperatively by applyLogoRegenResult; a binding on text /
+                    // isNeutral would be clobbered by the first assignment.
+                    SectionStatus {
+                        id: schoolStatus
+                        objectName: "schoolStatus"
                     }
                 }
             }
@@ -527,7 +566,9 @@ Rectangle {
             // instance — e.g. one owned by the VM — recomputes a palette
             // nothing is bound to and is a silent no-op in the running UI.
             if (vm.hasLogo) {
-                Theme._vm.regenerateFromImportedLogo(vm.logoPath);
+                screen.applyLogoRegenResult(
+                    Theme._vm.regenerateFromImportedLogo(vm.logoPath),
+                    vm.logoPath);
                 screen.showStatus(qsTr("Logo imported."), false);
             }
             // The failure case reports itself through the VM's statusMessage,

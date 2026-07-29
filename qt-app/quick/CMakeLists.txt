@@ -269,3 +269,12 @@ wits_add_qttest(tst_settingsviewmodel
     SOURCES tests/tst_settingsviewmodel.cpp
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
     OFFSCREEN)
+
+# --- Deprecated-token grep-guard (Phase 4d Task 12, C++ QtTest). Pure file
+# I/O over the QML source + QuickTest data dirs (no GUI, no rendering ->
+# QTEST_APPLESS_MAIN, no OFFSCREEN). Fails if any deprecated brand/accent alias
+# name reappears in *.qml CODE (comments are stripped first). ---
+wits_add_qttest(tst_notokenaliases
+    SOURCES tests/tst_notokenaliases.cpp
+    DEFINES SRC_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
+            SRC_QML_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")

@@ -155,7 +155,7 @@ Rectangle {
                 required property int index
                 width: ListView.view ? ListView.view.width : 0
                 implicitHeight: 40
-                color: hover.hovered ? Qt.alpha(Theme.brand.admin, 0.06)
+                color: hover.hovered ? Qt.alpha(Theme.brand.base, 0.06)
                                      : (index % 2 === 0 ? Theme.card : Theme.rowHairline)
                 // C3: row hover glide. Unconditional (not behind animateRows)
                 // — imperceptible in tests, duration-gated by

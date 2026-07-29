@@ -42,7 +42,7 @@ Rectangle {
                 radius: width / 2
                 color: Theme.card
                 border.width: 3
-                border.color: Theme.secondary
+                border.color: Theme.accent.base
                 // Logo image lands in Phase 4 (admin logo import); circle placeholder now.
                 Text {
                     anchors.centerIn: parent
@@ -55,7 +55,10 @@ Rectangle {
                 spacing: Theme.spacing.xs
                 Text {
                     text: qsTr("Library Attendance")
-                    color: Theme.brand.onKiosk
+                    // Phase 4d role map: panel is maroon after the gradient flip;
+                    // title = cream brand.on (Kiosk:30). onKiosk(=accent.on=brand-deep)
+                    // would be invisible on maroon.
+                    color: Theme.brand.on
                     font.family: Theme.typography.serif
                     font.pixelSize: Theme.typography.pageTitle
                     font.weight: Font.Bold
@@ -63,7 +66,7 @@ Rectangle {
                 Text {
                     text: (panel.vm ? panel.vm.schoolName : "") + " · "
                           + (panel.vm ? panel.vm.schoolAddress : "")
-                    color: Theme.onBrandMuted
+                    color: Theme.brand.onMuted
                     font.family: Theme.typography.sans
                     font.pixelSize: Theme.typography.control
                     wrapMode: Text.WordWrap
@@ -82,10 +85,10 @@ Rectangle {
             spacing: Theme.spacing.sm
             RowLayout {
                 spacing: Theme.spacing.sm
-                LPulseDot { color: Theme.secondary; pulseDuration: 900 }
+                LPulseDot { color: Theme.accent.base; pulseDuration: 900 }
                 LEyebrow {
                     text: qsTr("SCAN OR TYPE YOUR ID")
-                    color: Theme.secondary
+                    color: Theme.accent.base
                     font.letterSpacing: 1.6
                 }
             }
@@ -93,7 +96,9 @@ Rectangle {
                 id: idField
                 Layout.fillWidth: true
                 placeholderText: qsTr("ID number…")
-                color: Theme.brand.onKiosk
+                // Phase 4d role map: cream typed text on the maroon input
+                // (Kiosk:47, cream on-brand); onKiosk would be invisible on maroon.
+                color: Theme.brand.on
                 font.family: Theme.typography.sans
                 font.pixelSize: Theme.typography.cardTitle
                 // Admin keys are alphabetic -> mask; student IDs are digits -> show.
@@ -104,7 +109,7 @@ Rectangle {
                     color: Qt.alpha(Theme.card, 0.10)
                     border.width: 1
                     border.color: idField.activeFocus
-                                  ? Theme.secondary : Qt.alpha(Theme.card, 0.28)
+                                  ? Theme.accent.base : Qt.alpha(Theme.card, 0.28)
                 }
                 onAccepted: panel.submit()
                 Accessible.role: Accessible.EditableText
@@ -120,6 +125,11 @@ Rectangle {
                 id: guestBtn
                 Layout.fillWidth: true
                 variant: "Outline"
+                // Phase 4d role map: this panel is maroon after the gradient
+                // flip, so the Outline default (dark-slate Theme.text on a
+                // Theme.border edge) would be illegible. onBrand renders a
+                // cream brand.on label + a translucent light border instead.
+                onBrand: true
                 text: qsTr("Guest log in")
                 visible: panel.vm ? panel.vm.guestEnabled : false
                 onClicked: if (panel.vm) panel.vm.requestGuest()
@@ -133,14 +143,16 @@ Rectangle {
                 spacing: Theme.spacing.sm
                 Text {
                     text: panel.vm ? panel.vm.clockTime : ""
-                    color: Theme.brand.onKiosk
+                    // Phase 4d role map: cream clock digits on maroon (Kiosk:55);
+                    // meridiem stays gold. onKiosk would be invisible on maroon.
+                    color: Theme.brand.on
                     font.family: Theme.typography.sans
                     font.pixelSize: Theme.typography.statValue
                     font.weight: Font.ExtraBold
                 }
                 Text {
                     text: panel.vm ? panel.vm.clockMeridiem : ""
-                    color: Theme.secondary
+                    color: Theme.accent.base
                     font.family: Theme.typography.sans
                     font.pixelSize: Theme.typography.cardTitle
                     Layout.alignment: Qt.AlignBottom
@@ -149,7 +161,7 @@ Rectangle {
             Text {
                 text: (panel.vm ? panel.vm.clockDate : "") + qsTr("  ·  Open ")
                       + (panel.vm ? panel.vm.libraryHours : "")
-                color: Theme.onBrandMuted
+                color: Theme.brand.onMuted
                 font.family: Theme.typography.sans
                 font.pixelSize: Theme.typography.control
             }
