@@ -26,7 +26,7 @@ private slots:
     void mixReachesEndpoints();
 
     // Fallback palette
-    void fallbackMatchesWitsThemeConstants();
+    void fallbackPaletteRolesAreStable();
     void fallbackPaletteIsLegible();
 
     // JSON round-trip
@@ -147,7 +147,7 @@ void TestBrandTheme::mixReachesEndpoints()
     QCOMPARE(BrandColorMath::mix(a, b, 0.5), QColor(110, 120, 130));
 }
 
-void TestBrandTheme::fallbackMatchesWitsThemeConstants()
+void TestBrandTheme::fallbackPaletteRolesAreStable()
 {
     const BrandPalette p = BrandTheme::fallbackPalette();
     // Brand/accent roles are the intentional navy+amber product palette (4d),
@@ -185,6 +185,7 @@ void TestBrandTheme::fallbackPaletteIsLegible()
     QVERIFY(contrastRatio(p.brandOn,     p.brandBase) >= 4.5); // text on navy fill
     QVERIFY(contrastRatio(p.brandText,   p.card)      >= 4.5); // navy-as-text on card
     QVERIFY(contrastRatio(p.brandOnMuted, p.brandBase) >= 4.5); // muted nav label on navy
+    QVERIFY(contrastRatio(p.brandOnMuted, p.sidebarBase) >= 4.5); // and on the admin sidebar surface
     QVERIFY(contrastRatio(p.accentOn,    p.accentBase) >= 4.5); // text on amber fill
     QVERIFY(contrastRatio(p.accentText,  p.card)       >= 4.5); // amber-as-text on card
     QVERIFY(contrastRatio(p.accentBase,  p.brandBase)  >= 3.0); // accent distinct from brand
