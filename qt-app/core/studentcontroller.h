@@ -41,8 +41,10 @@ public:
                         const QString &department,
                         const QString &course);
 
-    // Async — result arrives via bulkUpdateFinished / bulkUpdateFailed.
-    void bulkUpdateStudents(const QList<StudentRecord> &updates);
+    // Async — result arrives via bulkUpdateFinished / bulkUpdateFailed. The
+    // updates array is sent as a JSON string in a single `students` FORM field
+    // (8-field objects don't urlencode cleanly); adminKey is a sibling field.
+    void bulkUpdateStudents(const QList<StudentRecord> &updates, const QString &adminKey);
 
     // Async — result arrives via deleteFinished / deleteFailed. adminKey is
     // sent as a FORM field (delete_students.php is requireAdminAuth-guarded).

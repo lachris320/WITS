@@ -1,5 +1,8 @@
 #include <QtTest>
 #include <QByteArray>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QList>
 #include <QNetworkAccessManager>
 #include <QString>
@@ -48,6 +51,7 @@ private slots:
 
     // request assembly (harmonized FORM + admin_key)
     void deleteStudents_buildsFormBodyWithAdminKey();
+    void bulkUpdate_buildsFormBodyWithStudentsJsonAndAdminKey();
 };
 
 void TestStudentController::normalizeFilterPlaceholdersBecomeEmpty()
@@ -277,6 +281,31 @@ void TestStudentController::deleteStudents_buildsFormBodyWithAdminKey()
     QVERIFY(ids.contains("2023-001"));
     QVERIFY(ids.contains("2023-002"));
     QVERIFY(!nam.lastBody.contains("{"));   // not a JSON body
+}
+
+void TestStudentController::bulkUpdate_buildsFormBodyWithStudentsJsonAndAdminKey()
+{
+    CapturingNam nam;
+    StudentController ctrl(&nam);
+
+    StudentRecord r;
+    r.schoolId = "2023-001"; r.code = "C1"; r.name = "Juan Cruz";
+    r.department = "CCS"; r.course = "BSIT"; r.yearLevel = "2";
+    r.gender = "Male"; r.status = "Active";
+    ctrl.bulkUpdateStudents(QList<StudentRecord>() << r, "test-key");
+
+    QCOMPARE(nam.lastOp, QNetworkAccessManager::PostOperation);
+    QCOMPARE(nam.lastContentType, QStringLiteral("application/x-www-form-urlencoded"));
+
+    const QUrlQuery q(QString::fromUtf8(nam.lastBody));
+    QCOMPARE(q.queryItemValue("admin_key"), QStringLiteral("test-key"));
+
+    // students is a JSON string in one field; decode it back and check a field.
+    const QString studentsJson = q.queryItemValue("students", QUrl::FullyDecoded);
+    const QJsonArray arr = QJsonDocument::fromJson(studentsJson.toUtf8()).array();
+    QCOMPARE(arr.size(), 1);
+    QCOMPARE(arr.at(0).toObject().value("school_id").toString(), QStringLiteral("2023-001"));
+    QCOMPARE(arr.at(0).toObject().value("year_level").toString(), QStringLiteral("2"));
 }
 
 QTEST_MAIN(TestStudentController)
