@@ -2200,7 +2200,7 @@ void adminWindow::clearCheckboxes()
 
 void adminWindow::bulkUpdateStudents(const QList<StudentRecord> &updates)
 {
-    m_studentController->bulkUpdateStudents(updates);
+    m_studentController->bulkUpdateStudents(updates, m_adminKey);
 }
 
 // Restores the Student Search toolbar to its non-edit (view) state:
@@ -2279,7 +2279,7 @@ void adminWindow::onDeleteStudentBtnClicked()
         QMessageBox::Yes | QMessageBox::No);
 
     if (confirm == QMessageBox::Yes)
-        m_studentController->deleteStudents(selectedIds);
+        m_studentController->deleteStudents(selectedIds, m_adminKey);
 }
 
 void adminWindow::onDeleteFinished(bool ok, int requestedCount, const QString &message)
