@@ -150,6 +150,12 @@ private:
     ReportHeaderInfo collectHeaderInfo() const;
     void printReport(const QJsonArray &data, const QJsonObject &filters);
 
+    // Shared reply handler for the requireAdminAuth-guarded department actions
+    // (deactivate / reset / delete). Reads and classifies the reply, then shows
+    // the success/failure/transport-error QMessageBox. Consumes the reply
+    // (deleteLater). See the definition for the isServerAnswer rationale.
+    void showGuardedReplyResult(QNetworkReply *reply);
+
 private slots:
     void onAttachFileBtnClicked();
     void onUpdateDatabaseBtnClicked();

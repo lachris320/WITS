@@ -7,6 +7,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QUrlQuery>
 
 StudentController::StudentController(QNetworkAccessManager *nam, QObject *parent)
     : QObject(parent)
@@ -174,11 +175,12 @@ quint64 StudentController::searchStudents(const QString &search,
     return requestId;
 }
 
-void StudentController::bulkUpdateStudents(const QList<StudentRecord> &updates)
+void StudentController::bulkUpdateStudents(const QList<StudentRecord> &updates,
+                                           const QString &adminKey)
 {
     QNetworkRequest request(ApiConfig::endpoint(QStringLiteral("bulk_update_students.php")));
     request.setHeader(QNetworkRequest::ContentTypeHeader,
-                      QStringLiteral("application/json"));
+                      QStringLiteral("application/x-www-form-urlencoded"));
 
     QJsonArray studentsArray;
     for (const StudentRecord &rec : updates) {
@@ -193,11 +195,18 @@ void StudentController::bulkUpdateStudents(const QList<StudentRecord> &updates)
         student["status"]     = rec.status;
         studentsArray.append(student);
     }
+    const QByteArray studentsJson =
+        QJsonDocument(studentsArray).toJson(QJsonDocument::Compact);
 
-    QJsonObject data;
-    data["students"] = studentsArray;
+    QUrlQuery body;
+    body.addQueryItem(QStringLiteral("students"), QString::fromUtf8(studentsJson));
+    body.addQueryItem(QStringLiteral("admin_key"), adminKey);
 
-    QNetworkReply *reply = m_nam->post(request, QJsonDocument(data).toJson());
+    // NOTE: QUrlQuery::toString(FullyEncoded) leaves a literal '+' unencoded, so
+    // a '+' in a value reaches PHP as a space. This matches the house pattern
+    // (adminwindow.cpp:626); the JSON payload here never contains a bare '+'.
+    QNetworkReply *reply =
+        m_nam->post(request, body.toString(QUrl::FullyEncoded).toUtf8());
 
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         if (reply->error() != QNetworkReply::NoError) {
@@ -213,20 +222,23 @@ void StudentController::bulkUpdateStudents(const QList<StudentRecord> &updates)
     });
 }
 
-void StudentController::deleteStudents(const QStringList &schoolIds)
+void StudentController::deleteStudents(const QStringList &schoolIds, const QString &adminKey)
 {
     QNetworkRequest request(ApiConfig::endpoint(QStringLiteral("delete_students.php")));
     request.setHeader(QNetworkRequest::ContentTypeHeader,
-                      QStringLiteral("application/json"));
+                      QStringLiteral("application/x-www-form-urlencoded"));
 
-    QJsonArray ids;
+    QUrlQuery body;
     for (const QString &id : schoolIds)
-        ids.append(id);
-    QJsonObject data;
-    data["school_ids"] = ids;
+        body.addQueryItem(QStringLiteral("school_ids[]"), id);
+    body.addQueryItem(QStringLiteral("admin_key"), adminKey);
 
+    // NOTE: QUrlQuery::toString(FullyEncoded) leaves a literal '+' unencoded, so
+    // a '+' in a value reaches PHP as a space. This matches the house pattern
+    // (adminwindow.cpp:626); school_ids/admin_key don't contain '+' in practice.
     const int requestedCount = schoolIds.size();
-    QNetworkReply *reply = m_nam->post(request, QJsonDocument(data).toJson());
+    QNetworkReply *reply =
+        m_nam->post(request, body.toString(QUrl::FullyEncoded).toUtf8());
 
     connect(reply, &QNetworkReply::finished, this, [this, reply, requestedCount]() {
         if (reply->error() != QNetworkReply::NoError) {
