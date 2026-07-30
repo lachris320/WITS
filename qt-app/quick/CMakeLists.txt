@@ -84,6 +84,7 @@ qt_add_qml_module(witsquickmodule
         models/VisitLogRowsModel.h models/VisitLogRowsModel.cpp
         viewmodels/VisitLogsViewModel.h viewmodels/VisitLogsViewModel.cpp
         models/SearchResultsModel.h models/SearchResultsModel.cpp
+        models/StudentsTableModel.cpp models/StudentsTableModel.h
         viewmodels/SearchViewModel.h viewmodels/SearchViewModel.cpp
         viewmodels/SettingsViewModel.h viewmodels/SettingsViewModel.cpp
 )
@@ -223,6 +224,14 @@ wits_add_qttest(tst_barsmodel
     SOURCES tests/tst_barsmodel.cpp
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Gui
     OFFSCREEN)
+
+# --- StudentsTableModel unit test (C++ QtTest). Pure QAbstractListModel logic
+# over StudentRecord (selection tracked by schoolId, survives setRecords) with
+# NO QNetworkAccessManager -> QTEST_APPLESS_MAIN, no OFFSCREEN. Links the module
+# only (which now contains StudentsTableModel.cpp) to avoid a duplicate symbol.
+wits_add_qttest(tst_studentstablemodel
+    SOURCES tests/tst_studentstablemodel.cpp
+    LIBS witsquickmodule)
 
 # --- L* component skeletons Quick test (offscreen) ---
 # Same escape hatch as tst_qml_theme above: "import LOAMS" lives only in the
