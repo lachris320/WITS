@@ -10,7 +10,7 @@ Item {
     // own band below all of them for the same reason: interactive fixtures
     // sharing a position/z with a later-declared sibling silently absorb
     // synthetic mouse events meant for the earlier one.
-    width: 400; height: 1620
+    width: 400; height: 2800
 
     LButton    { id: b;  text: "OK" }
     LCard      { id: c }
@@ -1208,6 +1208,71 @@ Item {
             tryCompare(image, "status", Image.Ready, 5000);
             tryCompare(canvas, "visible", true, 5000);
             compare(placeholder.visible, false);
+        }
+    }
+
+    // --- LTable multi-select fixtures (own band) ---
+    QtObject {
+        id: selectStub
+        property int setAllCalls: 0
+        property bool lastSetAll: false
+        property int toggleCalls: 0
+        property string lastToggleId: ""
+        function setAllSelected(v) { setAllCalls++; lastSetAll = v; }
+        function toggle(id) { toggleCalls++; lastToggleId = id; }
+        property int selectedCount: 0
+        property bool allSelected: false
+    }
+    // A real ListModel (not a JS array) so per-row `schoolId`/`selected` roles resolve.
+    ListModel {
+        id: selectRows
+        ListElement { schoolId: "A"; name: "Ann"; selected: false }
+        ListElement { schoolId: "B"; name: "Ben"; selected: true  }
+    }
+
+    LTable {
+        id: plainTable
+        y: 2100
+        width: 400; height: 160
+        selectable: false
+        columns: [ {key:"name", title:"Name"} ]
+        model: selectRows
+    }
+
+    LTable {
+        id: selectTable
+        y: 2280
+        width: 400; height: 160
+        selectable: true
+        selectionModel: selectStub          // NEW prop: carries toggle/setAllSelected/allSelected
+        columns: [ {key:"name", title:"Name"} ]
+        model: selectRows
+    }
+
+    TestCase {
+        name: "LTableMultiSelect"; when: windowShown
+        function test_noCheckboxWhenNotSelectable() {
+            verify(findChild(plainTable, "selectAllCheck") === null);
+        }
+        function test_selectAllCheckboxExistsWhenSelectable() {
+            verify(findChild(selectTable, "selectAllCheck") !== null);
+            verify(findChild(selectTable, "rowCheck_A") !== null);
+        }
+        function test_headerCheckCallsSetAll() {
+            var h = findChild(selectTable, "selectAllCheck");
+            verify(h !== null);
+            var before = selectStub.setAllCalls;
+            mouseClick(h);
+            compare(selectStub.setAllCalls, before + 1);
+            compare(selectStub.lastSetAll, true);
+        }
+        function test_rowCheckCallsToggle() {
+            var r = findChild(selectTable, "rowCheck_A");
+            verify(r !== null);
+            var before = selectStub.toggleCalls;
+            mouseClick(r);
+            compare(selectStub.toggleCalls, before + 1);
+            compare(selectStub.lastToggleId, "A");
         }
     }
 }

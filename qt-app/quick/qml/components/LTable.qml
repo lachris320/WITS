@@ -9,6 +9,11 @@ Rectangle {
     property var columns: []
     property var model: null
     property bool selectable: false
+    // The object carrying the selection API (`selected` role via `model`,
+    // plus `toggle`/`setAllSelected`/`allSelected`/`selectedCount`). Kept
+    // SEPARATE from `model` so the row-data model and the selection surface
+    // can be the SAME StudentsTableModel or, in tests, a plain-QML stub.
+    property var selectionModel: null
     property string emptyStateText: qsTr("No records")
     // Opt-in row entrance (Phase 3 Task C), default OFF. tst_qml_components.qml
     // exercises this component assuming static geometry, and any future dense
@@ -43,6 +48,36 @@ Rectangle {
                 anchors.leftMargin: Theme.spacing.lg
                 anchors.rightMargin: Theme.spacing.lg
                 spacing: Theme.spacing.md
+                // Select-all checkbox column (multi-select mode only). A
+                // Loader with active:false means the item never EXISTS when
+                // not selectable — so findChild(...,"selectAllCheck") returns
+                // null for a default table, and the RowLayout has no extra
+                // slot (geometry byte-identical to a non-selectable table).
+                Loader {
+                    active: table.selectable
+                    visible: table.selectable
+                    Layout.preferredWidth: table.selectable ? 24 : 0
+                    sourceComponent: Rectangle {
+                        objectName: "selectAllCheck"
+                        anchors.centerIn: parent
+                        width: 18; height: 18; radius: Theme.radius.sm2
+                        color: (table.selectionModel && table.selectionModel.allSelected)
+                               ? Theme.accent.base : Theme.card
+                        border.width: 2; border.color: Theme.border
+                        Text {
+                            anchors.centerIn: parent
+                            visible: table.selectionModel && table.selectionModel.allSelected
+                            text: "✓"; color: Theme.accent.on
+                            font.family: Theme.typography.sans
+                            font.pixelSize: Theme.typography.eyebrow
+                        }
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: if (table.selectionModel)
+                                table.selectionModel.setAllSelected(!table.selectionModel.allSelected)
+                        }
+                    }
+                }
                 Repeater {
                     model: table.columns
                     delegate: Text {
@@ -174,6 +209,37 @@ Rectangle {
                     anchors.leftMargin: Theme.spacing.lg
                     anchors.rightMargin: Theme.spacing.lg
                     spacing: Theme.spacing.md
+                    // Per-row checkbox (multi-select mode only). Same
+                    // active:false Loader idiom as the header — no per-row
+                    // checkbox is instantiated for a non-selectable consumer,
+                    // and the RowLayout keeps its default geometry. The
+                    // sourceComponent is declared in the row-delegate scope so
+                    // it can read rowDelegate.model.schoolId / .selected.
+                    Loader {
+                        active: table.selectable
+                        visible: table.selectable
+                        Layout.preferredWidth: table.selectable ? 24 : 0
+                        sourceComponent: Rectangle {
+                            objectName: "rowCheck_" + (rowDelegate.model.schoolId !== undefined
+                                                       ? rowDelegate.model.schoolId : rowDelegate.index)
+                            anchors.centerIn: parent
+                            width: 18; height: 18; radius: Theme.radius.sm2
+                            color: (rowDelegate.model.selected === true) ? Theme.accent.base : Theme.card
+                            border.width: 2; border.color: Theme.border
+                            Text {
+                                anchors.centerIn: parent
+                                visible: rowDelegate.model.selected === true
+                                text: "✓"; color: Theme.accent.on
+                                font.family: Theme.typography.sans
+                                font.pixelSize: Theme.typography.eyebrow
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: if (table.selectionModel)
+                                    table.selectionModel.toggle(rowDelegate.model.schoolId)
+                            }
+                        }
+                    }
                     Repeater {
                         model: table.columns
                         delegate: Text {
@@ -184,6 +250,12 @@ Rectangle {
                                 var v = rowDelegate.model[modelData.key];
                                 return v !== undefined && v !== null ? v : "";
                             }
+                            // Server-supplied values (name/department/course)
+                            // reach this cell over cleartext HTTP; AutoText
+                            // would render a tampered value as markup. Force
+                            // plain text (anti-injection, spec Global
+                            // Constraints).
+                            textFormat: Text.PlainText
                             color: Theme.text
                             font.family: Theme.typography.sans
                             font.pixelSize: Theme.typography.body
