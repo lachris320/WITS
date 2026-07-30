@@ -35,10 +35,10 @@
 - Modify `AdminScreen.qml` — instantiate `DatabaseViewModel { id: databaseVm }`, pass it to the Database page's `DatabaseScreen`, and call `databaseVm.refresh()` when the Database page is shown (mirror how Search autoloads).
 
 **CMake / tests:**
-- Modify `qt-app/quick/CMakeLists.txt` — add the two new C++ sources to `witsquickmodule`; add the two new QML files to `QML_FILES`.
+- Modify `qt-app/quick/CMakeLists.txt` — add the new C++ sources (`StudentsTableModel`, `DatabaseViewModel`) to `witsquickmodule`; add the ONE new QML file (`LCascadingSelect.qml`) to `QML_FILES` (`DatabaseScreen.qml` is already registered).
 - Create `qt-app/quick/tests/tst_studentstablemodel.cpp` + `tst_databaseviewmodel.cpp` (register via `wits_add_qttest`, no OFFSCREEN — pure logic).
 - Modify `qt-app/quick/tests/tst_qml_components.qml` — `LCascadingSelect` + `LTable` multi-select QuickTests.
-- Create `qt-app/quick/tests/tst_qml_database.qml` (or extend `tst_qml_admin.qml`) — `DatabaseScreen` QuickTest with a stub vm. Register with OFFSCREEN.
+- Modify `qt-app/quick/tests/tst_qml_admin.qml` — add the `DatabaseScreen` fixture + TestCase (NO new target — a QuickTest needs a `.cpp` runner and this binary already scans the whole `tests/` dir).
 
 **Interfaces produced for 4a.2b:**
 - `StudentsTableModel::selectedIds() -> QStringList` (feeds multi-delete + bulk-update).
@@ -335,7 +335,7 @@ Expected: PASS (6 cases).
 
 `StudentsTableModel` is a C++ type not creatable from a QuickTest, so the selection semantics (survives refresh, counts) are already covered in `tst_studentstablemodel` (Task 1). Here we verify only the **checkbox WIRING**: a `selectionModel` stub records `setAllSelected`/`toggle` calls, and a real QML `ListModel` supplies rows carrying a `selected` role so the per-row checkbox is exercised (not just the header). Assert: (1) no checkbox column when `selectable:false`; (2) header `selectAllCheck` + per-row `rowCheck_<id>` exist when `selectable:true`; (3) clicking the header calls `setAllSelected(true)`; (4) clicking a row check calls `toggle(<id>)`.
 
-**FIRST bump the host height:** the file's host `Item` is `height: 1620` (`tst_qml_components.qml:13`) and interactive fixtures must sit inside it or `mouseClick` isn't delivered. These fixtures sit at `y:2100–2640` (with Task 3's `LCascadingSelect` at `y:2460`), so raise the host to `height: 2800`.
+**FIRST bump the host height:** the file's host `Item` is `height: 1620` (`tst_qml_components.qml:13`) and interactive fixtures must sit inside it or `mouseClick` isn't delivered. These fixtures sit at `y:2100–2440` (with Task 3's `LCascadingSelect` at `y:2660`), so raise the host to `height: 2800`.
 
 Add this fixture + test (own band):
 
@@ -1070,5 +1070,5 @@ Expected: `tst_qml_database` passes; full suite green (prior targets + the new m
 ## Self-Review checklist (run before handoff)
 
 1. **Spec coverage (§4.2, §3.4, §6.2):** multi-select `LTable` (Task 2) ✓; student table (Task 5) ✓; cascading selector — **Dept→Course**, Year deferred per the owner-approved deviation (Tasks 3, Global Constraints) ✓; selection-survives-refresh (Task 1) ✓. Register/edit/bulk/delete/dept-ops are 4a.2b (out of scope, stated). Export CSV = 4a.2b.
-2. **Placeholders:** none — every code step is full content. The two "verify a fact" notes (`wits_add_qttest`/QuickTest registration signature; `search_students` empty-filter behavior; `LTable` cell `PlainText`) are confirmation steps against existing code, not deferred implementation.
+2. **Placeholders:** none — every code step is full content. Remaining "verify a fact" notes (`search_students` empty-filter behavior — confirmed `WHERE 1=1`; the `tst_barsmodel` / `wits_add_qttest` registration to mirror) are confirmation steps against existing code, not deferred implementation. `PlainText` and the QuickTest-target shape are now explicit steps, not open questions.
 3. **Type consistency:** `StudentsTableModel` roles/`selectedIds()`/`toggle`/`setAllSelected` match between Task 1, the `selectionModel` usage in Task 2, and `DatabaseViewModel::students()` in Task 4/5; `LCascadingSelect` signals `departmentPicked`/`coursePicked` match between Task 3 and the `DatabaseScreen` handlers in Task 5; `DatabaseViewModel` prop names (`students`/`departments`/`courses`/`department`/`loading`/`errorText`) match between Task 4 and Task 5's bindings.
