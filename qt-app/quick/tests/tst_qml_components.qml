@@ -1275,4 +1275,37 @@ Item {
             compare(selectStub.lastToggleId, "A");
         }
     }
+
+    // --- LCascadingSelect fixtures (own band) ---
+    LCascadingSelect {
+        id: casc
+        y: 2660
+        departments: ["CCS","CBA"]
+        courses: ["BSIT","BSCS"]
+    }
+    // Declared child spy (the file has no signalSpy.createObject factory).
+    SignalSpy { id: deptSpy; target: casc; signalName: "departmentPicked" }
+
+    TestCase {
+        name: "LCascadingSelect"; when: windowShown
+        function init() { casc.department = ""; casc.course = ""; deptSpy.clear(); }
+        function test_pickingDepartmentEmitsAndClearsCourse() {
+            casc.course = "BSIT";
+            var deptCombo = findChild(casc, "cascDept");
+            deptCombo.selectValue("CCS");
+            compare(deptSpy.count, 1);
+            compare(casc.department, "CCS");
+            compare(casc.course, "");            // dependent-clear
+        }
+        function test_courseNoLongerPresentSelfClears() {
+            casc.course = "BSIT";
+            casc.courses = ["BSCS"];             // BSIT re-scoped out
+            compare(casc.course, "");
+        }
+        function test_allMeansEmptyFilter() {
+            var deptCombo = findChild(casc, "cascDept");
+            deptCombo.selectValue("All");
+            compare(casc.department, "");        // "All" -> empty
+        }
+    }
 }
