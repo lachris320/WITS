@@ -269,9 +269,16 @@ Rectangle {
 
     // Empty state.
     Text {
+        objectName: "tableEmptyState"
         anchors.centerIn: parent
         visible: table.emptyVisible
         text: table.emptyStateText
+        // emptyStateText is bound to server-supplied error messages
+        // (e.g. vm.errorText) that reach the client over cleartext
+        // HTTP. AutoText would render a tampered value as markup
+        // (e.g. an <img> that beacons an attacker URL). Force plain
+        // text (anti-injection, mirrors the cell Text above).
+        textFormat: Text.PlainText
         color: Theme.mutedText
         font.family: Theme.typography.sans
         font.pixelSize: Theme.typography.body

@@ -384,6 +384,14 @@ Item {
             verify(t.emptyVisible === true);
         }
 
+        // Anti-injection: emptyStateText carries server-supplied error
+        // messages (e.g. vm.errorText) over cleartext HTTP; the empty-state
+        // Text must pin PlainText so a tampered <img>/markup value can't be
+        // rendered (mirrors the cell PlainText guard).
+        function test_emptyStateIsPlainText() {
+            compare(findChild(t, "tableEmptyState").textFormat, Text.PlainText);
+        }
+
         // --- Motion (Phase 3 Task C): row entrance (C2) + hover (C3) ---
 
         // Regression guard for the opt-in default (brief C2 CRITICAL /
