@@ -87,6 +87,7 @@ qt_add_qml_module(witsquickmodule
         models/SearchResultsModel.h models/SearchResultsModel.cpp
         models/StudentsTableModel.cpp models/StudentsTableModel.h
         viewmodels/SearchViewModel.h viewmodels/SearchViewModel.cpp
+        viewmodels/DatabaseViewModel.cpp viewmodels/DatabaseViewModel.h
         viewmodels/SettingsViewModel.h viewmodels/SettingsViewModel.cpp
 )
 
@@ -271,6 +272,15 @@ wits_add_qttest(tst_visitlogsviewmodel
 # --- SearchViewModel unit test (C++ QtTest, offscreen) ---
 wits_add_qttest(tst_searchviewmodel
     SOURCES tests/tst_searchviewmodel.cpp
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    OFFSCREEN)
+
+# --- DatabaseViewModel unit test (C++ QtTest, offscreen). The VM builds a real
+# QNetworkAccessManager + StudentController and some paths (setDepartment) fire a
+# fire-and-forget post(), so this needs a QCoreApplication (QTEST_MAIN, not
+# APPLESS) + Network/Gui + OFFSCREEN — mirrors tst_searchviewmodel. ---
+wits_add_qttest(tst_databaseviewmodel
+    SOURCES tests/tst_databaseviewmodel.cpp
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
     OFFSCREEN)
 
