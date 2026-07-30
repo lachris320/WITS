@@ -14,8 +14,16 @@ if (!is_array($schoolIds) || count($schoolIds) === 0) {
 $conn->begin_transaction();
 try {
     // 1. Cascade: delete the affected students' visit history first.
+    // prepare() returns false on error when mysqli is NOT in exception mode
+    // (older configs); throw so the catch below rolls back deterministically.
     $delVisits = $conn->prepare("DELETE FROM library_visits WHERE student_id = ?");
+    if (!$delVisits) {
+        throw new Exception($conn->error);
+    }
     $delStudent = $conn->prepare("DELETE FROM students WHERE school_id = ?");
+    if (!$delStudent) {
+        throw new Exception($conn->error);
+    }
 
     $deleted = 0;
     foreach ($schoolIds as $id) {

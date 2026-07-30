@@ -86,6 +86,38 @@ bool isServerAnswer(bool replyHadError, int httpStatus, const QByteArray &body)
 
 } // namespace
 
+// Shared reply handler for the three requireAdminAuth-guarded department actions
+// (deactivate / reset / delete). Reads the body, classifies it, and shows the
+// result — identical for all three, so it lives here instead of being copied
+// into each slot's finished() lambda.
+void adminWindow::showGuardedReplyResult(QNetworkReply *reply)
+{
+    const QByteArray resp = reply->readAll();
+    const bool replyHadError = reply->error() != QNetworkReply::NoError;
+    const int httpStatus = reply->attribute(
+        QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QString transportError = reply->errorString();
+    reply->deleteLater();
+
+    // A 401 from requireAdminAuth is the server answering, not a
+    // transport failure: show its message, not "Content Access Denied".
+    if (!isServerAnswer(replyHadError, httpStatus, resp)) {
+        QMessageBox::critical(this, "Error", transportError);
+        return;
+    }
+
+    QJsonDocument doc = QJsonDocument::fromJson(resp);
+    if (doc.isObject() && doc["status"].toString() == "success") {
+        QMessageBox::information(this, "Success", doc["message"].toString());
+    } else {
+        const QString message = doc.isObject() ? doc["message"].toString() : QString();
+        QMessageBox::warning(this, "Failed",
+                             message.isEmpty()
+                                 ? QStringLiteral("The server rejected the request.")
+                                 : message);
+    }
+}
+
 void adminWindow::setActiveSidebar(QPushButton* activeBtn){
     QList<QPushButton*> buttons = {
         ui->generalBtn,
@@ -577,29 +609,7 @@ adminWindow::adminWindow(QWidget *parent)
 
         QNetworkReply *reply = networkManager->post(request, postData.toString(QUrl::FullyEncoded).toUtf8());
 
-        connect(reply, &QNetworkReply::finished, this, [=]() {
-            const QByteArray resp = reply->readAll();
-            const bool replyHadError = reply->error() != QNetworkReply::NoError;
-            const int httpStatus = reply->attribute(
-                QNetworkRequest::HttpStatusCodeAttribute).toInt();
-            const QString transportError = reply->errorString();
-            reply->deleteLater();
-
-            if (!isServerAnswer(replyHadError, httpStatus, resp)) {
-                QMessageBox::critical(this, "Error", transportError);
-                return;
-            }
-            QJsonDocument doc = QJsonDocument::fromJson(resp);
-            if (doc.isObject() && doc["status"].toString() == "success") {
-                QMessageBox::information(this, "Success", doc["message"].toString());
-            } else {
-                const QString message = doc.isObject() ? doc["message"].toString() : QString();
-                QMessageBox::warning(this, "Failed",
-                                     message.isEmpty()
-                                         ? QStringLiteral("The server rejected the request.")
-                                         : message);
-            }
-        });
+        connect(reply, &QNetworkReply::finished, this, [=]() { showGuardedReplyResult(reply); });
     });
 
     connect(ui->resetCountBtn, &QPushButton::clicked, this, [=]() {
@@ -633,32 +643,7 @@ adminWindow::adminWindow(QWidget *parent)
 
         QNetworkReply *reply = networkManager->post(request, postData.toString(QUrl::FullyEncoded).toUtf8());
 
-        connect(reply, &QNetworkReply::finished, this, [=]() {
-            const QByteArray resp = reply->readAll();
-            const bool replyHadError = reply->error() != QNetworkReply::NoError;
-            const int httpStatus = reply->attribute(
-                QNetworkRequest::HttpStatusCodeAttribute).toInt();
-            const QString transportError = reply->errorString();
-            reply->deleteLater();
-
-            // A 401 from requireAdminAuth is the server answering, not a
-            // transport failure: show its message, not "Content Access Denied".
-            if (!isServerAnswer(replyHadError, httpStatus, resp)) {
-                QMessageBox::critical(this, "Error", transportError);
-                return;
-            }
-
-            QJsonDocument doc = QJsonDocument::fromJson(resp);
-            if (doc.isObject() && doc["status"].toString() == "success") {
-                QMessageBox::information(this, "Success", doc["message"].toString());
-            } else {
-                const QString message = doc.isObject() ? doc["message"].toString() : QString();
-                QMessageBox::warning(this, "Failed",
-                                     message.isEmpty()
-                                         ? QStringLiteral("The server rejected the request.")
-                                         : message);
-            }
-        });
+        connect(reply, &QNetworkReply::finished, this, [=]() { showGuardedReplyResult(reply); });
     });
 
     connect(ui->deleteRecordsBtn, &QPushButton::clicked, this, [=]() {
@@ -693,29 +678,7 @@ adminWindow::adminWindow(QWidget *parent)
 
         QNetworkReply *reply = networkManager->post(request, postData.toString(QUrl::FullyEncoded).toUtf8());
 
-        connect(reply, &QNetworkReply::finished, this, [=]() {
-            const QByteArray resp = reply->readAll();
-            const bool replyHadError = reply->error() != QNetworkReply::NoError;
-            const int httpStatus = reply->attribute(
-                QNetworkRequest::HttpStatusCodeAttribute).toInt();
-            const QString transportError = reply->errorString();
-            reply->deleteLater();
-
-            if (!isServerAnswer(replyHadError, httpStatus, resp)) {
-                QMessageBox::critical(this, "Error", transportError);
-                return;
-            }
-            QJsonDocument doc = QJsonDocument::fromJson(resp);
-            if (doc.isObject() && doc["status"].toString() == "success") {
-                QMessageBox::information(this, "Success", doc["message"].toString());
-            } else {
-                const QString message = doc.isObject() ? doc["message"].toString() : QString();
-                QMessageBox::warning(this, "Failed",
-                                     message.isEmpty()
-                                         ? QStringLiteral("The server rejected the request.")
-                                         : message);
-            }
-        });
+        connect(reply, &QNetworkReply::finished, this, [=]() { showGuardedReplyResult(reply); });
     });
 
 
