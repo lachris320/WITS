@@ -385,14 +385,22 @@ QNetworkReply *CapturingNam::createRequest(Operation op, const QNetworkRequest &
 
 - [ ] **Step 3: Register the harness with the controller test target**
 
-In `qt-app/CMakeLists.txt`, find the `wits_add_qttest(tst_studentcontroller ...)` registration and add the harness source to it (match how existing multi-source tests list files). It must compile `testsupport/capturingnam.cpp` and expose `testsupport/` on the include path. Example shape (adapt to the file's actual macro signature):
+CORRECTION (advisor-verified): `tst_studentcontroller` is NOT a `wits_add_qttest` target — it is a **raw `qt_add_executable` block** in `qt-app/tests/CMakeLists.txt` (around lines 106-121), alongside a `target_include_directories` and a `set_tests_properties`. Extend that existing block: add the harness `.cpp` **and** `.h` (list the `.h` so AUTOMOC processes its `Q_OBJECT`) to the sources, and add `${CMAKE_SOURCE_DIR}/testsupport` to its include dirs. `Qt::Network` is already linked on this target — nothing else to add. Example (adapt to the real block):
 
 ```cmake
-wits_add_qttest(tst_studentcontroller
-    SOURCES tests/tst_studentcontroller.cpp core/studentcontroller.cpp testsupport/capturingnam.cpp
-    INCLUDE_DIRS testsupport
-)
+qt_add_executable(tst_studentcontroller
+    tst_studentcontroller.cpp
+    ${CMAKE_SOURCE_DIR}/core/studentcontroller.cpp
+    ${CMAKE_SOURCE_DIR}/core/studentcontroller.h
+    ${CMAKE_SOURCE_DIR}/core/studentdata.h
+    ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
+    ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h)
+# ... (keep the existing link + AUTOMOC + add_test lines) ...
+target_include_directories(tst_studentcontroller PRIVATE
+    ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/core ${CMAKE_SOURCE_DIR}/testsupport)
 ```
+
+Do NOT migrate it to `wits_add_qttest` (that macro would pull in the settings-isolation TU and does NOT auto-link Qt::Network — the raw-block edit is lower-risk). Also add `setFinished(true);` inside `CannedReply`'s singleShot lambda before `emit finished();` (harmless here, correct for the increment-2 reuse).
 
 - [ ] **Step 4: Build the (unchanged) test to prove the harness compiles and links**
 
