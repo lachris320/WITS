@@ -24,7 +24,7 @@
 
 **C++ (`qt-app/quick/`):**
 - Create `models/StudentsTableModel.{h,cpp}` — `QAbstractListModel` of `StudentRecord` + a `SelectedRole`; selection tracked by `schoolId` in a `QSet<QString>` so it survives `setRecords`. Exposes `count`, `selectedCount`, `anySelected`, `allSelected`; `Q_INVOKABLE toggle(schoolId)`, `setAllSelected(bool)`, `clearSelection()`, `selectedIds()`.
-- Create `viewmodels/DatabaseViewModel.{h,cpp}` — owns `QNetworkAccessManager` + `StudentController` + a `StudentsTableModel`; mirrors `SearchViewModel` wiring (departments/courses/results, loading/error, requestId race). Exposes `students` (the model), `departments`, `courses`, `department`, `loading`, `errorText`; `Q_INVOKABLE refresh()`, `setDepartment()`, `setCourse()`, `reloadTable()`.
+- Create `viewmodels/DatabaseViewModel.{h,cpp}` — owns `QNetworkAccessManager` + `StudentController` + a `StudentsTableModel`; mirrors `SearchViewModel` wiring (departments/courses/results, loading/error, requestId race) and is `QML_ELEMENT`-registered. Exposes `students` (the model), `departments`, `courses`, `department`, `course`, `loading`, `errorText`; `Q_INVOKABLE refresh()`, `setDepartment()` (dependent-clears `course`), `setCourse()`, `reloadTable()`.
 
 **QML components (`qt-app/quick/qml/components/`):**
 - Create `LCascadingSelect.qml` — reusable Dept→Course selector (two `LComboBox`), "All" semantics, dependent-clear; `departments`/`courses` string-list props, `department`/`course` state, signals `departmentPicked(string)` + `coursePicked(string)`.
@@ -151,13 +151,15 @@ QTEST_APPLESS_MAIN(TestStudentsTableModel)
 #include "tst_studentstablemodel.moc"
 ```
 
-- [ ] **Step 2: Register the test (RED — class doesn't exist)**
+- [ ] **Step 2: Add the model to the module + register the test (RED — class doesn't exist)**
 
-In `qt-app/quick/CMakeLists.txt`, near the other `wits_add_qttest` model tests, add:
+Two CMake edits in `qt-app/quick/CMakeLists.txt`:
+1. Add `models/StudentsTableModel.cpp models/StudentsTableModel.h` to the `witsquickmodule` source list (alongside the other `models/*` sources).
+2. Register the test — **link the module, do NOT also list the model `.cpp`** (listing it AND linking `witsquickmodule`, which now contains it, is a duplicate-symbol link error). Match the sibling model-test pattern (e.g. `tst_barsmodel`, which links the module only):
 ```cmake
-wits_add_qttest(tst_studentstablemodel SOURCES tests/tst_studentstablemodel.cpp models/StudentsTableModel.cpp LIBS witsquickmodule)
+wits_add_qttest(tst_studentstablemodel SOURCES tests/tst_studentstablemodel.cpp LIBS witsquickmodule)
 ```
-(Match the exact `wits_add_qttest` signature used by a sibling model test such as `tst_searchresultsmodel` if one exists; if model tests link the model source directly rather than the whole module, mirror that. Confirm the real registration style first.)
+Confirm the real `tst_barsmodel` registration and mirror it exactly.
 Run: `cmake -S qt-app -B C:/b/loams-4a2 -G Ninja -DCMAKE_PREFIX_PATH="C:/Qt/6.11.1/mingw_64"` then `cmake --build C:/b/loams-4a2 --target tst_studentstablemodel` → FAIL (`StudentsTableModel.h` not found).
 
 - [ ] **Step 3: Write the header**
@@ -331,12 +333,11 @@ Expected: PASS (6 cases).
 
 - [ ] **Step 1: Write failing QuickTests**
 
-In `qt-app/quick/tests/tst_qml_components.qml` add a fixture + `TestCase` (match the file's fixture-band pattern — each fixture in its own y-offset region). Fixture uses a tiny plain-QML `ListModel`-backed stub is NOT enough (needs `toggle`/`allSelected`); instead inject a `StudentsTableModel` is C++-only — so the QuickTest drives selection through the table's checkbox items and asserts against a **stub** object exposing `selected` role + `toggle`. Simplest: give the test a `QtObject` stub model API is impractical for a ListView model. Use the real interaction: build an `LTable` with `selectable: true` and a small C++ `StudentsTableModel` is not available in QML tests without registration. **Therefore:** register `StudentsTableModel` as a QML-creatable type is out of scope; instead the QuickTest validates the checkbox WIRING against a minimal QML `ListModel` plus table-level `selectAllChecked`/`selectedCount` reads, and the deep selection semantics are already covered by `tst_studentstablemodel` (Task 1). Concretely, assert:
-  1. With `selectable: false` (default), no checkbox column objects exist (`findChild(table,"selectAllCheck") === null`).
-  2. With `selectable: true`, a `selectAllCheck` header checkbox exists and per-row `rowCheck_<id>` items exist.
-  3. Clicking `selectAllCheck` calls the model's `setAllSelected(true)` (assert via a spy property on a stub model that records the call).
+`StudentsTableModel` is a C++ type not creatable from a QuickTest, so the selection semantics (survives refresh, counts) are already covered in `tst_studentstablemodel` (Task 1). Here we verify only the **checkbox WIRING**: a `selectionModel` stub records `setAllSelected`/`toggle` calls, and a real QML `ListModel` supplies rows carrying a `selected` role so the per-row checkbox is exercised (not just the header). Assert: (1) no checkbox column when `selectable:false`; (2) header `selectAllCheck` + per-row `rowCheck_<id>` exist when `selectable:true`; (3) clicking the header calls `setAllSelected(true)`; (4) clicking a row check calls `toggle(<id>)`.
 
-Add this fixture + test:
+**FIRST bump the host height:** the file's host `Item` is `height: 1620` (`tst_qml_components.qml:13`) and interactive fixtures must sit inside it or `mouseClick` isn't delivered. These fixtures sit at `y:2100–2640` (with Task 3's `LCascadingSelect` at `y:2460`), so raise the host to `height: 2800`.
+
+Add this fixture + test (own band):
 
 ```qml
 // --- LTable multi-select fixtures (own band) ---
@@ -345,13 +346,17 @@ QtObject {
     property int setAllCalls: 0
     property bool lastSetAll: false
     property int toggleCalls: 0
+    property string lastToggleId: ""
     function setAllSelected(v) { setAllCalls++; lastSetAll = v; }
-    function toggle(id) { toggleCalls++; }
+    function toggle(id) { toggleCalls++; lastToggleId = id; }
     property int selectedCount: 0
     property bool allSelected: false
-    // Minimal list-model surface for the ListView: 2 rows.
-    property var rows: [ {schoolId:"A", name:"Ann", selected:false},
-                         {schoolId:"B", name:"Ben", selected:false} ]
+}
+// A real ListModel (not a JS array) so per-row `schoolId`/`selected` roles resolve.
+ListModel {
+    id: selectRows
+    ListElement { schoolId: "A"; name: "Ann"; selected: false }
+    ListElement { schoolId: "B"; name: "Ben"; selected: true  }
 }
 
 LTable {
@@ -360,7 +365,7 @@ LTable {
     width: 400; height: 160
     selectable: false
     columns: [ {key:"name", title:"Name"} ]
-    model: selectStub.rows
+    model: selectRows
 }
 
 LTable {
@@ -368,9 +373,9 @@ LTable {
     y: 2280
     width: 400; height: 160
     selectable: true
-    selectionModel: selectStub          // NEW prop: the object carrying toggle/setAllSelected/allSelected
+    selectionModel: selectStub          // NEW prop: carries toggle/setAllSelected/allSelected
     columns: [ {key:"name", title:"Name"} ]
-    model: selectStub.rows
+    model: selectRows
 }
 
 TestCase {
@@ -380,6 +385,7 @@ TestCase {
     }
     function test_selectAllCheckboxExistsWhenSelectable() {
         verify(findChild(selectTable, "selectAllCheck") !== null);
+        verify(findChild(selectTable, "rowCheck_A") !== null);
     }
     function test_headerCheckCallsSetAll() {
         var h = findChild(selectTable, "selectAllCheck");
@@ -388,6 +394,14 @@ TestCase {
         mouseClick(h);
         compare(selectStub.setAllCalls, before + 1);
         compare(selectStub.lastSetAll, true);
+    }
+    function test_rowCheckCallsToggle() {
+        var r = findChild(selectTable, "rowCheck_A");
+        verify(r !== null);
+        var before = selectStub.toggleCalls;
+        mouseClick(r);
+        compare(selectStub.toggleCalls, before + 1);
+        compare(selectStub.lastToggleId, "A");
     }
 }
 ```
@@ -453,6 +467,8 @@ Item {
 ```
 (Guard every `selectionModel` access with a null check so the default non-selectable table with no `selectionModel` never errors.)
 
+**Also, in the SAME task, close the anti-injection gap:** `LTable`'s cell `Text` (the row `Repeater` delegate, currently `LTable.qml:179-191`) renders server-supplied values (name/department/course) and does NOT set a text format — so `AutoText` would render markup. Add `textFormat: Text.PlainText` to that cell `Text`. (This is a required security fix, not optional — the Database table is the first consumer to feed server strings through `LTable`.)
+
 - [ ] **Step 4: Run — GREEN + regression**
 
 Run: `cmake --build C:/b/loams-4a2 --target tst_qml_components && ctest --test-dir C:/b/loams-4a2 -R qml_components --output-on-failure`
@@ -482,22 +498,23 @@ Add to `tst_qml_components.qml` (own fixture band):
 ```qml
 LCascadingSelect {
     id: casc
-    y: 2460
+    y: 2660
     departments: ["CCS","CBA"]
     courses: ["BSIT","BSCS"]
 }
+// Declared child spy (the file has no signalSpy.createObject factory).
+SignalSpy { id: deptSpy; target: casc; signalName: "departmentPicked" }
+
 TestCase {
     name: "LCascadingSelect"; when: windowShown
-    function init() { casc.department = ""; casc.course = ""; }
+    function init() { casc.department = ""; casc.course = ""; deptSpy.clear(); }
     function test_pickingDepartmentEmitsAndClearsCourse() {
         casc.course = "BSIT";
-        var spy = signalSpy.createObject(casc, {target: casc, signalName: "departmentPicked"});
         var deptCombo = findChild(casc, "cascDept");
         deptCombo.selectValue("CCS");
-        compare(spy.count, 1);
+        compare(deptSpy.count, 1);
         compare(casc.department, "CCS");
         compare(casc.course, "");            // dependent-clear
-        spy.destroy();
     }
     function test_courseNoLongerPresentSelfClears() {
         casc.course = "BSIT";
@@ -511,7 +528,7 @@ TestCase {
     }
 }
 ```
-(`signalSpy` is the file's existing `Component { SignalSpy {} }` factory — reuse whatever the file already uses for spies; if none, add `SignalSpy { id: deptSpy; target: casc; signalName: "departmentPicked" }` as a child and read `deptSpy.count`.)
+(The `casc` fixture sits at `y:2660`, inside the host height bumped to 2800 in Task 2.)
 
 - [ ] **Step 2: Run — RED** (`LCascadingSelect` unknown type).
 
@@ -643,8 +660,11 @@ void TestDatabaseViewModel::setDepartmentReloadsCoursesAndClears()
     DatabaseViewModel vm;
     vm.onCoursesLoaded({"BSIT"});
     QCOMPARE(vm.courses(), (QStringList{"BSIT"}));
+    vm.setCourse("BSIT");
+    QCOMPARE(vm.course(), QStringLiteral("BSIT"));
     vm.setDepartment("CCS");
     QCOMPARE(vm.department(), QStringLiteral("CCS"));
+    QCOMPARE(vm.course(), QString());   // Critical fix: dept change drops the stale course filter
 }
 
 void TestDatabaseViewModel::networkErrorSetsErrorAndClearsRows()
@@ -675,6 +695,7 @@ QTEST_APPLESS_MAIN(TestDatabaseViewModel)
 
 #include <QObject>
 #include <QStringList>
+#include <qqml.h>                 // QML_ELEMENT — AdminScreen instantiates this type
 #include "studentdata.h"
 #include "StudentsTableModel.h"
 
@@ -688,10 +709,12 @@ class StudentController;
 class DatabaseViewModel : public QObject
 {
     Q_OBJECT
+    QML_ELEMENT                    // declarative registration, mirrors SearchViewModel.h
     Q_PROPERTY(StudentsTableModel *students READ students CONSTANT)
     Q_PROPERTY(QStringList departments READ departments NOTIFY departmentsChanged)
     Q_PROPERTY(QStringList courses READ courses NOTIFY coursesChanged)
     Q_PROPERTY(QString department READ department NOTIFY departmentChanged)
+    Q_PROPERTY(QString course READ course NOTIFY courseChanged)
     Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged)
     Q_PROPERTY(QString errorText READ errorText NOTIFY errorTextChanged)
 public:
@@ -701,6 +724,7 @@ public:
     QStringList departments() const { return m_departments; }
     QStringList courses() const { return m_courses; }
     QString department() const { return m_department; }
+    QString course() const { return m_course; }   // exposed so a test/screen can observe the dependent-clear
     bool loading() const { return m_loading; }
     QString errorText() const { return m_errorText; }
 
@@ -720,6 +744,7 @@ signals:
     void departmentsChanged();
     void coursesChanged();
     void departmentChanged();
+    void courseChanged();
     void loadingChanged();
     void errorTextChanged();
 
@@ -780,6 +805,11 @@ void DatabaseViewModel::setDepartment(const QString &department)
     if (m_department != department) {
         m_department = department;
         emit departmentChanged();
+        // Dependent-clear (Critical fix): a new department invalidates the
+        // course filter. The QML cascade clears its own combo, but the VM must
+        // also drop m_course or reloadTable() would send a course from the OLD
+        // department and return wrong/empty rows.
+        if (!m_course.isEmpty()) { m_course.clear(); emit courseChanged(); }
         m_controller->loadCourses(department);   // re-scope the course list
     }
     reloadTable();
@@ -787,7 +817,7 @@ void DatabaseViewModel::setDepartment(const QString &department)
 
 void DatabaseViewModel::setCourse(const QString &course)
 {
-    m_course = course;
+    if (m_course != course) { m_course = course; emit courseChanged(); }
     reloadTable();
 }
 
@@ -849,22 +879,17 @@ Expected: PASS (4 cases). NOTE: verify `search_students.php` returns all rows fo
 
 **Files:**
 - Modify: `qt-app/quick/qml/admin/DatabaseScreen.qml` (replace placeholder)
-- Modify: `qt-app/quick/qml/admin/AdminScreen.qml` (instantiate + inject + autoload)
-- Create: `qt-app/quick/tests/tst_qml_database.qml` (register with OFFSCREEN)
-- Modify: `qt-app/quick/CMakeLists.txt` (register the QuickTest)
+- Modify: `qt-app/quick/qml/admin/AdminScreen.qml` (instantiate + inject)
+- Modify: `qt-app/quick/tests/tst_qml_admin.qml` (add the DatabaseScreen fixture + TestCase — NO new target: a QuickTest needs a `.cpp` `QUICK_TEST_MAIN` runner, and the existing `tst_qml_admin` binary already scans the whole `tests/` dir, so a bare `.qml` in a new `wits_add_qttest` cannot work)
 
 **Interfaces:**
-- Consumes: `DatabaseViewModel` (`students`, `departments`, `courses`, `department`, `loading`, `errorText`, `refresh`, `setDepartment`, `setCourse`), `LCascadingSelect`, `LTable` multi-select.
+- Consumes: `DatabaseViewModel` (`students`, `departments`, `courses`, `department`, `course`, `loading`, `errorText`, `refresh`, `setDepartment`, `setCourse`), `LCascadingSelect`, `LTable` multi-select.
 
 - [ ] **Step 1: Write the failing QuickTest (stub vm)**
 
-Create `qt-app/quick/tests/tst_qml_database.qml`:
+Add a fixture band + `TestCase` to `qt-app/quick/tests/tst_qml_admin.qml` (match how that file hosts its existing screen tests — each in its own region of the root `Item`; give the fixtures a y-offset that clears the other screens). The block:
 
 ```qml
-import QtQuick
-import QtTest
-import LOAMS
-
 Item {
     width: 900; height: 700
 
@@ -888,11 +913,12 @@ Item {
         property var departments: ["CCS","CBA"]
         property var courses: ["BSIT","BSCS"]
         property string department: ""
+        property string course: ""
         property bool loading: false
         property string errorText: ""
         function refresh() {}
         function setDepartment(d) { department = d; }
-        function setCourse(c) {}
+        function setCourse(c) { course = c; }
     }
 
     DatabaseScreen { id: screen; anchors.fill: parent; vm: stubVm }
@@ -915,9 +941,11 @@ Item {
 }
 ```
 
-- [ ] **Step 2: Register + run — RED**
+- [ ] **Step 2: Run — RED**
 
-Add `wits_add_qttest(tst_qml_database SOURCES tests/tst_qml_database.qml OFFSCREEN ...)` (match the exact QuickTest registration signature used by `tst_qml_admin`). Run → FAIL (`DatabaseScreen` is still the placeholder; no `cascDept`/`studentsTable`).
+No new CMake target — the test lives in the existing `tst_qml_admin`. Rebuild + run it:
+`cmake --build C:/b/loams-4a2 --target tst_qml_admin && ctest --test-dir C:/b/loams-4a2 -R qml_admin --output-on-failure`
+Expected: FAIL (`DatabaseScreen` is still the placeholder; no `cascDept`/`studentsTable`/`tableCountHeader`).
 
 - [ ] **Step 3: Replace `DatabaseScreen.qml`**
 
@@ -974,6 +1002,7 @@ Rectangle {
                     departments: screen.vm ? screen.vm.departments : []
                     courses: screen.vm ? screen.vm.courses : []
                     department: screen.vm ? screen.vm.department : ""
+                    course: screen.vm ? screen.vm.course : ""   // reflects the VM's dependent-clear
                     onDepartmentPicked: function(d) { if (screen.vm) screen.vm.setDepartment(d); }
                     onCoursePicked: function(c) { if (screen.vm) screen.vm.setCourse(c); }
                 }
@@ -1015,11 +1044,11 @@ Rectangle {
     }
 }
 ```
-NOTE: `LTable`'s cell `Text` renders `rowDelegate.model[key]` — verify `LTable` sets `textFormat: Text.PlainText` on its cell text (anti-injection); if it does not, add it as part of this task (server-supplied name/department must not render as rich text).
+NOTE: the anti-injection `textFormat: Text.PlainText` on `LTable`'s cell text is added in **Task 2** (see that task's Step 3) — this screen relies on it, so confirm it landed.
 
 - [ ] **Step 4: Wire into `AdminScreen.qml`**
 
-Near the other per-screen VMs (`SettingsViewModel { id: settingsVm }` etc.), add `DatabaseViewModel { id: databaseVm }`. In the `pageLoader` (the `Loader` that switches admin pages), where `Navigator.Database` currently loads the placeholder `DatabaseScreen`, pass the vm: `DatabaseScreen { vm: databaseVm }`. Add an autoload so the table populates when the Database page is shown — mirror how Search refreshes on navigation (e.g. a `Connections` on `Navigator` calling `databaseVm.refresh()` when `Navigator.adminPage === Navigator.Database`, or the existing autoload mechanism this shell uses). Read the current `AdminScreen.qml` Database case + how Search autoloads before editing, and match that mechanism exactly.
+Near the other per-screen VMs (`SettingsViewModel { id: settingsVm }` etc.), add `DatabaseViewModel { id: databaseVm }`. In the page `Loader` where `Navigator.Database` currently loads the placeholder, pass the vm: `DatabaseScreen { vm: databaseVm }`. **No autoload wiring needed** — the shell's `Loader.onLoaded` already feature-detects `item.vm.refresh()` (`AdminScreen.qml:179-186`), which fires `databaseVm.refresh()` on navigation to the page (the same mechanism Search uses). Confirm that `onLoaded` block still covers the Database case before finishing.
 
 - [ ] **Step 5: Build + run — GREEN + full regression**
 
