@@ -572,24 +572,32 @@ adminWindow::adminWindow(QWidget *parent)
 
         QUrlQuery postData;
         postData.addQueryItem("department", dept);
+        // deactivate_department.php is now requireAdminAuth-guarded.
+        postData.addQueryItem("admin_key", m_adminKey);
 
         QNetworkReply *reply = networkManager->post(request, postData.toString(QUrl::FullyEncoded).toUtf8());
 
         connect(reply, &QNetworkReply::finished, this, [=]() {
-            if (reply->error() != QNetworkReply::NoError) {
-                QMessageBox::critical(this, "Error", reply->errorString());
-                reply->deleteLater();
-                return;
-            }
-
-            QByteArray resp = reply->readAll();
+            const QByteArray resp = reply->readAll();
+            const bool replyHadError = reply->error() != QNetworkReply::NoError;
+            const int httpStatus = reply->attribute(
+                QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const QString transportError = reply->errorString();
             reply->deleteLater();
 
+            if (!isServerAnswer(replyHadError, httpStatus, resp)) {
+                QMessageBox::critical(this, "Error", transportError);
+                return;
+            }
             QJsonDocument doc = QJsonDocument::fromJson(resp);
             if (doc.isObject() && doc["status"].toString() == "success") {
                 QMessageBox::information(this, "Success", doc["message"].toString());
             } else {
-                QMessageBox::warning(this, "Failed", doc["message"].toString());
+                const QString message = doc.isObject() ? doc["message"].toString() : QString();
+                QMessageBox::warning(this, "Failed",
+                                     message.isEmpty()
+                                         ? QStringLiteral("The server rejected the request.")
+                                         : message);
             }
         });
     });
@@ -680,24 +688,32 @@ adminWindow::adminWindow(QWidget *parent)
 
         QUrlQuery postData;
         postData.addQueryItem("department", dept);
+        // delete_department.php is now requireAdminAuth-guarded.
+        postData.addQueryItem("admin_key", m_adminKey);
 
         QNetworkReply *reply = networkManager->post(request, postData.toString(QUrl::FullyEncoded).toUtf8());
 
         connect(reply, &QNetworkReply::finished, this, [=]() {
-            if (reply->error() != QNetworkReply::NoError) {
-                QMessageBox::critical(this, "Error", reply->errorString());
-                reply->deleteLater();
-                return;
-            }
-
-            QByteArray resp = reply->readAll();
+            const QByteArray resp = reply->readAll();
+            const bool replyHadError = reply->error() != QNetworkReply::NoError;
+            const int httpStatus = reply->attribute(
+                QNetworkRequest::HttpStatusCodeAttribute).toInt();
+            const QString transportError = reply->errorString();
             reply->deleteLater();
 
+            if (!isServerAnswer(replyHadError, httpStatus, resp)) {
+                QMessageBox::critical(this, "Error", transportError);
+                return;
+            }
             QJsonDocument doc = QJsonDocument::fromJson(resp);
             if (doc.isObject() && doc["status"].toString() == "success") {
                 QMessageBox::information(this, "Success", doc["message"].toString());
             } else {
-                QMessageBox::warning(this, "Failed", doc["message"].toString());
+                const QString message = doc.isObject() ? doc["message"].toString() : QString();
+                QMessageBox::warning(this, "Failed",
+                                     message.isEmpty()
+                                         ? QStringLiteral("The server rejected the request.")
+                                         : message);
             }
         });
     });
