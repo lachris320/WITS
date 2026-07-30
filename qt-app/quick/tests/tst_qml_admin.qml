@@ -10,10 +10,10 @@ Item {
     // window tracks this root item's size.
     //
     // Geometry ledger (x 0 column):   dash 0..760 | search 760..1460 |
-    //   logs 1460..2160 | settings 2160..3760.
+    //   logs 1460..2160 | settings 2160..3760 | database 3800..4500.
     // Parked no-vm column (x 2000): vmlessSearch 0..700 |
     //   vmlessLogs 760..1460 | vmlessSettings 1560..2260.
-    width: 1100; height: 3760
+    width: 1100; height: 4500
 
     // --- Dashboard stub VM ---
     // maxValue is declared on the stubs because the screen binds
@@ -1618,6 +1618,62 @@ Item {
             compare(findChild(vmlessSettings, "resetConfirmDialog").visible, false);
             // The logo slot must not latch on with no vm to supply one.
             compare(findChild(vmlessSettings, "logoPreview").visible, false);
+        }
+    }
+
+    // --- Database screen fixture (own band below Settings, y 3800..4500) ---
+    // A self-contained Item so the DatabaseScreen fills a known rect clear of
+    // every other screen fixture. The stub vm is a plain QtObject exposing only
+    // the surface DatabaseScreen reads — no live network, no C++ VM (house rule
+    // §5). `students` is itself a QtObject carrying the multi-select surface
+    // (count/selectedCount/allSelected/setAllSelected/toggle) LTable binds to.
+    Item {
+        id: databaseBand
+        y: 3800
+        width: 900; height: 700
+
+        QtObject {
+            id: stubModel
+            property int count: 2
+            property int selectedCount: 0
+            property bool allSelected: false
+            function setAllSelected(v) {}
+            function toggle(id) {}
+            property var rows: [ {schoolId:"A", name:"Ann", course:"BSIT", department:"CCS",
+                                  yearLevel:"2", status:"Active", visits:3, selected:false},
+                                 {schoolId:"B", name:"Ben", course:"BSCS", department:"CCS",
+                                  yearLevel:"3", status:"Active", visits:1, selected:false} ]
+        }
+        QtObject {
+            id: stubVm
+            property var students: stubModel
+            property var departments: ["CCS","CBA"]
+            property var courses: ["BSIT","BSCS"]
+            property string department: ""
+            property string course: ""
+            property bool loading: false
+            property string errorText: ""
+            function refresh() {}
+            function setDepartment(d) { department = d; }
+            function setCourse(c) { course = c; }
+        }
+
+        DatabaseScreen { id: databaseScreen; anchors.fill: parent; vm: stubVm }
+
+        TestCase {
+            name: "DatabaseScreen"; when: windowShown
+            function test_showsCascadingFilter() {
+                verify(findChild(databaseScreen, "cascDept") !== null);
+            }
+            function test_showsSelectableTable() {
+                verify(findChild(databaseScreen, "studentsTable") !== null);
+                verify(findChild(databaseScreen, "selectAllCheck") !== null);   // selectable table
+            }
+            function test_headerShowsCounts() {
+                var h = findChild(databaseScreen, "tableCountHeader");
+                verify(h !== null);
+                verify(h.text.indexOf("2") !== -1);   // 2 results
+            }
         }
     }
 }
