@@ -96,7 +96,8 @@ Behavior:
   encoding.
 - **Empty input** ⇒ header row only.
 
-Delete already exists on the controller — **no new endpoint, no new method**:
+Delete already exists on the controller (`deleteStudents` + `deleteFinished` /
+`deleteFailed`) — **no new endpoint**:
 
 ```cpp
 void deleteStudents(const QStringList &schoolIds, const QString &adminKey);
@@ -104,6 +105,41 @@ void deleteStudents(const QStringList &schoolIds, const QString &adminKey);
 //   deleteFinished(bool ok, int requestedCount, const QString &message)
 //   deleteFailed(const QString &errorString)
 ```
+
+**Required fix — reply classification (in scope for this slice).** As written
+today, `deleteStudents` (`studentcontroller.cpp:244-248`) checks
+`reply->error() != NoError` **first** and emits `deleteFailed(errorString)`,
+returning **without reading the body**. A guard 401 sets
+`QNetworkReply::AuthenticationRequiredError`, so a **bad/expired admin key routes
+to the transport path** with a generic Qt error string and the server's
+`{status:error,message:…}` body is discarded. `deleteFinished(false, …)` only
+ever fires on HTTP-200 error bodies (`"Invalid data"` / SQL failure). Because
+locked decision (A) uses the held key with **no re-type**, a stale-key 401 is the
+**primary** failure mode this feature must surface — and the current control flow
+cannot distinguish it from a network outage.
+
+Fix `deleteStudents` to classify the reply the same way the existing
+`HttpForm::isServerAnswer` seam does (`HttpForm.cpp`, used by
+`SettingsViewModel`): an HTTP reply that **carries a status code and a body**
+(even 4xx/5xx — notably the 401 from `requireAdminAuth`) is a *server answer* →
+read the body through `parseDeleteResponse` → `deleteFinished(false, message)`.
+Only a genuine transport failure (**no** HTTP status attribute) emits
+`deleteFailed`. Extract the decision as a pure, unit-testable static so the 401
+path is coverable without a live reply:
+
+```cpp
+// True when the reply is a decodable server answer (has an HTTP status +
+// body) rather than a transport failure. Mirrors HttpForm::isServerAnswer.
+static bool deleteReplyIsServerAnswer(bool replyHadError, int httpStatus,
+                                      const QByteArray &body);
+```
+
+This is a strict improvement for the legacy `adminwindow` caller too (it already
+handles `deleteFinished(false, message)` by showing the server message; a stale
+key now shows *"Invalid admin key"* instead of a generic network error). The
+sibling `bulkUpdateStudents` has the identical error-first pattern
+(`studentcontroller.cpp:212`) — leave it for 4a.2b-iii, where the classifier
+should be reused (forward-note, not this slice).
 
 ### 2. `qt-app/quick/models/StudentsTableModel.{h,cpp}`
 
@@ -190,19 +226,35 @@ Extend with an OPTIONAL typed-confirmation gate:
 When `requireTypedConfirmation` is `true`, show a text field and keep the
 confirm button disabled until the field text **equals** `confirmationWord`
 (exact match). When `false`, behavior is unchanged — backward-compatible for
-existing call sites.
+existing call sites (`SettingsScreen.qml:475` tier-2 reset; the
+`tst_qml_components.qml` fixtures — both keep the default `false`).
+
+Two implementation constraints so the extension stays consistent with the
+existing component:
+
+- **Fold the typed-confirm gate into the existing confirm-button `enabled`
+  binding** (currently `enabled: !root.busy && root.keyReady`), not a parallel
+  binding — add the `field-matches-confirmationWord` term to that one expression.
+- **Follow the Loader-not-`visible` pattern already used in this file**
+  (`LConfirmDialog.qml:20-24`) so a QuickTest `findChild()` can locate the typed
+  field and assert the gate regardless of the dialog's visibility.
 
 This is reusable and was chosen over a bespoke `DeleteStudentsDialog`.
 
 ### 6. `qt-app/quick/qml/admin/DatabaseScreen.qml`
 
-Into the EXISTING count-header row (`"N results · M selected"`, right-aligned),
-add two `LButton`s:
+The current count header (`DatabaseScreen.qml:59-68`) is a **single
+left-aligned `Text`** (`objectName: "tableCountHeader"`), NOT a `RowLayout` and
+not right-aligned. Wrap it into a `RowLayout`: the existing `Text` on the left, a
+spacer (`Item { Layout.fillWidth: true }`), then the two right-aligned
+`LButton`s:
 
 - **Export**
   - Label: `Export CSV (all N)` when nothing selected (N = filtered count) /
     `Export CSV (M)` when M selected.
-  - ALWAYS enabled.
+  - Enabled whenever there is **at least one row to export** — i.e. M > 0, or
+    (nothing selected and) N > 0. **Disabled when the filtered set is empty
+    (N = 0)** so we never silently write a BOM+header-only file.
   - Supplemental `tooltipText: "Exports selected rows, or all filtered rows if
     none are selected."`
   - RESERVED width via a worst-case `TextMetrics` so the button edge never
@@ -218,7 +270,10 @@ Add:
 
 - A `FileDialog { fileMode: FileDialog.SaveFile; defaultSuffix: "csv";
   nameFilters: ["CSV (*.csv)"] }` (from `QtQuick.Dialogs`, native on Windows in
-  Qt 6) whose `onAccepted` calls `vm.exportCsv(selectedFile)`.
+  Qt 6) whose `onAccepted` calls `vm.exportCsv(selectedFile)`. **This is the
+  first `QtQuick.Dialogs` use in the Quick UI** (existing pickers are Widgets
+  `QFileDialog`), so wire the `Qt6::QuickDialogs2` dependency into
+  `qt-app/quick/CMakeLists.txt` (link + import) as part of this slice.
 - The two-tier delete `LConfirmDialog`: content itemizes the impact
   (`"• M student records"`, `"• all associated visit history"`, `"This cannot be
   undone."`); set `requireTypedConfirmation: vm.requiresTypedConfirmation(M)` so
@@ -253,8 +308,9 @@ cleanliness.
 
 ### Export
 
-1. User clicks **Export** (always enabled). Label reflects whether the export
-   will cover the M selected rows or all N filtered rows.
+1. User clicks **Export** (enabled whenever ≥1 row is exportable; disabled at
+   N = 0). Label reflects whether the export will cover the M selected rows or
+   all N filtered rows.
 2. The `FileDialog` (SaveFile mode, `.csv` default suffix, CSV name filter)
    opens natively.
 3. On accept ⇒ `vm.exportCsv(selectedFile)`.
@@ -269,11 +325,20 @@ cleanliness.
 
 ## Error Taxonomy
 
-Defined here; reused by later slices.
+Defined here; reused by later slices. This taxonomy depends on the reply
+classification described in §1 — without it, a 401 is indistinguishable from a
+transport failure.
 
-- **Transport failure** (`deleteFailed`, file I/O error) → transient toast.
-- **Server rejection / 401 bad-or-expired admin key** → a clear dialog/message:
-  `"Admin authentication failed — re-enter via admin login"`.
+- **Transport failure** — a reply with **no** HTTP status ⇒ `deleteFailed`, or a
+  CSV file I/O error ⇒ transient toast (e.g. *"Delete failed — check your
+  connection."*).
+- **Server rejection** — an HTTP reply carrying an error body ⇒
+  `deleteFinished(false, message)`:
+  - **401 bad/expired admin key** (the held-key failure mode from decision A) →
+    a clear dialog/message: *"Admin authentication failed — re-enter via admin
+    login."*
+  - other server error (`"Invalid data"`, SQL failure) → toast with the server
+    message.
 - **Field / precondition** (the typed-confirm gate) → inline in the dialog.
 
 ---
@@ -285,6 +350,10 @@ Defined here; reused by later slices.
 - `StudentController::toCsv` — quoting edge cases (name with comma, embedded
   double-quote, embedded newline), BOM present, header row correct, all fields
   except photo in order, empty list ⇒ header only, CRLF terminators.
+- `StudentController::deleteReplyIsServerAnswer` — the classifier from §1:
+  transport (no HTTP status) ⇒ false; 401-with-body ⇒ true; 200 `{status:error}`
+  ⇒ true; 200 `{status:success}` ⇒ true. This is what makes the 401→auth path
+  coverable without a live reply (see the CapturingNam note below).
 - `DatabaseViewModel::requiresTypedConfirmation` boundary (9 → false,
   10 → true).
 - `StudentsTableModel::selectedRecords` / `allRecords`.
@@ -296,6 +365,14 @@ Defined here; reused by later slices.
 - `onDeleteFinished` triggers a reload + clears selection + sets the status.
 - `exportCsv(QUrl::fromLocalFile(tempfile))` writes the expected bytes.
 - The selected-vs-all-filtered branch picks the right rows.
+- **CapturingNam note.** The existing `CapturingNam` returns a canned
+  `{status:success}` reply and cannot inject a 401-with-body, so it covers the
+  success and (via an errored reply) transport paths only. The 401→auth-state
+  mapping is verified two ways WITHOUT extending the harness: (1) the
+  `deleteReplyIsServerAnswer` static unit test above; (2) invoking the VM's
+  `onDeleteFinished(false, requestedCount, "<401 message>")` handler **directly**
+  (a public test seam, like `SearchViewModel::onSearchFinished`) and asserting it
+  sets the auth-failure state. No live 401 reply is required.
 
 ### QuickTest (stub VM)
 
