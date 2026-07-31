@@ -339,6 +339,10 @@ transport failure.
     login."*
   - other server error (`"Invalid data"`, SQL failure) → toast with the server
     message.
+  - *Implementation forward-note:* the VM tells the two apart by the message
+    string — **reuse the existing `SettingsViewModel::isAuthFailureMessage`
+    predicate** (`SettingsViewModel.cpp:152-156`, matches "Invalid admin key" /
+    "authentication required") rather than inventing a new one.
 - **Field / precondition** (the typed-confirm gate) → inline in the dialog.
 
 ---
