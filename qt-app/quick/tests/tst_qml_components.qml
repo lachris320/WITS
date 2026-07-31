@@ -10,7 +10,7 @@ Item {
     // own band below all of them for the same reason: interactive fixtures
     // sharing a position/z with a later-declared sibling silently absorb
     // synthetic mouse events meant for the earlier one.
-    width: 400; height: 1620
+    width: 400; height: 2800
 
     LButton    { id: b;  text: "OK" }
     LCard      { id: c }
@@ -382,6 +382,14 @@ Item {
             t.model = null;
             compare(t.rowCount, 0);
             verify(t.emptyVisible === true);
+        }
+
+        // Anti-injection: emptyStateText carries server-supplied error
+        // messages (e.g. vm.errorText) over cleartext HTTP; the empty-state
+        // Text must pin PlainText so a tampered <img>/markup value can't be
+        // rendered (mirrors the cell PlainText guard).
+        function test_emptyStateIsPlainText() {
+            compare(findChild(t, "tableEmptyState").textFormat, Text.PlainText);
         }
 
         // --- Motion (Phase 3 Task C): row entrance (C2) + hover (C3) ---
@@ -1208,6 +1216,104 @@ Item {
             tryCompare(image, "status", Image.Ready, 5000);
             tryCompare(canvas, "visible", true, 5000);
             compare(placeholder.visible, false);
+        }
+    }
+
+    // --- LTable multi-select fixtures (own band) ---
+    QtObject {
+        id: selectStub
+        property int setAllCalls: 0
+        property bool lastSetAll: false
+        property int toggleCalls: 0
+        property string lastToggleId: ""
+        function setAllSelected(v) { setAllCalls++; lastSetAll = v; }
+        function toggle(id) { toggleCalls++; lastToggleId = id; }
+        property int selectedCount: 0
+        property bool allSelected: false
+    }
+    // A real ListModel (not a JS array) so per-row `schoolId`/`selected` roles resolve.
+    ListModel {
+        id: selectRows
+        ListElement { schoolId: "A"; name: "Ann"; selected: false }
+        ListElement { schoolId: "B"; name: "Ben"; selected: true  }
+    }
+
+    LTable {
+        id: plainTable
+        y: 2100
+        width: 400; height: 160
+        selectable: false
+        columns: [ {key:"name", title:"Name"} ]
+        model: selectRows
+    }
+
+    LTable {
+        id: selectTable
+        y: 2280
+        width: 400; height: 160
+        selectable: true
+        selectionModel: selectStub          // NEW prop: carries toggle/setAllSelected/allSelected
+        columns: [ {key:"name", title:"Name"} ]
+        model: selectRows
+    }
+
+    TestCase {
+        name: "LTableMultiSelect"; when: windowShown
+        function test_noCheckboxWhenNotSelectable() {
+            verify(findChild(plainTable, "selectAllCheck") === null);
+        }
+        function test_selectAllCheckboxExistsWhenSelectable() {
+            verify(findChild(selectTable, "selectAllCheck") !== null);
+            verify(findChild(selectTable, "rowCheck_A") !== null);
+        }
+        function test_headerCheckCallsSetAll() {
+            var h = findChild(selectTable, "selectAllCheck");
+            verify(h !== null);
+            var before = selectStub.setAllCalls;
+            mouseClick(h);
+            compare(selectStub.setAllCalls, before + 1);
+            compare(selectStub.lastSetAll, true);
+        }
+        function test_rowCheckCallsToggle() {
+            var r = findChild(selectTable, "rowCheck_A");
+            verify(r !== null);
+            var before = selectStub.toggleCalls;
+            mouseClick(r);
+            compare(selectStub.toggleCalls, before + 1);
+            compare(selectStub.lastToggleId, "A");
+        }
+    }
+
+    // --- LCascadingSelect fixtures (own band) ---
+    LCascadingSelect {
+        id: casc
+        y: 2660
+        departments: ["CCS","CBA"]
+        courses: ["BSIT","BSCS"]
+    }
+    // Declared child spy (the file has no signalSpy.createObject factory).
+    SignalSpy { id: deptSpy; target: casc; signalName: "departmentPicked" }
+
+    TestCase {
+        name: "LCascadingSelect"; when: windowShown
+        function init() { casc.department = ""; casc.course = ""; deptSpy.clear(); }
+        function test_pickingDepartmentEmitsAndClearsCourse() {
+            casc.course = "BSIT";
+            var deptCombo = findChild(casc, "cascDept");
+            deptCombo.selectValue("CCS");
+            compare(deptSpy.count, 1);
+            compare(casc.department, "CCS");
+            compare(casc.course, "");            // dependent-clear
+        }
+        function test_courseNoLongerPresentSelfClears() {
+            casc.course = "BSIT";
+            casc.courses = ["BSCS"];             // BSIT re-scoped out
+            compare(casc.course, "");
+        }
+        function test_allMeansEmptyFilter() {
+            var deptCombo = findChild(casc, "cascDept");
+            deptCombo.selectValue("All");
+            compare(casc.department, "");        // "All" -> empty
         }
     }
 }

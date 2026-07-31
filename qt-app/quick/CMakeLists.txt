@@ -66,6 +66,7 @@ qt_add_qml_module(witsquickmodule
         qml/components/LSidebarBrand.qml
         qml/components/LConfirmDialog.qml
         qml/components/LComboBox.qml
+        qml/components/LCascadingSelect.qml
         qml/kiosk/GuestDialog.qml
     SOURCES
         HttpForm.h HttpForm.cpp
@@ -84,7 +85,9 @@ qt_add_qml_module(witsquickmodule
         models/VisitLogRowsModel.h models/VisitLogRowsModel.cpp
         viewmodels/VisitLogsViewModel.h viewmodels/VisitLogsViewModel.cpp
         models/SearchResultsModel.h models/SearchResultsModel.cpp
+        models/StudentsTableModel.cpp models/StudentsTableModel.h
         viewmodels/SearchViewModel.h viewmodels/SearchViewModel.cpp
+        viewmodels/DatabaseViewModel.cpp viewmodels/DatabaseViewModel.h
         viewmodels/SettingsViewModel.h viewmodels/SettingsViewModel.cpp
 )
 
@@ -224,6 +227,14 @@ wits_add_qttest(tst_barsmodel
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Gui
     OFFSCREEN)
 
+# --- StudentsTableModel unit test (C++ QtTest). Pure QAbstractListModel logic
+# over StudentRecord (selection tracked by schoolId, survives setRecords) with
+# NO QNetworkAccessManager -> QTEST_APPLESS_MAIN, no OFFSCREEN. Links the module
+# only (which now contains StudentsTableModel.cpp) to avoid a duplicate symbol.
+wits_add_qttest(tst_studentstablemodel
+    SOURCES tests/tst_studentstablemodel.cpp
+    LIBS witsquickmodule)
+
 # --- L* component skeletons Quick test (offscreen) ---
 # Same escape hatch as tst_qml_theme above: "import LOAMS" lives only in the
 # QUICK_TEST_MAIN data file, so the plugin + "_init" object must be linked
@@ -261,6 +272,15 @@ wits_add_qttest(tst_visitlogsviewmodel
 # --- SearchViewModel unit test (C++ QtTest, offscreen) ---
 wits_add_qttest(tst_searchviewmodel
     SOURCES tests/tst_searchviewmodel.cpp
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    OFFSCREEN)
+
+# --- DatabaseViewModel unit test (C++ QtTest, offscreen). The VM builds a real
+# QNetworkAccessManager + StudentController and some paths (setDepartment) fire a
+# fire-and-forget post(), so this needs a QCoreApplication (QTEST_MAIN, not
+# APPLESS) + Network/Gui + OFFSCREEN — mirrors tst_searchviewmodel. ---
+wits_add_qttest(tst_databaseviewmodel
+    SOURCES tests/tst_databaseviewmodel.cpp
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
     OFFSCREEN)
 

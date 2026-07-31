@@ -26,6 +26,7 @@ Rectangle {
     DashboardViewModel { id: dashboardVm }
     SearchViewModel    { id: searchVm }
     VisitLogsViewModel { id: visitLogsVm }
+    DatabaseViewModel  { id: databaseVm }
     SettingsViewModel  { id: settingsVm }
 
     // Read-only school identity (logo + name) for the sidebar brand block.
@@ -191,7 +192,7 @@ Rectangle {
     Component { id: dashboardComponent; DashboardScreen { objectName: "dashboardPage"; vm: dashboardVm } }
     Component { id: searchComponent;    SearchScreen    { objectName: "searchPage";    vm: searchVm } }
     Component { id: visitLogsComponent; VisitLogsScreen { objectName: "visitLogsPage"; vm: visitLogsVm } }
-    Component { id: databaseComponent;  DatabaseScreen  { objectName: "databasePage" } }
+    Component { id: databaseComponent;  DatabaseScreen  { objectName: "databasePage"; vm: databaseVm } }
     Component { id: reportingComponent; ReportingScreen { objectName: "reportingPage" } }
     Component { id: settingsComponent;  SettingsScreen  { objectName: "settingsPage";  vm: settingsVm } }
 }
