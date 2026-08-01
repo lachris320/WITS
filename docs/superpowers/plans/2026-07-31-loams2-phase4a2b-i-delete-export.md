@@ -419,8 +419,9 @@ git commit -m "feat(quick): add StudentsTableModel selectedRecords/allRecords ac
 
 Steps:
 
-- [ ] **RED** — Add test declarations to `TestDatabaseViewModel`'s `private slots:` (`qt-app/quick/tests/tst_databaseviewmodel.cpp` ~L14):
+- [ ] **RED** — Add test declarations to `TestDatabaseViewModel`'s `private slots:` (`qt-app/quick/tests/tst_databaseviewmodel.cpp` ~L14). Include a `cleanup()` slot (QtTest runs it after EACH test) that clears the process-wide `AdminSession`, so a test that sets the held key can't leak it into a later test even if an assertion aborts before an inline `clear()`:
 ```cpp
+    void cleanup();     // per-test isolation: reset the process-wide AdminSession
     void requiresTypedConfirmationBoundary();
     void deleteSelectedPostsIdsAndAdminKey();
     void onDeleteFinishedSuccessRefreshesClearsAndSetsStatus();
@@ -433,10 +434,20 @@ Steps:
 #include <QUrlQuery>
 #include "AdminSession.h"
 #include "studentcontroller.h"
-#include "capturingnam.h"
 ```
+Do NOT include `capturingnam.h` here: it lives in `qt-app/testsupport/`, which is
+on the include path only for `tst_studentcontroller` (`qt-app/tests/CMakeLists.txt:115`);
+`wits_add_qttest` does not add it, so the include would not compile — and the VM
+layer does not use it anyway (request wire-format is covered at the controller
+layer in Task 2).
+
 Add a test-only ctor is NOT available — the VM builds its own NAM. For request-assembly, drive through `AdminSession` + the VM's real `deleteSelected()`, which posts via the VM's internal `QNetworkAccessManager`. Because that NAM is `new QNetworkAccessManager(this)` inside the VM, request-assembly is asserted the same way the spec's CapturingNam note prescribes for the *controller* layer (Task 2 already covers the wire format); at the VM layer assert instead that `deleteSelected()` with an empty selection is a no-op and that the held key is what would be sent. Add bodies:
 ```cpp
+void TestDatabaseViewModel::cleanup()
+{
+    AdminSession::instance().clear();   // isolate the process-wide singleton per test
+}
+
 void TestDatabaseViewModel::requiresTypedConfirmationBoundary()
 {
     DatabaseViewModel vm;
@@ -619,6 +630,12 @@ void DatabaseViewModel::setStatusMessage(const QString &m) { m_statusMessage = m
 void DatabaseViewModel::setAuthFailure(bool v) { if (m_authFailure != v) { m_authFailure = v; emit authFailureChanged(); } }
 ```
 (`setStatusMessage` fires unconditionally so re-issuing the same message still re-triggers the toast, mirroring `SettingsViewModel::setStatus`.)
+- [ ] **Add the required `exportCsv` stub NOW (not later).** `exportCsv` is declared `Q_INVOKABLE` in this task, so moc emits a metacall reference to `&DatabaseViewModel::exportCsv`; without a definition the `tst_databaseviewmodel` target FAILS TO LINK and the GREEN step below is unreachable. Add a temporary stub (Task 5 replaces its body):
+```cpp
+// Temporary stub — real implementation lands in Task 5. Present so the moc
+// metacall for the Q_INVOKABLE resolves and this task's target links.
+bool DatabaseViewModel::exportCsv(const QUrl & /*fileUrl*/) { return false; }
+```
 - [ ] **GREEN** — Build + run; confirm all 6 new tests pass and the 4 pre-existing DatabaseViewModel tests still pass:
 ```
 export PATH="/c/Qt/6.11.1/mingw_64/bin:/c/Qt/Tools/mingw1310_64/bin:/c/Qt/Tools/CMake_64/bin:/c/Qt/Tools/Ninja:$PATH"
@@ -626,7 +643,7 @@ cmake --build <build-dir> --target tst_databaseviewmodel
 ctest --test-dir <build-dir> --output-on-failure -R tst_databaseviewmodel
 ```
 Expected: `tst_databaseviewmodel` passes; `PASS : TestDatabaseViewModel::requiresTypedConfirmationBoundary` + the 5 delete tests + prior tests green.
-- [ ] **REFACTOR** — Confirm `exportCsv` is only DECLARED here (definition arrives in Task 5) — if the linker complains about a missing `exportCsv` symbol, add a temporary `bool DatabaseViewModel::exportCsv(const QUrl &) { return false; }` stub and delete it in Task 5. Prefer implementing Task 5 immediately so no stub is needed.
+- [ ] **REFACTOR** — No change needed; Task 5 replaces the stub body with the real writer. (Alternatively, an executor may proceed straight into Task 5 and skip committing the stub separately.)
 - [ ] **COMMIT**:
 ```
 git add qt-app/quick/viewmodels/DatabaseViewModel.h qt-app/quick/viewmodels/DatabaseViewModel.cpp qt-app/quick/viewmodels/SettingsViewModel.h qt-app/quick/tests/tst_databaseviewmodel.cpp
@@ -705,12 +722,13 @@ void TestDatabaseViewModel::exportCsvWriteFailureReturnsFalse()
     QVERIFY(!vm.statusMessage().isEmpty());
 }
 ```
-- [ ] **RED** — Build; if Task 4 left a temporary stub, the tests should FAIL at runtime (stub returns false / no file written). If no stub, expect a link error for the missing `exportCsv` symbol:
+- [ ] **RED** — Build + run. Task 4 added the temporary stub (`return false;`), so the target links and the 3 new tests FAIL at runtime (stub returns false / writes nothing):
 ```
 export PATH="/c/Qt/6.11.1/mingw_64/bin:/c/Qt/Tools/mingw1310_64/bin:/c/Qt/Tools/CMake_64/bin:/c/Qt/Tools/Ninja:$PATH"
 cmake --build <build-dir> --target tst_databaseviewmodel
+ctest --test-dir <build-dir> --output-on-failure -R tst_databaseviewmodel
 ```
-Expected: unresolved `DatabaseViewModel::exportCsv` (no stub) OR the 3 new tests fail (stub present).
+Expected: the 3 new `exportCsv*` tests FAIL (stub returns false / no file written); everything else green.
 - [ ] **GREEN** — Add the definition in `qt-app/quick/viewmodels/DatabaseViewModel.cpp` (after `deleteSelected`), replacing any temporary stub:
 ```cpp
 bool DatabaseViewModel::exportCsv(const QUrl &fileUrl)
@@ -980,6 +998,7 @@ git commit -m "feat(quick): add optional typed-confirmation gate to LConfirmDial
 
 **Files:**
 - Modify: `qt-app/quick/qml/admin/DatabaseScreen.qml` (wrap `tableCountHeader` in a RowLayout with Export + Delete `LButton`s; add `FileDialog`, `LConfirmDialog`, `LToast`; `import QtQuick.Dialogs`)
+- Modify: `qt-app/CMakeLists.txt` (add `QuickDialogs2` to the `find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS ...)` list at `:17` — the top-level find_package is the ONLY one; `quick/CMakeLists.txt` has none, so without this the `Qt6::QuickDialogs2` imported target does not exist and configure FAILS)
 - Modify: `qt-app/quick/CMakeLists.txt` (link `Qt6::QuickDialogs2` on `witsquickmodule` so the `QtQuick.Dialogs` import resolves at runtime and for the QuickTest binaries)
 - Test: `qt-app/quick/tests/tst_qml_admin.qml` (extend the Database stub VM + the `DatabaseScreen` TestCase; `tst_qml_admin` compiles the whole `tests/` dir via `QUICK_TEST_SOURCE_DIR`)
 
@@ -990,7 +1009,13 @@ git commit -m "feat(quick): add optional typed-confirmation gate to LConfirmDial
 
 Steps:
 
-- [ ] **RED (CMake first, so the import resolves)** — In `qt-app/quick/CMakeLists.txt`, add `Qt${QT_VERSION_MAJOR}::QuickDialogs2` to the `witsquickmodule` link block (`~L94-100`), so it reads:
+- [ ] **RED (CMake first, so the import resolves)** — Two edits, in this order:
+
+  1. In `qt-app/CMakeLists.txt:17`, add `QuickDialogs2` to the `find_package` COMPONENTS list (this is the sole `find_package(Qt…)` in the tree; without it the `Qt6::QuickDialogs2` target is undefined and configure errors):
+```cmake
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Network Charts Test UiTools PrintSupport Svg Qml Quick QuickControls2 QuickDialogs2 QuickTest)
+```
+  2. In `qt-app/quick/CMakeLists.txt`, add `Qt${QT_VERSION_MAJOR}::QuickDialogs2` to the `witsquickmodule` link block (`~L94-100`), so it reads:
 ```cmake
 target_link_libraries(witsquickmodule PUBLIC
     witscore
