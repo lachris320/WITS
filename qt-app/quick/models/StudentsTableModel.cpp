@@ -54,6 +54,21 @@ QStringList StudentsTableModel::selectedIds() const
     return QStringList(m_selected.begin(), m_selected.end());
 }
 
+QList<StudentRecord> StudentsTableModel::selectedRecords() const
+{
+    QList<StudentRecord> out;
+    out.reserve(m_selected.size());
+    for (const StudentRecord &r : m_records)
+        if (m_selected.contains(r.schoolId))
+            out.append(r);
+    return out;
+}
+
+QList<StudentRecord> StudentsTableModel::allRecords() const
+{
+    return m_records;
+}
+
 void StudentsTableModel::emitRowSelectionChanged(int row)
 {
     const QModelIndex idx = index(row, 0);
