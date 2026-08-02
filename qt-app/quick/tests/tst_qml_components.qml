@@ -13,6 +13,12 @@ Item {
     width: 400; height: 2800
 
     LButton    { id: b;  text: "OK" }
+    LButton {
+        id: bTip
+        text: "Delete ( 3 )"
+        tooltipText: "Exports selected rows, or all filtered rows if none are selected."
+        accessibleName: "Delete 3 selected rows"
+    }
     LCard      { id: c }
     // Outline-variant factory for the onBrand label-colour test: each case
     // needs a fresh instance so onBrand can be set at construction, matching
@@ -315,6 +321,25 @@ Item {
             // now derives from brand.base->brand.deep.
             compare(gr.gradient.stops[0].color, Theme.brand.base);
             compare(gr.gradient.stops[1].color, Theme.brand.deep);
+        }
+    }
+
+    TestCase {
+        name: "LButtonTooltipAndAccessibleName"
+        when: windowShown
+        function test_accessibleNameOverridesTextWhenSet() {
+            compare(bTip.Accessible.name, "Delete 3 selected rows");
+        }
+        function test_accessibleNameFallsBackToTextWhenEmpty() {
+            // The default fixture `b` (LButton { text: "OK" }) sets no
+            // accessibleName, so Accessible.name must still be the label.
+            compare(b.Accessible.name, "OK");
+        }
+        function test_tooltipTextIsHeldButHiddenUntilHover() {
+            var tip = findChild(bTip, "lbuttonTooltip");
+            verify(tip !== null);
+            compare(tip.text, "Exports selected rows, or all filtered rows if none are selected.");
+            compare(tip.visible, false);        // not hovered => hidden
         }
     }
 
