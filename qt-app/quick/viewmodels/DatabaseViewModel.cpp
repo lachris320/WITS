@@ -1,7 +1,12 @@
 #include "DatabaseViewModel.h"
 
+#include <QFileInfo>
 #include <QNetworkAccessManager>
+#include <QSaveFile>
+#include <QUrl>
 #include "studentcontroller.h"
+#include "AdminSession.h"
+#include "SettingsViewModel.h"
 
 DatabaseViewModel::DatabaseViewModel(QObject *parent)
     : QObject(parent)
@@ -12,6 +17,8 @@ DatabaseViewModel::DatabaseViewModel(QObject *parent)
     connect(m_controller, &StudentController::searchFailed, this, &DatabaseViewModel::onSearchFailed);
     connect(m_controller, &StudentController::departmentsLoaded, this, &DatabaseViewModel::onDepartmentsLoaded);
     connect(m_controller, &StudentController::coursesLoaded, this, &DatabaseViewModel::onCoursesLoaded);
+    connect(m_controller, &StudentController::deleteFinished, this, &DatabaseViewModel::onDeleteFinished);
+    connect(m_controller, &StudentController::deleteFailed, this, &DatabaseViewModel::onDeleteFailed);
 }
 
 void DatabaseViewModel::refresh()
@@ -88,5 +95,48 @@ bool DatabaseViewModel::acceptRequest(quint64 requestId)
     m_latestAppliedRequestId = requestId; return true;
 }
 
+void DatabaseViewModel::deleteSelected()
+{
+    const QStringList ids = m_students.selectedIds();
+    if (ids.isEmpty())
+        return;                       // nothing selected — guard
+    m_deleteInFlight = true;
+    m_controller->deleteStudents(ids, AdminSession::instance().key());
+}
+
+void DatabaseViewModel::onDeleteFinished(bool ok, int requestedCount, const QString &message)
+{
+    m_deleteInFlight = false;
+    if (ok) {
+        setAuthFailure(false);
+        setStatusMessage(tr("Deleted %1 students").arg(requestedCount));
+        reloadTable();                // re-fetch the current dept/course filter
+        m_students.clearSelection();  // deleted rows also drop via setRecords' intersect
+        return;
+    }
+    // Server rejection. Tell the 401 held-key failure apart from a generic
+    // server error via the SAME predicate SettingsViewModel uses (§Error Taxonomy).
+    if (SettingsViewModel::isAuthFailureMessage(message)) {
+        setAuthFailure(true);
+        setStatusMessage(tr("Admin authentication failed — re-enter via admin login."));
+    } else {
+        setAuthFailure(false);
+        setStatusMessage(message.isEmpty() ? tr("Delete failed.") : message);
+    }
+}
+
+void DatabaseViewModel::onDeleteFailed(const QString & /*errorString*/)
+{
+    m_deleteInFlight = false;
+    setAuthFailure(false);
+    setStatusMessage(tr("Delete failed — check your connection."));
+}
+
+// Temporary stub — real implementation lands in Task 5. Present so the moc
+// metacall for the Q_INVOKABLE resolves and this task's target links.
+bool DatabaseViewModel::exportCsv(const QUrl & /*fileUrl*/) { return false; }
+
 void DatabaseViewModel::setLoading(bool v) { if (m_loading != v) { m_loading = v; emit loadingChanged(); } }
 void DatabaseViewModel::setError(const QString &e) { if (m_errorText != e) { m_errorText = e; emit errorTextChanged(); } }
+void DatabaseViewModel::setStatusMessage(const QString &m) { m_statusMessage = m; emit statusMessageChanged(); }
+void DatabaseViewModel::setAuthFailure(bool v) { if (m_authFailure != v) { m_authFailure = v; emit authFailureChanged(); } }

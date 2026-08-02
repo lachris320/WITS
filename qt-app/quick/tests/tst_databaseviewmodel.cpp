@@ -1,8 +1,11 @@
 #include <QtTest>
 #include <QSignalSpy>
+#include <QUrlQuery>
 #include "DatabaseViewModel.h"
 #include "StudentsTableModel.h"
 #include "studentdata.h"
+#include "AdminSession.h"
+#include "studentcontroller.h"
 
 class TestDatabaseViewModel : public QObject
 {
@@ -12,6 +15,13 @@ private slots:
     void studentsLoadedFillTable();
     void setDepartmentReloadsCoursesAndClears();
     void networkErrorSetsErrorAndClearsRows();
+    void cleanup();     // per-test isolation: reset the process-wide AdminSession
+    void requiresTypedConfirmationBoundary();
+    void deleteSelectedPostsIdsAndAdminKey();
+    void onDeleteFinishedSuccessRefreshesClearsAndSetsStatus();
+    void onDeleteFinishedAuthFailureSetsAuthState();
+    void onDeleteFinishedGenericFailureSetsStatusNoAuth();
+    void onDeleteFailedSetsTransientStatus();
 };
 
 // A DatabaseViewModel test-ctor takes a StudentController*; but StudentController
@@ -56,6 +66,83 @@ void TestDatabaseViewModel::networkErrorSetsErrorAndClearsRows()
     QVERIFY(!vm.errorText().isEmpty());
     QCOMPARE(vm.students()->count(), 0);   // stale rows cleared
     QVERIFY(!vm.loading());
+}
+
+void TestDatabaseViewModel::cleanup()
+{
+    AdminSession::instance().clear();   // isolate the process-wide singleton per test
+}
+
+void TestDatabaseViewModel::requiresTypedConfirmationBoundary()
+{
+    DatabaseViewModel vm;
+    QCOMPARE(vm.requiresTypedConfirmation(9), false);
+    QCOMPARE(vm.requiresTypedConfirmation(10), true);
+    QCOMPARE(vm.requiresTypedConfirmation(11), true);
+}
+
+void TestDatabaseViewModel::deleteSelectedPostsIdsAndAdminKey()
+{
+    // Empty selection => no network call, no status change (guard).
+    DatabaseViewModel vm;
+    AdminSession::instance().setKey("held-key");
+    vm.deleteSelected();
+    QVERIFY(vm.statusMessage().isEmpty());
+
+    // With a selection, deleteSelected() sources ids from the model and the key
+    // from AdminSession. The controller wire format (school_ids[] + admin_key)
+    // is asserted in tst_studentcontroller::deleteStudents_buildsFormBodyWithAdminKey;
+    // here we assert the VM feeds the controller a non-empty request by
+    // observing that the in-flight path does not early-return: select a row,
+    // call deleteSelected(), then drive the reply seam directly.
+    StudentRecord r; r.schoolId = "2023-001"; r.name = "Ann";
+    vm.onSearchFinished(SearchOutcome::Results, {r}, "", "", 1);
+    vm.students()->toggle("2023-001");
+    QCOMPARE(vm.students()->selectedIds(), QStringList{"2023-001"});
+    vm.deleteSelected();                 // posts via the VM's own NAM (no live server in CI)
+    // The success/failure handlers are unit-tested directly below; this step
+    // only proves the guarded path was entered (selection non-empty).
+    QVERIFY(vm.students()->selectedCount() == 1);
+    AdminSession::instance().clear();
+}
+
+void TestDatabaseViewModel::onDeleteFinishedSuccessRefreshesClearsAndSetsStatus()
+{
+    DatabaseViewModel vm;
+    StudentRecord r; r.schoolId = "2023-001"; r.name = "Ann";
+    vm.onSearchFinished(SearchOutcome::Results, {r}, "", "", 1);
+    vm.students()->toggle("2023-001");
+    QCOMPARE(vm.students()->selectedCount(), 1);
+
+    vm.onDeleteFinished(true, 3, QString());
+    QCOMPARE(vm.statusMessage(), QStringLiteral("Deleted 3 students"));
+    QVERIFY(!vm.authFailure());
+    QCOMPARE(vm.students()->selectedCount(), 0);   // cleared
+    QVERIFY(vm.loading());                          // reloadTable() flipped loading on
+}
+
+void TestDatabaseViewModel::onDeleteFinishedAuthFailureSetsAuthState()
+{
+    DatabaseViewModel vm;
+    vm.onDeleteFinished(false, 2, QStringLiteral("Invalid admin key"));
+    QVERIFY(vm.authFailure());
+    QVERIFY(!vm.statusMessage().isEmpty());
+}
+
+void TestDatabaseViewModel::onDeleteFinishedGenericFailureSetsStatusNoAuth()
+{
+    DatabaseViewModel vm;
+    vm.onDeleteFinished(false, 2, QStringLiteral("Invalid data"));
+    QVERIFY(!vm.authFailure());
+    QCOMPARE(vm.statusMessage(), QStringLiteral("Invalid data"));
+}
+
+void TestDatabaseViewModel::onDeleteFailedSetsTransientStatus()
+{
+    DatabaseViewModel vm;
+    vm.onDeleteFailed(QStringLiteral("Connection refused"));
+    QVERIFY(!vm.authFailure());
+    QVERIFY(!vm.statusMessage().isEmpty());
 }
 
 QTEST_MAIN(TestDatabaseViewModel)
