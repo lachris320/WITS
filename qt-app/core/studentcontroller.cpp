@@ -103,6 +103,41 @@ bool StudentController::parseDeleteResponse(const QByteArray &raw, QString &outM
     return false;
 }
 
+QByteArray StudentController::toCsv(const QList<StudentRecord> &rows)
+{
+    auto quote = [](const QString &v) -> QString {
+        const bool needs = v.contains(QLatin1Char(',')) || v.contains(QLatin1Char('"'))
+                        || v.contains(QLatin1Char('\n')) || v.contains(QLatin1Char('\r'));
+        if (!needs)
+            return v;
+        QString q = v;
+        q.replace(QLatin1Char('"'), QLatin1String("\"\""));
+        return QLatin1Char('"') + q + QLatin1Char('"');
+    };
+    auto line = [&quote](const QStringList &cells) -> QString {
+        QStringList out;
+        out.reserve(cells.size());
+        for (const QString &c : cells)
+            out << quote(c);
+        return out.join(QLatin1Char(',')) + QLatin1String("\r\n");
+    };
+
+    QString csv = line({ QStringLiteral("code"), QStringLiteral("school_id"),
+                         QStringLiteral("name"), QStringLiteral("course"),
+                         QStringLiteral("department"), QStringLiteral("year_level"),
+                         QStringLiteral("gender"), QStringLiteral("status"),
+                         QStringLiteral("visits") });
+    for (const StudentRecord &r : rows) {
+        csv += line({ r.code, r.schoolId, r.name, r.course, r.department,
+                      r.yearLevel, r.gender, r.status, QString::number(r.visits) });
+    }
+
+    QByteArray out;
+    out.append("\xEF\xBB\xBF");            // UTF-8 BOM
+    out.append(csv.toUtf8());
+    return out;
+}
+
 // Pure port of the departments parse in populateFilters (adminwindow.cpp:3375-3382).
 // Returns only the parsed entries (View prepends "Select Department"); skips
 // "all" case-insensitively; empty on !success.

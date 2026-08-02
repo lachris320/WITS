@@ -52,6 +52,15 @@ private slots:
     // request assembly (harmonized FORM + admin_key)
     void deleteStudents_buildsFormBodyWithAdminKey();
     void bulkUpdate_buildsFormBodyWithStudentsJsonAndAdminKey();
+
+    // toCsv
+    void toCsv_emptyList_headerOnlyWithBom();
+    void toCsv_headerRowIsExactFieldOrder();
+    void toCsv_serializesAllFieldsExceptPhoto();
+    void toCsv_quotesCommaEmbeddedField();
+    void toCsv_doublesEmbeddedQuote();
+    void toCsv_quotesEmbeddedNewline();
+    void toCsv_usesCrlfLineTerminators();
 };
 
 void TestStudentController::normalizeFilterPlaceholdersBecomeEmpty()
@@ -306,6 +315,64 @@ void TestStudentController::bulkUpdate_buildsFormBodyWithStudentsJsonAndAdminKey
     QCOMPARE(arr.size(), 1);
     QCOMPARE(arr.at(0).toObject().value("school_id").toString(), QStringLiteral("2023-001"));
     QCOMPARE(arr.at(0).toObject().value("year_level").toString(), QStringLiteral("2"));
+}
+
+static const QByteArray kBom = QByteArrayLiteral("\xEF\xBB\xBF");
+
+void TestStudentController::toCsv_emptyList_headerOnlyWithBom()
+{
+    const QByteArray csv = StudentController::toCsv({});
+    QVERIFY(csv.startsWith(kBom));
+    QCOMPARE(csv, kBom + "code,school_id,name,course,department,year_level,gender,status,visits\r\n");
+}
+
+void TestStudentController::toCsv_headerRowIsExactFieldOrder()
+{
+    const QByteArray csv = StudentController::toCsv({});
+    const QByteArray body = csv.mid(kBom.size());
+    const QByteArray header = body.left(body.indexOf("\r\n"));
+    QCOMPARE(header, QByteArrayLiteral(
+        "code,school_id,name,course,department,year_level,gender,status,visits"));
+}
+
+void TestStudentController::toCsv_serializesAllFieldsExceptPhoto()
+{
+    StudentRecord r;
+    r.code = "C1"; r.schoolId = "2023-001"; r.name = "Juan Cruz"; r.course = "BSIT";
+    r.department = "CCS"; r.yearLevel = "2"; r.gender = "Male"; r.status = "Active";
+    r.visits = 42;
+    const QByteArray csv = StudentController::toCsv({r});
+    QVERIFY(csv.contains("C1,2023-001,Juan Cruz,BSIT,CCS,2,Male,Active,42\r\n"));
+}
+
+void TestStudentController::toCsv_quotesCommaEmbeddedField()
+{
+    StudentRecord r; r.name = "Cruz, Juan";
+    const QByteArray csv = StudentController::toCsv({r});
+    QVERIFY(csv.contains("\"Cruz, Juan\""));
+}
+
+void TestStudentController::toCsv_doublesEmbeddedQuote()
+{
+    StudentRecord r; r.name = "Juan \"JC\" Cruz";
+    const QByteArray csv = StudentController::toCsv({r});
+    QVERIFY(csv.contains("\"Juan \"\"JC\"\" Cruz\""));
+}
+
+void TestStudentController::toCsv_quotesEmbeddedNewline()
+{
+    StudentRecord r; r.name = "Line1\nLine2";
+    const QByteArray csv = StudentController::toCsv({r});
+    QVERIFY(csv.contains("\"Line1\nLine2\""));
+}
+
+void TestStudentController::toCsv_usesCrlfLineTerminators()
+{
+    StudentRecord r; r.name = "Ann";
+    const QByteArray csv = StudentController::toCsv({r});
+    // Header line + one data line, both CRLF-terminated => exactly two "\r\n".
+    QCOMPARE(csv.count("\r\n"), 2);
+    QVERIFY(!csv.contains("\n\n"));
 }
 
 QTEST_MAIN(TestStudentController)

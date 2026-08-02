@@ -28,6 +28,13 @@ public:
     // Returns true when status=="success"; on failure sets outMessage to the
     // server "message" field (empty on success).
     static bool parseDeleteResponse(const QByteArray &raw, QString &outMessage);
+    // Pure, network-free CSV serializer for the Database export (Phase 4a.2b-i).
+    // RFC-4180: a cell is quoted iff it contains a comma, quote, CR, or LF, and
+    // embedded quotes are doubled; CRLF line terminators; a UTF-8 BOM is
+    // prepended so Excel opens it as UTF-8. Columns = every StudentRecord field
+    // except photo (there is no client-side photo field). Empty list => header
+    // only.
+    static QByteArray toCsv(const QList<StudentRecord> &rows);
 
     // Async — result arrives via searchFinished / searchFailed, both of which
     // echo back the returned request id. StudentController fires an
