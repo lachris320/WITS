@@ -5,6 +5,8 @@
 #include <QJsonObject>
 #include <QList>
 #include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QSignalSpy>
 #include <QString>
 #include <QStringList>
 #include <QUrlQuery>
@@ -52,6 +54,17 @@ private slots:
     // request assembly (harmonized FORM + admin_key)
     void deleteStudents_buildsFormBodyWithAdminKey();
     void bulkUpdate_buildsFormBodyWithStudentsJsonAndAdminKey();
+
+    // deleteStudents — guard 401 must surface as deleteFinished(false, msg),
+    // never deleteFailed (the whole point of Task 2's rewrite).
+    void deleteStudents_guard401WithBody_emitsDeleteFinishedNotFailed();
+
+    // deleteReplyIsServerAnswer (mirrors HttpForm::isServerAnswer)
+    void deleteReplyIsServerAnswer_transportNoStatus_isFalse();
+    void deleteReplyIsServerAnswer_401WithBody_isTrue();
+    void deleteReplyIsServerAnswer_200Error_isTrue();
+    void deleteReplyIsServerAnswer_200Success_isTrue();
+    void deleteReplyIsServerAnswer_statusButEmptyBody_isFalse();
 
     // toCsv
     void toCsv_emptyList_headerOnlyWithBom();
@@ -315,6 +328,72 @@ void TestStudentController::bulkUpdate_buildsFormBodyWithStudentsJsonAndAdminKey
     QCOMPARE(arr.size(), 1);
     QCOMPARE(arr.at(0).toObject().value("school_id").toString(), QStringLiteral("2023-001"));
     QCOMPARE(arr.at(0).toObject().value("year_level").toString(), QStringLiteral("2"));
+}
+
+void TestStudentController::deleteStudents_guard401WithBody_emitsDeleteFinishedNotFailed()
+{
+    // requireAdminAuth answers a stale/bad admin key with HTTP 401 + a JSON
+    // error body. Before the Task 2 rewrite, StudentController::deleteStudents
+    // treated ANY reply->error() != NoError as a transport failure and emitted
+    // deleteFailed with the generic Qt errorString, never reaching
+    // parseDeleteResponse. That mis-surfaces a stale admin key as a network
+    // problem. This test pins the fix: the 401 body must reach deleteFinished
+    // with ok==false and the server's own message, and deleteFailed must NOT
+    // fire at all. It fails against the old early-return implementation.
+    const QByteArray body = R"({"status":"error","message":"Invalid admin key"})";
+    CapturingNam nam(body, QNetworkReply::AuthenticationRequiredError, 401);
+    StudentController ctrl(&nam);
+
+    QSignalSpy finishedSpy(&ctrl, &StudentController::deleteFinished);
+    QSignalSpy failedSpy(&ctrl, &StudentController::deleteFailed);
+
+    ctrl.deleteStudents(QStringList() << "2023-001", "stale-key");
+
+    QVERIFY(finishedSpy.wait(1000));
+
+    QCOMPARE(finishedSpy.count(), 1);
+    QCOMPARE(failedSpy.count(), 0);
+
+    const QList<QVariant> args = finishedSpy.takeFirst();
+    QCOMPARE(args.at(0).toBool(), false);
+    QCOMPARE(args.at(1).toInt(), 1);
+    QCOMPARE(args.at(2).toString(), QStringLiteral("Invalid admin key"));
+}
+
+void TestStudentController::deleteReplyIsServerAnswer_transportNoStatus_isFalse()
+{
+    // hadError=true, no HTTP status (attribute absent => 0): a real transport
+    // failure — DNS/refused/timeout.
+    QVERIFY(!StudentController::deleteReplyIsServerAnswer(true, 0, QByteArray()));
+}
+
+void TestStudentController::deleteReplyIsServerAnswer_401WithBody_isTrue()
+{
+    // requireAdminAuth answers a bad/expired key with 401 + a JSON body —
+    // that IS the server answering and must reach parseDeleteResponse.
+    const QByteArray body = R"({"status":"error","message":"Invalid admin key"})";
+    QVERIFY(StudentController::deleteReplyIsServerAnswer(true, 401, body));
+}
+
+void TestStudentController::deleteReplyIsServerAnswer_200Error_isTrue()
+{
+    // No transport error and a normal 200 status, but the JSON payload itself
+    // reports a server-side failure — still a decodable server answer.
+    const QByteArray body = R"({"status":"error","message":"Invalid data"})";
+    QVERIFY(StudentController::deleteReplyIsServerAnswer(false, 200, body));
+}
+
+void TestStudentController::deleteReplyIsServerAnswer_200Success_isTrue()
+{
+    QVERIFY(StudentController::deleteReplyIsServerAnswer(false, 200,
+                                                         R"({"status":"success"})"));
+}
+
+void TestStudentController::deleteReplyIsServerAnswer_statusButEmptyBody_isFalse()
+{
+    // A status code with an empty body gives the decode seam nothing to
+    // classify — treated as a transport failure, exactly like HttpForm.
+    QVERIFY(!StudentController::deleteReplyIsServerAnswer(true, 500, QByteArray()));
 }
 
 static const QByteArray kBom = QByteArrayLiteral("\xEF\xBB\xBF");

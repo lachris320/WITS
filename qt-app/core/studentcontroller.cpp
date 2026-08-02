@@ -8,6 +8,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QUrlQuery>
+#include <QVariant>
 
 StudentController::StudentController(QNetworkAccessManager *nam, QObject *parent)
     : QObject(parent)
@@ -170,6 +171,16 @@ QStringList StudentController::parseCourses(const QByteArray &raw)
     return out;
 }
 
+bool StudentController::deleteReplyIsServerAnswer(bool replyHadError, int httpStatus,
+                                                  const QByteArray &body)
+{
+    if (!replyHadError)
+        return true;
+    // An error status is still the server answering — provided it sent
+    // something for the decode seam to read.
+    return httpStatus > 0 && !body.isEmpty();
+}
+
 // --- Network methods ---
 
 quint64 StudentController::searchStudents(const QString &search,
@@ -276,18 +287,21 @@ void StudentController::deleteStudents(const QStringList &schoolIds, const QStri
         m_nam->post(request, body.toString(QUrl::FullyEncoded).toUtf8());
 
     connect(reply, &QNetworkReply::finished, this, [this, reply, requestedCount]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            emit deleteFailed(reply->errorString());
-            reply->deleteLater();
-            return;
-        }
-
         const QByteArray resp = reply->readAll();
+        const bool hadError = reply->error() != QNetworkReply::NoError;
+        const QString errorString = reply->errorString();
+        const QVariant statusAttr =
+            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
+        const int httpStatus = statusAttr.isValid() ? statusAttr.toInt() : 0;
         reply->deleteLater();
 
-        QString message;
-        const bool ok = parseDeleteResponse(resp, message);
-        emit deleteFinished(ok, requestedCount, message);
+        if (deleteReplyIsServerAnswer(hadError, httpStatus, resp)) {
+            QString message;
+            const bool ok = parseDeleteResponse(resp, message);
+            emit deleteFinished(ok, requestedCount, message);   // 401 body reaches here
+        } else {
+            emit deleteFailed(errorString);                     // genuine transport failure only
+        }
     });
 }
 
