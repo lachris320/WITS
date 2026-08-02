@@ -132,9 +132,26 @@ void DatabaseViewModel::onDeleteFailed(const QString & /*errorString*/)
     setStatusMessage(tr("Delete failed — check your connection."));
 }
 
-// Temporary stub — real implementation lands in Task 5. Present so the moc
-// metacall for the Q_INVOKABLE resolves and this task's target links.
-bool DatabaseViewModel::exportCsv(const QUrl & /*fileUrl*/) { return false; }
+bool DatabaseViewModel::exportCsv(const QUrl &fileUrl)
+{
+    const QList<StudentRecord> rows =
+        m_students.anySelected() ? m_students.selectedRecords() : m_students.allRecords();
+    const QByteArray bytes = StudentController::toCsv(rows);
+
+    const QString path = fileUrl.toLocalFile();
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
+        setStatusMessage(tr("Export failed — could not open the file for writing."));
+        return false;
+    }
+    if (file.write(bytes) != bytes.size() || !file.commit()) {
+        setStatusMessage(tr("Export failed — could not write the file."));
+        return false;
+    }
+    setStatusMessage(tr("Exported %1 rows to %2")
+                         .arg(rows.size()).arg(QFileInfo(path).fileName()));
+    return true;
+}
 
 void DatabaseViewModel::setLoading(bool v) { if (m_loading != v) { m_loading = v; emit loadingChanged(); } }
 void DatabaseViewModel::setError(const QString &e) { if (m_errorText != e) { m_errorText = e; emit errorTextChanged(); } }

@@ -1,6 +1,8 @@
 #include <QtTest>
 #include <QSignalSpy>
 #include <QUrlQuery>
+#include <QTemporaryDir>
+#include <QFile>
 #include "DatabaseViewModel.h"
 #include "StudentsTableModel.h"
 #include "studentdata.h"
@@ -22,6 +24,9 @@ private slots:
     void onDeleteFinishedAuthFailureSetsAuthState();
     void onDeleteFinishedGenericFailureSetsStatusNoAuth();
     void onDeleteFailedSetsTransientStatus();
+    void exportCsvWritesAllRowsWhenNoneSelected();
+    void exportCsvWritesOnlySelectedWhenSomeSelected();
+    void exportCsvWriteFailureReturnsFalse();
 };
 
 // A DatabaseViewModel test-ctor takes a StudentController*; but StudentController
@@ -142,6 +147,56 @@ void TestDatabaseViewModel::onDeleteFailedSetsTransientStatus()
     DatabaseViewModel vm;
     vm.onDeleteFailed(QStringLiteral("Connection refused"));
     QVERIFY(!vm.authFailure());
+    QVERIFY(!vm.statusMessage().isEmpty());
+}
+
+void TestDatabaseViewModel::exportCsvWritesAllRowsWhenNoneSelected()
+{
+    DatabaseViewModel vm;
+    StudentRecord a; a.schoolId = "A"; a.name = "Ann";  a.visits = 1;
+    StudentRecord b; b.schoolId = "B"; b.name = "Ben";  b.visits = 2;
+    vm.onSearchFinished(SearchOutcome::Results, {a, b}, "", "", 1);
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath("all.csv");
+    QVERIFY(vm.exportCsv(QUrl::fromLocalFile(path)));
+
+    QFile f(path);
+    QVERIFY(f.open(QIODevice::ReadOnly));
+    const QByteArray bytes = f.readAll();
+    QCOMPARE(bytes, StudentController::toCsv({a, b}));   // exact byte-for-byte
+    QCOMPARE(vm.statusMessage(), QStringLiteral("Exported 2 rows to all.csv"));
+}
+
+void TestDatabaseViewModel::exportCsvWritesOnlySelectedWhenSomeSelected()
+{
+    DatabaseViewModel vm;
+    StudentRecord a; a.schoolId = "A"; a.name = "Ann";
+    StudentRecord b; b.schoolId = "B"; b.name = "Ben";
+    vm.onSearchFinished(SearchOutcome::Results, {a, b}, "", "", 1);
+    vm.students()->toggle("B");                          // only B selected
+
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    const QString path = dir.filePath("sel.csv");
+    QVERIFY(vm.exportCsv(QUrl::fromLocalFile(path)));
+
+    QFile f(path);
+    QVERIFY(f.open(QIODevice::ReadOnly));
+    QCOMPARE(f.readAll(), StudentController::toCsv({b})); // B only, not A
+    QCOMPARE(vm.statusMessage(), QStringLiteral("Exported 1 rows to sel.csv"));
+}
+
+void TestDatabaseViewModel::exportCsvWriteFailureReturnsFalse()
+{
+    DatabaseViewModel vm;
+    StudentRecord a; a.schoolId = "A"; a.name = "Ann";
+    vm.onSearchFinished(SearchOutcome::Results, {a}, "", "", 1);
+    // A path whose parent directory does not exist => QSaveFile::open fails.
+    const bool ok = vm.exportCsv(QUrl::fromLocalFile(
+        QStringLiteral("./no_such_dir_xyz/out.csv")));
+    QVERIFY(!ok);
     QVERIFY(!vm.statusMessage().isEmpty());
 }
 
