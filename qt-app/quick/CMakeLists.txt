@@ -96,6 +96,7 @@ target_link_libraries(witsquickmodule PUBLIC
     Qt${QT_VERSION_MAJOR}::Quick
     Qt${QT_VERSION_MAJOR}::Qml
     Qt${QT_VERSION_MAJOR}::QuickControls2
+    Qt${QT_VERSION_MAJOR}::QuickDialogs2
     Qt${QT_VERSION_MAJOR}::Gui
 )
 
