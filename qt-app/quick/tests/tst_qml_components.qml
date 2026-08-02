@@ -115,6 +115,13 @@ Item {
     LTextField { id: pf; label: "Admin Key"; isPassword: true; text: "secret" }
     LConfirmDialog { id: cd1; tier: 1; title: "Confirm"; message: "Proceed?" }
     LConfirmDialog { id: cd2; tier: 2; title: "Reset Visits"; message: "Deletes history."; confirmText: "Reset" }
+    // Typed-confirmation gate fixture (Phase 4a.2b-i Task 7): opt-in via
+    // requireTypedConfirmation, independent of cd1/cd2's default-false tiers.
+    LConfirmDialog {
+        id: cdTyped; tier: 1; title: "Delete students?"
+        message: "This cannot be undone."; confirmText: "Delete"
+        requireTypedConfirmation: true; confirmationWord: "DELETE"
+    }
     LComboBox { id: cb; model: ["CE", "IT", "BA"]; placeholder: "Select Department" }
     LStatTile  { id: st; label: "L"; value: "1" }
     ListModel {
@@ -1074,6 +1081,40 @@ Item {
             cd2.clearKey();
             compare(findChild(cd2, "confirmKeyField").text, "");
             compare(findChild(cd2, "confirmButton").enabled, false);
+        }
+    }
+
+    TestCase {
+        name: "LConfirmDialogTypedConfirmation"
+        when: windowShown
+        function init() {
+            cdTyped.visible = false; cdTyped.busy = false;
+            var f = findChild(cdTyped, "confirmTypedField");
+            if (f) f.text = "";
+        }
+        function test_typedFieldExistsWhenRequired() {
+            verify(findChild(cdTyped, "confirmTypedField") !== null);
+        }
+        function test_defaultDialogHasNoTypedField() {
+            // cd1 keeps the default requireTypedConfirmation:false.
+            compare(findChild(cd1, "confirmTypedField"), null);
+        }
+        function test_confirmDisabledUntilWordTypedExactly() {
+            cdTyped.visible = true; waitForRendering(cdTyped);
+            var btn = findChild(cdTyped, "confirmButton");
+            compare(btn.enabled, false);                 // empty
+            findChild(cdTyped, "confirmTypedField").text = "delete";
+            compare(btn.enabled, false);                 // wrong case — exact match required
+            findChild(cdTyped, "confirmTypedField").text = "DELETE";
+            compare(btn.enabled, true);
+        }
+        function test_typedFieldClearedOnReopen() {
+            cdTyped.visible = true; waitForRendering(cdTyped);
+            findChild(cdTyped, "confirmTypedField").text = "DELETE";
+            cdTyped.visible = false;
+            cdTyped.visible = true; waitForRendering(cdTyped);
+            compare(findChild(cdTyped, "confirmTypedField").text, "");
+            compare(findChild(cdTyped, "confirmButton").enabled, false);
         }
     }
 

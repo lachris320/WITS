@@ -16,12 +16,23 @@ LDialog {
     signal confirmed(string key)
     signal cancelled()
 
+    // Optional typed-confirmation gate (Phase 4a.2b-i). When true, a text field
+    // appears and Confirm stays disabled until it EXACTLY equals confirmationWord.
+    // Default false keeps every existing call site (SettingsScreen tier-2,
+    // fixtures) unchanged.
+    property bool requireTypedConfirmation: false
+    property string confirmationWord: "DELETE"
+
     // Tier 1 must have NO key-field object in the tree at all (not merely a
     // hidden one) — a QuickTest findChild() searches the object tree
     // regardless of `visible`, so a Loader that only instantiates the field
     // for tier 2 is required, not a plain LTextField gated by `visible`.
     readonly property bool keyReady: tier !== 2
         || (keyFieldLoader.item !== null && keyFieldLoader.item.text.trim().length > 0)
+
+    readonly property bool typedConfirmReady: !root.requireTypedConfirmation
+        || (typedFieldLoader.item !== null
+            && typedFieldLoader.item.text === root.confirmationWord)
 
     // The re-typed key is deliberate friction in front of the most irreversible
     // operations in the app — so it must NOT survive a single use. Clearing on
@@ -33,6 +44,8 @@ LDialog {
     function clearKey() {
         if (keyFieldLoader.item)
             keyFieldLoader.item.text = "";
+        if (typedFieldLoader.item)
+            typedFieldLoader.item.text = "";
     }
     onVisibleChanged: if (visible) root.clearKey()
 
@@ -51,6 +64,16 @@ LDialog {
             }
         }
 
+        Loader {
+            id: typedFieldLoader
+            Layout.fillWidth: true
+            active: root.requireTypedConfirmation
+            sourceComponent: LTextField {
+                objectName: "confirmTypedField"
+                label: qsTr("Type %1 to confirm").arg(root.confirmationWord)
+            }
+        }
+
         RowLayout {
             Layout.alignment: Qt.AlignRight
             spacing: Theme.spacing.md
@@ -65,7 +88,7 @@ LDialog {
                 objectName: "confirmButton"
                 variant: root.tier === 2 ? "Danger" : "Primary"
                 text: root.confirmText
-                enabled: !root.busy && root.keyReady
+                enabled: !root.busy && root.keyReady && root.typedConfirmReady
                 // Emit the TRIMMED key so the payload matches what keyReady
                 // above gated on. Emitting the raw text let a key typed with a
                 // trailing space pass the client gate and then 401 server-side,
