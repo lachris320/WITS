@@ -110,6 +110,10 @@ public:
     static QString serializeCsv(const QStringList &headers,
                                 const QList<QStringList> &rows);
 
+    // Shared auth-failure classification: the two message strings
+    // requireAdminAuth (T17) / its guard return on a bad or missing key.
+    static bool isAuthFailureMessage(const QString &message);
+
     // Tier-2 destructive op (spec §3.3): zeroes students.visits AND permanently
     // DELETEs library_visits rows for department on the backend. adminKey MUST
     // be the freshly re-typed key from the tier-2 confirmation dialog, NOT the
@@ -165,9 +169,6 @@ private:
     void recomputeDirty();
     void setBusy(bool v);
     void setStatus(const QString &msg);
-    // Shared auth-failure classification: the two message strings
-    // requireAdminAuth (T17) / its guard return on a bad or missing key.
-    static bool isAuthFailureMessage(const QString &message);
 
     // Every endpoint in this VM answers with the same envelope
     // ({"status":..., "message":...}), so every decode seam ran the same

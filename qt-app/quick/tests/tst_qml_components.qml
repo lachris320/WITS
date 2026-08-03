@@ -13,6 +13,12 @@ Item {
     width: 400; height: 2800
 
     LButton    { id: b;  text: "OK" }
+    LButton {
+        id: bTip
+        text: "Delete ( 3 )"
+        tooltipText: "Exports selected rows, or all filtered rows if none are selected."
+        accessibleName: "Delete 3 selected rows"
+    }
     LCard      { id: c }
     // Outline-variant factory for the onBrand label-colour test: each case
     // needs a fresh instance so onBrand can be set at construction, matching
@@ -109,6 +115,13 @@ Item {
     LTextField { id: pf; label: "Admin Key"; isPassword: true; text: "secret" }
     LConfirmDialog { id: cd1; tier: 1; title: "Confirm"; message: "Proceed?" }
     LConfirmDialog { id: cd2; tier: 2; title: "Reset Visits"; message: "Deletes history."; confirmText: "Reset" }
+    // Typed-confirmation gate fixture (Phase 4a.2b-i Task 7): opt-in via
+    // requireTypedConfirmation, independent of cd1/cd2's default-false tiers.
+    LConfirmDialog {
+        id: cdTyped; tier: 1; title: "Delete students?"
+        message: "This cannot be undone."; confirmText: "Delete"
+        requireTypedConfirmation: true; confirmationWord: "DELETE"
+    }
     LComboBox { id: cb; model: ["CE", "IT", "BA"]; placeholder: "Select Department" }
     LStatTile  { id: st; label: "L"; value: "1" }
     ListModel {
@@ -315,6 +328,42 @@ Item {
             // now derives from brand.base->brand.deep.
             compare(gr.gradient.stops[0].color, Theme.brand.base);
             compare(gr.gradient.stops[1].color, Theme.brand.deep);
+        }
+    }
+
+    TestCase {
+        name: "LToastPlainText"
+        when: windowShown
+        // The Database delete flow pipes a server-supplied error `message`
+        // (DatabaseViewModel::onDeleteFinished's generic-error branch) into
+        // vm.statusMessage, which lands here as toast.message. Text defaults
+        // to AutoText, which auto-detects and RENDERS rich text (including
+        // remote <img> fetches) — over a backend reached via cleartext HTTP.
+        // Pinned plain in the primitive so no consumer has to remember
+        // (mirrors LDialog.qml's dialogTitleText/dialogMessageText guard).
+        function test_contentTextIsPlainNotRichText() {
+            var content = findChild(to, "toastText");
+            verify(content !== null);
+            compare(content.textFormat, Text.PlainText);
+        }
+    }
+
+    TestCase {
+        name: "LButtonTooltipAndAccessibleName"
+        when: windowShown
+        function test_accessibleNameOverridesTextWhenSet() {
+            compare(bTip.Accessible.name, "Delete 3 selected rows");
+        }
+        function test_accessibleNameFallsBackToTextWhenEmpty() {
+            // The default fixture `b` (LButton { text: "OK" }) sets no
+            // accessibleName, so Accessible.name must still be the label.
+            compare(b.Accessible.name, "OK");
+        }
+        function test_tooltipTextIsHeldButHiddenUntilHover() {
+            var tip = findChild(bTip, "lbuttonTooltip");
+            verify(tip !== null);
+            compare(tip.text, "Exports selected rows, or all filtered rows if none are selected.");
+            compare(tip.visible, false);        // not hovered => hidden
         }
     }
 
@@ -1049,6 +1098,40 @@ Item {
             cd2.clearKey();
             compare(findChild(cd2, "confirmKeyField").text, "");
             compare(findChild(cd2, "confirmButton").enabled, false);
+        }
+    }
+
+    TestCase {
+        name: "LConfirmDialogTypedConfirmation"
+        when: windowShown
+        function init() {
+            cdTyped.visible = false; cdTyped.busy = false;
+            var f = findChild(cdTyped, "confirmTypedField");
+            if (f) f.text = "";
+        }
+        function test_typedFieldExistsWhenRequired() {
+            verify(findChild(cdTyped, "confirmTypedField") !== null);
+        }
+        function test_defaultDialogHasNoTypedField() {
+            // cd1 keeps the default requireTypedConfirmation:false.
+            compare(findChild(cd1, "confirmTypedField"), null);
+        }
+        function test_confirmDisabledUntilWordTypedExactly() {
+            cdTyped.visible = true; waitForRendering(cdTyped);
+            var btn = findChild(cdTyped, "confirmButton");
+            compare(btn.enabled, false);                 // empty
+            findChild(cdTyped, "confirmTypedField").text = "delete";
+            compare(btn.enabled, false);                 // wrong case — exact match required
+            findChild(cdTyped, "confirmTypedField").text = "DELETE";
+            compare(btn.enabled, true);
+        }
+        function test_typedFieldClearedOnReopen() {
+            cdTyped.visible = true; waitForRendering(cdTyped);
+            findChild(cdTyped, "confirmTypedField").text = "DELETE";
+            cdTyped.visible = false;
+            cdTyped.visible = true; waitForRendering(cdTyped);
+            compare(findChild(cdTyped, "confirmTypedField").text, "");
+            compare(findChild(cdTyped, "confirmButton").enabled, false);
         }
     }
 

@@ -35,6 +35,8 @@ public:
 
     void setRecords(const QList<StudentRecord> &records);
     QStringList selectedIds() const;
+    QList<StudentRecord> selectedRecords() const; // records whose schoolId is selected, m_records order
+    QList<StudentRecord> allRecords() const;      // all currently-loaded/filtered records
 
     Q_INVOKABLE void toggle(const QString &schoolId);
     Q_INVOKABLE void setAllSelected(bool on);

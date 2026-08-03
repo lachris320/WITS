@@ -8,6 +8,7 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QUrlQuery>
+#include <QVariant>
 
 StudentController::StudentController(QNetworkAccessManager *nam, QObject *parent)
     : QObject(parent)
@@ -103,6 +104,63 @@ bool StudentController::parseDeleteResponse(const QByteArray &raw, QString &outM
     return false;
 }
 
+QByteArray StudentController::toCsv(const QList<StudentRecord> &rows)
+{
+    // OWASP CSV-injection mitigation: a leading '=', '+', '-', '@', tab, or
+    // CR makes Excel/LibreOffice interpret the cell as a formula rather than
+    // text. Every string cell here (code/school_id/name/course/department/
+    // year_level/gender/status) is server-supplied — parseSearchResponse
+    // decodes gender/status with an unchecked .toString() too, no client-side
+    // controlled vocabulary is enforced — so a tampered value could execute
+    // on open. Prefix a single apostrophe to force text interpretation before
+    // the RFC-4180 quote decision below. An empty cell is left untouched.
+    // (visits is numeric and is excluded on purpose.)
+    auto neutralizeFormula = [](const QString &v) -> QString {
+        if (v.isEmpty())
+            return v;
+        switch (v.at(0).toLatin1()) {
+        case '=': case '+': case '-': case '@': case '\t': case '\r':
+            return QLatin1Char('\'') + v;
+        default:
+            return v;
+        }
+    };
+    auto quote = [](const QString &v) -> QString {
+        const bool needs = v.contains(QLatin1Char(',')) || v.contains(QLatin1Char('"'))
+                        || v.contains(QLatin1Char('\n')) || v.contains(QLatin1Char('\r'));
+        if (!needs)
+            return v;
+        QString q = v;
+        q.replace(QLatin1Char('"'), QLatin1String("\"\""));
+        return QLatin1Char('"') + q + QLatin1Char('"');
+    };
+    auto line = [&quote](const QStringList &cells) -> QString {
+        QStringList out;
+        out.reserve(cells.size());
+        for (const QString &c : cells)
+            out << quote(c);
+        return out.join(QLatin1Char(',')) + QLatin1String("\r\n");
+    };
+
+    QString csv = line({ QStringLiteral("code"), QStringLiteral("school_id"),
+                         QStringLiteral("name"), QStringLiteral("course"),
+                         QStringLiteral("department"), QStringLiteral("year_level"),
+                         QStringLiteral("gender"), QStringLiteral("status"),
+                         QStringLiteral("visits") });
+    for (const StudentRecord &r : rows) {
+        csv += line({ neutralizeFormula(r.code), neutralizeFormula(r.schoolId),
+                      neutralizeFormula(r.name), neutralizeFormula(r.course),
+                      neutralizeFormula(r.department), neutralizeFormula(r.yearLevel),
+                      neutralizeFormula(r.gender), neutralizeFormula(r.status),
+                      QString::number(r.visits) });
+    }
+
+    QByteArray out;
+    out.append("\xEF\xBB\xBF");            // UTF-8 BOM
+    out.append(csv.toUtf8());
+    return out;
+}
+
 // Pure port of the departments parse in populateFilters (adminwindow.cpp:3375-3382).
 // Returns only the parsed entries (View prepends "Select Department"); skips
 // "all" case-insensitively; empty on !success.
@@ -133,6 +191,16 @@ QStringList StudentController::parseCourses(const QByteArray &raw)
             out << val.toString();
     }
     return out;
+}
+
+bool StudentController::deleteReplyIsServerAnswer(bool replyHadError, int httpStatus,
+                                                  const QByteArray &body)
+{
+    if (!replyHadError)
+        return true;
+    // An error status is still the server answering — provided it sent
+    // something for the decode seam to read.
+    return httpStatus > 0 && !body.isEmpty();
 }
 
 // --- Network methods ---
@@ -241,18 +309,21 @@ void StudentController::deleteStudents(const QStringList &schoolIds, const QStri
         m_nam->post(request, body.toString(QUrl::FullyEncoded).toUtf8());
 
     connect(reply, &QNetworkReply::finished, this, [this, reply, requestedCount]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            emit deleteFailed(reply->errorString());
-            reply->deleteLater();
-            return;
-        }
-
         const QByteArray resp = reply->readAll();
+        const bool hadError = reply->error() != QNetworkReply::NoError;
+        const QString errorString = reply->errorString();
+        const QVariant statusAttr =
+            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
+        const int httpStatus = statusAttr.isValid() ? statusAttr.toInt() : 0;
         reply->deleteLater();
 
-        QString message;
-        const bool ok = parseDeleteResponse(resp, message);
-        emit deleteFinished(ok, requestedCount, message);
+        if (deleteReplyIsServerAnswer(hadError, httpStatus, resp)) {
+            QString message;
+            const bool ok = parseDeleteResponse(resp, message);
+            emit deleteFinished(ok, requestedCount, message);   // 401 body reaches here
+        } else {
+            emit deleteFailed(errorString);                     // genuine transport failure only
+        }
     });
 }
 

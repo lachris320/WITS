@@ -14,7 +14,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(BUILD_LEGACY_WIDGETS "Build the legacy WITS Widgets executable" ON)
 
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Network Charts Test UiTools PrintSupport Svg Qml Quick QuickControls2 QuickTest)
-find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Network Charts Test UiTools PrintSupport Svg Qml Quick QuickControls2 QuickTest)
+find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Network Charts Test UiTools PrintSupport Svg Qml Quick QuickControls2 QuickDialogs2 QuickTest)
 
 # Enable CTest BEFORE any add_subdirectory that registers tests. CMake only
 # honours add_test()/set_tests_properties() in a subdirectory if enable_testing()

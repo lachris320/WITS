@@ -18,6 +18,9 @@ private slots:
     void selectionSurvivesRefreshBySchoolId();
     void setAllAndClear();
     void selectedIdsReturnsOnlySelected();
+    void selectedRecordsReturnsOnlySelectedInOrder();
+    void selectedRecordsEmptyWhenNoneSelected();
+    void allRecordsReturnsEveryLoadedRow();
 };
 
 void TestStudentsTableModel::emptyByDefault()
@@ -79,6 +82,36 @@ void TestStudentsTableModel::selectedIdsReturnsOnlySelected()
     m.toggle("A"); m.toggle("C");
     QStringList ids = m.selectedIds(); ids.sort();
     QCOMPARE(ids, (QStringList{"A","C"}));
+}
+
+void TestStudentsTableModel::selectedRecordsReturnsOnlySelectedInOrder()
+{
+    StudentsTableModel m;
+    m.setRecords({rec("A","Ann"), rec("B","Ben"), rec("C","Cara")});
+    m.toggle("C"); m.toggle("A");
+    const QList<StudentRecord> sel = m.selectedRecords();
+    QCOMPARE(sel.size(), 2);
+    // m_records order (A before C), not selection/insertion order.
+    QCOMPARE(sel.at(0).schoolId, QStringLiteral("A"));
+    QCOMPARE(sel.at(1).schoolId, QStringLiteral("C"));
+}
+
+void TestStudentsTableModel::selectedRecordsEmptyWhenNoneSelected()
+{
+    StudentsTableModel m;
+    m.setRecords({rec("A","Ann"), rec("B","Ben")});
+    QVERIFY(m.selectedRecords().isEmpty());
+}
+
+void TestStudentsTableModel::allRecordsReturnsEveryLoadedRow()
+{
+    StudentsTableModel m;
+    m.setRecords({rec("A","Ann"), rec("B","Ben")});
+    m.toggle("A");                       // selection must not affect allRecords()
+    const QList<StudentRecord> all = m.allRecords();
+    QCOMPARE(all.size(), 2);
+    QCOMPARE(all.at(0).schoolId, QStringLiteral("A"));
+    QCOMPARE(all.at(1).schoolId, QStringLiteral("B"));
 }
 
 QTEST_APPLESS_MAIN(TestStudentsTableModel)

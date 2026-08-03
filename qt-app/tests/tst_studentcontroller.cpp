@@ -5,6 +5,8 @@
 #include <QJsonObject>
 #include <QList>
 #include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QSignalSpy>
 #include <QString>
 #include <QStringList>
 #include <QUrlQuery>
@@ -52,6 +54,36 @@ private slots:
     // request assembly (harmonized FORM + admin_key)
     void deleteStudents_buildsFormBodyWithAdminKey();
     void bulkUpdate_buildsFormBodyWithStudentsJsonAndAdminKey();
+
+    // deleteStudents — guard 401 must surface as deleteFinished(false, msg),
+    // never deleteFailed (the whole point of Task 2's rewrite).
+    void deleteStudents_guard401WithBody_emitsDeleteFinishedNotFailed();
+
+    // deleteReplyIsServerAnswer (mirrors HttpForm::isServerAnswer)
+    void deleteReplyIsServerAnswer_transportNoStatus_isFalse();
+    void deleteReplyIsServerAnswer_401WithBody_isTrue();
+    void deleteReplyIsServerAnswer_200Error_isTrue();
+    void deleteReplyIsServerAnswer_200Success_isTrue();
+    void deleteReplyIsServerAnswer_statusButEmptyBody_isFalse();
+
+    // toCsv
+    void toCsv_emptyList_headerOnlyWithBom();
+    void toCsv_headerRowIsExactFieldOrder();
+    void toCsv_serializesAllFieldsExceptPhoto();
+    void toCsv_quotesCommaEmbeddedField();
+    void toCsv_doublesEmbeddedQuote();
+    void toCsv_quotesEmbeddedNewline();
+    void toCsv_usesCrlfLineTerminators();
+
+    // toCsv — CSV formula-injection neutralization (OWASP CSV injection)
+    void toCsv_prefixesApostropheWhenFieldStartsWithEquals();
+    void toCsv_prefixesApostropheWhenFieldStartsWithPlus();
+    void toCsv_prefixesApostropheWhenFieldStartsWithMinus();
+    void toCsv_prefixesApostropheWhenFieldStartsWithAt();
+    void toCsv_normalNameIsUnchanged();
+    void toCsv_formulaFieldWithCommaIsPrefixedAndQuoted();
+    void toCsv_prefixesApostropheWhenStatusStartsWithEquals();
+    void toCsv_prefixesApostropheWhenGenderStartsWithEquals();
 };
 
 void TestStudentController::normalizeFilterPlaceholdersBecomeEmpty()
@@ -306,6 +338,201 @@ void TestStudentController::bulkUpdate_buildsFormBodyWithStudentsJsonAndAdminKey
     QCOMPARE(arr.size(), 1);
     QCOMPARE(arr.at(0).toObject().value("school_id").toString(), QStringLiteral("2023-001"));
     QCOMPARE(arr.at(0).toObject().value("year_level").toString(), QStringLiteral("2"));
+}
+
+void TestStudentController::deleteStudents_guard401WithBody_emitsDeleteFinishedNotFailed()
+{
+    // requireAdminAuth answers a stale/bad admin key with HTTP 401 + a JSON
+    // error body. Before the Task 2 rewrite, StudentController::deleteStudents
+    // treated ANY reply->error() != NoError as a transport failure and emitted
+    // deleteFailed with the generic Qt errorString, never reaching
+    // parseDeleteResponse. That mis-surfaces a stale admin key as a network
+    // problem. This test pins the fix: the 401 body must reach deleteFinished
+    // with ok==false and the server's own message, and deleteFailed must NOT
+    // fire at all. It fails against the old early-return implementation.
+    const QByteArray body = R"({"status":"error","message":"Invalid admin key"})";
+    CapturingNam nam(body, QNetworkReply::AuthenticationRequiredError, 401);
+    StudentController ctrl(&nam);
+
+    QSignalSpy finishedSpy(&ctrl, &StudentController::deleteFinished);
+    QSignalSpy failedSpy(&ctrl, &StudentController::deleteFailed);
+
+    ctrl.deleteStudents(QStringList() << "2023-001", "stale-key");
+
+    QVERIFY(finishedSpy.wait(1000));
+
+    QCOMPARE(finishedSpy.count(), 1);
+    QCOMPARE(failedSpy.count(), 0);
+
+    const QList<QVariant> args = finishedSpy.takeFirst();
+    QCOMPARE(args.at(0).toBool(), false);
+    QCOMPARE(args.at(1).toInt(), 1);
+    QCOMPARE(args.at(2).toString(), QStringLiteral("Invalid admin key"));
+}
+
+void TestStudentController::deleteReplyIsServerAnswer_transportNoStatus_isFalse()
+{
+    // hadError=true, no HTTP status (attribute absent => 0): a real transport
+    // failure — DNS/refused/timeout.
+    QVERIFY(!StudentController::deleteReplyIsServerAnswer(true, 0, QByteArray()));
+}
+
+void TestStudentController::deleteReplyIsServerAnswer_401WithBody_isTrue()
+{
+    // requireAdminAuth answers a bad/expired key with 401 + a JSON body —
+    // that IS the server answering and must reach parseDeleteResponse.
+    const QByteArray body = R"({"status":"error","message":"Invalid admin key"})";
+    QVERIFY(StudentController::deleteReplyIsServerAnswer(true, 401, body));
+}
+
+void TestStudentController::deleteReplyIsServerAnswer_200Error_isTrue()
+{
+    // No transport error and a normal 200 status, but the JSON payload itself
+    // reports a server-side failure — still a decodable server answer.
+    const QByteArray body = R"({"status":"error","message":"Invalid data"})";
+    QVERIFY(StudentController::deleteReplyIsServerAnswer(false, 200, body));
+}
+
+void TestStudentController::deleteReplyIsServerAnswer_200Success_isTrue()
+{
+    QVERIFY(StudentController::deleteReplyIsServerAnswer(false, 200,
+                                                         R"({"status":"success"})"));
+}
+
+void TestStudentController::deleteReplyIsServerAnswer_statusButEmptyBody_isFalse()
+{
+    // A status code with an empty body gives the decode seam nothing to
+    // classify — treated as a transport failure, exactly like HttpForm.
+    QVERIFY(!StudentController::deleteReplyIsServerAnswer(true, 500, QByteArray()));
+}
+
+static const QByteArray kBom = QByteArrayLiteral("\xEF\xBB\xBF");
+
+void TestStudentController::toCsv_emptyList_headerOnlyWithBom()
+{
+    const QByteArray csv = StudentController::toCsv({});
+    QVERIFY(csv.startsWith(kBom));
+    QCOMPARE(csv, kBom + "code,school_id,name,course,department,year_level,gender,status,visits\r\n");
+}
+
+void TestStudentController::toCsv_headerRowIsExactFieldOrder()
+{
+    const QByteArray csv = StudentController::toCsv({});
+    const QByteArray body = csv.mid(kBom.size());
+    const QByteArray header = body.left(body.indexOf("\r\n"));
+    QCOMPARE(header, QByteArrayLiteral(
+        "code,school_id,name,course,department,year_level,gender,status,visits"));
+}
+
+void TestStudentController::toCsv_serializesAllFieldsExceptPhoto()
+{
+    StudentRecord r;
+    r.code = "C1"; r.schoolId = "2023-001"; r.name = "Juan Cruz"; r.course = "BSIT";
+    r.department = "CCS"; r.yearLevel = "2"; r.gender = "Male"; r.status = "Active";
+    r.visits = 42;
+    const QByteArray csv = StudentController::toCsv({r});
+    QVERIFY(csv.contains("C1,2023-001,Juan Cruz,BSIT,CCS,2,Male,Active,42\r\n"));
+}
+
+void TestStudentController::toCsv_quotesCommaEmbeddedField()
+{
+    StudentRecord r; r.name = "Cruz, Juan";
+    const QByteArray csv = StudentController::toCsv({r});
+    QVERIFY(csv.contains("\"Cruz, Juan\""));
+}
+
+void TestStudentController::toCsv_doublesEmbeddedQuote()
+{
+    StudentRecord r; r.name = "Juan \"JC\" Cruz";
+    const QByteArray csv = StudentController::toCsv({r});
+    QVERIFY(csv.contains("\"Juan \"\"JC\"\" Cruz\""));
+}
+
+void TestStudentController::toCsv_quotesEmbeddedNewline()
+{
+    StudentRecord r; r.name = "Line1\nLine2";
+    const QByteArray csv = StudentController::toCsv({r});
+    QVERIFY(csv.contains("\"Line1\nLine2\""));
+}
+
+void TestStudentController::toCsv_usesCrlfLineTerminators()
+{
+    StudentRecord r; r.name = "Ann";
+    const QByteArray csv = StudentController::toCsv({r});
+    // Header line + one data line, both CRLF-terminated => exactly two "\r\n".
+    QCOMPARE(csv.count("\r\n"), 2);
+    QVERIFY(!csv.contains("\n\n"));
+}
+
+// OWASP CSV-injection mitigation: a leading =, +, -, or @ (or a leading tab/CR)
+// makes Excel/LibreOffice interpret the cell as a formula. Prefixing a single
+// apostrophe forces text interpretation without altering the visible value.
+void TestStudentController::toCsv_prefixesApostropheWhenFieldStartsWithEquals()
+{
+    StudentRecord r; r.name = "=HYPERLINK(\"http://x\")";
+    const QByteArray csv = StudentController::toCsv({r});
+    QVERIFY(csv.contains("'=HYPERLINK(\"\"http://x\"\")"));
+}
+
+void TestStudentController::toCsv_prefixesApostropheWhenFieldStartsWithPlus()
+{
+    StudentRecord r; r.name = "+1234";
+    const QByteArray csv = StudentController::toCsv({r});
+    QVERIFY(csv.contains(",'+1234,"));
+}
+
+void TestStudentController::toCsv_prefixesApostropheWhenFieldStartsWithMinus()
+{
+    StudentRecord r; r.name = "-1234";
+    const QByteArray csv = StudentController::toCsv({r});
+    QVERIFY(csv.contains(",'-1234,"));
+}
+
+void TestStudentController::toCsv_prefixesApostropheWhenFieldStartsWithAt()
+{
+    StudentRecord r; r.name = "@SUM(A1)";
+    const QByteArray csv = StudentController::toCsv({r});
+    QVERIFY(csv.contains(",'@SUM(A1),"));
+}
+
+void TestStudentController::toCsv_normalNameIsUnchanged()
+{
+    StudentRecord r; r.name = "Juan Cruz";
+    const QByteArray csv = StudentController::toCsv({r});
+    QVERIFY(csv.contains(",Juan Cruz,"));
+    QVERIFY(!csv.contains("'Juan Cruz"));
+}
+
+void TestStudentController::toCsv_formulaFieldWithCommaIsPrefixedAndQuoted()
+{
+    StudentRecord r; r.name = "=A,B";
+    const QByteArray csv = StudentController::toCsv({r});
+    QVERIFY(csv.contains("\"'=A,B\""));
+}
+
+// status is decoded from the server response via an unchecked .toString()
+// (parseSearchResponse) — no client-side controlled vocabulary is enforced —
+// so it is just as untrusted as name/course/department and must get the same
+// formula-injection guard.
+void TestStudentController::toCsv_prefixesApostropheWhenStatusStartsWithEquals()
+{
+    StudentRecord r;
+    r.code = "C1"; r.schoolId = "2023-001"; r.name = "Juan Cruz"; r.course = "BSIT";
+    r.department = "CCS"; r.yearLevel = "2"; r.gender = "Male"; r.status = "=EVIL";
+    r.visits = 1;
+    const QByteArray csv = StudentController::toCsv({r});
+    QVERIFY(csv.contains(",Male,'=EVIL,1\r\n"));
+}
+
+// Same rationale as above: gender is an unchecked server string too.
+void TestStudentController::toCsv_prefixesApostropheWhenGenderStartsWithEquals()
+{
+    StudentRecord r;
+    r.code = "C1"; r.schoolId = "2023-001"; r.name = "Juan Cruz"; r.course = "BSIT";
+    r.department = "CCS"; r.yearLevel = "2"; r.gender = "=EVIL"; r.status = "Active";
+    r.visits = 1;
+    const QByteArray csv = StudentController::toCsv({r});
+    QVERIFY(csv.contains(",'=EVIL,Active,1\r\n"));
 }
 
 QTEST_MAIN(TestStudentController)

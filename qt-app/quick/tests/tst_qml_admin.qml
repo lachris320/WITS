@@ -1653,15 +1653,35 @@ Item {
             property string course: ""
             property bool loading: false
             property string errorText: ""
+            property string statusMessage: ""
+            property int deleteCount: 0
+            property url lastExportUrl: ""
+            property bool exportResult: true
             function refresh() {}
             function setDepartment(d) { department = d; }
             function setCourse(c) { course = c; }
+            function requiresTypedConfirmation(n) { return n >= 10; }
+            function deleteSelected() { deleteCount++; }
+            function exportCsv(u) { lastExportUrl = u; return exportResult; }
         }
 
         DatabaseScreen { id: databaseScreen; anchors.fill: parent; vm: stubVm }
 
         TestCase {
             name: "DatabaseScreen"; when: windowShown
+            // Reset the shared stub + close any dialog left open by a prior
+            // test — QuickTest runs functions in alphabetical order, and a
+            // leaked-visible LConfirmDialog's scrim swallows later mouseClicks.
+            function init() {
+                stubModel.selectedCount = 0;
+                stubModel.count = 2;
+                stubVm.deleteCount = 0;
+                stubVm.lastExportUrl = "";
+                stubVm.exportResult = true;
+                stubVm.statusMessage = "";
+                var dlg = findChild(databaseScreen, "deleteConfirm");
+                if (dlg) { dlg.visible = false; dlg.clearKey(); }
+            }
             function test_showsCascadingFilter() {
                 verify(findChild(databaseScreen, "cascDept") !== null);
             }
@@ -1673,6 +1693,69 @@ Item {
                 var h = findChild(databaseScreen, "tableCountHeader");
                 verify(h !== null);
                 verify(h.text.indexOf("2") !== -1);   // 2 results
+            }
+            function test_exportLabelReflectsSelection() {
+                var btn = findChild(databaseScreen, "exportButton");
+                verify(btn !== null);
+                compare(btn.text, "Export CSV (all 2)");   // nothing selected => all N
+                stubModel.selectedCount = 1;
+                compare(btn.text, "Export CSV (1)");
+            }
+            function test_exportDisabledWhenNoRows() {
+                stubModel.selectedCount = 0;
+                stubModel.count = 0;
+                compare(findChild(databaseScreen, "exportButton").enabled, false);
+            }
+            function test_deleteLabelAndEnabledTrackSelection() {
+                var btn = findChild(databaseScreen, "deleteButton");
+                verify(btn !== null);
+                compare(btn.text, "Delete");
+                compare(btn.enabled, false);              // nothing selected
+                stubModel.selectedCount = 3;
+                compare(btn.text, "Delete (3)");
+                compare(btn.enabled, true);
+            }
+            function test_deleteConfirmInvokesVmDeleteSelected() {
+                stubModel.selectedCount = 2;
+                waitForRendering(databaseScreen);
+                mouseClick(findChild(databaseScreen, "deleteButton"));
+                var dlg = findChild(databaseScreen, "deleteConfirm");
+                verify(dlg !== null);
+                compare(dlg.visible, true);
+                compare(dlg.requireTypedConfirmation, false);   // 2 < 10
+                mouseClick(findChild(dlg, "confirmButton"));
+                compare(stubVm.deleteCount, 1);
+            }
+            function test_typedConfirmGateEngagesForLargeSelection() {
+                stubModel.selectedCount = 10;               // >= threshold
+                waitForRendering(databaseScreen);
+                mouseClick(findChild(databaseScreen, "deleteButton"));
+                var dlg = findChild(databaseScreen, "deleteConfirm");
+                compare(dlg.requireTypedConfirmation, true);
+                var btn = findChild(dlg, "confirmButton");
+                compare(btn.enabled, false);                // gated until DELETE typed
+                findChild(dlg, "confirmTypedField").text = "DELETE";
+                compare(btn.enabled, true);
+            }
+            function test_fileDialogAcceptInvokesExportCsv() {
+                var dlg = findChild(databaseScreen, "exportDialog");
+                verify(dlg !== null);
+                dlg.selectedFile = "file:///tmp/wits_export_test.csv";
+                dlg.accepted();                             // drive the onAccepted wiring
+                compare(stubVm.lastExportUrl.toString(), "file:///tmp/wits_export_test.csv");
+            }
+            // Guards the LToast binding trap (documented in KioskScreen.qml):
+            // LToast's auto-dismiss Timer imperatively sets message="", which
+            // would permanently destroy a plain `message: vm.statusMessage`
+            // binding after the FIRST toast. Prove a SECOND status still shows.
+            function test_toastShowsSecondStatusAfterFirstDismissed() {
+                var toast = findChild(databaseScreen, "databaseToast");
+                verify(toast !== null);
+                stubVm.statusMessage = "First status";
+                compare(toast.message, "First status");
+                toast.message = "";   // simulate the LToast auto-dismiss timer firing
+                stubVm.statusMessage = "Second status";
+                compare(toast.message, "Second status");
             }
         }
     }

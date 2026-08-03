@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Dialogs
 import LOAMS
 
 // Database (spec §4.2, increment 4a.2a): filterable, multi-selectable student
@@ -55,16 +56,66 @@ Rectangle {
             }
         }
 
-        // Count/selection header.
-        Text {
-            objectName: "tableCountHeader"
-            text: screen.selectedCount > 0
-                  ? qsTr("%1 results · %2 selected").arg(screen.resultCount).arg(screen.selectedCount)
-                  : qsTr("%1 results").arg(screen.resultCount)
-            color: Theme.mutedTextCaption
-            font.family: Theme.typography.sans
-            font.pixelSize: Theme.typography.control
-            font.weight: Font.ExtraBold
+        // Count/selection header + row actions (Export/Delete).
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Theme.spacing.md
+
+            Text {
+                objectName: "tableCountHeader"
+                text: screen.selectedCount > 0
+                      ? qsTr("%1 results · %2 selected").arg(screen.resultCount).arg(screen.selectedCount)
+                      : qsTr("%1 results").arg(screen.resultCount)
+                color: Theme.mutedTextCaption
+                font.family: Theme.typography.sans
+                font.pixelSize: Theme.typography.control
+                font.weight: Font.ExtraBold
+            }
+
+            Item { Layout.fillWidth: true }   // spacer pushes the actions right
+
+            TextMetrics {
+                id: exportMetrics
+                font.family: Theme.typography.sans
+                font.pixelSize: Theme.typography.control
+                // Worst-case label width so the button never resizes on count change.
+                text: qsTr("Export CSV (all %1)").arg(screen.resultCount)
+            }
+            LButton {
+                objectName: "exportButton"
+                variant: "Outline"
+                compact: true
+                text: screen.selectedCount > 0
+                      ? qsTr("Export CSV (%1)").arg(screen.selectedCount)
+                      : qsTr("Export CSV (all %1)").arg(screen.resultCount)
+                // Exportable when M > 0 OR (nothing selected and) N > 0; disabled at N == 0.
+                enabled: screen.selectedCount > 0 || screen.resultCount > 0
+                tooltipText: qsTr("Exports selected rows, or all filtered rows if none are selected.")
+                accessibleName: screen.selectedCount > 0
+                                ? qsTr("Export %1 selected rows to CSV").arg(screen.selectedCount)
+                                : qsTr("Export all %1 filtered rows to CSV").arg(screen.resultCount)
+                Layout.minimumWidth: exportMetrics.width + Theme.spacing.xl * 2
+                onClicked: exportDialog.open()
+            }
+
+            TextMetrics {
+                id: deleteMetrics
+                font.family: Theme.typography.sans
+                font.pixelSize: Theme.typography.control
+                text: qsTr("Delete (%1)").arg(screen.resultCount)
+            }
+            LButton {
+                objectName: "deleteButton"
+                variant: "Danger"
+                compact: true
+                text: screen.selectedCount > 0
+                      ? qsTr("Delete (%1)").arg(screen.selectedCount)
+                      : qsTr("Delete")
+                enabled: screen.selectedCount > 0
+                accessibleName: qsTr("Delete %1 selected student records").arg(screen.selectedCount)
+                Layout.minimumWidth: deleteMetrics.width + Theme.spacing.xl * 2
+                onClicked: deleteConfirm.visible = true
+            }
         }
 
         // The table.
@@ -86,6 +137,51 @@ Rectangle {
                 { key: "status",     title: qsTr("Status"),     weight: 1 },
                 { key: "visits",     title: qsTr("Visits"),     weight: 1 }
             ]
+        }
+    }
+
+    FileDialog {
+        id: exportDialog
+        objectName: "exportDialog"
+        fileMode: FileDialog.SaveFile
+        defaultSuffix: "csv"
+        nameFilters: ["CSV (*.csv)"]
+        onAccepted: if (screen.vm) screen.vm.exportCsv(selectedFile)
+    }
+
+    LConfirmDialog {
+        id: deleteConfirm
+        objectName: "deleteConfirm"
+        title: qsTr("Delete students?")
+        // Itemized, irreversible-impact message (PlainText per LConfirmDialog).
+        message: qsTr("This will permanently delete:\n• %1 student records\n• all associated visit history\n\nThis cannot be undone.")
+                    .arg(screen.selectedCount)
+        confirmText: qsTr("Delete")
+        // M >= 10 requires typing DELETE (the VM owns the threshold).
+        requireTypedConfirmation: screen.vm ? screen.vm.requiresTypedConfirmation(screen.selectedCount) : false
+        confirmationWord: "DELETE"
+        onConfirmed: { deleteConfirm.visible = false; if (screen.vm) screen.vm.deleteSelected(); }
+    }
+
+    LToast {
+        id: databaseToast
+        objectName: "databaseToast"
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: Theme.spacing.xxl
+    }
+
+    // NOT a declarative `message: vm.statusMessage` binding — LToast's
+    // auto-dismiss Timer imperatively sets message="" (LToast.qml), which
+    // would PERMANENTLY destroy such a binding after the first toast, so
+    // every later status update would be silently swallowed (same trap
+    // documented in KioskScreen.qml). Raise imperatively instead: every time
+    // the VM's statusMessage changes to something non-empty, push it in.
+    Connections {
+        target: screen.vm ? screen.vm : null
+        function onStatusMessageChanged() {
+            if (screen.vm.statusMessage !== "")
+                databaseToast.message = screen.vm.statusMessage;
         }
     }
 }
