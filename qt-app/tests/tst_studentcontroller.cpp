@@ -74,6 +74,14 @@ private slots:
     void toCsv_doublesEmbeddedQuote();
     void toCsv_quotesEmbeddedNewline();
     void toCsv_usesCrlfLineTerminators();
+
+    // toCsv — CSV formula-injection neutralization (OWASP CSV injection)
+    void toCsv_prefixesApostropheWhenFieldStartsWithEquals();
+    void toCsv_prefixesApostropheWhenFieldStartsWithPlus();
+    void toCsv_prefixesApostropheWhenFieldStartsWithMinus();
+    void toCsv_prefixesApostropheWhenFieldStartsWithAt();
+    void toCsv_normalNameIsUnchanged();
+    void toCsv_formulaFieldWithCommaIsPrefixedAndQuoted();
 };
 
 void TestStudentController::normalizeFilterPlaceholdersBecomeEmpty()
@@ -452,6 +460,52 @@ void TestStudentController::toCsv_usesCrlfLineTerminators()
     // Header line + one data line, both CRLF-terminated => exactly two "\r\n".
     QCOMPARE(csv.count("\r\n"), 2);
     QVERIFY(!csv.contains("\n\n"));
+}
+
+// OWASP CSV-injection mitigation: a leading =, +, -, or @ (or a leading tab/CR)
+// makes Excel/LibreOffice interpret the cell as a formula. Prefixing a single
+// apostrophe forces text interpretation without altering the visible value.
+void TestStudentController::toCsv_prefixesApostropheWhenFieldStartsWithEquals()
+{
+    StudentRecord r; r.name = "=HYPERLINK(\"http://x\")";
+    const QByteArray csv = StudentController::toCsv({r});
+    QVERIFY(csv.contains("'=HYPERLINK(\"\"http://x\"\")"));
+}
+
+void TestStudentController::toCsv_prefixesApostropheWhenFieldStartsWithPlus()
+{
+    StudentRecord r; r.name = "+1234";
+    const QByteArray csv = StudentController::toCsv({r});
+    QVERIFY(csv.contains(",'+1234,"));
+}
+
+void TestStudentController::toCsv_prefixesApostropheWhenFieldStartsWithMinus()
+{
+    StudentRecord r; r.name = "-1234";
+    const QByteArray csv = StudentController::toCsv({r});
+    QVERIFY(csv.contains(",'-1234,"));
+}
+
+void TestStudentController::toCsv_prefixesApostropheWhenFieldStartsWithAt()
+{
+    StudentRecord r; r.name = "@SUM(A1)";
+    const QByteArray csv = StudentController::toCsv({r});
+    QVERIFY(csv.contains(",'@SUM(A1),"));
+}
+
+void TestStudentController::toCsv_normalNameIsUnchanged()
+{
+    StudentRecord r; r.name = "Juan Cruz";
+    const QByteArray csv = StudentController::toCsv({r});
+    QVERIFY(csv.contains(",Juan Cruz,"));
+    QVERIFY(!csv.contains("'Juan Cruz"));
+}
+
+void TestStudentController::toCsv_formulaFieldWithCommaIsPrefixedAndQuoted()
+{
+    StudentRecord r; r.name = "=A,B";
+    const QByteArray csv = StudentController::toCsv({r});
+    QVERIFY(csv.contains("\"'=A,B\""));
 }
 
 QTEST_MAIN(TestStudentController)

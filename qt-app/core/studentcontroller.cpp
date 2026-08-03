@@ -106,6 +106,22 @@ bool StudentController::parseDeleteResponse(const QByteArray &raw, QString &outM
 
 QByteArray StudentController::toCsv(const QList<StudentRecord> &rows)
 {
+    // OWASP CSV-injection mitigation: a leading '=', '+', '-', '@', tab, or
+    // CR makes Excel/LibreOffice interpret the cell as a formula rather than
+    // text. These fields are server-supplied (name/course/department/
+    // school_id/code) and a tampered value could execute on open, so prefix
+    // a single apostrophe to force text interpretation before the RFC-4180
+    // quote decision below. An empty cell is left untouched.
+    auto neutralizeFormula = [](const QString &v) -> QString {
+        if (v.isEmpty())
+            return v;
+        switch (v.at(0).toLatin1()) {
+        case '=': case '+': case '-': case '@': case '\t': case '\r':
+            return QLatin1Char('\'') + v;
+        default:
+            return v;
+        }
+    };
     auto quote = [](const QString &v) -> QString {
         const bool needs = v.contains(QLatin1Char(',')) || v.contains(QLatin1Char('"'))
                         || v.contains(QLatin1Char('\n')) || v.contains(QLatin1Char('\r'));
@@ -129,8 +145,10 @@ QByteArray StudentController::toCsv(const QList<StudentRecord> &rows)
                          QStringLiteral("gender"), QStringLiteral("status"),
                          QStringLiteral("visits") });
     for (const StudentRecord &r : rows) {
-        csv += line({ r.code, r.schoolId, r.name, r.course, r.department,
-                      r.yearLevel, r.gender, r.status, QString::number(r.visits) });
+        csv += line({ neutralizeFormula(r.code), neutralizeFormula(r.schoolId),
+                      neutralizeFormula(r.name), neutralizeFormula(r.course),
+                      neutralizeFormula(r.department), neutralizeFormula(r.yearLevel),
+                      r.gender, r.status, QString::number(r.visits) });
     }
 
     QByteArray out;
