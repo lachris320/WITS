@@ -18,6 +18,7 @@
 #include "AdminSession.h"
 #include "HttpForm.h"
 #include "apiconfig.h"
+#include "csvutil.h"
 #include "brandtheme.h"
 #include "reportcontroller.h"
 
@@ -275,23 +276,8 @@ void SettingsViewModel::loadDepartments()
 QString SettingsViewModel::serializeCsv(const QStringList &headers,
                                         const QList<QStringList> &rows)
 {
-    auto cell = [](const QString &v) -> QString {
-        const bool needsQuote = v.contains(QLatin1Char(',')) || v.contains(QLatin1Char('"'))
-                             || v.contains(QLatin1Char('\n')) || v.contains(QLatin1Char('\r'));
-        if (!needsQuote)
-            return v;
-        QString q = v;
-        q.replace(QLatin1Char('"'), QLatin1String("\"\""));
-        return QLatin1Char('"') + q + QLatin1Char('"');
-    };
-    auto line = [&cell](const QStringList &cells) -> QString {
-        QStringList out;
-        out.reserve(cells.size());
-        for (const QString &c : cells) out << cell(c);
-        return out.join(QLatin1Char(',')) + QLatin1String("\r\n");
-    };
-    QString csv = line(headers);
-    for (const QStringList &r : rows) csv += line(r);
+    QString csv = csvutil::joinRow(headers);
+    for (const QStringList &r : rows) csv += csvutil::joinRow(r);
     return csv;
 }
 

@@ -1,5 +1,6 @@
 #include "studentcontroller.h"
 #include "apiconfig.h"
+#include "csvutil.h"
 
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -125,30 +126,13 @@ QByteArray StudentController::toCsv(const QList<StudentRecord> &rows)
             return v;
         }
     };
-    auto quote = [](const QString &v) -> QString {
-        const bool needs = v.contains(QLatin1Char(',')) || v.contains(QLatin1Char('"'))
-                        || v.contains(QLatin1Char('\n')) || v.contains(QLatin1Char('\r'));
-        if (!needs)
-            return v;
-        QString q = v;
-        q.replace(QLatin1Char('"'), QLatin1String("\"\""));
-        return QLatin1Char('"') + q + QLatin1Char('"');
-    };
-    auto line = [&quote](const QStringList &cells) -> QString {
-        QStringList out;
-        out.reserve(cells.size());
-        for (const QString &c : cells)
-            out << quote(c);
-        return out.join(QLatin1Char(',')) + QLatin1String("\r\n");
-    };
-
-    QString csv = line({ QStringLiteral("code"), QStringLiteral("school_id"),
+    QString csv = csvutil::joinRow({ QStringLiteral("code"), QStringLiteral("school_id"),
                          QStringLiteral("name"), QStringLiteral("course"),
                          QStringLiteral("department"), QStringLiteral("year_level"),
                          QStringLiteral("gender"), QStringLiteral("status"),
                          QStringLiteral("visits") });
     for (const StudentRecord &r : rows) {
-        csv += line({ neutralizeFormula(r.code), neutralizeFormula(r.schoolId),
+        csv += csvutil::joinRow({ neutralizeFormula(r.code), neutralizeFormula(r.schoolId),
                       neutralizeFormula(r.name), neutralizeFormula(r.course),
                       neutralizeFormula(r.department), neutralizeFormula(r.yearLevel),
                       neutralizeFormula(r.gender), neutralizeFormula(r.status),

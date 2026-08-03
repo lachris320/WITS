@@ -108,6 +108,8 @@ qt_add_executable(tst_studentcontroller
     ${CMAKE_SOURCE_DIR}/core/studentcontroller.cpp
     ${CMAKE_SOURCE_DIR}/core/studentcontroller.h
     ${CMAKE_SOURCE_DIR}/core/studentdata.h
+    ${CMAKE_SOURCE_DIR}/core/csvutil.cpp
+    ${CMAKE_SOURCE_DIR}/core/csvutil.h
     ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
     ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
 )
@@ -230,4 +232,14 @@ wits_add_qttest(tst_visitlogparser
         ${CMAKE_SOURCE_DIR}/core/visitlogparser.cpp
         ${CMAKE_SOURCE_DIR}/core/visitlogparser.h
         ${CMAKE_SOURCE_DIR}/core/visitlogdata.h
+    INCLUDES ${CMAKE_SOURCE_DIR}/core)
+
+# --- shared RFC-4180 CSV kernel (pure core, no offscreen) — extracted out of
+# StudentController::toCsv and SettingsViewModel::serializeCsv to kill the
+# duplicated escaping/joining logic the dry-checker flagged post-PR#32. ---
+wits_add_qttest(tst_csvutil
+    SOURCES
+        tst_csvutil.cpp
+        ${CMAKE_SOURCE_DIR}/core/csvutil.cpp
+        ${CMAKE_SOURCE_DIR}/core/csvutil.h
     INCLUDES ${CMAKE_SOURCE_DIR}/core)

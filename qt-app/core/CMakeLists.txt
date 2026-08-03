@@ -26,6 +26,7 @@ add_library(witscore STATIC
     importcontroller.h importcontroller.cpp
     studentdata.h
     studentcontroller.h studentcontroller.cpp
+    csvutil.h csvutil.cpp
     dashboarddata.h
     dashboardparser.h dashboardparser.cpp
     visitlogdata.h
