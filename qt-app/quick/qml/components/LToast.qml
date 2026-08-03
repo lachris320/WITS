@@ -28,8 +28,17 @@ Rectangle {
 
     Text {
         id: contentText
+        objectName: "toastText"
         anchors.centerIn: parent
         text: toast.message
+        // toast.message is consumer-supplied and, via the Database delete
+        // flow, can carry a server error `message` straight from the
+        // backend (DatabaseViewModel::onDeleteFinished's generic-error
+        // branch) over cleartext HTTP. Text defaults to AutoText, which
+        // auto-detects and RENDERS rich text (including remote <img>
+        // fetches). Pinned plain here so no consumer has to remember
+        // (mirrors LDialog.qml's dialogTitleText/dialogMessageText guard).
+        textFormat: Text.PlainText
         color: toast.severity === "Success" ? Theme.success
              : toast.severity === "Error" ? Theme.error : Theme.text
         font.family: Theme.typography.sans

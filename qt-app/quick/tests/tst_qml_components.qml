@@ -332,6 +332,23 @@ Item {
     }
 
     TestCase {
+        name: "LToastPlainText"
+        when: windowShown
+        // The Database delete flow pipes a server-supplied error `message`
+        // (DatabaseViewModel::onDeleteFinished's generic-error branch) into
+        // vm.statusMessage, which lands here as toast.message. Text defaults
+        // to AutoText, which auto-detects and RENDERS rich text (including
+        // remote <img> fetches) — over a backend reached via cleartext HTTP.
+        // Pinned plain in the primitive so no consumer has to remember
+        // (mirrors LDialog.qml's dialogTitleText/dialogMessageText guard).
+        function test_contentTextIsPlainNotRichText() {
+            var content = findChild(to, "toastText");
+            verify(content !== null);
+            compare(content.textFormat, Text.PlainText);
+        }
+    }
+
+    TestCase {
         name: "LButtonTooltipAndAccessibleName"
         when: windowShown
         function test_accessibleNameOverridesTextWhenSet() {
