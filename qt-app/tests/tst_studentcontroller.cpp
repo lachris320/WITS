@@ -82,6 +82,8 @@ private slots:
     void toCsv_prefixesApostropheWhenFieldStartsWithAt();
     void toCsv_normalNameIsUnchanged();
     void toCsv_formulaFieldWithCommaIsPrefixedAndQuoted();
+    void toCsv_prefixesApostropheWhenStatusStartsWithEquals();
+    void toCsv_prefixesApostropheWhenGenderStartsWithEquals();
 };
 
 void TestStudentController::normalizeFilterPlaceholdersBecomeEmpty()
@@ -506,6 +508,31 @@ void TestStudentController::toCsv_formulaFieldWithCommaIsPrefixedAndQuoted()
     StudentRecord r; r.name = "=A,B";
     const QByteArray csv = StudentController::toCsv({r});
     QVERIFY(csv.contains("\"'=A,B\""));
+}
+
+// status is decoded from the server response via an unchecked .toString()
+// (parseSearchResponse) — no client-side controlled vocabulary is enforced —
+// so it is just as untrusted as name/course/department and must get the same
+// formula-injection guard.
+void TestStudentController::toCsv_prefixesApostropheWhenStatusStartsWithEquals()
+{
+    StudentRecord r;
+    r.code = "C1"; r.schoolId = "2023-001"; r.name = "Juan Cruz"; r.course = "BSIT";
+    r.department = "CCS"; r.yearLevel = "2"; r.gender = "Male"; r.status = "=EVIL";
+    r.visits = 1;
+    const QByteArray csv = StudentController::toCsv({r});
+    QVERIFY(csv.contains(",Male,'=EVIL,1\r\n"));
+}
+
+// Same rationale as above: gender is an unchecked server string too.
+void TestStudentController::toCsv_prefixesApostropheWhenGenderStartsWithEquals()
+{
+    StudentRecord r;
+    r.code = "C1"; r.schoolId = "2023-001"; r.name = "Juan Cruz"; r.course = "BSIT";
+    r.department = "CCS"; r.yearLevel = "2"; r.gender = "=EVIL"; r.status = "Active";
+    r.visits = 1;
+    const QByteArray csv = StudentController::toCsv({r});
+    QVERIFY(csv.contains(",'=EVIL,Active,1\r\n"));
 }
 
 QTEST_MAIN(TestStudentController)

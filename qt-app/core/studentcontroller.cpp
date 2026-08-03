@@ -108,10 +108,13 @@ QByteArray StudentController::toCsv(const QList<StudentRecord> &rows)
 {
     // OWASP CSV-injection mitigation: a leading '=', '+', '-', '@', tab, or
     // CR makes Excel/LibreOffice interpret the cell as a formula rather than
-    // text. These fields are server-supplied (name/course/department/
-    // school_id/code) and a tampered value could execute on open, so prefix
-    // a single apostrophe to force text interpretation before the RFC-4180
-    // quote decision below. An empty cell is left untouched.
+    // text. Every string cell here (code/school_id/name/course/department/
+    // year_level/gender/status) is server-supplied — parseSearchResponse
+    // decodes gender/status with an unchecked .toString() too, no client-side
+    // controlled vocabulary is enforced — so a tampered value could execute
+    // on open. Prefix a single apostrophe to force text interpretation before
+    // the RFC-4180 quote decision below. An empty cell is left untouched.
+    // (visits is numeric and is excluded on purpose.)
     auto neutralizeFormula = [](const QString &v) -> QString {
         if (v.isEmpty())
             return v;
@@ -148,7 +151,8 @@ QByteArray StudentController::toCsv(const QList<StudentRecord> &rows)
         csv += line({ neutralizeFormula(r.code), neutralizeFormula(r.schoolId),
                       neutralizeFormula(r.name), neutralizeFormula(r.course),
                       neutralizeFormula(r.department), neutralizeFormula(r.yearLevel),
-                      r.gender, r.status, QString::number(r.visits) });
+                      neutralizeFormula(r.gender), neutralizeFormula(r.status),
+                      QString::number(r.visits) });
     }
 
     QByteArray out;
