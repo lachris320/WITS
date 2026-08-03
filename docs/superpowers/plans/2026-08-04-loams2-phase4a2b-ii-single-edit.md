@@ -74,7 +74,7 @@ void TestStudentController::bulkUpdate_guard401WithBody_emitsBulkUpdateFinishedN
 }
 ```
 
-> `BulkUpdateResult` is already usable in `QSignalSpy` args here because the existing `bulkUpdate_buildsFormBodyWithStudentsJsonAndAdminKey` test and the `bulkUpdateFinished(const BulkUpdateResult&)` signal already compile; if `qvariant_cast<BulkUpdateResult>` fails to compile, add `Q_DECLARE_METATYPE(BulkUpdateResult)` to `qt-app/core/studentdata.h` and `qRegisterMetaType<BulkUpdateResult>()` at the top of the test — but check first, it is likely already registered via the signal.
+> **Metatype note (verify at the RED step).** `qvariant_cast<BulkUpdateResult>` from a `QSignalSpy` arg should work under Qt 6 without any `Q_DECLARE_METATYPE`: moc auto-registers a signal's parameter types, and `QMetaType::fromType<BulkUpdateResult>()` resolves for a complete type. Do NOT assume it is "already registered" — `studentdata.h` has no `Q_DECLARE_METATYPE(BulkUpdateResult)` and no existing test captures `bulkUpdateFinished` via a spy (the existing `bulkUpdate_buildsFormBodyWithStudentsJsonAndAdminKey` only inspects the request body). If Step 2's compile/run shows the cast failing, add `Q_DECLARE_METATYPE(BulkUpdateResult)` to `qt-app/core/studentdata.h` and `qRegisterMetaType<BulkUpdateResult>()` at the top of the test body, then re-run. Confirm the cast at the red step rather than trusting this note.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -389,7 +389,12 @@ void DatabaseViewModel::beginEditSelected()
 
 void DatabaseViewModel::setEditDepartment(const QString &dept)
 {
-    if (m_editDepartment != dept) { m_editDepartment = dept; emit editDepartmentChanged(); }
+    if (m_editDepartment == dept)
+        return;   // no actual change — do NOT clear the course or reload (mirrors
+                  // the filter's setDepartment at DatabaseViewModel.cpp:38-51, and
+                  // is the second line of defense behind the dialog's prefill guard:
+                  // re-selecting the same department must never blank the course).
+    m_editDepartment = dept; emit editDepartmentChanged();
     if (!m_editCourse.isEmpty()) { m_editCourse.clear(); emit editCourseChanged(); }
     m_editController->loadCourses(dept);           // re-scope the edit course list
 }
@@ -859,25 +864,39 @@ import LOAMS
 LDialog {
     id: root
     property var vm
+
+    // Guard against the programmatic prefill firing the vm setters.
+    // LComboBox.selectValue(v) EMITS `selected(v)` (LComboBox.qml:30-35), so
+    // pushing vm state into a combo on open would re-enter its onSelected and
+    // call the vm setter. For Department that is destructive: setEditDepartment
+    // CLEARS editCourse, which would blank the just-prefilled Course before
+    // courseCombo.selectValue(editCourse) runs. While `prefilling` is true, the
+    // onSelected/onTextChanged handlers skip the vm push — so the open-time
+    // sync only sets each control's displayed value, never mutates the vm.
+    property bool prefilling: false
     title: qsTr("Edit student")
 
     // LComboBox.onActivated imperatively assigns its own currentValue, which
     // severs any declarative `currentValue: vm.editX` binding after the first
     // pick. So push vm state INTO the combos via selectValue(...) on open, and
     // — critically — re-sync the Course combo whenever the vm clears/changes
-    // editCourse (a department change sets it to ""), or the dependent-clear
-    // would not visibly reset the combo.
+    // editCourse (a real department change sets it to ""), or the dependent-clear
+    // would not visibly reset the combo. This re-sync's own selectValue is
+    // prefilling-safe: a genuine clear happens with prefilling=false, and its
+    // re-entrant setEditCourse("") is an idempotent no-op in the vm.
     Connections {
         target: root.vm ? root.vm : null
         function onEditCourseChanged() { courseCombo.selectValue(root.vm.editCourse); }
     }
     onVisibleChanged: if (visible && root.vm) {
+        root.prefilling = true;
         nameField.text = root.vm.editName;
         yearField.text = root.vm.editYearLevel;
         deptCombo.selectValue(root.vm.editDepartment);
         courseCombo.selectValue(root.vm.editCourse);
         genderCombo.selectValue(root.vm.editGender);
         statusCombo.selectValue(root.vm.editStatus);
+        root.prefilling = false;
     }
 
     ColumnLayout {
@@ -900,9 +919,10 @@ LDialog {
             Layout.fillWidth: true
             label: qsTr("Name")
             // No `text:` binding — see the combo-severance note: bind-then-type
-            // would sever it. Set imperatively on open (above), push edits back
-            // to the vm here so Save-enable (vm.editName) stays reactive.
-            onTextChanged: if (root.vm) root.vm.setEditName(text)
+            // would sever it. Set imperatively on open (above, under prefilling),
+            // push edits back to the vm here so Save-enable (vm.editName) stays
+            // reactive. `!root.prefilling` skips the push during open-time sync.
+            onTextChanged: if (!root.prefilling && root.vm) root.vm.setEditName(text)
         }
 
         LComboBox {
@@ -910,7 +930,7 @@ LDialog {
             objectName: "editDeptCombo"
             Layout.fillWidth: true
             model: root.vm ? root.vm.departments : []
-            onSelected: function(value) { if (root.vm) root.vm.setEditDepartment(value); }
+            onSelected: function(value) { if (!root.prefilling && root.vm) root.vm.setEditDepartment(value); }
         }
 
         LComboBox {
@@ -918,7 +938,7 @@ LDialog {
             objectName: "editCourseCombo"
             Layout.fillWidth: true
             model: root.vm ? root.vm.editCourses : []
-            onSelected: function(value) { if (root.vm) root.vm.setEditCourse(value); }
+            onSelected: function(value) { if (!root.prefilling && root.vm) root.vm.setEditCourse(value); }
         }
 
         LTextField {
@@ -926,7 +946,7 @@ LDialog {
             objectName: "editYearField"
             Layout.fillWidth: true
             label: qsTr("Year Level")
-            onTextChanged: if (root.vm) root.vm.setEditYearLevel(text)
+            onTextChanged: if (!root.prefilling && root.vm) root.vm.setEditYearLevel(text)
         }
 
         LComboBox {
@@ -934,7 +954,7 @@ LDialog {
             objectName: "editGenderCombo"
             Layout.fillWidth: true
             model: ["Male", "Female"]
-            onSelected: function(value) { if (root.vm) root.vm.setEditGender(value); }
+            onSelected: function(value) { if (!root.prefilling && root.vm) root.vm.setEditGender(value); }
         }
 
         LComboBox {
@@ -942,7 +962,7 @@ LDialog {
             objectName: "editStatusCombo"
             Layout.fillWidth: true
             model: ["Active", "Inactive"]
-            onSelected: function(value) { if (root.vm) root.vm.setEditStatus(value); }
+            onSelected: function(value) { if (!root.prefilling && root.vm) root.vm.setEditStatus(value); }
         }
 
         RowLayout {
@@ -1032,6 +1052,12 @@ Add to the `DatabaseScreen` TestCase `init()` (~line 1675) a reset line:
                 stubVm.canEdit = false;
                 stubVm.beginEditSelectedCount = 0;
                 stubVm.lastBeginEditId = "";
+                // Per-test isolation hygiene for the edit state (the prefill
+                // guard means open no longer mutates it, but reset anyway so a
+                // future test that DOES drive a dept change can't leak into the
+                // next).
+                stubVm.editDepartment = "CCS";
+                stubVm.editCourse = "BSIT";
                 var ed = findChild(databaseScreen, "editDialog");
                 if (ed) ed.visible = false;
 ```
