@@ -123,8 +123,9 @@ Recorded as settled — do NOT relitigate.
   Delete**, enabled ONLY when exactly one row is selected
   (`canEdit == (selectedCount == 1)`), with tooltip *"Select exactly one student
   to edit"*.
-- PLUS **double-click a row / Enter on the focused row** opens that student's
-  edit dialog.
+- PLUS **double-click a row** opens that student's edit dialog. (Keyboard
+  row-activation / "Enter on the focused row" is deferred — LTable has no
+  keyboard-nav layer yet; keyboard users edit via the header Edit button. See §5.)
 - **No per-row pencil column** this slice (YAGNI — deferred).
 
 ### Editable fields / inputs
@@ -215,14 +216,24 @@ Q_PROPERTY(QString     editCourse     READ editCourse     WRITE setEditCourse   
 Q_PROPERTY(QStringList editCourses    READ editCourses    NOTIFY editCoursesChanged) // model for the course combo
 
 Q_INVOKABLE void beginEdit(const QString &schoolId);
+Q_INVOKABLE void beginEditSelected();
 Q_INVOKABLE void setEditDepartment(const QString &dept);
 Q_INVOKABLE void saveEdit();
 ```
 
 - **`canEdit`** = `selectedCount == 1`.
-- **`beginEdit(schoolId)`** — locate the record in the model, prefill **all**
-  `edit*` state from it, and load the courses for its department into
-  `editCourses` (via the second controller — decision B).
+- **`beginEdit(schoolId)`** — locate the record by iterating the model's
+  `allRecords()` for a matching `schoolId`, prefill **all** `edit*` state from it,
+  and load the courses for its department into `editCourses` (via the second
+  controller — decision B). **If no record matches, it is a no-op** — do not
+  change edit state and do not signal the dialog to open. (This should not occur:
+  `beginEdit` is only invoked for a visible/selected row.)
+- **`beginEditSelected()`** — the header-button entry point. `StudentsTableModel`'s
+  `selectedIds()` is plain C++ (NOT `Q_INVOKABLE`/`Q_PROPERTY`), so QML cannot pass
+  the selected id. The VM reads its OWN model's single selected id in C++
+  (`m_students.selectedIds().first()` when `selectedCount()==1`) and delegates to
+  `beginEdit(thatId)`. The header Edit button calls this; the double-click path
+  calls `beginEdit(schoolId)` with the row's id directly.
 - **`setEditDepartment(dept)`** — set `editDepartment`, **clear** `editCourse`,
   and **reload** `editCourses` for `dept` (second controller).
 - **setters** for `editName` / `editYearLevel` / `editGender` / `editStatus` /
@@ -262,17 +273,34 @@ Reuse `statusMessage` / `authFailure` from 4a.2b-i for the toast / auth surface.
 An `LDialog`-based modal form. `property var vm`. A titled form containing:
 
 - **School ID** — read-only `Text` (`textFormat: Text.PlainText`).
-- **Name** — `LTextField` bound to `vm.editName`.
-- **Department** — `LComboBox` (`model: vm.departments`,
-  `currentValue: vm.editDepartment`, `onSelected: vm.setEditDepartment(...)`).
-- **Course** — `LComboBox` (`model: vm.editCourses`,
-  `currentValue: vm.editCourse`, `onSelected: vm.setEditCourse(...)`).
+- **Name** — `LTextField` bound to `vm.editName` (two-way `text` alias).
+- **Department** — `LComboBox` (`model: vm.departments`, `onSelected:
+  vm.setEditDepartment(value)`).
+- **Course** — `LComboBox` (`model: vm.editCourses`, `onSelected:
+  vm.setEditCourse(value)`).
 - **Year Level** — `LTextField` bound to `vm.editYearLevel`.
-- **Gender** — `LComboBox` (`model: ["Male", "Female"]`).
-- **Status** — `LComboBox` (`model: ["Active", "Inactive"]`).
+- **Gender** — `LComboBox` (`model: ["Male", "Female"]`, `onSelected:
+  vm.setEditGender(value)`).
+- **Status** — `LComboBox` (`model: ["Active", "Inactive"]`, `onSelected:
+  vm.setEditStatus(value)`).
 - **Save** `LButton` — enabled iff `vm.editName` trimmed is non-empty →
   `vm.saveEdit()`.
 - **Cancel** `LButton` → `close()`.
+
+**Combo value sync (required — do NOT bind `currentValue:` to the vm).**
+`LComboBox.onActivated` imperatively assigns its own `currentValue`, which would
+sever a declarative `currentValue: vm.editX` binding after the first pick. So the
+dialog must push vm state INTO each combo via `LComboBox.selectValue(...)`:
+- On dialog open / prefill, call `selectValue(vm.editDepartment)`,
+  `selectValue(vm.editCourse)`, `selectValue(vm.editGender)`,
+  `selectValue(vm.editStatus)`.
+- **Critically**, re-sync the Course combo whenever the vm clears/changes it:
+  `Connections { target: vm; function onEditCourseChanged() {
+  courseCombo.selectValue(vm.editCourse) } }`. This is what makes the
+  dependent-clear (department change → `editCourse` becomes `""`) actually reset
+  the Course combo visually. (Gender/Status/Department share LComboBox's
+  binding-severance but have no dependent clear, so an open-time `selectValue` is
+  sufficient for them.)
 
 Zero raw hex; `Theme` tokens only. One component per file.
 
@@ -280,7 +308,9 @@ Zero raw hex; `Theme` tokens only. One component per file.
 
 - Add the **Edit** `LButton` to the count-header `RowLayout`, **LEFT of Delete**
   (`enabled: vm.canEdit`, with `tooltipText` and `accessibleName`). `onClicked`
-  calls `vm.beginEdit(<the single selected schoolId>)` then opens the dialog.
+  calls `vm.beginEditSelected()` (the VM resolves the single selected id in C++)
+  then opens the dialog. The Edit button is Tab-reachable, so it is the
+  keyboard-accessible path to editing (see the LTable note in §5).
 - Wire `LTable.onRowActivated(schoolId)` → `vm.beginEdit(schoolId)` + open the
   dialog.
 - Instantiate `StudentEditDialog { vm: screen.vm }`, driven visible. The existing
@@ -288,19 +318,25 @@ Zero raw hex; `Theme` tokens only. One component per file.
 
 ### 5. `qt-app/quick/qml/components/LTable.qml`
 
-- Add `signal rowActivated(string schoolId)`, emitted on **row double-click** and
-  on **Enter on the focused row**.
-- It MUST NOT fight the per-row checkbox: the checkbox cell swallows its own
-  clicks, so the double-click's first click must not toggle selection.
+- Add `signal rowActivated(string schoolId)`, emitted on **row double-click**
+  only. (LTable's `ListView` currently has no focus / `currentIndex` / highlight /
+  `Keys` handling and no focusable delegate, so keyboard "Enter on the focused
+  row" would require adding a whole keyboard-navigation layer — **out of scope for
+  this slice**. Keyboard users edit via the Tab-reachable header Edit button.
+  Keyboard row-activation is a deferred follow-up.)
+- The double-click MUST NOT fight the per-row checkbox: the checkbox's own
+  `MouseArea` covers only the ~18×18 checkbox box, so a row-body-level
+  `MouseArea`/`TapHandler` (below the checkbox in the delegate) that emits
+  `rowActivated(model.schoolId)` on double-click won't toggle selection.
 - **Backward-compatible** — no existing consumer is required to connect it.
 
 ---
 
 ## Data Flow (Edit)
 
-1. User **selects one** row and clicks **Edit**, OR **double-clicks** a row (or
-   presses **Enter** on the focused row).
-2. `vm.beginEdit(schoolId)` locates the record, **prefills** all `edit*` state,
+1. User **selects one** row and clicks **Edit** (→ `vm.beginEditSelected()`), OR
+   **double-clicks** a row (→ `vm.beginEdit(schoolId)`).
+2. `beginEdit`/`beginEditSelected` locates the record, **prefills** all `edit*` state,
    and **loads** `editCourses` for the record's department (second controller).
 3. The dialog opens **prefilled**.
 4. The user edits fields. Changing the **Department** combo →
@@ -357,8 +393,12 @@ filter (consistent with delete). Because `school_id` is unchanged:
   populates `editCourses`.
 - `setEditDepartment` updates the department, **clears** `editCourse`, and
   **reloads** `editCourses`.
-- `saveEdit` posts a **1-element `students` JSON array** carrying the EDITED
-  field values plus `admin_key` (assert the wire form).
+- `saveEdit` enters the guarded path — the VM test asserts it reads the
+  `AdminSession` key and posts (mirrors `deleteSelectedPostsIdsAndAdminKey`).
+  **The exact wire form** (1-element `students` JSON array + `admin_key`) is
+  asserted at the CONTROLLER level in `tst_studentcontroller` (which already
+  covers the `bulkUpdate` request body) — the VM hardwires a private QNAM with no
+  request-capture seam, same as delete.
 - `onBulkUpdateFinished(ok, updated >= 1)` ⇒ status `"Student updated"` +
   triggers reload + emits the close / `editDone` signal.
 - `updated == 0` ⇒ status `"No changes to save"`.
@@ -376,15 +416,19 @@ filter (consistent with delete). Because `school_id` is unchanged:
 
 ### QuickTest (stub VM)
 
-- Edit button enabled **only** at `M == 1` (disabled at 0 and ≥ 2).
+- Edit button enabled **only** at `M == 1` (disabled at 0 and ≥ 2), and clicking
+  it invokes `vm.beginEditSelected()`.
 - Double-clicking a table row emits `rowActivated` → the screen calls
   `vm.beginEdit(schoolId)`.
-- The dialog renders **prefilled** from the stub's `edit*` state.
-- Changing the Department combo calls `vm.setEditDepartment`.
+- The dialog renders **prefilled** from the stub's `edit*` state (combos show the
+  prefilled values via `selectValue`).
+- Changing the Department combo calls `vm.setEditDepartment`; a subsequent
+  `editCourse`-cleared state resets the Course combo (the `selectValue` re-sync).
 - **Save** invokes `vm.saveEdit` and is **disabled** when `editName` is empty.
 - **Cancel** closes the dialog.
 - The stub VM exposes: `canEdit`, the `edit*` state, `editCourses`, `beginEdit`,
-  `setEditDepartment`, the `setEdit*` setters, `saveEdit`, and `statusMessage`.
+  `beginEditSelected`, `setEditDepartment`, the `setEdit*` setters, `saveEdit`,
+  and `statusMessage`.
 
 ---
 
@@ -393,6 +437,9 @@ filter (consistent with delete). Because `school_id` is unchanged:
 Stated explicitly:
 
 - Per-row pencil column.
+- Keyboard row-activation (Enter on a focused row) — needs a `ListView`
+  keyboard-nav layer LTable doesn't have; keyboard editing is via the header Edit
+  button this slice.
 - Bulk / multi-row edit (that is 4a.2b-iii).
 - Editing `school_id` / `code` / `visits` / `photo` (photo is 4a.2b-iv).
 - Duplicate checking; register; department ops.
