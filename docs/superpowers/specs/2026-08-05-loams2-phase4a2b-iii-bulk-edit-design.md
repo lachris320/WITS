@@ -120,8 +120,10 @@ The existing header **Edit** button (`DatabaseScreen.qml`) becomes adaptive:
   single-edit path, `StudentEditDialog`, name editable); else →
   `vm.beginBulkEditSelected()` (new bulk path, `BulkEditDialog`).
 - **Double-click a row** → `vm.beginEdit(schoolId)` (single-edit) — **unchanged.**
-- Tooltip/accessible name reflect the two modes ("Edit the selected student" vs
-  "Bulk-edit the N selected students").
+- `tooltipText` / `accessibleName` become **bindings on `selectedCount`** (the
+  current button hard-codes "Select exactly one student to edit" / "Edit the
+  selected student" at `DatabaseScreen.qml:107–108`): "Edit the selected student"
+  at 1 vs "Bulk-edit the %1 selected students" at ≥2.
 
 The two dialogs are **mutually exclusive** — never open at once. This is what
 lets bulk edit safely **reuse `m_editController`** for its dependent course
@@ -131,33 +133,79 @@ list (no third `QNetworkAccessManager`).
 
 A new `qt-app/quick/qml/admin/BulkEditDialog.qml`, an `LDialog`-based modal
 taking `property var vm`. Each editable field is a **tri-state row**: a
-"Change this" toggle (an `LSwitch`/checkbox-style control; if none exists,
-a checkbox composed from existing primitives — no raw hex, Theme tokens only)
-plus a value control that is **disabled until the toggle is on**. Only toggled
-fields are applied.
+"Change this" toggle plus a value control that is **disabled until the toggle
+is on**. Only toggled fields are applied.
+
+**New primitive — `LCheckbox`.** `qt-app/quick/qml/components/` has **no**
+switch/checkbox primitive today (only `LSegmented`, `LComboBox`, `LTextField`,
+…). This slice adds a minimal **`LCheckbox.qml`** (a checked/label control,
+Theme-token-only, `checked` property + `toggled(bool)` signal, accessible name)
+used for the five field toggles. It is a named build task (not "compose if
+none exists"), gets its own `tst_qml_components` case, and is reusable by the
+4a.2b-iv register form.
 
 | Field | Toggle | Value control | Notes |
 |-------|--------|---------------|-------|
-| Department | `changeDepartment` | `LComboBox(vm.departments)` | picking a dept re-scopes the course list |
-| Course | `changeCourse` | `LComboBox(vm.bulkCourses)` | **enabled only while `changeDepartment` is on and a dept is picked** |
+| Department | `changeDepartment` | `LComboBox(vm.departments)` | picking a dept re-scopes the course list; **toggling this on forces Course on** |
+| Course | `changeCourse` | `LComboBox(vm.bulkCourses)` | **coupled to Department — on iff Department is on** (see below) |
 | Year Level | `changeYearLevel` | `LTextField` | free text (mixed section/number semantics, per existing filter behavior) |
 | Gender | `changeGender` | `LComboBox(["Male","Female"])` | |
 | Status | `changeStatus` | `LComboBox(["Active","Inactive"])` | |
 
 **Never** Name (unique per student) or School ID (immutable) — neither appears.
 
-**Course-requires-Department** is enforced in **two layers** (mirroring the
-single-edit prefill guard's belt-and-suspenders):
+**Department ↔ Course are coupled — they move together.** This is the fix for a
+data-integrity hole: because `bulk_update_students.php` SETs **all six columns
+unconditionally** (`bulk_update_students.php:38–40`), changing *only* Department
+would resend each student's **old** course (which belonged to the old
+department), leaving N students in a new dept carrying a stale course. Single-edit
+already prevents this by clearing the course on any real dept change
+(`DatabaseViewModel.cpp:187–189`); bulk edit matches that invariant by coupling
+the two:
 
-- **QML:** the Course toggle is `enabled: vm.changeDepartment && vm.bulkDepartment.length > 0`.
-- **VM:** `setChangeDepartment(false)` also forces `changeCourse` off and clears
-  `bulkCourse`; `setChangeCourse(true)` is a guarded no-op unless
-  `changeDepartment && !bulkDepartment.isEmpty()`. Setting `bulkDepartment`
-  clears `bulkCourse` and reloads the course list (dependent-clear, exactly as
-  the single-edit `setEditDepartment` does).
+- **Course cannot change without Department** (the operator can't pick a course
+  in isolation across a possibly mixed-department selection), **and**
+- **Department cannot change without also setting a Course** (no silent
+  mismatch). Both are part of the same change or neither is.
+
+Enforced in **two layers** (belt-and-suspenders, mirroring the single-edit
+prefill guard):
+
+- **QML:** the Course toggle is **driven by**, not independent of, Department —
+  it is `checked: vm.changeDepartment` and disabled from independent toggling;
+  the Course *value combo* is `enabled: vm.changeDepartment && vm.bulkDepartment.length > 0`.
+- **VM:** `setChangeDepartment(true)` also sets `changeCourse = true`;
+  `setChangeDepartment(false)` forces `changeCourse = false` and clears
+  `bulkCourse`. `setChangeCourse(...)` independent of Department is a guarded
+  no-op. Setting `bulkDepartment` clears `bulkCourse` and reloads the course
+  list (dependent-clear, exactly as single-edit `setEditDepartment` does,
+  `DatabaseViewModel.cpp:180–190`).
+- **`canApplyBulk`** therefore requires: when Department is toggled, a non-empty
+  `bulkDepartment` **and** a non-empty `bulkCourse` (from the new dept's list).
+
+> **Owner sign-off point:** this makes "move a cohort to a new department" always
+> require also choosing their course in that department — you cannot bulk-change
+> department alone. That is the intended integrity behavior (the owner chose the
+> mismatch-preventing option during brainstorming); flagged here for visibility.
+
+**Combo prefill / severance guards (same traps as single-edit).**
+`LComboBox.selectValue()` sets `currentValue` **and emits `selected()`**
+(`LComboBox.qml:30–35`), and `onActivated` imperatively severs any declarative
+`currentValue:` binding (`LComboBox.qml:45–48`). `BulkEditDialog` therefore
+replicates `StudentEditDialog`'s machinery (`StudentEditDialog.qml:21–45`):
+
+- a **`prefilling`** flag so the on-open reset's `selectValue()` calls don't
+  re-enter the `setBulk*`/`setChange*` setters;
+- an **`onVisibleChanged`** handler that, on open, pushes the VM's freshly-reset
+  state into every combo (`selectValue("")` / default) so a reopened dialog never
+  shows stale prior selections;
+- a **`Connections { onBulkCourseChanged: courseCombo.selectValue(vm.bulkCourse) }`**
+  re-sync so the VM's dependent-clear of `bulkCourse` (on a dept change) is
+  visibly reflected in the course combo — otherwise the clear is invisible.
 
 **Apply** is disabled until `vm.canApplyBulk` — at least one field toggled **and**
-every toggled field has a valid (non-empty) value.
+every toggled field has a valid (non-empty) value (with the Department⇒Course
+rule above).
 
 The dialog has **Cancel** (closes) and **Apply** (opens the change preview —
 below). The dialog **stays open** through the preview and the network round-trip;
@@ -191,29 +239,54 @@ Unlisted fields are left unchanged.
   `confirmationWord: "UPDATE"` (distinct from delete's `"DELETE"`).
 - `onConfirmed` → `bulkEditConfirm.visible = false; vm.applyBulkEdit();`
   (BulkEditDialog stays open behind it until `bulkEditFinished`).
+- **Stacking:** both `BulkEditDialog` and `LConfirmDialog` are full-screen
+  `LDialog` scrims that stack by declaration order — declare `bulkEditConfirm`
+  **after** `BulkEditDialog` in `DatabaseScreen.qml` so the confirm renders on
+  top of the still-open bulk dialog.
 
 ### Apply mechanics
 
-`DatabaseViewModel::applyBulkEdit()`:
+Record-building is a **pure function** of (selected records × toggle state ×
+values) and MUST be a **free `static`** (or public) — **not a private member**.
+`DatabaseViewModel` news up its own `m_nam`/`m_controller` in the ctor
+(`DatabaseViewModel.cpp:13–14, 23–24`) with **no injection seam**, and existing
+unit tests drive the VM purely through its public `onXxx` slots
+(`tst_databaseviewmodel.cpp:44–48`); a test cannot observe records posted through
+the internal NAM. A directly-callable static is the only way to unit-test the
+override/carry-through rules.
 
-1. `const QList<StudentRecord> sel = m_students.selectedRecords();` — guard empty.
-2. For each record, **copy it**, then override **only toggled fields**:
-   `changeDepartment → rec.department`; `changeCourse → rec.course`;
-   `changeYearLevel → rec.yearLevel`; `changeGender → rec.gender`;
-   `changeStatus → rec.status`. `name`, `schoolId`, `code`, `visits` are carried
-   through untouched.
-3. `m_controller->bulkUpdateStudents(updates, AdminSession::instance().key());`
+```cpp
+// A small POD of the operator's choices (toggle + value per field).
+struct BulkEditChanges {
+    bool changeDepartment=false; QString department;
+    bool changeCourse=false;     QString course;
+    bool changeYearLevel=false;  QString yearLevel;
+    bool changeGender=false;     QString gender;
+    bool changeStatus=false;     QString status;
+};
+// Pure: copies each record, overrides ONLY toggled fields; name/schoolId/code/
+// visits carried through untouched.
+static QList<StudentRecord> buildBulkUpdates(const QList<StudentRecord> &selected,
+                                             const BulkEditChanges &changes);
+```
+
+`DatabaseViewModel::applyBulkEdit()` then:
+
+1. Guard: no-op if `m_bulkInFlight`, or `selectedRecords()` empty, or
+   `!canApplyBulk()`.
+2. `const auto updates = buildBulkUpdates(m_students.selectedRecords(), currentChanges());`
+3. `m_bulkInFlight = true;` (re-entry guard — the dialog stays open behind the
+   confirm, so a second Apply click could otherwise fire a duplicate batch;
+   cleared in the bulk-update result handlers). Apply is also disabled in QML
+   while a batch is in flight.
+4. `m_controller->bulkUpdateStudents(updates, AdminSession::instance().key());`
    (the **primary** controller — same path single-edit uses.)
-
-Because record-building is a pure function of (selected records × toggle state ×
-values), it is extracted to a **testable helper** — e.g. a private
-`QList<StudentRecord> buildBulkUpdates() const` (or a free static taking the
-records + a small "changes" struct) so a unit test can assert the override /
-carry-through rules without the network.
 
 ### Result handling — generalized for single + bulk
 
 `onBulkUpdateFinished` serves both paths. Its message becomes **count-based**:
+
+Every branch first **clears `m_bulkInFlight = false`** (re-entry guard release):
 
 - `ok && updatedCount >= 1` → `tr("Updated %n student(s)", "", updatedCount)`
   (or explicit `updatedCount == 1 ? tr("Updated 1 student") : tr("Updated %1 students")`),
@@ -250,6 +323,16 @@ Because the dialogs are mutually exclusive, we route by target: a private
 the result to `m_editCourses` (single) or `m_bulkCourses` (bulk) accordingly.
 No third `QNetworkAccessManager`.
 
+**Known narrow race (acknowledged, not fixed here).** `m_courseTarget` is a
+single shared var and `m_editController->loadCourses` replies carry no request-id
+(unlike `searchStudents`). If a single-edit dialog is closed and a bulk dialog
+opened before a late `coursesLoaded` from the prior session arrives, that reply
+could land in `bulkCourses` under the flipped target. This is pre-existing in
+spirit (single-edit already races on rapid dept changes), extremely unlikely
+under the manual open-dialog → change-dept cadence, and harmless (a wrong course
+list is visibly re-scoped on the next dept pick). Left as-is; a request-id guard
+on `loadCourses` is a future hardening, not this slice.
+
 ---
 
 ## VM Surface Changes (`DatabaseViewModel`)
@@ -262,7 +345,9 @@ No third `QNetworkAccessManager`.
   / `bulkStatus` — the five values.
 - `QStringList bulkCourses` (READ) — dependent course list for the bulk dialog.
 - `bool canApplyBulk` (READ) — Apply-enable predicate.
-- `QStringList bulkChangeSummary` (READ) — preview lines.
+- `QStringList bulkChangeSummary` (READ) — preview lines (`canApplyBulk` also
+  encodes the Department⇒Course rule: if `changeDepartment`, both
+  `bulkDepartment` and `bulkCourse` must be non-empty).
 
 **New Q_INVOKABLEs:**
 
@@ -270,9 +355,17 @@ No third `QNetworkAccessManager`.
   to a clean state; `m_editMode = BulkEdit`; emit `bulkEditReady()`.
 - setters: `setChangeDepartment/Course/YearLevel/Gender/Status(bool)`,
   `setBulkDepartment/Course/YearLevel/Gender/Status(QString)` (with the
-  dept→course dependency logic above).
+  Department⇔Course coupling above).
 - `applyBulkEdit()`.
 - Reuse existing `requiresTypedConfirmation(int)`.
+
+**New free static** (in `DatabaseViewModel`, testable without a VM instance):
+`buildBulkUpdates(const QList<StudentRecord>&, const BulkEditChanges&)`.
+
+**New private members:** `BulkEditChanges`-worth of toggle/value state;
+`bool m_bulkInFlight` (re-entry guard); `enum { NoEdit, SingleEdit, BulkEdit }
+m_editMode`; `enum { SingleEdit, BulkEdit } m_courseTarget`; the last-emitted
+`canEdit` bool (over-emit fix).
 
 **New signals:** `bulkEditReady()`, `bulkEditFinished()`, plus `*Changed()` for
 each new property.
@@ -338,17 +431,24 @@ server rejection is `applyServerRejection` (folded-in helper).
 
 **Unit — `tst_databaseviewmodel` (network-free, driven via the public slots):**
 
-- **Record building:** given a selection and a toggle/value set, `applyBulkEdit`
-  produces records that override **only** toggled fields and **carry through**
-  each student's own name / schoolId / code / visits.
+- **Record building (the static):** call `buildBulkUpdates(selection, changes)`
+  **directly** — it produces records that override **only** toggled fields and
+  **carry through** each student's own name / schoolId / code / visits. (Must be
+  a free static; the VM has no NAM injection seam, so records posted through the
+  internal controller are not observable — see Apply mechanics.)
 - **`canApplyBulk`:** false with no toggle; false when a toggled field is empty;
+  false when `changeDepartment` is on but `bulkCourse` is empty (the coupling);
   true when ≥1 toggle has a valid value.
 - **`bulkChangeSummary`:** correct lines, field order, only-toggled, for a
   representative toggle set.
-- **Course-requires-Department:** toggling Department off forces Course off +
-  clears `bulkCourse`; `setChangeCourse(true)` is a no-op without a department;
-  setting `bulkDepartment` clears `bulkCourse` and requests the course reload
-  (assert via a capturing NAM or the `bulkCourses`/course-target routing).
+- **Department⇔Course coupling:** `setChangeDepartment(true)` sets `changeCourse`
+  true; `setChangeDepartment(false)` forces Course off + clears `bulkCourse`;
+  `setChangeCourse(true)` without a department is a no-op; setting
+  `bulkDepartment` clears `bulkCourse`. Assert the course-reload landed via the
+  `bulkCourses`/course-target seam below (**no** capturing NAM — the VM's NAM is
+  not injectable).
+- **`m_bulkInFlight` re-entry guard:** a second `applyBulkEdit()` before a result
+  arrives is a no-op; the guard clears on the next result.
 - **Course-target routing:** an `onEditCoursesLoaded` while `m_courseTarget ==
   BulkEdit` populates `bulkCourses`, not `editCourses`, and vice-versa.
 - **Count-based result messages:** `onBulkUpdateFinished` with `updatedCount`
@@ -361,9 +461,12 @@ server rejection is `applyServerRejection` (folded-in helper).
 
 **QuickTest — `tst_qml_admin` (OFFSCREEN, plain-QML stub VM):**
 
+- `LCheckbox`: a `tst_qml_components` case — `checked` reflects state, clicking
+  emits `toggled(bool)`, Theme-token styling.
 - BulkEditDialog: a field's value control is disabled until its toggle is on;
-  the Course toggle is disabled until Department's toggle is on with a dept
-  chosen.
+  the Course toggle follows Department (checking Department checks Course; the
+  Course value combo is enabled only with a department chosen; unchecking
+  Department unchecks Course).
 - Apply is disabled until `canApplyBulk`; Apply emits `applyRequested`.
 - The change-preview `LConfirmDialog` shows the summary lines + count; typed
   confirmation appears for a stubbed `requiresTypedConfirmation === true`.
@@ -403,3 +506,20 @@ None. All forks resolved during brainstorming (2026-08-05): change-preview over
 duplicate-preview; adaptive single Edit button; Course-requires-Department;
 summary + typed-confirm for ≥10; fold in `applyServerRejection` + `canEdit`
 logic, defer the other two follow-ups.
+
+**Design-spec review round 1 (fresh Opus subagent, 2026-08-05) — resolved:**
+
+- **Critical:** Department-without-Course would persist a stale dept/course pair
+  (backend SETs all columns) → fixed by **coupling Department⇔Course** (they
+  toggle together; `canApplyBulk` requires a course when dept changes). Owner
+  sign-off point flagged in-line.
+- **Important:** builder must be a **free static** (VM has no NAM injection seam)
+  → spec now mandates `buildBulkUpdates(...)` static + direct unit test.
+- **Important:** no toggle primitive exists → spec now names an **`LCheckbox`**
+  build task with its own test.
+- **Important:** BulkEditDialog needs the same **prefill/severance guards** as
+  single-edit → spec now specifies the `prefilling` flag, `onVisibleChanged`
+  reset, and `onBulkCourseChanged` re-sync.
+- **Minor (folded in):** `m_bulkInFlight` re-entry guard; confirm dialog declared
+  after the bulk dialog (stacking); acknowledged the narrow `coursesLoaded`
+  cross-dialog race; adaptive-button tooltip/accessibleName become bindings.
