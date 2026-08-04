@@ -19,6 +19,19 @@ DatabaseViewModel::DatabaseViewModel(QObject *parent)
     connect(m_controller, &StudentController::coursesLoaded, this, &DatabaseViewModel::onCoursesLoaded);
     connect(m_controller, &StudentController::deleteFinished, this, &DatabaseViewModel::onDeleteFinished);
     connect(m_controller, &StudentController::deleteFailed, this, &DatabaseViewModel::onDeleteFailed);
+
+    m_editNam = new QNetworkAccessManager(this);
+    m_editController = new StudentController(m_editNam, this);
+    connect(m_editController, &StudentController::coursesLoaded,
+            this, &DatabaseViewModel::onEditCoursesLoaded);
+    // canEdit tracks selection size — re-emit whenever the model's selection changes.
+    connect(&m_students, &StudentsTableModel::selectionChanged,
+            this, &DatabaseViewModel::canEditChanged);
+
+    connect(m_controller, &StudentController::bulkUpdateFinished,
+            this, &DatabaseViewModel::onBulkUpdateFinished);
+    connect(m_controller, &StudentController::bulkUpdateFailed,
+            this, &DatabaseViewModel::onBulkUpdateFailed);
 }
 
 void DatabaseViewModel::refresh()
@@ -130,6 +143,118 @@ void DatabaseViewModel::onDeleteFailed(const QString & /*errorString*/)
     m_deleteInFlight = false;
     setAuthFailure(false);
     setStatusMessage(tr("Delete failed — check your connection."));
+}
+
+void DatabaseViewModel::beginEdit(const QString &schoolId)
+{
+    const QList<StudentRecord> recs = m_students.allRecords();
+    int idx = -1;
+    for (int i = 0; i < recs.size(); ++i) {
+        if (recs.at(i).schoolId == schoolId) { idx = i; break; }
+    }
+    if (idx < 0)
+        return;   // not found — no-op; do not touch edit state or open the dialog
+
+    const StudentRecord &r = recs.at(idx);
+    m_editSchoolId = r.schoolId;   emit editSchoolIdChanged();
+    m_editCode     = r.code;       // carried unchanged into saveEdit (not editable)
+    m_editVisits   = r.visits;     // carried unchanged into saveEdit (not editable)
+    m_editName     = r.name;       emit editNameChanged();
+    m_editYearLevel= r.yearLevel;  emit editYearLevelChanged();
+    m_editGender   = r.gender;     emit editGenderChanged();
+    m_editStatus   = r.status;     emit editStatusChanged();
+    m_editDepartment = r.department; emit editDepartmentChanged();
+    m_editCourse   = r.course;     emit editCourseChanged();
+
+    m_editController->loadCourses(r.department);   // independent of the filter's course list
+    emit editReady();
+}
+
+void DatabaseViewModel::beginEditSelected()
+{
+    if (m_students.selectedCount() != 1)
+        return;                                    // header button only enabled at 1
+    beginEdit(m_students.selectedIds().first());
+}
+
+void DatabaseViewModel::setEditDepartment(const QString &dept)
+{
+    if (m_editDepartment == dept)
+        return;   // no actual change — do NOT clear the course or reload (mirrors
+                  // the filter's setDepartment at DatabaseViewModel.cpp:38-51, and
+                  // is the second line of defense behind the dialog's prefill guard:
+                  // re-selecting the same department must never blank the course).
+    m_editDepartment = dept; emit editDepartmentChanged();
+    if (!m_editCourse.isEmpty()) { m_editCourse.clear(); emit editCourseChanged(); }
+    m_editController->loadCourses(dept);           // re-scope the edit course list
+}
+
+void DatabaseViewModel::onEditCoursesLoaded(const QStringList &courses)
+{
+    m_editCourses = courses; emit editCoursesChanged();
+}
+
+void DatabaseViewModel::setEditName(const QString &v)
+{ if (m_editName != v) { m_editName = v; emit editNameChanged(); } }
+
+void DatabaseViewModel::setEditYearLevel(const QString &v)
+{ if (m_editYearLevel != v) { m_editYearLevel = v; emit editYearLevelChanged(); } }
+
+void DatabaseViewModel::setEditGender(const QString &v)
+{ if (m_editGender != v) { m_editGender = v; emit editGenderChanged(); } }
+
+void DatabaseViewModel::setEditStatus(const QString &v)
+{ if (m_editStatus != v) { m_editStatus = v; emit editStatusChanged(); } }
+
+void DatabaseViewModel::setEditCourse(const QString &v)
+{ if (m_editCourse != v) { m_editCourse = v; emit editCourseChanged(); } }
+
+void DatabaseViewModel::saveEdit()
+{
+    StudentRecord rec;
+    rec.schoolId   = m_editSchoolId;   // immutable identity (WHERE key)
+    rec.code       = m_editCode;       // carried unchanged
+    rec.visits     = m_editVisits;     // carried unchanged
+    rec.name       = m_editName;
+    rec.department = m_editDepartment;
+    rec.course     = m_editCourse;
+    rec.yearLevel  = m_editYearLevel;
+    rec.gender     = m_editGender;
+    rec.status     = m_editStatus;
+    // Primary controller (search/delete/bulkUpdate) — NOT the edit course loader.
+    m_controller->bulkUpdateStudents({rec}, AdminSession::instance().key());
+}
+
+void DatabaseViewModel::onBulkUpdateFinished(const BulkUpdateResult &result)
+{
+    if (result.ok && result.updatedCount >= 1) {
+        setAuthFailure(false);
+        setStatusMessage(tr("Student updated"));
+        reloadTable();                 // re-fetch the current dept/course filter
+        emit editFinished();
+        return;
+    }
+    if (result.ok) {                   // updatedCount == 0: no-op edit is a success
+        setAuthFailure(false);
+        setStatusMessage(tr("No changes to save"));
+        emit editFinished();
+        return;
+    }
+    // Server rejection. Distinguish a 401 held-key failure from a generic error
+    // via the SAME predicate delete uses (§Error Taxonomy). Keep the dialog open.
+    if (SettingsViewModel::isAuthFailureMessage(result.message)) {
+        setAuthFailure(true);
+        setStatusMessage(tr("Admin authentication failed — re-enter via admin login."));
+    } else {
+        setAuthFailure(false);
+        setStatusMessage(result.message.isEmpty() ? tr("Update failed.") : result.message);
+    }
+}
+
+void DatabaseViewModel::onBulkUpdateFailed(const QString & /*errorString*/)
+{
+    setAuthFailure(false);
+    setStatusMessage(tr("Update failed — check your connection."));
 }
 
 bool DatabaseViewModel::exportCsv(const QUrl &fileUrl)

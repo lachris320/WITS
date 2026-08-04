@@ -22,6 +22,10 @@ Rectangle {
     // this true (VisitLogsScreen) opts into the populate/add row fade-in.
     property bool animateRows: false
 
+    // Double-click a row body to activate/edit it (4a.2b-ii). Backward-compatible:
+    // no existing consumer is required to connect it. Emitted only on double-click.
+    signal rowActivated(string schoolId)
+
     // Introspection for tests + the empty state.
     readonly property int rowCount: list.count
     readonly property bool emptyVisible: list.count === 0
@@ -203,6 +207,31 @@ Rectangle {
                 // HoverHandler.hovered is not a QQuickItem and is invisible to
                 // findChild() — expose it as a plain property for tests.
                 readonly property bool isHovered: hover.hovered
+
+                // Row-body double-click → rowActivated. A MouseArea (not a
+                // TapHandler) is deliberate: TapHandler's onDoubleTapped
+                // relies on chaining two separate tap gestures via wall-clock
+                // timestamps, and QtQuickTest's synthetic mouse-event helpers
+                // (mouseDoubleClick/mouseDoubleClickSequence/two mouseClicks)
+                // space their internal event timestamps too far apart for
+                // TapHandler's ~400ms double-tap window — a real,
+                // still-unresolved Qt bug (QTBUG-102441) confirmed empirically
+                // here: TapHandler.tapCount never advanced past 1 across any
+                // QTest double-click helper. MouseArea.onDoubleClicked instead
+                // reacts to the native QEvent::MouseButtonDblClick that those
+                // same helpers DO send, so it fires reliably under test. The
+                // per-row checkbox MouseArea (below, inside the RowLayout) is
+                // declared later and stacks on top within its own ~18x18
+                // bounds, so a double-click on the checkbox toggles selection
+                // and never reaches this row-level MouseArea; a double-click
+                // anywhere else on the row activates it.
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton
+                    onDoubleClicked: table.rowActivated(
+                        rowDelegate.model.schoolId !== undefined
+                            ? rowDelegate.model.schoolId : "")
+                }
 
                 RowLayout {
                     anchors.fill: parent

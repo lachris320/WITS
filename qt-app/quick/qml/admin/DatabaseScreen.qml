@@ -98,6 +98,17 @@ Rectangle {
                 onClicked: exportDialog.open()
             }
 
+            LButton {
+                objectName: "editButton"
+                variant: "Primary"
+                compact: true
+                text: qsTr("Edit")
+                enabled: screen.vm ? screen.vm.canEdit : false
+                tooltipText: qsTr("Select exactly one student to edit")
+                accessibleName: qsTr("Edit the selected student")
+                onClicked: if (screen.vm) screen.vm.beginEditSelected()
+            }
+
             TextMetrics {
                 id: deleteMetrics
                 font.family: Theme.typography.sans
@@ -137,6 +148,7 @@ Rectangle {
                 { key: "status",     title: qsTr("Status"),     weight: 1 },
                 { key: "visits",     title: qsTr("Visits"),     weight: 1 }
             ]
+            onRowActivated: function(schoolId) { if (screen.vm) screen.vm.beginEdit(schoolId); }
         }
     }
 
@@ -183,5 +195,19 @@ Rectangle {
             if (screen.vm.statusMessage !== "")
                 databaseToast.message = screen.vm.statusMessage;
         }
+    }
+
+    StudentEditDialog {
+        id: editDialog
+        objectName: "editDialog"
+        vm: screen.vm
+    }
+
+    // beginEdit/beginEditSelected emit editReady only when a record was located;
+    // editFinished fires on save success or a no-op. Drive the modal from both.
+    Connections {
+        target: screen.vm ? screen.vm : null
+        function onEditReady() { editDialog.visible = true; }
+        function onEditFinished() { editDialog.visible = false; }
     }
 }

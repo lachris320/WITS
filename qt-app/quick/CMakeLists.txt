@@ -46,6 +46,7 @@ qt_add_qml_module(witsquickmodule
         qml/admin/SearchScreen.qml
         qml/admin/VisitLogsScreen.qml
         qml/admin/DatabaseScreen.qml
+        qml/admin/StudentEditDialog.qml
         qml/admin/ReportingScreen.qml
         qml/admin/SettingsScreen.qml
         qml/components/LButton.qml

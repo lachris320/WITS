@@ -10,10 +10,11 @@ Item {
     // window tracks this root item's size.
     //
     // Geometry ledger (x 0 column):   dash 0..760 | search 760..1460 |
-    //   logs 1460..2160 | settings 2160..3760 | database 3800..4500.
+    //   logs 1460..2160 | settings 2160..3760 | database 3800..4500
+    //   | editDialog 4500..5200.
     // Parked no-vm column (x 2000): vmlessSearch 0..700 |
     //   vmlessLogs 760..1460 | vmlessSettings 1560..2260.
-    width: 1100; height: 4500
+    width: 1100; height: 5200
 
     // --- Dashboard stub VM ---
     // maxValue is declared on the stubs because the screen binds
@@ -1657,12 +1658,34 @@ Item {
             property int deleteCount: 0
             property url lastExportUrl: ""
             property bool exportResult: true
+            property bool canEdit: false
+            property string editSchoolId: "2023-001"
+            property string editName: "Ann"
+            property string editYearLevel: "2"
+            property string editGender: "Female"
+            property string editStatus: "Active"
+            property string editDepartment: "CCS"
+            property string editCourse: "BSIT"
+            property var editCourses: ["BSIT", "BSCS"]
+            property int beginEditSelectedCount: 0
+            property string lastBeginEditId: ""
+            signal editReady()
+            signal editFinished()
             function refresh() {}
             function setDepartment(d) { department = d; }
             function setCourse(c) { course = c; }
             function requiresTypedConfirmation(n) { return n >= 10; }
             function deleteSelected() { deleteCount++; }
             function exportCsv(u) { lastExportUrl = u; return exportResult; }
+            function beginEditSelected() { beginEditSelectedCount++; editReady(); }
+            function beginEdit(id) { lastBeginEditId = id; editReady(); }
+            function setEditDepartment(d) { editDepartment = d; editCourse = ""; }
+            function setEditName(v) { editName = v; }
+            function setEditYearLevel(v) { editYearLevel = v; }
+            function setEditGender(v) { editGender = v; }
+            function setEditStatus(v) { editStatus = v; }
+            function setEditCourse(v) { editCourse = v; }
+            function saveEdit() {}
         }
 
         DatabaseScreen { id: databaseScreen; anchors.fill: parent; vm: stubVm }
@@ -1679,6 +1702,17 @@ Item {
                 stubVm.lastExportUrl = "";
                 stubVm.exportResult = true;
                 stubVm.statusMessage = "";
+                stubVm.canEdit = false;
+                stubVm.beginEditSelectedCount = 0;
+                stubVm.lastBeginEditId = "";
+                // Per-test isolation hygiene for the edit state (the prefill
+                // guard means open no longer mutates it, but reset anyway so a
+                // future test that DOES drive a dept change can't leak into the
+                // next).
+                stubVm.editDepartment = "CCS";
+                stubVm.editCourse = "BSIT";
+                var ed = findChild(databaseScreen, "editDialog");
+                if (ed) ed.visible = false;
                 var dlg = findChild(databaseScreen, "deleteConfirm");
                 if (dlg) { dlg.visible = false; dlg.clearKey(); }
             }
@@ -1756,6 +1790,121 @@ Item {
                 toast.message = "";   // simulate the LToast auto-dismiss timer firing
                 stubVm.statusMessage = "Second status";
                 compare(toast.message, "Second status");
+            }
+            function test_editButtonEnabledOnlyWhenCanEdit() {
+                var btn = findChild(databaseScreen, "editButton");
+                verify(btn !== null);
+                compare(btn.enabled, false);          // canEdit false
+                stubVm.canEdit = true;
+                compare(btn.enabled, true);
+            }
+            function test_editButtonInvokesBeginEditSelected() {
+                stubVm.canEdit = true;
+                waitForRendering(databaseScreen);
+                mouseClick(findChild(databaseScreen, "editButton"));
+                compare(stubVm.beginEditSelectedCount, 1);
+            }
+            function test_rowActivatedInvokesBeginEdit() {
+                // Drive the screen's LTable→vm wiring directly (the stub model is
+                // not a real row model). Task 4 proves the double-click emits it.
+                findChild(databaseScreen, "studentsTable").rowActivated("2023-XYZ");
+                compare(stubVm.lastBeginEditId, "2023-XYZ");
+            }
+            function test_editReadyOpensDialogAndFinishedCloses() {
+                var ed = findChild(databaseScreen, "editDialog");
+                verify(ed !== null);
+                compare(ed.visible, false);
+                stubVm.editReady();
+                compare(ed.visible, true);
+                stubVm.editFinished();
+                compare(ed.visible, false);
+            }
+        }
+    }
+
+    // --- StudentEditDialog fixture (own band below Database, y 4500..5200) ---
+    // Minimal edit-only stub so the dialog can be exercised without the screen.
+    Item {
+        id: editDialogBand
+        y: 4500
+        width: 900; height: 700
+
+        QtObject {
+            id: editStub
+            property var departments: ["CCS", "CBA"]
+            property var editCourses: ["BSIT", "BSCS"]
+            property string editSchoolId: "2023-001"
+            property string editName: "Juan Cruz"
+            property string editYearLevel: "2"
+            property string editGender: "Male"
+            property string editStatus: "Active"
+            property string editDepartment: "CCS"
+            property string editCourse: "BSIT"
+            property int setDeptCount: 0
+            property string lastDept: ""
+            property int saveCount: 0
+            function setEditDepartment(d) { setDeptCount++; lastDept = d; editDepartment = d; editCourse = ""; }
+            function setEditName(v) { editName = v; }
+            function setEditYearLevel(v) { editYearLevel = v; }
+            function setEditGender(v) { editGender = v; }
+            function setEditStatus(v) { editStatus = v; }
+            function setEditCourse(v) { editCourse = v; }
+            function saveEdit() { saveCount++; }
+        }
+
+        StudentEditDialog { id: editDialog; anchors.fill: parent; vm: editStub }
+
+        TestCase {
+            name: "StudentEditDialog"; when: windowShown
+            function init() {
+                editStub.editName = "Juan Cruz";
+                editStub.editCourse = "BSIT";
+                editStub.editDepartment = "CCS";
+                editStub.setDeptCount = 0;
+                editStub.saveCount = 0;
+                editDialog.visible = false;
+            }
+            function test_prefillsFromVmOnOpen() {
+                editDialog.visible = true;
+                waitForRendering(editDialog);
+                compare(findChild(editDialog, "editNameField").text, "Juan Cruz");
+                compare(findChild(editDialog, "editDeptCombo").currentValue, "CCS");
+                compare(findChild(editDialog, "editCourseCombo").currentValue, "BSIT");
+                compare(findChild(editDialog, "editGenderCombo").currentValue, "Male");
+                compare(findChild(editDialog, "editStatusCombo").currentValue, "Active");
+                verify(findChild(editDialog, "editSchoolIdText").text.indexOf("2023-001") !== -1);
+            }
+            function test_saveDisabledWhenNameEmpty() {
+                editStub.editName = "";
+                editDialog.visible = true;
+                waitForRendering(editDialog);
+                compare(findChild(editDialog, "editSaveButton").enabled, false);
+                editStub.editName = "Something";
+                compare(findChild(editDialog, "editSaveButton").enabled, true);
+            }
+            function test_saveInvokesVmSaveEdit() {
+                editDialog.visible = true;
+                waitForRendering(editDialog);
+                mouseClick(findChild(editDialog, "editSaveButton"));
+                compare(editStub.saveCount, 1);
+            }
+            function test_cancelClosesDialog() {
+                editDialog.visible = true;
+                waitForRendering(editDialog);
+                mouseClick(findChild(editDialog, "editCancelButton"));
+                compare(editDialog.visible, false);
+            }
+            function test_departmentChangeCallsVmAndResyncsCourseCombo() {
+                editDialog.visible = true;
+                waitForRendering(editDialog);
+                compare(findChild(editDialog, "editCourseCombo").currentValue, "BSIT");
+                // Simulate picking a new department via the combo's own path.
+                findChild(editDialog, "editDeptCombo").selectValue("CBA");
+                compare(editStub.setDeptCount, 1);
+                compare(editStub.lastDept, "CBA");
+                // The vm cleared editCourse (""); the Connections re-sync must
+                // reset the Course combo's displayed value.
+                compare(findChild(editDialog, "editCourseCombo").currentValue, "");
             }
         }
     }

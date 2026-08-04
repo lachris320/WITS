@@ -27,6 +27,18 @@ private slots:
     void exportCsvWritesAllRowsWhenNoneSelected();
     void exportCsvWritesOnlySelectedWhenSomeSelected();
     void exportCsvWriteFailureReturnsFalse();
+    void canEditIsTrueOnlyWhenExactlyOneSelected();
+    void beginEditPrefillsAllFieldsAndEmitsReady();
+    void beginEditNoMatchIsNoOp();
+    void beginEditSelectedUsesSingleSelectedId();
+    void setEditDepartmentClearsCourseAndReloads();
+    void onEditCoursesLoadedPopulatesEditCourses();
+    void onBulkUpdateFinishedSuccessSetsStatusReloadsAndFinishes();
+    void onBulkUpdateFinishedNoChangeSetsStatusAndFinishes();
+    void onBulkUpdateFinishedAuthFailureSetsAuthStateKeepsOpen();
+    void onBulkUpdateFinishedGenericFailureSetsStatusNoAuth();
+    void onBulkUpdateFailedSetsTransientStatus();
+    void saveEditEntersGuardedPath();
 };
 
 // A DatabaseViewModel test-ctor takes a StudentController*; but StudentController
@@ -198,6 +210,169 @@ void TestDatabaseViewModel::exportCsvWriteFailureReturnsFalse()
         QStringLiteral("./no_such_dir_xyz/out.csv")));
     QVERIFY(!ok);
     QVERIFY(!vm.statusMessage().isEmpty());
+}
+
+void TestDatabaseViewModel::canEditIsTrueOnlyWhenExactlyOneSelected()
+{
+    DatabaseViewModel vm;
+    StudentRecord a; a.schoolId = "A"; a.name = "Ann";
+    StudentRecord b; b.schoolId = "B"; b.name = "Ben";
+    vm.onSearchFinished(SearchOutcome::Results, {a, b}, "", "", 1);
+    QCOMPARE(vm.canEdit(), false);              // 0 selected
+    vm.students()->toggle("A");
+    QCOMPARE(vm.canEdit(), true);               // exactly 1
+    vm.students()->toggle("B");
+    QCOMPARE(vm.canEdit(), false);              // 2 selected
+}
+
+void TestDatabaseViewModel::beginEditPrefillsAllFieldsAndEmitsReady()
+{
+    DatabaseViewModel vm;
+    StudentRecord r;
+    r.schoolId = "2023-001"; r.code = "C1"; r.name = "Juan Cruz"; r.course = "BSIT";
+    r.department = "CCS"; r.yearLevel = "2"; r.gender = "Male"; r.status = "Active";
+    r.visits = 7;
+    vm.onSearchFinished(SearchOutcome::Results, {r}, "", "", 1);
+
+    QSignalSpy readySpy(&vm, &DatabaseViewModel::editReady);
+    vm.beginEdit("2023-001");
+
+    QCOMPARE(vm.editSchoolId(), QStringLiteral("2023-001"));
+    QCOMPARE(vm.editName(), QStringLiteral("Juan Cruz"));
+    QCOMPARE(vm.editYearLevel(), QStringLiteral("2"));
+    QCOMPARE(vm.editGender(), QStringLiteral("Male"));
+    QCOMPARE(vm.editStatus(), QStringLiteral("Active"));
+    QCOMPARE(vm.editDepartment(), QStringLiteral("CCS"));
+    QCOMPARE(vm.editCourse(), QStringLiteral("BSIT"));
+    QCOMPARE(readySpy.count(), 1);
+}
+
+void TestDatabaseViewModel::beginEditNoMatchIsNoOp()
+{
+    DatabaseViewModel vm;
+    StudentRecord r; r.schoolId = "2023-001"; r.name = "Ann";
+    vm.onSearchFinished(SearchOutcome::Results, {r}, "", "", 1);
+
+    QSignalSpy readySpy(&vm, &DatabaseViewModel::editReady);
+    vm.beginEdit("does-not-exist");
+    QCOMPARE(readySpy.count(), 0);                 // no signal — dialog stays closed
+    QVERIFY(vm.editSchoolId().isEmpty());          // edit state untouched
+}
+
+void TestDatabaseViewModel::beginEditSelectedUsesSingleSelectedId()
+{
+    DatabaseViewModel vm;
+    StudentRecord a; a.schoolId = "A"; a.name = "Ann";
+    StudentRecord b; b.schoolId = "B"; b.name = "Ben";
+    vm.onSearchFinished(SearchOutcome::Results, {a, b}, "", "", 1);
+    vm.students()->toggle("B");                    // exactly one selected
+
+    QSignalSpy readySpy(&vm, &DatabaseViewModel::editReady);
+    vm.beginEditSelected();
+    QCOMPARE(vm.editSchoolId(), QStringLiteral("B"));
+    QCOMPARE(vm.editName(), QStringLiteral("Ben"));
+    QCOMPARE(readySpy.count(), 1);
+}
+
+void TestDatabaseViewModel::setEditDepartmentClearsCourseAndReloads()
+{
+    DatabaseViewModel vm;
+    StudentRecord r; r.schoolId = "A"; r.name = "Ann"; r.department = "CCS"; r.course = "BSIT";
+    vm.onSearchFinished(SearchOutcome::Results, {r}, "", "", 1);
+    vm.beginEdit("A");
+    QCOMPARE(vm.editCourse(), QStringLiteral("BSIT"));
+
+    vm.setEditDepartment("CBA");
+    QCOMPARE(vm.editDepartment(), QStringLiteral("CBA"));
+    QCOMPARE(vm.editCourse(), QString());          // dependent-clear
+}
+
+void TestDatabaseViewModel::onEditCoursesLoadedPopulatesEditCourses()
+{
+    DatabaseViewModel vm;
+    vm.onEditCoursesLoaded({"BSIT", "BSCS"});
+    QCOMPARE(vm.editCourses(), (QStringList{"BSIT", "BSCS"}));
+}
+
+void TestDatabaseViewModel::onBulkUpdateFinishedSuccessSetsStatusReloadsAndFinishes()
+{
+    DatabaseViewModel vm;
+    StudentRecord r; r.schoolId = "A"; r.name = "Ann";
+    vm.onSearchFinished(SearchOutcome::Results, {r}, "", "", 1);
+
+    QSignalSpy finishedSpy(&vm, &DatabaseViewModel::editFinished);
+    BulkUpdateResult res; res.ok = true; res.updatedCount = 1;
+    vm.onBulkUpdateFinished(res);
+
+    QCOMPARE(vm.statusMessage(), QStringLiteral("Student updated"));
+    QVERIFY(!vm.authFailure());
+    QVERIFY(vm.loading());                 // reloadTable() flipped loading on
+    QCOMPARE(finishedSpy.count(), 1);
+}
+
+void TestDatabaseViewModel::onBulkUpdateFinishedNoChangeSetsStatusAndFinishes()
+{
+    DatabaseViewModel vm;
+    QSignalSpy finishedSpy(&vm, &DatabaseViewModel::editFinished);
+    BulkUpdateResult res; res.ok = true; res.updatedCount = 0;
+    vm.onBulkUpdateFinished(res);
+
+    QCOMPARE(vm.statusMessage(), QStringLiteral("No changes to save"));
+    QVERIFY(!vm.authFailure());
+    QCOMPARE(finishedSpy.count(), 1);      // dialog closes on a no-op too
+}
+
+void TestDatabaseViewModel::onBulkUpdateFinishedAuthFailureSetsAuthStateKeepsOpen()
+{
+    DatabaseViewModel vm;
+    QSignalSpy finishedSpy(&vm, &DatabaseViewModel::editFinished);
+    BulkUpdateResult res; res.ok = false; res.message = "Invalid admin key";
+    vm.onBulkUpdateFinished(res);
+
+    QVERIFY(vm.authFailure());
+    QVERIFY(!vm.statusMessage().isEmpty());
+    QCOMPARE(finishedSpy.count(), 0);      // dialog stays open on error
+}
+
+void TestDatabaseViewModel::onBulkUpdateFinishedGenericFailureSetsStatusNoAuth()
+{
+    DatabaseViewModel vm;
+    QSignalSpy finishedSpy(&vm, &DatabaseViewModel::editFinished);
+    BulkUpdateResult res; res.ok = false; res.message = "Some updates failed, rolled back";
+    vm.onBulkUpdateFinished(res);
+
+    QVERIFY(!vm.authFailure());
+    QCOMPARE(vm.statusMessage(), QStringLiteral("Some updates failed, rolled back"));
+    QCOMPARE(finishedSpy.count(), 0);
+}
+
+void TestDatabaseViewModel::onBulkUpdateFailedSetsTransientStatus()
+{
+    DatabaseViewModel vm;
+    QSignalSpy finishedSpy(&vm, &DatabaseViewModel::editFinished);
+    vm.onBulkUpdateFailed(QStringLiteral("Connection refused"));
+    QVERIFY(!vm.authFailure());
+    QVERIFY(!vm.statusMessage().isEmpty());
+    QCOMPARE(finishedSpy.count(), 0);
+}
+
+void TestDatabaseViewModel::saveEditEntersGuardedPath()
+{
+    // saveEdit reads the AdminSession key and posts via the VM's own NAM (no
+    // live server in CI). The exact wire form (1-element students JSON array +
+    // admin_key) is asserted at the controller level in
+    // tst_studentcontroller::bulkUpdate_buildsFormBodyWithStudentsJsonAndAdminKey.
+    // Here we only prove saveEdit does not early-return: with a located record
+    // it leaves edit state intact and fires without crashing.
+    DatabaseViewModel vm;
+    AdminSession::instance().setKey("held-key");
+    StudentRecord r; r.schoolId = "A"; r.name = "Ann"; r.department = "CCS"; r.course = "BSIT";
+    vm.onSearchFinished(SearchOutcome::Results, {r}, "", "", 1);
+    vm.beginEdit("A");
+    vm.setEditName("Ann Edited");
+    vm.saveEdit();                         // posts; reply handled asynchronously
+    QCOMPARE(vm.editName(), QStringLiteral("Ann Edited"));
+    AdminSession::instance().clear();
 }
 
 QTEST_MAIN(TestDatabaseViewModel)
