@@ -177,8 +177,8 @@ QStringList StudentController::parseCourses(const QByteArray &raw)
     return out;
 }
 
-bool StudentController::deleteReplyIsServerAnswer(bool replyHadError, int httpStatus,
-                                                  const QByteArray &body)
+bool StudentController::replyIsServerAnswer(bool replyHadError, int httpStatus,
+                                            const QByteArray &body)
 {
     if (!replyHadError)
         return true;
@@ -261,16 +261,19 @@ void StudentController::bulkUpdateStudents(const QList<StudentRecord> &updates,
         m_nam->post(request, body.toString(QUrl::FullyEncoded).toUtf8());
 
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            emit bulkUpdateFailed(reply->errorString());   // View: overlay row 4 after UI reset
-            reply->deleteLater();
-            return;
-        }
-
         const QByteArray resp = reply->readAll();
+        const bool hadError = reply->error() != QNetworkReply::NoError;
+        const QString errorString = reply->errorString();
+        const QVariant statusAttr =
+            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
+        const int httpStatus = statusAttr.isValid() ? statusAttr.toInt() : 0;
         reply->deleteLater();
 
-        emit bulkUpdateFinished(parseBulkUpdateResponse(resp));
+        if (replyIsServerAnswer(hadError, httpStatus, resp)) {
+            emit bulkUpdateFinished(parseBulkUpdateResponse(resp));   // 401 body reaches here
+        } else {
+            emit bulkUpdateFailed(errorString);                      // genuine transport failure only
+        }
     });
 }
 
@@ -301,7 +304,7 @@ void StudentController::deleteStudents(const QStringList &schoolIds, const QStri
         const int httpStatus = statusAttr.isValid() ? statusAttr.toInt() : 0;
         reply->deleteLater();
 
-        if (deleteReplyIsServerAnswer(hadError, httpStatus, resp)) {
+        if (replyIsServerAnswer(hadError, httpStatus, resp)) {
             QString message;
             const bool ok = parseDeleteResponse(resp, message);
             emit deleteFinished(ok, requestedCount, message);   // 401 body reaches here

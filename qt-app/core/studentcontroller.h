@@ -36,12 +36,13 @@ public:
     // only.
     static QByteArray toCsv(const QList<StudentRecord> &rows);
 
-    // True when a delete reply is a decodable server answer (has an HTTP status
-    // + body) rather than a transport failure. Mirrors HttpForm::isServerAnswer
-    // so a guard 401 (bad/expired admin key) reaches parseDeleteResponse
-    // instead of being misreported as a network error.
-    static bool deleteReplyIsServerAnswer(bool replyHadError, int httpStatus,
-                                          const QByteArray &body);
+    // True when a reply is a decodable server answer (has an HTTP status +
+    // body) rather than a transport failure. Mirrors HttpForm::isServerAnswer
+    // so a guard 401 (bad/expired admin key) reaches parseDeleteResponse /
+    // parseBulkUpdateResponse instead of being misreported as a network error.
+    // Shared by deleteStudents and bulkUpdateStudents.
+    static bool replyIsServerAnswer(bool replyHadError, int httpStatus,
+                                    const QByteArray &body);
 
     // Async — result arrives via searchFinished / searchFailed, both of which
     // echo back the returned request id. StudentController fires an
