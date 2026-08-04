@@ -28,6 +28,15 @@ class DatabaseViewModel : public QObject
     Q_PROPERTY(QString errorText READ errorText NOTIFY errorTextChanged)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged)
     Q_PROPERTY(bool authFailure READ authFailure NOTIFY authFailureChanged)
+    Q_PROPERTY(bool canEdit READ canEdit NOTIFY canEditChanged)
+    Q_PROPERTY(QString editSchoolId READ editSchoolId NOTIFY editSchoolIdChanged)
+    Q_PROPERTY(QString editName READ editName WRITE setEditName NOTIFY editNameChanged)
+    Q_PROPERTY(QString editYearLevel READ editYearLevel WRITE setEditYearLevel NOTIFY editYearLevelChanged)
+    Q_PROPERTY(QString editGender READ editGender WRITE setEditGender NOTIFY editGenderChanged)
+    Q_PROPERTY(QString editStatus READ editStatus WRITE setEditStatus NOTIFY editStatusChanged)
+    Q_PROPERTY(QString editDepartment READ editDepartment NOTIFY editDepartmentChanged)
+    Q_PROPERTY(QString editCourse READ editCourse WRITE setEditCourse NOTIFY editCourseChanged)
+    Q_PROPERTY(QStringList editCourses READ editCourses NOTIFY editCoursesChanged)
 public:
     explicit DatabaseViewModel(QObject *parent = nullptr);
 
@@ -42,6 +51,15 @@ public:
     QString errorText() const { return m_errorText; }
     QString statusMessage() const { return m_statusMessage; }
     bool authFailure() const { return m_authFailure; }
+    bool canEdit() const { return m_students.selectedCount() == 1; }
+    QString editSchoolId() const { return m_editSchoolId; }
+    QString editName() const { return m_editName; }
+    QString editYearLevel() const { return m_editYearLevel; }
+    QString editGender() const { return m_editGender; }
+    QString editStatus() const { return m_editStatus; }
+    QString editDepartment() const { return m_editDepartment; }
+    QString editCourse() const { return m_editCourse; }
+    QStringList editCourses() const { return m_editCourses; }
 
     Q_INVOKABLE void refresh();                          // load departments + all students
     Q_INVOKABLE void setDepartment(const QString &department);
@@ -54,6 +72,15 @@ public:
     Q_INVOKABLE void deleteSelected();
     Q_INVOKABLE bool exportCsv(const QUrl &fileUrl);   // implemented in Task 5
 
+    Q_INVOKABLE void beginEdit(const QString &schoolId);
+    Q_INVOKABLE void beginEditSelected();
+    Q_INVOKABLE void setEditDepartment(const QString &dept);
+    Q_INVOKABLE void setEditName(const QString &v);
+    Q_INVOKABLE void setEditYearLevel(const QString &v);
+    Q_INVOKABLE void setEditGender(const QString &v);
+    Q_INVOKABLE void setEditStatus(const QString &v);
+    Q_INVOKABLE void setEditCourse(const QString &v);
+
     // Public slots (test seam — driven network-free, like SearchViewModel).
     void onSearchFinished(SearchOutcome outcome, const QList<StudentRecord> &records,
                           const QString &message, const QString &searchTerm, quint64 requestId);
@@ -62,6 +89,7 @@ public:
     void onCoursesLoaded(const QStringList &courses);
     void onDeleteFinished(bool ok, int requestedCount, const QString &message);
     void onDeleteFailed(const QString &errorString);
+    void onEditCoursesLoaded(const QStringList &courses);
 
 signals:
     void departmentsChanged();
@@ -72,6 +100,16 @@ signals:
     void errorTextChanged();
     void statusMessageChanged();
     void authFailureChanged();
+    void canEditChanged();
+    void editSchoolIdChanged();
+    void editNameChanged();
+    void editYearLevelChanged();
+    void editGenderChanged();
+    void editStatusChanged();
+    void editDepartmentChanged();
+    void editCourseChanged();
+    void editCoursesChanged();
+    void editReady();
 
 private:
     bool acceptRequest(quint64 requestId);
@@ -90,6 +128,13 @@ private:
     bool m_authFailure = false;
     bool m_deleteInFlight = false;
     quint64 m_latestAppliedRequestId = 0;
+
+    QNetworkAccessManager *m_editNam = nullptr;
+    StudentController *m_editController = nullptr;
+    QString m_editSchoolId, m_editName, m_editYearLevel, m_editGender, m_editStatus;
+    QString m_editDepartment, m_editCourse, m_editCode;
+    int m_editVisits = 0;
+    QStringList m_editCourses;
 };
 
 #endif // DATABASEVIEWMODEL_H

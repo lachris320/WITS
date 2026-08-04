@@ -19,6 +19,14 @@ DatabaseViewModel::DatabaseViewModel(QObject *parent)
     connect(m_controller, &StudentController::coursesLoaded, this, &DatabaseViewModel::onCoursesLoaded);
     connect(m_controller, &StudentController::deleteFinished, this, &DatabaseViewModel::onDeleteFinished);
     connect(m_controller, &StudentController::deleteFailed, this, &DatabaseViewModel::onDeleteFailed);
+
+    m_editNam = new QNetworkAccessManager(this);
+    m_editController = new StudentController(m_editNam, this);
+    connect(m_editController, &StudentController::coursesLoaded,
+            this, &DatabaseViewModel::onEditCoursesLoaded);
+    // canEdit tracks selection size — re-emit whenever the model's selection changes.
+    connect(&m_students, &StudentsTableModel::selectionChanged,
+            this, &DatabaseViewModel::canEditChanged);
 }
 
 void DatabaseViewModel::refresh()
@@ -131,6 +139,70 @@ void DatabaseViewModel::onDeleteFailed(const QString & /*errorString*/)
     setAuthFailure(false);
     setStatusMessage(tr("Delete failed — check your connection."));
 }
+
+void DatabaseViewModel::beginEdit(const QString &schoolId)
+{
+    const QList<StudentRecord> recs = m_students.allRecords();
+    int idx = -1;
+    for (int i = 0; i < recs.size(); ++i) {
+        if (recs.at(i).schoolId == schoolId) { idx = i; break; }
+    }
+    if (idx < 0)
+        return;   // not found — no-op; do not touch edit state or open the dialog
+
+    const StudentRecord &r = recs.at(idx);
+    m_editSchoolId = r.schoolId;   emit editSchoolIdChanged();
+    m_editCode     = r.code;       // carried unchanged into saveEdit (not editable)
+    m_editVisits   = r.visits;     // carried unchanged into saveEdit (not editable)
+    m_editName     = r.name;       emit editNameChanged();
+    m_editYearLevel= r.yearLevel;  emit editYearLevelChanged();
+    m_editGender   = r.gender;     emit editGenderChanged();
+    m_editStatus   = r.status;     emit editStatusChanged();
+    m_editDepartment = r.department; emit editDepartmentChanged();
+    m_editCourse   = r.course;     emit editCourseChanged();
+
+    m_editController->loadCourses(r.department);   // independent of the filter's course list
+    emit editReady();
+}
+
+void DatabaseViewModel::beginEditSelected()
+{
+    if (m_students.selectedCount() != 1)
+        return;                                    // header button only enabled at 1
+    beginEdit(m_students.selectedIds().first());
+}
+
+void DatabaseViewModel::setEditDepartment(const QString &dept)
+{
+    if (m_editDepartment == dept)
+        return;   // no actual change — do NOT clear the course or reload (mirrors
+                  // the filter's setDepartment at DatabaseViewModel.cpp:38-51, and
+                  // is the second line of defense behind the dialog's prefill guard:
+                  // re-selecting the same department must never blank the course).
+    m_editDepartment = dept; emit editDepartmentChanged();
+    if (!m_editCourse.isEmpty()) { m_editCourse.clear(); emit editCourseChanged(); }
+    m_editController->loadCourses(dept);           // re-scope the edit course list
+}
+
+void DatabaseViewModel::onEditCoursesLoaded(const QStringList &courses)
+{
+    m_editCourses = courses; emit editCoursesChanged();
+}
+
+void DatabaseViewModel::setEditName(const QString &v)
+{ if (m_editName != v) { m_editName = v; emit editNameChanged(); } }
+
+void DatabaseViewModel::setEditYearLevel(const QString &v)
+{ if (m_editYearLevel != v) { m_editYearLevel = v; emit editYearLevelChanged(); } }
+
+void DatabaseViewModel::setEditGender(const QString &v)
+{ if (m_editGender != v) { m_editGender = v; emit editGenderChanged(); } }
+
+void DatabaseViewModel::setEditStatus(const QString &v)
+{ if (m_editStatus != v) { m_editStatus = v; emit editStatusChanged(); } }
+
+void DatabaseViewModel::setEditCourse(const QString &v)
+{ if (m_editCourse != v) { m_editCourse = v; emit editCourseChanged(); } }
 
 bool DatabaseViewModel::exportCsv(const QUrl &fileUrl)
 {

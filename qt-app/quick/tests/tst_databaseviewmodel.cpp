@@ -27,6 +27,12 @@ private slots:
     void exportCsvWritesAllRowsWhenNoneSelected();
     void exportCsvWritesOnlySelectedWhenSomeSelected();
     void exportCsvWriteFailureReturnsFalse();
+    void canEditIsTrueOnlyWhenExactlyOneSelected();
+    void beginEditPrefillsAllFieldsAndEmitsReady();
+    void beginEditNoMatchIsNoOp();
+    void beginEditSelectedUsesSingleSelectedId();
+    void setEditDepartmentClearsCourseAndReloads();
+    void onEditCoursesLoadedPopulatesEditCourses();
 };
 
 // A DatabaseViewModel test-ctor takes a StudentController*; but StudentController
@@ -198,6 +204,88 @@ void TestDatabaseViewModel::exportCsvWriteFailureReturnsFalse()
         QStringLiteral("./no_such_dir_xyz/out.csv")));
     QVERIFY(!ok);
     QVERIFY(!vm.statusMessage().isEmpty());
+}
+
+void TestDatabaseViewModel::canEditIsTrueOnlyWhenExactlyOneSelected()
+{
+    DatabaseViewModel vm;
+    StudentRecord a; a.schoolId = "A"; a.name = "Ann";
+    StudentRecord b; b.schoolId = "B"; b.name = "Ben";
+    vm.onSearchFinished(SearchOutcome::Results, {a, b}, "", "", 1);
+    QCOMPARE(vm.canEdit(), false);              // 0 selected
+    vm.students()->toggle("A");
+    QCOMPARE(vm.canEdit(), true);               // exactly 1
+    vm.students()->toggle("B");
+    QCOMPARE(vm.canEdit(), false);              // 2 selected
+}
+
+void TestDatabaseViewModel::beginEditPrefillsAllFieldsAndEmitsReady()
+{
+    DatabaseViewModel vm;
+    StudentRecord r;
+    r.schoolId = "2023-001"; r.code = "C1"; r.name = "Juan Cruz"; r.course = "BSIT";
+    r.department = "CCS"; r.yearLevel = "2"; r.gender = "Male"; r.status = "Active";
+    r.visits = 7;
+    vm.onSearchFinished(SearchOutcome::Results, {r}, "", "", 1);
+
+    QSignalSpy readySpy(&vm, &DatabaseViewModel::editReady);
+    vm.beginEdit("2023-001");
+
+    QCOMPARE(vm.editSchoolId(), QStringLiteral("2023-001"));
+    QCOMPARE(vm.editName(), QStringLiteral("Juan Cruz"));
+    QCOMPARE(vm.editYearLevel(), QStringLiteral("2"));
+    QCOMPARE(vm.editGender(), QStringLiteral("Male"));
+    QCOMPARE(vm.editStatus(), QStringLiteral("Active"));
+    QCOMPARE(vm.editDepartment(), QStringLiteral("CCS"));
+    QCOMPARE(vm.editCourse(), QStringLiteral("BSIT"));
+    QCOMPARE(readySpy.count(), 1);
+}
+
+void TestDatabaseViewModel::beginEditNoMatchIsNoOp()
+{
+    DatabaseViewModel vm;
+    StudentRecord r; r.schoolId = "2023-001"; r.name = "Ann";
+    vm.onSearchFinished(SearchOutcome::Results, {r}, "", "", 1);
+
+    QSignalSpy readySpy(&vm, &DatabaseViewModel::editReady);
+    vm.beginEdit("does-not-exist");
+    QCOMPARE(readySpy.count(), 0);                 // no signal — dialog stays closed
+    QVERIFY(vm.editSchoolId().isEmpty());          // edit state untouched
+}
+
+void TestDatabaseViewModel::beginEditSelectedUsesSingleSelectedId()
+{
+    DatabaseViewModel vm;
+    StudentRecord a; a.schoolId = "A"; a.name = "Ann";
+    StudentRecord b; b.schoolId = "B"; b.name = "Ben";
+    vm.onSearchFinished(SearchOutcome::Results, {a, b}, "", "", 1);
+    vm.students()->toggle("B");                    // exactly one selected
+
+    QSignalSpy readySpy(&vm, &DatabaseViewModel::editReady);
+    vm.beginEditSelected();
+    QCOMPARE(vm.editSchoolId(), QStringLiteral("B"));
+    QCOMPARE(vm.editName(), QStringLiteral("Ben"));
+    QCOMPARE(readySpy.count(), 1);
+}
+
+void TestDatabaseViewModel::setEditDepartmentClearsCourseAndReloads()
+{
+    DatabaseViewModel vm;
+    StudentRecord r; r.schoolId = "A"; r.name = "Ann"; r.department = "CCS"; r.course = "BSIT";
+    vm.onSearchFinished(SearchOutcome::Results, {r}, "", "", 1);
+    vm.beginEdit("A");
+    QCOMPARE(vm.editCourse(), QStringLiteral("BSIT"));
+
+    vm.setEditDepartment("CBA");
+    QCOMPARE(vm.editDepartment(), QStringLiteral("CBA"));
+    QCOMPARE(vm.editCourse(), QString());          // dependent-clear
+}
+
+void TestDatabaseViewModel::onEditCoursesLoadedPopulatesEditCourses()
+{
+    DatabaseViewModel vm;
+    vm.onEditCoursesLoaded({"BSIT", "BSCS"});
+    QCOMPARE(vm.editCourses(), (QStringList{"BSIT", "BSCS"}));
 }
 
 QTEST_MAIN(TestDatabaseViewModel)
