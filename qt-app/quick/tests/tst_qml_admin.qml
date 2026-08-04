@@ -1658,12 +1658,34 @@ Item {
             property int deleteCount: 0
             property url lastExportUrl: ""
             property bool exportResult: true
+            property bool canEdit: false
+            property string editSchoolId: "2023-001"
+            property string editName: "Ann"
+            property string editYearLevel: "2"
+            property string editGender: "Female"
+            property string editStatus: "Active"
+            property string editDepartment: "CCS"
+            property string editCourse: "BSIT"
+            property var editCourses: ["BSIT", "BSCS"]
+            property int beginEditSelectedCount: 0
+            property string lastBeginEditId: ""
+            signal editReady()
+            signal editFinished()
             function refresh() {}
             function setDepartment(d) { department = d; }
             function setCourse(c) { course = c; }
             function requiresTypedConfirmation(n) { return n >= 10; }
             function deleteSelected() { deleteCount++; }
             function exportCsv(u) { lastExportUrl = u; return exportResult; }
+            function beginEditSelected() { beginEditSelectedCount++; editReady(); }
+            function beginEdit(id) { lastBeginEditId = id; editReady(); }
+            function setEditDepartment(d) { editDepartment = d; editCourse = ""; }
+            function setEditName(v) { editName = v; }
+            function setEditYearLevel(v) { editYearLevel = v; }
+            function setEditGender(v) { editGender = v; }
+            function setEditStatus(v) { editStatus = v; }
+            function setEditCourse(v) { editCourse = v; }
+            function saveEdit() {}
         }
 
         DatabaseScreen { id: databaseScreen; anchors.fill: parent; vm: stubVm }
@@ -1680,6 +1702,17 @@ Item {
                 stubVm.lastExportUrl = "";
                 stubVm.exportResult = true;
                 stubVm.statusMessage = "";
+                stubVm.canEdit = false;
+                stubVm.beginEditSelectedCount = 0;
+                stubVm.lastBeginEditId = "";
+                // Per-test isolation hygiene for the edit state (the prefill
+                // guard means open no longer mutates it, but reset anyway so a
+                // future test that DOES drive a dept change can't leak into the
+                // next).
+                stubVm.editDepartment = "CCS";
+                stubVm.editCourse = "BSIT";
+                var ed = findChild(databaseScreen, "editDialog");
+                if (ed) ed.visible = false;
                 var dlg = findChild(databaseScreen, "deleteConfirm");
                 if (dlg) { dlg.visible = false; dlg.clearKey(); }
             }
@@ -1757,6 +1790,34 @@ Item {
                 toast.message = "";   // simulate the LToast auto-dismiss timer firing
                 stubVm.statusMessage = "Second status";
                 compare(toast.message, "Second status");
+            }
+            function test_editButtonEnabledOnlyWhenCanEdit() {
+                var btn = findChild(databaseScreen, "editButton");
+                verify(btn !== null);
+                compare(btn.enabled, false);          // canEdit false
+                stubVm.canEdit = true;
+                compare(btn.enabled, true);
+            }
+            function test_editButtonInvokesBeginEditSelected() {
+                stubVm.canEdit = true;
+                waitForRendering(databaseScreen);
+                mouseClick(findChild(databaseScreen, "editButton"));
+                compare(stubVm.beginEditSelectedCount, 1);
+            }
+            function test_rowActivatedInvokesBeginEdit() {
+                // Drive the screen's LTable→vm wiring directly (the stub model is
+                // not a real row model). Task 4 proves the double-click emits it.
+                findChild(databaseScreen, "studentsTable").rowActivated("2023-XYZ");
+                compare(stubVm.lastBeginEditId, "2023-XYZ");
+            }
+            function test_editReadyOpensDialogAndFinishedCloses() {
+                var ed = findChild(databaseScreen, "editDialog");
+                verify(ed !== null);
+                compare(ed.visible, false);
+                stubVm.editReady();
+                compare(ed.visible, true);
+                stubVm.editFinished();
+                compare(ed.visible, false);
             }
         }
     }
