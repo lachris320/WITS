@@ -1,0 +1,412 @@
+<title>LOAMS 2.0 — Modernization Progress</title>
+<style>
+  :root {
+    --ground:#f7f4f1; --surface:#ffffff; --surface-2:#f3ede9;
+    --ink:#211a17; --ink-soft:#5f534d; --ink-faint:#8f827b;
+    --brand:#7E1A15; --brand-deep:#5c1310; --brand-rail:#9a2c25;
+    --gold:#C99A1E; --gold-bright:#E8B10E;
+    --hairline:#e7ded8;
+    --done:#1f7a4d; --done-soft:#e4f1ea; --done-line:#bfe0cd;
+    --active:#B45309; --active-soft:#faedd6; --active-line:#e6cf9e;
+    --planned:#8a7d76; --planned-soft:#efe9e5; --planned-line:#ddd3cc;
+    --shadow:0 1px 2px rgba(33,26,23,.05), 0 6px 20px rgba(33,26,23,.06);
+    --font-ui:"Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+    --font-mono:"Cascadia Code","Cascadia Mono",ui-monospace,"SF Mono",Consolas,"Liberation Mono",monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --ground:#17110f; --surface:#201815; --surface-2:#2a201c;
+      --ink:#f3eae4; --ink-soft:#b8a99f; --ink-faint:#8a7a70;
+      --brand:#df6f66; --brand-deep:#c85248; --brand-rail:#9e2b23;
+      --gold:#e8b10e; --gold-bright:#ffca3a;
+      --hairline:#3a2c26;
+      --done:#63c48c; --done-soft:#15342a; --done-line:#25553f;
+      --active:#e9ab52; --active-soft:#3a2a12; --active-line:#5c421c;
+      --planned:#9c8d83; --planned-soft:#2a211d; --planned-line:#3d3029;
+      --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#17110f; --surface:#201815; --surface-2:#2a201c;
+    --ink:#f3eae4; --ink-soft:#b8a99f; --ink-faint:#8a7a70;
+    --brand:#df6f66; --brand-deep:#c85248; --brand-rail:#9e2b23;
+    --gold:#e8b10e; --gold-bright:#ffca3a;
+    --hairline:#3a2c26;
+    --done:#63c48c; --done-soft:#15342a; --done-line:#25553f;
+    --active:#e9ab52; --active-soft:#3a2a12; --active-line:#5c421c;
+    --planned:#9c8d83; --planned-soft:#2a211d; --planned-line:#3d3029;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.35);
+  }
+  :root[data-theme="light"]{
+    --ground:#f7f4f1; --surface:#ffffff; --surface-2:#f3ede9;
+    --ink:#211a17; --ink-soft:#5f534d; --ink-faint:#8f827b;
+    --brand:#7E1A15; --brand-deep:#5c1310; --brand-rail:#9a2c25;
+    --gold:#C99A1E; --gold-bright:#E8B10E;
+    --hairline:#e7ded8;
+    --done:#1f7a4d; --done-soft:#e4f1ea; --done-line:#bfe0cd;
+    --active:#B45309; --active-soft:#faedd6; --active-line:#e6cf9e;
+    --planned:#8a7d76; --planned-soft:#efe9e5; --planned-line:#ddd3cc;
+    --shadow:0 1px 2px rgba(33,26,23,.05), 0 6px 20px rgba(33,26,23,.06);
+  }
+
+  *{box-sizing:border-box}
+  body{margin:0}
+  .wrap{
+    max-width:1000px; margin:0 auto; padding:clamp(20px,4vw,52px) clamp(16px,4vw,40px) 72px;
+    background:var(--ground); color:var(--ink);
+    font-family:var(--font-ui); font-size:16px; line-height:1.55;
+    -webkit-font-smoothing:antialiased;
+  }
+  .mono{font-family:var(--font-mono)}
+  .tnum{font-variant-numeric:tabular-nums}
+
+  /* ---- Header ---- */
+  header.masthead{border-top:3px solid var(--gold); padding-top:22px; margin-bottom:34px}
+  .eyebrow{
+    font-family:var(--font-mono); font-size:12px; letter-spacing:.16em; text-transform:uppercase;
+    color:var(--brand); font-weight:600; margin:0 0 10px;
+  }
+  h1{
+    font-size:clamp(30px,5.4vw,46px); line-height:1.04; letter-spacing:-.02em; font-weight:800;
+    margin:0 0 12px; text-wrap:balance; color:var(--ink);
+  }
+  h1 .v{color:var(--brand)}
+  .lede{font-size:clamp(15px,2.2vw,18px); color:var(--ink-soft); max-width:60ch; margin:0}
+  .statusline{
+    margin-top:16px; display:inline-flex; align-items:center; gap:9px;
+    background:var(--active-soft); border:1px solid var(--active-line); color:var(--active);
+    padding:7px 13px 7px 11px; border-radius:999px; font-size:13.5px; font-weight:600;
+  }
+  .statusline .dot{width:8px;height:8px;border-radius:50%;background:var(--active);box-shadow:0 0 0 3px color-mix(in srgb,var(--active) 22%,transparent)}
+  .statusline .mono{font-weight:600}
+
+  /* ---- Metrics ---- */
+  .metrics{display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:14px; margin:0 0 42px}
+  .stat{
+    background:var(--surface); border:1px solid var(--hairline); border-radius:14px;
+    padding:16px 17px; box-shadow:var(--shadow); position:relative; overflow:hidden;
+  }
+  .stat .k{font-family:var(--font-mono); font-size:11.5px; letter-spacing:.11em; text-transform:uppercase; color:var(--ink-faint); margin:0 0 8px}
+  .stat .v{font-size:31px; font-weight:800; letter-spacing:-.02em; line-height:1; color:var(--ink)}
+  .stat .v small{font-size:15px; font-weight:600; color:var(--ink-soft); letter-spacing:0}
+  .stat .sub{font-size:12.5px; color:var(--ink-soft); margin-top:7px}
+  .stat .arrow{color:var(--brand); font-weight:700}
+  .spark{display:block; width:100%; height:38px; margin-top:6px}
+
+  /* ---- Legend ---- */
+  .legend{display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; margin:0 2px 20px; font-size:13px; color:var(--ink-soft)}
+  .legend .key{display:inline-flex; align-items:center; gap:7px}
+  .swatch{width:11px;height:11px;border-radius:3px;display:inline-block}
+  .sw-done{background:var(--done)} .sw-active{background:var(--active)} .sw-planned{background:var(--planned)}
+
+  /* ---- Timeline ---- */
+  .timeline{position:relative; padding-left:38px}
+  .timeline::before{
+    content:""; position:absolute; left:11px; top:6px; bottom:8px; width:2px;
+    background:linear-gradient(var(--brand-rail),color-mix(in srgb,var(--brand-rail) 30%,transparent));
+    border-radius:2px;
+  }
+  .phase{position:relative; margin-bottom:16px}
+  .node{
+    position:absolute; left:-32px; top:20px; width:16px; height:16px; border-radius:50%;
+    background:var(--surface); border:2.5px solid var(--planned); z-index:1;
+  }
+  .phase[data-status="done"] .node{background:var(--brand); border-color:var(--brand)}
+  .phase[data-status="active"] .node{background:var(--surface); border-color:var(--active); box-shadow:0 0 0 4px color-mix(in srgb,var(--active) 20%,transparent)}
+  .phase[data-status="planned"] .node{background:var(--surface); border-color:var(--planned-line)}
+
+  .card{
+    background:var(--surface); border:1px solid var(--hairline); border-left:4px solid var(--planned);
+    border-radius:13px; padding:16px 18px; box-shadow:var(--shadow);
+  }
+  .phase[data-status="done"] .card{border-left-color:var(--done)}
+  .phase[data-status="active"] .card{border-left-color:var(--active)}
+  .phase[data-status="planned"] .card{border-left-color:var(--planned-line); background:color-mix(in srgb,var(--surface) 70%,var(--ground))}
+
+  .card-head{display:flex; align-items:baseline; gap:11px; flex-wrap:wrap}
+  .pnum{font-family:var(--font-mono); font-size:12px; font-weight:700; color:var(--brand); letter-spacing:.04em; white-space:nowrap}
+  .ptitle{font-size:18px; font-weight:750; letter-spacing:-.01em; margin:0; color:var(--ink)}
+  .chip{
+    font-family:var(--font-mono); font-size:11px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+    padding:3px 9px; border-radius:999px; white-space:nowrap; margin-left:auto;
+  }
+  .chip.done{background:var(--done-soft); color:var(--done); border:1px solid var(--done-line)}
+  .chip.active{background:var(--active-soft); color:var(--active); border:1px solid var(--active-line)}
+  .chip.planned{background:var(--planned-soft); color:var(--planned); border:1px solid var(--planned-line)}
+  .psummary{font-size:14px; color:var(--ink-soft); margin:9px 0 0; max-width:64ch}
+  .prs{display:flex; flex-wrap:wrap; gap:6px; margin-top:11px}
+  .pr{
+    font-family:var(--font-mono); font-size:12px; color:var(--ink-soft);
+    background:var(--surface-2); border:1px solid var(--hairline); border-radius:6px; padding:2px 8px;
+  }
+  .pr b{color:var(--brand); font-weight:700}
+  .pr.latest{background:var(--active-soft); border-color:var(--active-line); color:var(--active)}
+  .pr.latest b{color:var(--active)}
+
+  /* ---- Sub-tracks (Phase 4) ---- */
+  .tracks{margin-top:16px; border-top:1px dashed var(--hairline); padding-top:14px; display:grid; gap:9px}
+  .tracks-cap{font-family:var(--font-mono); font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-faint); margin:0 0 2px}
+  .track{
+    display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:11px;
+    padding:9px 11px; border-radius:9px; background:var(--surface-2); border:1px solid var(--hairline);
+  }
+  .track .tk{font-family:var(--font-mono); font-size:12.5px; font-weight:700; color:var(--brand); white-space:nowrap}
+  .track .tl{font-size:13.5px; color:var(--ink); min-width:0}
+  .track .tl small{color:var(--ink-soft); font-weight:400}
+  .track .ts{font-family:var(--font-mono); font-size:10.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; padding:2px 8px; border-radius:999px; white-space:nowrap}
+  .ts.done{background:var(--done-soft); color:var(--done); border:1px solid var(--done-line)}
+  .ts.active{background:var(--active-soft); color:var(--active); border:1px solid var(--active-line)}
+  .ts.planned{background:var(--planned-soft); color:var(--planned); border:1px solid var(--planned-line)}
+  .track[data-s="planned"]{background:color-mix(in srgb,var(--surface-2) 55%,var(--ground)); border-style:dashed}
+
+  /* nested slice ladder */
+  .ladder{margin:2px 0 0 0; padding:10px 0 2px 14px; border-left:2px solid var(--active-line); display:grid; gap:7px}
+  .slice{display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:10px; font-size:13px}
+  .slice .sk{font-family:var(--font-mono); font-size:12px; font-weight:700; color:var(--ink-soft); white-space:nowrap}
+  .slice .sl{color:var(--ink); min-width:0}
+  .slice .ss{font-family:var(--font-mono); font-size:12px; white-space:nowrap}
+  .slice.done .ss{color:var(--done)} .slice.planned .ss{color:var(--planned)}
+  .slice.done .sk{color:var(--brand)}
+  .slice.planned .sl,.slice.planned .sk{color:var(--ink-faint)}
+
+  footer{margin-top:40px; padding-top:18px; border-top:1px solid var(--hairline); color:var(--ink-faint); font-size:12.5px; display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap}
+  footer .mono{color:var(--ink-soft)}
+  @media (max-width:520px){
+    .track,.slice{grid-template-columns:auto 1fr; }
+    .track .ts,.slice .ss{grid-column:2; justify-self:start; margin-top:-4px}
+    .chip{margin-left:0}
+  }
+  @media (prefers-reduced-motion:no-preference){
+    .phase{opacity:0; transform:translateY(10px); animation:rise .5s cubic-bezier(.22,.7,.3,1) forwards}
+    @keyframes rise{to{opacity:1;transform:none}}
+  }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">Modernization Programme · Qt Widgets → Qt Quick</p>
+    <h1>LOAMS <span class="v">2.0</span> — build progress</h1>
+    <p class="lede">A parallel rebuild of the library attendance &amp; monitoring system onto a shared <span class="mono">witscore</span> C++ core with a QML front-end. Seven roadmap phases; the first four are shipped.</p>
+    <span class="statusline"><span class="dot"></span> Active: Phase 4 · Admin Part 2 — latest merge <span class="mono">PR&nbsp;#34</span></span>
+  </header>
+
+  <section class="metrics" aria-label="Programme metrics">
+    <div class="stat">
+      <p class="k">Phases shipped</p>
+      <div class="v tnum">4<small> / 7</small></div>
+      <p class="sub">0–3 complete · Phase 4 in progress</p>
+    </div>
+    <div class="stat">
+      <p class="k">Pull requests merged</p>
+      <div class="v tnum">18</div>
+      <p class="sub"><span class="mono">#17</span> <span class="arrow">→</span> <span class="mono">#34</span> to <span class="mono">master</span></p>
+    </div>
+    <div class="stat">
+      <p class="k">Test suite (ctest)</p>
+      <div class="v tnum">39 <small class="mono">targets</small></div>
+      <canvas class="spark" id="spark" width="320" height="76" aria-hidden="true"></canvas>
+    </div>
+    <div class="stat">
+      <p class="k">Latest slice</p>
+      <div class="v" style="font-size:19px;line-height:1.15;font-weight:750">Single-student edit</div>
+      <p class="sub"><span class="mono">4a.2b-ii</span> · merged <span class="mono tnum">2026-08-05</span></p>
+    </div>
+  </section>
+
+  <div class="legend" aria-hidden="true">
+    <span class="key"><span class="swatch sw-done"></span> Complete &amp; merged</span>
+    <span class="key"><span class="swatch sw-active"></span> Active / in progress</span>
+    <span class="key"><span class="swatch sw-planned"></span> Planned</span>
+  </div>
+
+  <section class="timeline" aria-label="Phase timeline">
+
+    <article class="phase" data-status="done" style="animation-delay:.02s">
+      <span class="node"></span>
+      <div class="card">
+        <div class="card-head">
+          <span class="pnum">PHASE 0</span>
+          <h2 class="ptitle">Proposal &amp; Roadmap</h2>
+          <span class="chip done">Complete</span>
+        </div>
+        <p class="psummary">Modernization strategy locked (parallel rebuild on a shared core), the 8 design decisions and the Phase 0–6 roadmap approved at the owner gate. 20-section proposal cleared a 2-round design review.</p>
+        <div class="prs"><span class="pr">approved <b>2026-07-09</b></span><span class="pr mono">master e0443f7</span></div>
+      </div>
+    </article>
+
+    <article class="phase" data-status="done" style="animation-delay:.06s">
+      <span class="node"></span>
+      <div class="card">
+        <div class="card-head">
+          <span class="pnum">PHASE 1</span>
+          <h2 class="ptitle">Core Extraction &amp; Quick Skeleton</h2>
+          <span class="chip done">Complete</span>
+        </div>
+        <p class="psummary">Extracted the UI-free controllers into a <span class="mono">witscore</span> static lib; stood up the <span class="mono">WITSQuick</span> app, <span class="mono">AppShell</span>, the <span class="mono">Theme</span> singleton, ten <span class="mono">L*</span> components, and RFID-in-QML. Legacy Widgets app kept as rollback.</p>
+        <div class="prs"><span class="pr"><b>PR&nbsp;#17</b></span><span class="pr mono">tests 12→17</span></div>
+      </div>
+    </article>
+
+    <article class="phase" data-status="done" style="animation-delay:.10s">
+      <span class="node"></span>
+      <div class="card">
+        <div class="card-head">
+          <span class="pnum">PHASE 2</span>
+          <h2 class="ptitle">Kiosk Surface Parity</h2>
+          <span class="chip done">Complete</span>
+        </div>
+        <p class="psummary">The full kiosk: student &amp; guest login, the live activity feed, the maroon/gold identity, and RFID card-scan — verified on real hardware against the legacy app.</p>
+        <div class="prs"><span class="pr"><b>PR&nbsp;#18</b></span><span class="pr"><b>#19</b> DRY</span><span class="pr"><b>#20</b> cleanup</span><span class="pr mono">tests →23</span></div>
+      </div>
+    </article>
+
+    <article class="phase" data-status="done" style="animation-delay:.14s">
+      <span class="node"></span>
+      <div class="card">
+        <div class="card-head">
+          <span class="pnum">PHASE 3</span>
+          <h2 class="ptitle">Admin Part 1</h2>
+          <span class="chip done">Complete</span>
+        </div>
+        <p class="psummary">The admin shell (maroon side-nav + header) over three screens — Dashboard, Search, and Visit Logs — with new view-models, list models, and two read-only reporting endpoints.</p>
+        <div class="prs"><span class="pr"><b>PR&nbsp;#21</b></span><span class="pr"><b>#22</b> docs</span><span class="pr"><b>#23</b> glide</span><span class="pr mono">tests →32</span></div>
+      </div>
+    </article>
+
+    <article class="phase" data-status="active" style="animation-delay:.18s">
+      <span class="node"></span>
+      <div class="card">
+        <div class="card-head">
+          <span class="pnum">PHASE 4</span>
+          <h2 class="ptitle">Admin Part 2 — Database · Reporting · Settings</h2>
+          <span class="chip active">In progress</span>
+        </div>
+        <p class="psummary">The heaviest phase, split into independent tracks. Settings and the brand-token engine are done; the Database track is mid-build; Reporting and photo display are queued.</p>
+
+        <div class="tracks">
+          <p class="tracks-cap">Tracks</p>
+
+          <div class="track" data-s="done">
+            <span class="tk">4c</span>
+            <span class="tl">Settings <small>— tiered destructive confirm, admin session, backend guard</small></span>
+            <span class="ts done">PR&nbsp;#24</span>
+          </div>
+
+          <div class="track" data-s="done">
+            <span class="tk">4d</span>
+            <span class="tl">Brand tokens <small>— role-based logo-derived palette, both surfaces</small></span>
+            <span class="ts done">#26–29</span>
+          </div>
+
+          <div class="track" data-s="active">
+            <span class="tk">4a</span>
+            <span class="tl">Database + Import <small>— CRUD over the student table</small></span>
+            <span class="ts active">Active</span>
+          </div>
+
+          <div class="ladder" aria-label="Database sub-slices">
+            <div class="slice done"><span class="sk">4a.1</span><span class="sl">Auth spine — guard the destructive endpoints</span><span class="ss">#30 ✓</span></div>
+            <div class="slice done"><span class="sk">4a.2a</span><span class="sl">Read table — filter &amp; multi-select</span><span class="ss">#31 ✓</span></div>
+            <div class="slice done"><span class="sk">4a.2b-i</span><span class="sl">Multi-delete + CSV export</span><span class="ss">#32 ✓</span></div>
+            <div class="slice done"><span class="sk">·</span><span class="sl">Shared CSV kernel (dedup)</span><span class="ss">#33 ✓</span></div>
+            <div class="slice done"><span class="sk">4a.2b-ii</span><span class="sl">Single-student edit</span><span class="ss">#34 ✓</span></div>
+            <div class="slice planned"><span class="sk">4a.2b-iii</span><span class="sl">Bulk edit + duplicate preview</span><span class="ss">next</span></div>
+            <div class="slice planned"><span class="sk">4a.2b-iv</span><span class="sl">Register student + photo capture</span><span class="ss">—</span></div>
+            <div class="slice planned"><span class="sk">4a.2c</span><span class="sl">Department deactivate-vs-delete</span><span class="ss">—</span></div>
+            <div class="slice planned"><span class="sk">4a.3</span><span class="sl">Excel / ZIP import</span><span class="ss">—</span></div>
+          </div>
+
+          <div class="track" data-s="planned">
+            <span class="tk">4b</span>
+            <span class="tl">Reporting <small>— charts, ranges, exports (runs parallel)</small></span>
+            <span class="ts planned">Planned</span>
+          </div>
+
+          <div class="track" data-s="planned">
+            <span class="tk">photo</span>
+            <span class="tl">Photo display <small>— <span class="mono">LAvatar</span> on kiosk &amp; search</small></span>
+            <span class="ts planned">Planned</span>
+          </div>
+        </div>
+      </div>
+    </article>
+
+    <article class="phase" data-status="planned" style="animation-delay:.22s">
+      <span class="node"></span>
+      <div class="card">
+        <div class="card-head">
+          <span class="pnum">PHASE 5</span>
+          <h2 class="ptitle">Light / Dark Mode</h2>
+          <span class="chip planned">Planned</span>
+        </div>
+        <p class="psummary">A full theming pass across both surfaces — the natural sibling of the Phase 4 brand-token work, parked until the Admin screens land.</p>
+      </div>
+    </article>
+
+    <article class="phase" data-status="planned" style="animation-delay:.26s">
+      <span class="node"></span>
+      <div class="card">
+        <div class="card-head">
+          <span class="pnum">PHASE 6</span>
+          <h2 class="ptitle">Backend Hardening</h2>
+          <span class="chip planned">Planned</span>
+        </div>
+        <p class="psummary">Sessions/tokens, HTTPS, and the broader server-side auth work deliberately deferred out of the UI phases — plus retiring the legacy Widgets rollback once 2.0 is trusted.</p>
+      </div>
+    </article>
+
+  </section>
+
+  <footer>
+    <span>LOAMS 2.0 · <span class="mono">github.com/lachris320/WITS</span></span>
+    <span class="mono">Snapshot 2026-08-05 · master @ a194c7b</span>
+  </footer>
+</div>
+
+<script>
+  (function(){
+    var c = document.getElementById('spark');
+    if(!c) return;
+    var pts = [12,17,23,32,36,39];   // ctest target growth, Phase 1 → now
+    function draw(){
+      var css = getComputedStyle(document.documentElement);
+      var line = css.getPropertyValue('--brand').trim() || '#7E1A15';
+      var gold = css.getPropertyValue('--gold-bright').trim() || '#E8B10E';
+      var faint = css.getPropertyValue('--hairline').trim() || '#e7ded8';
+      var dpr = Math.max(1, window.devicePixelRatio||1);
+      var w = c.clientWidth||320, h = c.clientHeight||38;
+      c.width = w*dpr; c.height = h*dpr;
+      var x = c.getContext('2d'); x.scale(dpr,dpr);
+      x.clearRect(0,0,w,h);
+      var pad=4, min=Math.min.apply(null,pts), max=Math.max.apply(null,pts);
+      var X=function(i){return pad + i*(w-2*pad)/(pts.length-1);};
+      var Y=function(v){return h-pad-(v-min)/(max-min)*(h-2*pad);};
+      // baseline
+      x.strokeStyle=faint; x.lineWidth=1;
+      x.beginPath(); x.moveTo(pad,h-pad); x.lineTo(w-pad,h-pad); x.stroke();
+      // area
+      x.beginPath(); x.moveTo(X(0),Y(pts[0]));
+      for(var i=1;i<pts.length;i++) x.lineTo(X(i),Y(pts[i]));
+      x.lineTo(X(pts.length-1),h-pad); x.lineTo(X(0),h-pad); x.closePath();
+      var g=x.createLinearGradient(0,0,0,h);
+      g.addColorStop(0, hexA(line,.22)); g.addColorStop(1, hexA(line,0));
+      x.fillStyle=g; x.fill();
+      // line
+      x.beginPath(); x.moveTo(X(0),Y(pts[0]));
+      for(var j=1;j<pts.length;j++) x.lineTo(X(j),Y(pts[j]));
+      x.strokeStyle=line; x.lineWidth=2; x.lineJoin='round'; x.stroke();
+      // endpoint
+      var ex=X(pts.length-1), ey=Y(pts[pts.length-1]);
+      x.beginPath(); x.arc(ex,ey,3.4,0,7); x.fillStyle=gold; x.fill();
+      x.strokeStyle=css.getPropertyValue('--surface').trim()||'#fff'; x.lineWidth=1.5; x.stroke();
+    }
+    function hexA(hex,a){
+      hex=hex.replace('#',''); if(hex.length===3) hex=hex.split('').map(function(c){return c+c;}).join('');
+      var n=parseInt(hex,16); return 'rgba('+((n>>16)&255)+','+((n>>8)&255)+','+(n&255)+','+a+')';
+    }
+    draw();
+    window.addEventListener('resize', draw);
+    if(window.matchMedia) window.matchMedia('(prefers-color-scheme:dark)').addEventListener('change', draw);
+    new MutationObserver(draw).observe(document.documentElement,{attributes:true,attributeFilter:['data-theme']});
+  })();
+</script>
