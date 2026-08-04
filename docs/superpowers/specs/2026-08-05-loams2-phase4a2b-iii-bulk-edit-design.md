@@ -308,17 +308,20 @@ pairs so each closes on its own event and there is no cross-dialog coupling:
 - bulk: new `bulkEditReady()` / `bulkEditFinished()`.
 
 `onBulkUpdateFinished` must emit the right one. The VM tracks which mode is
-in-flight with a small `enum { NoEdit, SingleEdit, BulkEdit } m_editMode` set at
-`beginEdit`/`beginBulkEditSelected` and consulted (then reset) when the result
-arrives. (Alternative considered: reuse `editFinished` for both — rejected to
-avoid the single dialog reacting to a bulk result.)
+in-flight with a **scoped** `enum class EditMode { NoEdit, SingleEdit, BulkEdit }
+m_editMode` set at `beginEdit`/`beginBulkEditSelected` and consulted (then reset)
+when the result arrives. (Alternative considered: reuse `editFinished` for both —
+rejected to avoid the single dialog reacting to a bulk result.) It is a **scoped
+`enum class`** so its `SingleEdit`/`BulkEdit` enumerators don't collide with the
+`CourseTarget` enum's below in the same class scope.
 
 ### Course-list routing (reusing `m_editController`)
 
 Both dialogs load "courses for department D" via `m_editController`, whose
 `coursesLoaded` currently lands in `onEditCoursesLoaded` → `m_editCourses`.
-Because the dialogs are mutually exclusive, we route by target: a private
-`enum { SingleEdit, BulkEdit } m_courseTarget` is set immediately before each
+Because the dialogs are mutually exclusive, we route by target: a private scoped
+`enum class CourseTarget { SingleEdit, BulkEdit } m_courseTarget` is set
+immediately before each
 `m_editController->loadCourses(...)` call, and `onEditCoursesLoaded` dispatches
 the result to `m_editCourses` (single) or `m_bulkCourses` (bulk) accordingly.
 No third `QNetworkAccessManager`.
@@ -352,7 +355,7 @@ on `loadCourses` is a future hardening, not this slice.
 **New Q_INVOKABLEs:**
 
 - `beginBulkEditSelected()` — guard `selectedCount >= 2`; reset all toggles/values
-  to a clean state; `m_editMode = BulkEdit`; emit `bulkEditReady()`.
+  to a clean state; `m_editMode = EditMode::BulkEdit`; emit `bulkEditReady()`.
 - setters: `setChangeDepartment/Course/YearLevel/Gender/Status(bool)`,
   `setBulkDepartment/Course/YearLevel/Gender/Status(QString)` (with the
   Department⇔Course coupling above).
@@ -360,7 +363,9 @@ on `loadCourses` is a future hardening, not this slice.
 - Reuse existing `requiresTypedConfirmation(int)`.
 
 **New free static** (in `DatabaseViewModel`, testable without a VM instance):
-`buildBulkUpdates(const QList<StudentRecord>&, const BulkEditChanges&)`.
+`buildBulkUpdates(const QList<StudentRecord>&, const BulkEditChanges&)`. A private
+`BulkEditChanges currentChanges() const` packs the VM's live toggle/value state
+into the POD for `applyBulkEdit` and `bulkChangeSummary`.
 
 **New private members:** `BulkEditChanges`-worth of toggle/value state;
 `bool m_bulkInFlight` (re-entry guard); `enum { NoEdit, SingleEdit, BulkEdit }
@@ -394,7 +399,7 @@ every `selectionChanged` — killing the over-emit.
 ```
 [≥2 selected] → Edit button (enabled, selectedCount>=1)
       → onClicked branch: selectedCount>1 → vm.beginBulkEditSelected()
-      → VM: reset toggles, m_editMode=BulkEdit, emit bulkEditReady()
+      → VM: reset toggles, m_editMode=EditMode::BulkEdit, emit bulkEditReady()
       → BulkEditDialog opens
    operator toggles fields + picks values (setChange*/setBulk* → canApplyBulk, bulkChangeSummary update)
       → Apply (enabled by canApplyBulk) → dialog emits applyRequested()
@@ -450,7 +455,8 @@ server rejection is `applyServerRejection` (folded-in helper).
 - **`m_bulkInFlight` re-entry guard:** a second `applyBulkEdit()` before a result
   arrives is a no-op; the guard clears on the next result.
 - **Course-target routing:** an `onEditCoursesLoaded` while `m_courseTarget ==
-  BulkEdit` populates `bulkCourses`, not `editCourses`, and vice-versa.
+  CourseTarget::BulkEdit` populates `bulkCourses`, not `editCourses`, and
+  vice-versa.
 - **Count-based result messages:** `onBulkUpdateFinished` with `updatedCount`
   1 / N / 0 → the three messages; `!ok` auth vs generic → `applyServerRejection`.
 - **`applyServerRejection` shared behavior:** an auth-failure message via the
