@@ -9,8 +9,10 @@ Item {
     // LTable row-motion fixture `tAnimated` (Phase 3 Task C), which gets its
     // own band below all of them for the same reason: interactive fixtures
     // sharing a position/z with a later-declared sibling silently absorb
-    // synthetic mouse events meant for the earlier one.
-    width: 400; height: 2800
+    // synthetic mouse events meant for the earlier one. Also accommodates
+    // `rowActBand` (4a.2b-ii Task 4), the LTable.rowActivated double-click
+    // fixture, in its own band below `casc`.
+    width: 400; height: 3080
 
     LButton    { id: b;  text: "OK" }
     LButton {
@@ -1397,6 +1399,48 @@ Item {
             var deptCombo = findChild(casc, "cascDept");
             deptCombo.selectValue("All");
             compare(casc.department, "");        // "All" -> empty
+        }
+    }
+
+    // --- LTable.rowActivated double-click (4a.2b-ii) ---
+    // Own vertical band below `casc` (y:2660..2660+its own height): an
+    // interactive fixture sharing a position/z with a sibling silently
+    // absorbs synthetic mouse events meant for the other one (see the
+    // LBarChart/LTable notes above).
+    Item {
+        id: rowActBand
+        y: 2820
+        width: 400; height: 200
+        LTable {
+            id: rowActTable
+            anchors.fill: parent
+            selectable: true
+            columns: [ { key: "name", title: "Name" } ]
+            model: ListModel {
+                ListElement { schoolId: "S1"; name: "Ann"; selected: false }
+                ListElement { schoolId: "S2"; name: "Ben"; selected: false }
+            }
+        }
+        SignalSpy {
+            id: rowActSpy
+            target: rowActTable
+            signalName: "rowActivated"
+        }
+        TestCase {
+            name: "LTableRowActivated"; when: windowShown
+            function init() { rowActSpy.clear(); }
+            function test_doubleClickEmitsRowActivatedWithSchoolId() {
+                var row = findChild(rowActTable, "tableRow_0");
+                verify(row !== null);
+                // Double-click on the row BODY (far right), away from the
+                // ~18x18 checkbox at the left edge. mouseDoubleClickSequence
+                // (not mouseDoubleClick) is required here: TapHandler.
+                // onDoubleTapped only fires on real press/release pairs,
+                // which mouseDoubleClick does not synthesize.
+                mouseDoubleClickSequence(row, row.width - 12, row.height / 2);
+                compare(rowActSpy.count, 1);
+                compare(rowActSpy.signalArguments[0][0], "S1");
+            }
         }
     }
 }
