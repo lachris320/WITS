@@ -80,6 +80,7 @@ public:
     Q_INVOKABLE void setEditGender(const QString &v);
     Q_INVOKABLE void setEditStatus(const QString &v);
     Q_INVOKABLE void setEditCourse(const QString &v);
+    Q_INVOKABLE void saveEdit();
 
     // Public slots (test seam — driven network-free, like SearchViewModel).
     void onSearchFinished(SearchOutcome outcome, const QList<StudentRecord> &records,
@@ -90,6 +91,8 @@ public:
     void onDeleteFinished(bool ok, int requestedCount, const QString &message);
     void onDeleteFailed(const QString &errorString);
     void onEditCoursesLoaded(const QStringList &courses);
+    void onBulkUpdateFinished(const BulkUpdateResult &result);
+    void onBulkUpdateFailed(const QString &errorString);
 
 signals:
     void departmentsChanged();
@@ -110,6 +113,7 @@ signals:
     void editCourseChanged();
     void editCoursesChanged();
     void editReady();
+    void editFinished();
 
 private:
     bool acceptRequest(quint64 requestId);

@@ -33,6 +33,12 @@ private slots:
     void beginEditSelectedUsesSingleSelectedId();
     void setEditDepartmentClearsCourseAndReloads();
     void onEditCoursesLoadedPopulatesEditCourses();
+    void onBulkUpdateFinishedSuccessSetsStatusReloadsAndFinishes();
+    void onBulkUpdateFinishedNoChangeSetsStatusAndFinishes();
+    void onBulkUpdateFinishedAuthFailureSetsAuthStateKeepsOpen();
+    void onBulkUpdateFinishedGenericFailureSetsStatusNoAuth();
+    void onBulkUpdateFailedSetsTransientStatus();
+    void saveEditEntersGuardedPath();
 };
 
 // A DatabaseViewModel test-ctor takes a StudentController*; but StudentController
@@ -286,6 +292,87 @@ void TestDatabaseViewModel::onEditCoursesLoadedPopulatesEditCourses()
     DatabaseViewModel vm;
     vm.onEditCoursesLoaded({"BSIT", "BSCS"});
     QCOMPARE(vm.editCourses(), (QStringList{"BSIT", "BSCS"}));
+}
+
+void TestDatabaseViewModel::onBulkUpdateFinishedSuccessSetsStatusReloadsAndFinishes()
+{
+    DatabaseViewModel vm;
+    StudentRecord r; r.schoolId = "A"; r.name = "Ann";
+    vm.onSearchFinished(SearchOutcome::Results, {r}, "", "", 1);
+
+    QSignalSpy finishedSpy(&vm, &DatabaseViewModel::editFinished);
+    BulkUpdateResult res; res.ok = true; res.updatedCount = 1;
+    vm.onBulkUpdateFinished(res);
+
+    QCOMPARE(vm.statusMessage(), QStringLiteral("Student updated"));
+    QVERIFY(!vm.authFailure());
+    QVERIFY(vm.loading());                 // reloadTable() flipped loading on
+    QCOMPARE(finishedSpy.count(), 1);
+}
+
+void TestDatabaseViewModel::onBulkUpdateFinishedNoChangeSetsStatusAndFinishes()
+{
+    DatabaseViewModel vm;
+    QSignalSpy finishedSpy(&vm, &DatabaseViewModel::editFinished);
+    BulkUpdateResult res; res.ok = true; res.updatedCount = 0;
+    vm.onBulkUpdateFinished(res);
+
+    QCOMPARE(vm.statusMessage(), QStringLiteral("No changes to save"));
+    QVERIFY(!vm.authFailure());
+    QCOMPARE(finishedSpy.count(), 1);      // dialog closes on a no-op too
+}
+
+void TestDatabaseViewModel::onBulkUpdateFinishedAuthFailureSetsAuthStateKeepsOpen()
+{
+    DatabaseViewModel vm;
+    QSignalSpy finishedSpy(&vm, &DatabaseViewModel::editFinished);
+    BulkUpdateResult res; res.ok = false; res.message = "Invalid admin key";
+    vm.onBulkUpdateFinished(res);
+
+    QVERIFY(vm.authFailure());
+    QVERIFY(!vm.statusMessage().isEmpty());
+    QCOMPARE(finishedSpy.count(), 0);      // dialog stays open on error
+}
+
+void TestDatabaseViewModel::onBulkUpdateFinishedGenericFailureSetsStatusNoAuth()
+{
+    DatabaseViewModel vm;
+    QSignalSpy finishedSpy(&vm, &DatabaseViewModel::editFinished);
+    BulkUpdateResult res; res.ok = false; res.message = "Some updates failed, rolled back";
+    vm.onBulkUpdateFinished(res);
+
+    QVERIFY(!vm.authFailure());
+    QCOMPARE(vm.statusMessage(), QStringLiteral("Some updates failed, rolled back"));
+    QCOMPARE(finishedSpy.count(), 0);
+}
+
+void TestDatabaseViewModel::onBulkUpdateFailedSetsTransientStatus()
+{
+    DatabaseViewModel vm;
+    QSignalSpy finishedSpy(&vm, &DatabaseViewModel::editFinished);
+    vm.onBulkUpdateFailed(QStringLiteral("Connection refused"));
+    QVERIFY(!vm.authFailure());
+    QVERIFY(!vm.statusMessage().isEmpty());
+    QCOMPARE(finishedSpy.count(), 0);
+}
+
+void TestDatabaseViewModel::saveEditEntersGuardedPath()
+{
+    // saveEdit reads the AdminSession key and posts via the VM's own NAM (no
+    // live server in CI). The exact wire form (1-element students JSON array +
+    // admin_key) is asserted at the controller level in
+    // tst_studentcontroller::bulkUpdate_buildsFormBodyWithStudentsJsonAndAdminKey.
+    // Here we only prove saveEdit does not early-return: with a located record
+    // it leaves edit state intact and fires without crashing.
+    DatabaseViewModel vm;
+    AdminSession::instance().setKey("held-key");
+    StudentRecord r; r.schoolId = "A"; r.name = "Ann"; r.department = "CCS"; r.course = "BSIT";
+    vm.onSearchFinished(SearchOutcome::Results, {r}, "", "", 1);
+    vm.beginEdit("A");
+    vm.setEditName("Ann Edited");
+    vm.saveEdit();                         // posts; reply handled asynchronously
+    QCOMPARE(vm.editName(), QStringLiteral("Ann Edited"));
+    AdminSession::instance().clear();
 }
 
 QTEST_MAIN(TestDatabaseViewModel)

@@ -27,6 +27,11 @@ DatabaseViewModel::DatabaseViewModel(QObject *parent)
     // canEdit tracks selection size — re-emit whenever the model's selection changes.
     connect(&m_students, &StudentsTableModel::selectionChanged,
             this, &DatabaseViewModel::canEditChanged);
+
+    connect(m_controller, &StudentController::bulkUpdateFinished,
+            this, &DatabaseViewModel::onBulkUpdateFinished);
+    connect(m_controller, &StudentController::bulkUpdateFailed,
+            this, &DatabaseViewModel::onBulkUpdateFailed);
 }
 
 void DatabaseViewModel::refresh()
@@ -203,6 +208,54 @@ void DatabaseViewModel::setEditStatus(const QString &v)
 
 void DatabaseViewModel::setEditCourse(const QString &v)
 { if (m_editCourse != v) { m_editCourse = v; emit editCourseChanged(); } }
+
+void DatabaseViewModel::saveEdit()
+{
+    StudentRecord rec;
+    rec.schoolId   = m_editSchoolId;   // immutable identity (WHERE key)
+    rec.code       = m_editCode;       // carried unchanged
+    rec.visits     = m_editVisits;     // carried unchanged
+    rec.name       = m_editName;
+    rec.department = m_editDepartment;
+    rec.course     = m_editCourse;
+    rec.yearLevel  = m_editYearLevel;
+    rec.gender     = m_editGender;
+    rec.status     = m_editStatus;
+    // Primary controller (search/delete/bulkUpdate) — NOT the edit course loader.
+    m_controller->bulkUpdateStudents({rec}, AdminSession::instance().key());
+}
+
+void DatabaseViewModel::onBulkUpdateFinished(const BulkUpdateResult &result)
+{
+    if (result.ok && result.updatedCount >= 1) {
+        setAuthFailure(false);
+        setStatusMessage(tr("Student updated"));
+        reloadTable();                 // re-fetch the current dept/course filter
+        emit editFinished();
+        return;
+    }
+    if (result.ok) {                   // updatedCount == 0: no-op edit is a success
+        setAuthFailure(false);
+        setStatusMessage(tr("No changes to save"));
+        emit editFinished();
+        return;
+    }
+    // Server rejection. Distinguish a 401 held-key failure from a generic error
+    // via the SAME predicate delete uses (§Error Taxonomy). Keep the dialog open.
+    if (SettingsViewModel::isAuthFailureMessage(result.message)) {
+        setAuthFailure(true);
+        setStatusMessage(tr("Admin authentication failed — re-enter via admin login."));
+    } else {
+        setAuthFailure(false);
+        setStatusMessage(result.message.isEmpty() ? tr("Update failed.") : result.message);
+    }
+}
+
+void DatabaseViewModel::onBulkUpdateFailed(const QString & /*errorString*/)
+{
+    setAuthFailure(false);
+    setStatusMessage(tr("Update failed — check your connection."));
+}
 
 bool DatabaseViewModel::exportCsv(const QUrl &fileUrl)
 {
