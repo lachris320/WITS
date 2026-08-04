@@ -986,6 +986,7 @@ void DatabaseViewModel::onBulkUpdateFinished(const BulkUpdateResult &result)
         // the existing single-edit tests that never set BulkEdit still get editFinished.
         if (m_editMode == EditMode::BulkEdit) emit bulkEditFinished();
         else                                  emit editFinished();
+        m_editMode = EditMode::NoEdit;        // consumed — reset for the next round
         return;
     }
     applyServerRejection(result.message, tr("Update failed."));  // dialog stays open
@@ -1081,7 +1082,9 @@ Item {
     id: root
     property bool checked: false
     property string label: ""
-    property bool enabled: true
+    // `enabled` is inherited from Item (non-final) — do NOT redeclare it; a
+    // disabled parent auto-disables the MouseArea, and the bindings below read
+    // the inherited value.
     signal toggled(bool checked)
 
     implicitHeight: Math.max(box.implicitHeight, labelText.implicitHeight)
@@ -1258,6 +1261,23 @@ In `tst_qml_admin.qml`, extend the geometry ledger comment, raise the root `heig
                 mouseClick(findChild(bulkDialog, "bulkCancelButton"));
                 compare(bulkDialog.visible, false);
             }
+            // Regression: a clicked checkbox imperatively writes `checked`,
+            // severing any binding — so a reopen MUST re-sync from the vm or the
+            // toggle shows stale. Click Status on, close, reset the vm (as
+            // beginBulkEditSelected does), reopen -> the check must read false.
+            function test_reopenResyncsTogglesFromVm() {
+                bulkDialog.visible = true;
+                waitForRendering(bulkDialog);
+                var statusCheck = findChild(bulkDialog, "bulkStatusCheck");
+                mouseClick(statusCheck);
+                compare(statusCheck.checked, true);
+                compare(bulkStub.changeStatus, true);
+                bulkDialog.visible = false;
+                bulkStub.changeStatus = false;          // vm reset (beginBulkEditSelected)
+                bulkDialog.visible = true;
+                waitForRendering(bulkDialog);
+                compare(statusCheck.checked, false);     // re-synced, not stale
+            }
         }
     }
     Component { id: signalSpy; SignalSpy {} }
@@ -1306,6 +1326,17 @@ LDialog {
     }
     onVisibleChanged: if (visible && root.vm) {
         root.prefilling = true;
+        // Checkboxes: set imperatively (setting `checked` does NOT emit
+        // toggled — only a MouseArea click does — so no re-entry guard needed
+        // for these, and re-assigning on each open HEALS the binding-severance
+        // a prior click caused, so a reopened dialog never shows stale toggles.
+        // Clickable checks carry NO declarative `checked:` binding (it would be
+        // severed on first click anyway); only the driven Course check binds.
+        deptCheck.checked   = root.vm.changeDepartment;
+        yearCheck.checked   = root.vm.changeYearLevel;
+        genderCheck.checked = root.vm.changeGender;
+        statusCheck.checked = root.vm.changeStatus;
+        // Combos: selectValue() DOES emit selected(), hence the prefilling guard.
         deptCombo.selectValue(root.vm.bulkDepartment);
         bulkCourseCombo.selectValue(root.vm.bulkCourse);
         yearField.text = root.vm.bulkYearLevel;
@@ -1318,12 +1349,14 @@ LDialog {
         width: parent.width
         spacing: Theme.spacing.md
 
-        // Department (drives Course).
+        // Department (drives Course). No declarative `checked:` binding — a
+        // MouseArea click imperatively writes checked (severing any binding),
+        // so state is synced from the vm on open (onVisibleChanged) instead.
         LCheckbox {
+            id: deptCheck
             objectName: "bulkDeptCheck"
             label: qsTr("Change Department")
-            checked: root.vm ? root.vm.changeDepartment : false
-            onToggled: function(on) { if (root.vm) root.vm.setChangeDepartment(on); }
+            onToggled: function(on) { if (!root.prefilling && root.vm) root.vm.setChangeDepartment(on); }
         }
         LComboBox {
             id: deptCombo
@@ -1353,10 +1386,10 @@ LDialog {
 
         // Year Level.
         LCheckbox {
+            id: yearCheck
             objectName: "bulkYearCheck"
             label: qsTr("Change Year Level")
-            checked: root.vm ? root.vm.changeYearLevel : false
-            onToggled: function(on) { if (root.vm) root.vm.setChangeYearLevel(on); }
+            onToggled: function(on) { if (!root.prefilling && root.vm) root.vm.setChangeYearLevel(on); }
         }
         LTextField {
             id: yearField
@@ -1369,10 +1402,10 @@ LDialog {
 
         // Gender.
         LCheckbox {
+            id: genderCheck
             objectName: "bulkGenderCheck"
             label: qsTr("Change Gender")
-            checked: root.vm ? root.vm.changeGender : false
-            onToggled: function(on) { if (root.vm) root.vm.setChangeGender(on); }
+            onToggled: function(on) { if (!root.prefilling && root.vm) root.vm.setChangeGender(on); }
         }
         LComboBox {
             id: genderCombo
@@ -1385,10 +1418,10 @@ LDialog {
 
         // Status.
         LCheckbox {
+            id: statusCheck
             objectName: "bulkStatusCheck"
             label: qsTr("Change Status")
-            checked: root.vm ? root.vm.changeStatus : false
-            onToggled: function(on) { if (root.vm) root.vm.setChangeStatus(on); }
+            onToggled: function(on) { if (!root.prefilling && root.vm) root.vm.setChangeStatus(on); }
         }
         LComboBox {
             id: statusCombo
@@ -1488,7 +1521,9 @@ In `tst_qml_admin.qml`, extend the existing Database `stubVm` (around line 1648)
             function setBulkStatus(v) { bulkStatus = v; }
 ```
 
-Also change the stub's `canEdit` semantics note: keep `property bool canEdit: false` but the tests below drive `selectedCount`. Add a `selectedCount` mirror to `stubModel` usage — `stubModel.selectedCount` already exists.
+Keep `property bool canEdit: false` on the stub; the tests below drive `selectedCount` via `stubModel.selectedCount` (already exists).
+
+**Reconcile two now-superseded existing tests** (they will otherwise break the full-suite gate): the adaptive `onClicked` (Step 3) branches on `selectedCount`, but the existing `test_editButtonInvokesBeginEditSelected` (`tst_qml_admin.qml:1801-1806`) clicks with `selectedCount == 0` (its `init()` resets it to 0) and expects `beginEditSelected` — which now routes to `beginBulkEditSelected` instead, failing the assertion. **DELETE** `test_editButtonInvokesBeginEditSelected` (superseded by the new `test_editButtonOpensSingleEditAtOne`) and **DELETE** `test_editButtonEnabledOnlyWhenCanEdit` (superseded by the new `test_editButtonEnabledWhenAnySelected`). Add the new tests below in their place.
 
 Add tests to the `DatabaseScreen` TestCase (reset the new counters in `init()`):
 
@@ -1613,10 +1648,11 @@ After the existing `StudentEditDialog { id: editDialog ... }` block (near the en
         id: bulkEditConfirm
         objectName: "bulkEditConfirm"
         title: qsTr("Apply bulk changes?")
-        // PlainText (LDialog pins it): restate exactly what changes + the count.
-        message: (screen.vm ? screen.vm.bulkChangeSummary.join("\n") : "")
-                 + qsTr("\n\nApply to %1 students. Unlisted fields are left unchanged.")
-                       .arg(screen.selectedCount)
+        // PlainText (LDialog pins it): restate exactly what changes + the count,
+        // bulleted, matching the spec's change-preview illustration.
+        message: qsTr("Apply these changes to %1 students:\n").arg(screen.selectedCount)
+                 + (screen.vm ? "• " + screen.vm.bulkChangeSummary.join("\n• ") : "")
+                 + qsTr("\n\nUnlisted fields are left unchanged.")
         confirmText: qsTr("Apply")
         requireTypedConfirmation: screen.vm ? screen.vm.requiresTypedConfirmation(screen.selectedCount) : false
         confirmationWord: "UPDATE"
