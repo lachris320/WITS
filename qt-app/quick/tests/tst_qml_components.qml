@@ -12,7 +12,7 @@ Item {
     // synthetic mouse events meant for the earlier one. Also accommodates
     // `rowActBand` (4a.2b-ii Task 4), the LTable.rowActivated double-click
     // fixture, in its own band below `casc`.
-    width: 400; height: 3080
+    width: 400; height: 3160
 
     LButton    { id: b;  text: "OK" }
     LButton {
@@ -1443,4 +1443,30 @@ Item {
             }
         }
     }
+
+    // --- LCheckbox fixture (own band below rowActBand) ---
+    LCheckbox { id: chk; objectName: "chk"; y: 3090; label: "Change Status" }
+
+    TestCase {
+        name: "LCheckbox"; when: windowShown
+        function init() { chk.checked = false; }
+        function test_clickTogglesCheckedAndEmits() {
+            var spy = signalSpy.createObject(chk, { target: chk, signalName: "toggled" });
+            compare(chk.checked, false);
+            mouseClick(chk);
+            compare(chk.checked, true);
+            compare(spy.count, 1);
+            mouseClick(chk);
+            compare(chk.checked, false);
+            compare(spy.count, 2);
+            spy.destroy();
+        }
+        function test_disabledDoesNotToggle() {
+            chk.enabled = false;
+            mouseClick(chk);
+            compare(chk.checked, false);
+            chk.enabled = true;
+        }
+    }
+    Component { id: signalSpy; SignalSpy {} }
 }

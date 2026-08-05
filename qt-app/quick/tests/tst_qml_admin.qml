@@ -11,10 +11,10 @@ Item {
     //
     // Geometry ledger (x 0 column):   dash 0..760 | search 760..1460 |
     //   logs 1460..2160 | settings 2160..3760 | database 3800..4500
-    //   | editDialog 4500..5200.
+    //   | editDialog 4500..5200 | bulkEdit 5200..5900.
     // Parked no-vm column (x 2000): vmlessSearch 0..700 |
     //   vmlessLogs 760..1460 | vmlessSettings 1560..2260.
-    width: 1100; height: 5200
+    width: 1100; height: 5900
 
     // --- Dashboard stub VM ---
     // maxValue is declared on the stubs because the screen binds
@@ -1686,6 +1686,38 @@ Item {
             function setEditStatus(v) { editStatus = v; }
             function setEditCourse(v) { editCourse = v; }
             function saveEdit() {}
+            property int beginBulkEditSelectedCount: 0
+            property int applyBulkEditCount: 0
+            property var bulkChangeSummary: ["Status → Inactive"]
+            property bool bulkBusy: false
+            property bool canApplyBulk: false
+            // Bulk field surface the hosted BulkEditDialog binds to.
+            property bool changeDepartment: false
+            property bool changeCourse: false
+            property bool changeYearLevel: false
+            property bool changeGender: false
+            property bool changeStatus: false
+            property string bulkDepartment: ""
+            property string bulkCourse: ""
+            property string bulkYearLevel: ""
+            property string bulkGender: ""
+            property string bulkStatus: ""
+            property var bulkCourses: []
+            signal bulkEditReady()
+            signal bulkEditFinished()
+            function beginBulkEditSelected() { beginBulkEditSelectedCount++; bulkEditReady(); }
+            function applyBulkEdit() { applyBulkEditCount++; }
+            // No-op setters so the dialog's onSelected/onToggled handlers resolve.
+            function setChangeDepartment(v) { changeDepartment = v; changeCourse = v; if (!v) bulkCourse = ""; }
+            function setChangeCourse(v) { changeCourse = v && changeDepartment; }
+            function setChangeYearLevel(v) { changeYearLevel = v; }
+            function setChangeGender(v) { changeGender = v; }
+            function setChangeStatus(v) { changeStatus = v; }
+            function setBulkDepartment(v) { bulkDepartment = v; bulkCourse = ""; }
+            function setBulkCourse(v) { bulkCourse = v; }
+            function setBulkYearLevel(v) { bulkYearLevel = v; }
+            function setBulkGender(v) { bulkGender = v; }
+            function setBulkStatus(v) { bulkStatus = v; }
         }
 
         DatabaseScreen { id: databaseScreen; anchors.fill: parent; vm: stubVm }
@@ -1715,6 +1747,12 @@ Item {
                 if (ed) ed.visible = false;
                 var dlg = findChild(databaseScreen, "deleteConfirm");
                 if (dlg) { dlg.visible = false; dlg.clearKey(); }
+                stubVm.beginBulkEditSelectedCount = 0;
+                stubVm.applyBulkEditCount = 0;
+                var bd = findChild(databaseScreen, "bulkEditDialog");
+                if (bd) bd.visible = false;
+                var bc = findChild(databaseScreen, "bulkEditConfirm");
+                if (bc) { bc.visible = false; bc.clearKey(); }
             }
             function test_showsCascadingFilter() {
                 verify(findChild(databaseScreen, "cascDept") !== null);
@@ -1791,18 +1829,63 @@ Item {
                 stubVm.statusMessage = "Second status";
                 compare(toast.message, "Second status");
             }
-            function test_editButtonEnabledOnlyWhenCanEdit() {
+            function test_editButtonEnabledWhenAnySelected() {
                 var btn = findChild(databaseScreen, "editButton");
-                verify(btn !== null);
-                compare(btn.enabled, false);          // canEdit false
-                stubVm.canEdit = true;
+                stubModel.selectedCount = 0; stubVm.canEdit = false;
+                compare(btn.enabled, false);
+                stubModel.selectedCount = 1; stubVm.canEdit = true;
+                compare(btn.enabled, true);
+                stubModel.selectedCount = 3;   // canEdit stays true (>=1)
                 compare(btn.enabled, true);
             }
-            function test_editButtonInvokesBeginEditSelected() {
-                stubVm.canEdit = true;
+            function test_editButtonOpensSingleEditAtOne() {
+                stubModel.selectedCount = 1; stubVm.canEdit = true;
                 waitForRendering(databaseScreen);
                 mouseClick(findChild(databaseScreen, "editButton"));
                 compare(stubVm.beginEditSelectedCount, 1);
+                compare(stubVm.beginBulkEditSelectedCount, 0);
+            }
+            function test_editButtonOpensBulkEditAtTwoPlus() {
+                stubModel.selectedCount = 2; stubVm.canEdit = true;
+                waitForRendering(databaseScreen);
+                mouseClick(findChild(databaseScreen, "editButton"));
+                compare(stubVm.beginBulkEditSelectedCount, 1);
+                compare(stubVm.beginEditSelectedCount, 0);
+            }
+            function test_bulkEditReadyOpensDialog_finishedCloses() {
+                var d = findChild(databaseScreen, "bulkEditDialog");
+                verify(d !== null);
+                compare(d.visible, false);
+                stubVm.bulkEditReady();
+                compare(d.visible, true);
+                stubVm.bulkEditFinished();
+                compare(d.visible, false);
+            }
+            function test_applyRequestedOpensPreviewThenConfirmApplies() {
+                stubModel.selectedCount = 2;
+                stubVm.bulkEditReady();
+                var d = findChild(databaseScreen, "bulkEditDialog");
+                d.applyRequested();                       // dialog asks to apply
+                var confirm = findChild(databaseScreen, "bulkEditConfirm");
+                verify(confirm !== null);
+                compare(confirm.visible, true);
+                // Preview restates the change + count.
+                verify(confirm.message.indexOf("Status → Inactive") !== -1);
+                verify(confirm.message.indexOf("2") !== -1);
+                compare(confirm.requireTypedConfirmation, false);   // 2 < 10
+                mouseClick(findChild(confirm, "confirmButton"));
+                compare(stubVm.applyBulkEditCount, 1);
+            }
+            function test_bulkConfirmTypedGateForLargeSelection() {
+                stubModel.selectedCount = 12;
+                stubVm.bulkEditReady();
+                findChild(databaseScreen, "bulkEditDialog").applyRequested();
+                var confirm = findChild(databaseScreen, "bulkEditConfirm");
+                compare(confirm.requireTypedConfirmation, true);
+                var btn = findChild(confirm, "confirmButton");
+                compare(btn.enabled, false);
+                findChild(confirm, "confirmTypedField").text = "UPDATE";
+                compare(btn.enabled, true);
             }
             function test_rowActivatedInvokesBeginEdit() {
                 // Drive the screen's LTable→vm wiring directly (the stub model is
@@ -1908,4 +1991,117 @@ Item {
             }
         }
     }
+
+    // --- BulkEditDialog fixture (own band below editDialog, y 5200..5900) ---
+    Item {
+        id: bulkEditBand
+        y: 5200
+        width: 900; height: 700
+
+        QtObject {
+            id: bulkStub
+            property var departments: ["CCS", "CBA"]
+            property var bulkCourses: ["BSBA", "BSA"]
+            property bool changeDepartment: false
+            property bool changeCourse: false
+            property bool changeYearLevel: false
+            property bool changeGender: false
+            property bool changeStatus: false
+            property string bulkDepartment: ""
+            property string bulkCourse: ""
+            property string bulkYearLevel: ""
+            property string bulkGender: ""
+            property string bulkStatus: ""
+            property bool canApplyBulk: false
+            property bool bulkBusy: false
+            // Mirror the real coupling so the dialog's driven bindings behave.
+            function setChangeDepartment(v) {
+                changeDepartment = v;
+                changeCourse = v;                 // coupled
+                if (!v) bulkCourse = "";
+            }
+            function setChangeCourse(v) { changeCourse = v && changeDepartment; }
+            function setChangeYearLevel(v) { changeYearLevel = v; }
+            function setChangeGender(v) { changeGender = v; }
+            function setChangeStatus(v) { changeStatus = v; }
+            function setBulkDepartment(v) { bulkDepartment = v; bulkCourse = ""; }
+            function setBulkCourse(v) { bulkCourse = v; }
+            function setBulkYearLevel(v) { bulkYearLevel = v; }
+            function setBulkGender(v) { bulkGender = v; }
+            function setBulkStatus(v) { bulkStatus = v; }
+        }
+
+        BulkEditDialog { id: bulkDialog; anchors.fill: parent; vm: bulkStub }
+
+        TestCase {
+            name: "BulkEditDialog"; when: windowShown
+            function init() {
+                bulkStub.changeDepartment = false; bulkStub.changeCourse = false;
+                bulkStub.changeStatus = false; bulkStub.bulkStatus = "";
+                bulkStub.bulkDepartment = ""; bulkStub.bulkCourse = "";
+                bulkStub.canApplyBulk = false; bulkStub.bulkBusy = false;
+                bulkDialog.visible = false;
+            }
+            function test_valueControlDisabledUntilToggleOn() {
+                bulkDialog.visible = true;
+                waitForRendering(bulkDialog);
+                var statusCombo = findChild(bulkDialog, "bulkStatusCombo");
+                verify(statusCombo !== null);
+                compare(statusCombo.enabled, false);          // toggle off
+                bulkStub.changeStatus = true;
+                compare(statusCombo.enabled, true);
+            }
+            function test_courseToggleFollowsDepartment() {
+                bulkDialog.visible = true;
+                waitForRendering(bulkDialog);
+                var courseCheck = findChild(bulkDialog, "bulkCourseCheck");
+                var courseCombo = findChild(bulkDialog, "bulkCourseCombo");
+                verify(courseCheck !== null);
+                compare(courseCheck.checked, false);
+                compare(courseCombo.enabled, false);           // needs dept + a chosen dept
+                // Turn Department on via its checkbox -> Course check follows.
+                bulkStub.setChangeDepartment(true);
+                compare(courseCheck.checked, true);
+                bulkStub.bulkDepartment = "CBA";
+                compare(courseCombo.enabled, true);
+            }
+            function test_applyDisabledUntilCanApply_andEmitsApplyRequested() {
+                bulkDialog.visible = true;
+                waitForRendering(bulkDialog);
+                var apply = findChild(bulkDialog, "bulkApplyButton");
+                verify(apply !== null);
+                compare(apply.enabled, false);                 // canApplyBulk false
+                bulkStub.canApplyBulk = true;
+                compare(apply.enabled, true);
+                var spy = signalSpy.createObject(bulkDialog, { target: bulkDialog, signalName: "applyRequested" });
+                mouseClick(apply);
+                compare(spy.count, 1);
+                spy.destroy();
+            }
+            function test_cancelClosesDialog() {
+                bulkDialog.visible = true;
+                waitForRendering(bulkDialog);
+                mouseClick(findChild(bulkDialog, "bulkCancelButton"));
+                compare(bulkDialog.visible, false);
+            }
+            // Regression: a clicked checkbox imperatively writes `checked`,
+            // severing any binding — so a reopen MUST re-sync from the vm or the
+            // toggle shows stale. Click Status on, close, reset the vm (as
+            // beginBulkEditSelected does), reopen -> the check must read false.
+            function test_reopenResyncsTogglesFromVm() {
+                bulkDialog.visible = true;
+                waitForRendering(bulkDialog);
+                var statusCheck = findChild(bulkDialog, "bulkStatusCheck");
+                mouseClick(statusCheck);
+                compare(statusCheck.checked, true);
+                compare(bulkStub.changeStatus, true);
+                bulkDialog.visible = false;
+                bulkStub.changeStatus = false;          // vm reset (beginBulkEditSelected)
+                bulkDialog.visible = true;
+                waitForRendering(bulkDialog);
+                compare(statusCheck.checked, false);     // re-synced, not stale
+            }
+        }
+    }
+    Component { id: signalSpy; SignalSpy {} }
 }

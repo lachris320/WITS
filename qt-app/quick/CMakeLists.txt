@@ -47,6 +47,7 @@ qt_add_qml_module(witsquickmodule
         qml/admin/VisitLogsScreen.qml
         qml/admin/DatabaseScreen.qml
         qml/admin/StudentEditDialog.qml
+        qml/admin/BulkEditDialog.qml
         qml/admin/ReportingScreen.qml
         qml/admin/SettingsScreen.qml
         qml/components/LButton.qml
@@ -68,6 +69,7 @@ qt_add_qml_module(witsquickmodule
         qml/components/LConfirmDialog.qml
         qml/components/LComboBox.qml
         qml/components/LCascadingSelect.qml
+        qml/components/LCheckbox.qml
         qml/kiosk/GuestDialog.qml
     SOURCES
         HttpForm.h HttpForm.cpp

@@ -103,10 +103,18 @@ Rectangle {
                 variant: "Primary"
                 compact: true
                 text: qsTr("Edit")
-                enabled: screen.vm ? screen.vm.canEdit : false
-                tooltipText: qsTr("Select exactly one student to edit")
-                accessibleName: qsTr("Edit the selected student")
-                onClicked: if (screen.vm) screen.vm.beginEditSelected()
+                enabled: screen.vm ? screen.vm.canEdit : false     // >= 1 selected
+                tooltipText: screen.selectedCount > 1
+                             ? qsTr("Bulk-edit the %1 selected students").arg(screen.selectedCount)
+                             : qsTr("Edit the selected student")
+                accessibleName: screen.selectedCount > 1
+                                ? qsTr("Bulk-edit the %1 selected students").arg(screen.selectedCount)
+                                : qsTr("Edit the selected student")
+                onClicked: {
+                    if (!screen.vm) return;
+                    if (screen.selectedCount === 1) screen.vm.beginEditSelected();
+                    else                             screen.vm.beginBulkEditSelected();
+                }
             }
 
             TextMetrics {
@@ -203,11 +211,37 @@ Rectangle {
         vm: screen.vm
     }
 
+    BulkEditDialog {
+        id: bulkEditDialog
+        objectName: "bulkEditDialog"
+        vm: screen.vm
+        onApplyRequested: bulkEditConfirm.visible = true
+    }
+
+    // Change-preview gate. Declared AFTER bulkEditDialog so its scrim renders on
+    // top of the still-open bulk dialog (LDialog stacks by declaration order).
+    LConfirmDialog {
+        id: bulkEditConfirm
+        objectName: "bulkEditConfirm"
+        title: qsTr("Apply bulk changes?")
+        // PlainText (LDialog pins it): restate exactly what changes + the count,
+        // bulleted, matching the spec's change-preview illustration.
+        message: qsTr("Apply these changes to %1 students:\n").arg(screen.selectedCount)
+                 + (screen.vm ? "• " + screen.vm.bulkChangeSummary.join("\n• ") : "")
+                 + qsTr("\n\nUnlisted fields are left unchanged.")
+        confirmText: qsTr("Apply")
+        requireTypedConfirmation: screen.vm ? screen.vm.requiresTypedConfirmation(screen.selectedCount) : false
+        confirmationWord: "UPDATE"
+        onConfirmed: { bulkEditConfirm.visible = false; if (screen.vm) screen.vm.applyBulkEdit(); }
+    }
+
     // beginEdit/beginEditSelected emit editReady only when a record was located;
     // editFinished fires on save success or a no-op. Drive the modal from both.
     Connections {
         target: screen.vm ? screen.vm : null
         function onEditReady() { editDialog.visible = true; }
         function onEditFinished() { editDialog.visible = false; }
+        function onBulkEditReady() { bulkEditDialog.visible = true; }
+        function onBulkEditFinished() { bulkEditDialog.visible = false; }
     }
 }
