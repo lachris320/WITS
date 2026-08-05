@@ -11,6 +11,16 @@
 class QNetworkAccessManager;
 class StudentController;
 
+// The operator's bulk-edit choices: a toggle + value per editable field.
+// Passed to DatabaseViewModel::buildBulkUpdates (pure, unit-tested).
+struct BulkEditChanges {
+    bool changeDepartment = false; QString department;
+    bool changeCourse     = false; QString course;
+    bool changeYearLevel  = false; QString yearLevel;
+    bool changeGender     = false; QString gender;
+    bool changeStatus     = false; QString status;
+};
+
 // Database screen VM (spec §4.2, increment 4a.2a — read/filter/select only).
 // Wraps StudentController (no new endpoint: an empty-search searchStudents with
 // the dept/course filter loads the table). Mirrors SearchViewModel's wiring +
@@ -41,6 +51,13 @@ public:
     explicit DatabaseViewModel(QObject *parent = nullptr);
 
     static constexpr int kTypeToConfirmThreshold = 10;
+
+    // Pure: copies each selected record, overriding ONLY the toggled fields;
+    // name/schoolId/code/visits carry through untouched. A free static because
+    // the VM news up its own NAM (no injection seam) — this is the only way to
+    // unit-test the override/carry-through rules network-free.
+    static QList<StudentRecord> buildBulkUpdates(const QList<StudentRecord> &selected,
+                                                 const BulkEditChanges &changes);
 
     StudentsTableModel *students() { return &m_students; }
     QStringList departments() const { return m_departments; }

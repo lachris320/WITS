@@ -41,6 +41,7 @@ private slots:
     void onBulkUpdateFailedSetsTransientStatus();
     void serverRejectionSharedByDeleteAndBulk();
     void saveEditEntersGuardedPath();
+    void buildBulkUpdatesOverridesOnlyToggledFieldsAndCarriesRest();
 };
 
 // A DatabaseViewModel test-ctor takes a StudentController*; but StudentController
@@ -412,6 +413,37 @@ void TestDatabaseViewModel::saveEditEntersGuardedPath()
     vm.saveEdit();                         // posts; reply handled asynchronously
     QCOMPARE(vm.editName(), QStringLiteral("Ann Edited"));
     AdminSession::instance().clear();
+}
+
+void TestDatabaseViewModel::buildBulkUpdatesOverridesOnlyToggledFieldsAndCarriesRest()
+{
+    StudentRecord a; a.schoolId="A"; a.code="C-A"; a.name="Ann"; a.course="BSIT";
+    a.department="CCS"; a.yearLevel="2"; a.gender="Female"; a.status="Active"; a.visits=5;
+    StudentRecord b; b.schoolId="B"; b.code="C-B"; b.name="Ben"; b.course="BSCS";
+    b.department="CCS"; b.yearLevel="3"; b.gender="Male"; b.status="Active"; b.visits=9;
+
+    BulkEditChanges ch;
+    ch.changeDepartment = true; ch.department = "CBA";
+    ch.changeCourse     = true; ch.course     = "BSBA";
+    ch.changeStatus     = true; ch.status     = "Inactive";
+
+    const QList<StudentRecord> out = DatabaseViewModel::buildBulkUpdates({a, b}, ch);
+    QCOMPARE(out.size(), 2);
+    // Overridden on every record.
+    QCOMPARE(out[0].department, QStringLiteral("CBA"));
+    QCOMPARE(out[0].course,     QStringLiteral("BSBA"));
+    QCOMPARE(out[0].status,     QStringLiteral("Inactive"));
+    QCOMPARE(out[1].department, QStringLiteral("CBA"));
+    // Carried through per-record, untouched.
+    QCOMPARE(out[0].schoolId,  QStringLiteral("A"));
+    QCOMPARE(out[0].name,      QStringLiteral("Ann"));
+    QCOMPARE(out[0].code,      QStringLiteral("C-A"));
+    QCOMPARE(out[0].yearLevel, QStringLiteral("2"));    // not toggled
+    QCOMPARE(out[0].gender,    QStringLiteral("Female"));// not toggled
+    QCOMPARE(out[0].visits,    5);
+    QCOMPARE(out[1].name,      QStringLiteral("Ben"));   // NOT wiped
+    QCOMPARE(out[1].yearLevel, QStringLiteral("3"));
+    QCOMPARE(out[1].visits,    9);
 }
 
 QTEST_MAIN(TestDatabaseViewModel)

@@ -205,6 +205,22 @@ void DatabaseViewModel::applyServerRejection(const QString &message,
     }
 }
 
+QList<StudentRecord> DatabaseViewModel::buildBulkUpdates(const QList<StudentRecord> &selected,
+                                                         const BulkEditChanges &changes)
+{
+    QList<StudentRecord> out;
+    out.reserve(selected.size());
+    for (StudentRecord r : selected) {   // copy — carries name/schoolId/code/visits
+        if (changes.changeDepartment) r.department = changes.department;
+        if (changes.changeCourse)     r.course     = changes.course;
+        if (changes.changeYearLevel)  r.yearLevel  = changes.yearLevel;
+        if (changes.changeGender)     r.gender     = changes.gender;
+        if (changes.changeStatus)     r.status     = changes.status;
+        out.append(r);
+    }
+    return out;
+}
+
 void DatabaseViewModel::setEditName(const QString &v)
 { if (m_editName != v) { m_editName = v; emit editNameChanged(); } }
 
