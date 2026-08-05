@@ -38,6 +38,7 @@ private slots:
     void onBulkUpdateFinishedAuthFailureSetsAuthStateKeepsOpen();
     void onBulkUpdateFinishedGenericFailureSetsStatusNoAuth();
     void onBulkUpdateFailedSetsTransientStatus();
+    void serverRejectionSharedByDeleteAndBulk();
     void saveEditEntersGuardedPath();
 };
 
@@ -354,6 +355,29 @@ void TestDatabaseViewModel::onBulkUpdateFailedSetsTransientStatus()
     QVERIFY(!vm.authFailure());
     QVERIFY(!vm.statusMessage().isEmpty());
     QCOMPARE(finishedSpy.count(), 0);
+}
+
+void TestDatabaseViewModel::serverRejectionSharedByDeleteAndBulk()
+{
+    // Same auth-failure message must produce the SAME auth state + toast on
+    // both the delete and the bulk-update paths (proves the shared helper).
+    DatabaseViewModel del;
+    del.onDeleteFinished(false, 2, QStringLiteral("Invalid admin key"));
+    DatabaseViewModel bulk;
+    BulkUpdateResult res; res.ok = false; res.message = "Invalid admin key";
+    bulk.onBulkUpdateFinished(res);
+    QCOMPARE(del.authFailure(), true);
+    QCOMPARE(bulk.authFailure(), true);
+    QCOMPARE(del.statusMessage(), bulk.statusMessage());   // identical auth toast
+
+    // And a generic (non-auth) message stays non-auth on both, using each
+    // path's own fallback when empty.
+    DatabaseViewModel del2;  del2.onDeleteFinished(false, 1, QString());
+    DatabaseViewModel bulk2; BulkUpdateResult r2; r2.ok = false; bulk2.onBulkUpdateFinished(r2);
+    QCOMPARE(del2.authFailure(), false);
+    QCOMPARE(bulk2.authFailure(), false);
+    QCOMPARE(del2.statusMessage(), QStringLiteral("Delete failed."));
+    QCOMPARE(bulk2.statusMessage(), QStringLiteral("Update failed."));
 }
 
 void TestDatabaseViewModel::saveEditEntersGuardedPath()

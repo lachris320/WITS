@@ -129,13 +129,7 @@ void DatabaseViewModel::onDeleteFinished(bool ok, int requestedCount, const QStr
     }
     // Server rejection. Tell the 401 held-key failure apart from a generic
     // server error via the SAME predicate SettingsViewModel uses (§Error Taxonomy).
-    if (SettingsViewModel::isAuthFailureMessage(message)) {
-        setAuthFailure(true);
-        setStatusMessage(tr("Admin authentication failed — re-enter via admin login."));
-    } else {
-        setAuthFailure(false);
-        setStatusMessage(message.isEmpty() ? tr("Delete failed.") : message);
-    }
+    applyServerRejection(message, tr("Delete failed."));
 }
 
 void DatabaseViewModel::onDeleteFailed(const QString & /*errorString*/)
@@ -194,6 +188,20 @@ void DatabaseViewModel::onEditCoursesLoaded(const QStringList &courses)
     m_editCourses = courses; emit editCoursesChanged();
 }
 
+void DatabaseViewModel::applyServerRejection(const QString &message,
+                                             const QString &genericFallback)
+{
+    // Tell a 401 held-key failure apart from a generic server error via the
+    // SAME predicate SettingsViewModel uses (§Error Taxonomy).
+    if (SettingsViewModel::isAuthFailureMessage(message)) {
+        setAuthFailure(true);
+        setStatusMessage(tr("Admin authentication failed — re-enter via admin login."));
+    } else {
+        setAuthFailure(false);
+        setStatusMessage(message.isEmpty() ? genericFallback : message);
+    }
+}
+
 void DatabaseViewModel::setEditName(const QString &v)
 { if (m_editName != v) { m_editName = v; emit editNameChanged(); } }
 
@@ -242,13 +250,7 @@ void DatabaseViewModel::onBulkUpdateFinished(const BulkUpdateResult &result)
     }
     // Server rejection. Distinguish a 401 held-key failure from a generic error
     // via the SAME predicate delete uses (§Error Taxonomy). Keep the dialog open.
-    if (SettingsViewModel::isAuthFailureMessage(result.message)) {
-        setAuthFailure(true);
-        setStatusMessage(tr("Admin authentication failed — re-enter via admin login."));
-    } else {
-        setAuthFailure(false);
-        setStatusMessage(result.message.isEmpty() ? tr("Update failed.") : result.message);
-    }
+    applyServerRejection(result.message, tr("Update failed."));
 }
 
 void DatabaseViewModel::onBulkUpdateFailed(const QString & /*errorString*/)

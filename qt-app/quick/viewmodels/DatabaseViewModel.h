@@ -121,6 +121,7 @@ private:
     void setError(const QString &e);
     void setStatusMessage(const QString &m);
     void setAuthFailure(bool v);
+    void applyServerRejection(const QString &message, const QString &genericFallback);
 
     QNetworkAccessManager *m_nam = nullptr;
     StudentController *m_controller = nullptr;
