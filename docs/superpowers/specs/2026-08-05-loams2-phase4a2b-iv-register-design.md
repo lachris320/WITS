@@ -62,7 +62,9 @@ client fix.
   rendered in QML MUST be `Text.PlainText` (cleartext-HTTP injection guard).
 - **No new shared component** is required by this slice (Fable UI review
   confirmed: use plain error `Text`, a button label-swap for busy, and the
-  existing `LDialog`/`LTextField`/`LComboBox`/`LCascadingSelect`/`LButton`).
+  existing `LDialog`/`LTextField`/`LComboBox`/`LButton`). Dept→Course uses two
+  plain `LComboBox`es (NOT `LCascadingSelect` — see the Dept→Course note below;
+  that control is a *filter* affordance and is wrong for a create form).
 
 ---
 
@@ -96,7 +98,11 @@ requireAdminAuth($conn);   // 401 "Admin authentication required" before anythin
 Multipart form-data populates `$_POST`, so `requireAdminAuth` reads
 `$_POST['admin_key']` (bcrypt) exactly as the other four guarded endpoints do.
 **This is breaking**: any client that doesn't send `admin_key` now 401s — hence
-the legacy fix below. Deploy `register_student.php` to XAMPP together with the
+the legacy fix below. (The alternate server route `api.php` →
+`students/register` → `require register_student.php` inherits the guard
+automatically — no separate fix, but noted so an experimental/web caller through
+that path isn't a surprise 401. Repo grep confirms the only client caller is the
+legacy `adminwindow.cpp` register lambda.) Deploy `register_student.php` to XAMPP together with the
 client (like 4a.1 Task 10), and negative-auth verify (401 without key) +
 positive verify (success with key).
 
@@ -131,21 +137,57 @@ selection (you can register any time; disabled only while `vm.loading`).
 
 An `LDialog`-based modal, `property var vm`. Title **"Register student"**; submit
 button **"Register"**. It is a *fresh* form (no prefill from existing data), so
-it needs **none** of the combo-severance/`prefilling` guard machinery the edit
-dialogs carry — `onVisibleChanged` just resets controls to their placeholder
-state and focuses School ID.
+it needs **none of the `prefilling`-guard machinery** the edit dialogs carry —
+`onVisibleChanged` just resets controls to their placeholder state and focuses
+School ID. It **does** still need the department→course re-sync `Connections`
+(exactly as `StudentEditDialog` carries): `LComboBox.onActivated` imperatively
+assigns `currentValue` and severs the binding, so when the department changes the
+course combo must be visibly reset — a `Connections { onRegCourseChanged: … }` /
+`onRegCoursesChanged` handler re-selects the course combo's placeholder. (This is
+the narrower, always-needed half of the machinery; the prefill/severance-on-open
+half the edit dialogs use to seed existing values is what a fresh form omits.)
 
-**Field order & grouping** (Fable UX review — identity → academic → photo, height
-budgeted for `LDialog`'s no-scroll 460px card):
+> **Implementation note for the plan (combo reset re-entrancy):**
+> `LComboBox.selectValue()` *emits* `selected()`, so resetting the dept combo on
+> reopen via a naive `regDeptCombo.selectValue("")` re-enters
+> `onSelected → vm.setRegDepartment("")`, clearing `regCourse` and firing a
+> spurious empty-department `loadCourses("")` on every open. It's benign
+> (idempotent; `beginRegister()` already cleared the VM), but the implementer
+> should reset the combos via a **non-emitting** path (or make `setRegDepartment("")`
+> a hard no-op) rather than a value-emitting `selectValue("")`.
+
+**`LDialog` inherits only its non-dismissing scrim, not keys or focus.** `LDialog`
+is a plain `Item` with a click-swallowing scrim `MouseArea` (so the scrim-does-
+not-dismiss behavior below IS inherited), but it has **no** `Keys` handler and is
+**not** a focus scope. So **Esc-to-cancel and all focus management below are new
+work implemented in `RegisterStudentDialog` itself** (`Keys.onEscapePressed` +
+`forceActiveFocus()` calls) — neither `LDialog` nor `StudentEditDialog` provides
+them for free. Budget them in the plan as new code, not reuse.
+
+**Field order & grouping** (Fable UX review — identity → academic → photo). The
+card is **width-capped at 460px**; `LDialog` sets no height cap and provides no
+`ScrollView`, so height is content-driven `implicitHeight` against the window —
+budget the ~8 rows against **window height** (an over-tall form clips rather than
+scrolls), comparable to the shipped `BulkEditDialog`. Rows:
 
 1. **School ID \*** (`LTextField`) — required, editable. Directly under it: an
    inline error `Text` (`visible: vm.regDuplicate`, `Text.PlainText`, error
    token) reading "This School ID already exists."
 2. **Name \*** (`LTextField`) — required.
 3. **Code** (`LTextField`) — optional.
-4. **Department → Course** (`LCascadingSelect`) — dependent cascade; course model
-   is `vm.regCourses`.
-5. **Year Level** (`LTextField`) — optional free text; `placeholderText`
+4. **Department → Course** — two plain `LComboBox`es (mirroring
+   `StudentEditDialog`, NOT `LCascadingSelect`). Register-scoped `objectName`s
+   **`regDeptCombo` / `regCourseCombo`** (NOT the shared `cascDept`/`cascCourse`,
+   which the Database filter's `LCascadingSelect` already occupies — a second
+   `cascDept` in the same scene would make the QuickTest `findChild` seam
+   ambiguous). Department model = the same departments list the
+   Database filter cascade already loads (reuse it; no new department property);
+   course model =
+   `vm.regCourses`. Department `onActivated → vm.setRegDepartment(currentValue)`;
+   the re-sync `Connections` resets the course combo to its placeholder on change.
+   No "All" placeholder — these *assign*, they don't *filter* (an operator
+   registering a student is choosing a department, not clearing a filter).
+5. **Year Level** (`LTextField`) — optional free text; `placeholder`
    "e.g. 1, 2, 3, 4".
 6. **Gender** + **Status** paired on one `RowLayout` (two `LComboBox` ~50/50) —
    saves a row of height; Gender ∈ [Male, Female], Status ∈ [Active, Inactive].
@@ -204,6 +246,15 @@ inline error.
   ID.
 - **`error` (generic)** → shared `databaseToast` with the server message; dialog
   stays open, data preserved.
+  - **Z-order caveat (verify during build):** `databaseToast` is declared
+    *before* the dialogs in `DatabaseScreen.qml`, and `LDialog` paints a
+    full-parent scrim, so the register dialog's scrim can stack *over* the toast
+    and dim/occlude it. Single/bulk edit already lean on this same "dialog stays
+    open + shared toast" path, so it's a pre-existing pattern — but because the
+    shared toast is the **only** surface for a generic register error, confirm
+    during GUI smoke that the toast renders **above** the register scrim. If it
+    doesn't, add an in-dialog error `Text` (mirroring the duplicate inline error)
+    for the generic-error case rather than relying on the occluded toast.
 - **401 held-key** → routed via the same `SettingsViewModel::isAuthFailureMessage`
   split (`applyServerRejection`) as delete/bulk → auth toast + `authFailure`;
   dialog stays open.
