@@ -27,7 +27,8 @@ private slots:
     void exportCsvWritesAllRowsWhenNoneSelected();
     void exportCsvWritesOnlySelectedWhenSomeSelected();
     void exportCsvWriteFailureReturnsFalse();
-    void canEditIsTrueOnlyWhenExactlyOneSelected();
+    void canEditIsTrueWhenAtLeastOneSelected();
+    void canEditChangedEmitsOnlyOnBooleanFlip();
     void beginEditPrefillsAllFieldsAndEmitsReady();
     void beginEditNoMatchIsNoOp();
     void beginEditSelectedUsesSingleSelectedId();
@@ -213,17 +214,31 @@ void TestDatabaseViewModel::exportCsvWriteFailureReturnsFalse()
     QVERIFY(!vm.statusMessage().isEmpty());
 }
 
-void TestDatabaseViewModel::canEditIsTrueOnlyWhenExactlyOneSelected()
+void TestDatabaseViewModel::canEditIsTrueWhenAtLeastOneSelected()
 {
     DatabaseViewModel vm;
     StudentRecord a; a.schoolId = "A"; a.name = "Ann";
     StudentRecord b; b.schoolId = "B"; b.name = "Ben";
     vm.onSearchFinished(SearchOutcome::Results, {a, b}, "", "", 1);
-    QCOMPARE(vm.canEdit(), false);              // 0 selected
+    QCOMPARE(vm.canEdit(), false);   // 0 selected
     vm.students()->toggle("A");
-    QCOMPARE(vm.canEdit(), true);               // exactly 1
+    QCOMPARE(vm.canEdit(), true);    // exactly 1 -> single-edit
     vm.students()->toggle("B");
-    QCOMPARE(vm.canEdit(), false);              // 2 selected
+    QCOMPARE(vm.canEdit(), true);    // 2 selected -> bulk-edit (button still enabled)
+}
+
+void TestDatabaseViewModel::canEditChangedEmitsOnlyOnBooleanFlip()
+{
+    DatabaseViewModel vm;
+    StudentRecord a; a.schoolId = "A"; a.name = "Ann";
+    StudentRecord b; b.schoolId = "B"; b.name = "Ben";
+    vm.onSearchFinished(SearchOutcome::Results, {a, b}, "", "", 1);
+    QSignalSpy spy(&vm, &DatabaseViewModel::canEditChanged);
+    vm.students()->toggle("A");   // false -> true  : emit
+    vm.students()->toggle("B");   // true  -> true  : no emit
+    vm.students()->toggle("B");   // true  -> true  : no emit
+    vm.students()->toggle("A");   // true  -> false : emit
+    QCOMPARE(spy.count(), 2);
 }
 
 void TestDatabaseViewModel::beginEditPrefillsAllFieldsAndEmitsReady()

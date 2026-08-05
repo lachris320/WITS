@@ -51,7 +51,7 @@ public:
     QString errorText() const { return m_errorText; }
     QString statusMessage() const { return m_statusMessage; }
     bool authFailure() const { return m_authFailure; }
-    bool canEdit() const { return m_students.selectedCount() == 1; }
+    bool canEdit() const { return m_students.selectedCount() >= 1; }
     QString editSchoolId() const { return m_editSchoolId; }
     QString editName() const { return m_editName; }
     QString editYearLevel() const { return m_editYearLevel; }
@@ -132,6 +132,7 @@ private:
     bool m_loading = false;
     bool m_authFailure = false;
     bool m_deleteInFlight = false;
+    bool m_lastCanEdit = false;
     quint64 m_latestAppliedRequestId = 0;
 
     QNetworkAccessManager *m_editNam = nullptr;

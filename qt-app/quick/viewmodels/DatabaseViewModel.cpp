@@ -24,9 +24,12 @@ DatabaseViewModel::DatabaseViewModel(QObject *parent)
     m_editController = new StudentController(m_editNam, this);
     connect(m_editController, &StudentController::coursesLoaded,
             this, &DatabaseViewModel::onEditCoursesLoaded);
-    // canEdit tracks selection size — re-emit whenever the model's selection changes.
-    connect(&m_students, &StudentsTableModel::selectionChanged,
-            this, &DatabaseViewModel::canEditChanged);
+    // canEdit is a derived bool over selection size; only re-emit when it
+    // actually flips (was: fired on every selectionChanged -> over-emit).
+    connect(&m_students, &StudentsTableModel::selectionChanged, this, [this] {
+        const bool now = canEdit();
+        if (now != m_lastCanEdit) { m_lastCanEdit = now; emit canEditChanged(); }
+    });
 
     connect(m_controller, &StudentController::bulkUpdateFinished,
             this, &DatabaseViewModel::onBulkUpdateFinished);
