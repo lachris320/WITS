@@ -163,6 +163,8 @@ void DatabaseViewModel::beginEdit(const QString &schoolId)
     m_editDepartment = r.department; emit editDepartmentChanged();
     m_editCourse   = r.course;     emit editCourseChanged();
 
+    m_editMode = EditMode::SingleEdit;
+    m_courseTarget = CourseTarget::SingleEdit;
     m_editController->loadCourses(r.department);   // independent of the filter's course list
     emit editReady();
 }
@@ -183,12 +185,17 @@ void DatabaseViewModel::setEditDepartment(const QString &dept)
                   // re-selecting the same department must never blank the course).
     m_editDepartment = dept; emit editDepartmentChanged();
     if (!m_editCourse.isEmpty()) { m_editCourse.clear(); emit editCourseChanged(); }
+    m_courseTarget = CourseTarget::SingleEdit;
     m_editController->loadCourses(dept);           // re-scope the edit course list
 }
 
 void DatabaseViewModel::onEditCoursesLoaded(const QStringList &courses)
 {
-    m_editCourses = courses; emit editCoursesChanged();
+    if (m_courseTarget == CourseTarget::BulkEdit) {
+        m_bulkCourses = courses; emit bulkCoursesChanged();
+    } else {
+        m_editCourses = courses; emit editCoursesChanged();
+    }
 }
 
 void DatabaseViewModel::applyServerRejection(const QString &message,
@@ -380,8 +387,26 @@ void DatabaseViewModel::setBulkDepartment(const QString &v)
     if (m_bulkDepartment == v) return;
     m_bulkDepartment = v; emit bulkDepartmentChanged();
     if (!m_bulkCourse.isEmpty()) { m_bulkCourse.clear(); emit bulkCourseChanged(); }
-    // NOTE: the dependent course-list LOAD is wired in Task 5.
+    m_courseTarget = CourseTarget::BulkEdit;
+    m_editController->loadCourses(v);   // dependent course list for the bulk dialog
     emitBulkDerivedChanged();
+}
+
+void DatabaseViewModel::beginBulkEditSelected()
+{
+    if (m_students.selectedCount() < 2) return;   // header button only branches here at >= 2
+    // Clean reset so a reopened dialog never inherits a prior session's state.
+    m_changeDepartment = m_changeCourse = m_changeYearLevel = false;
+    m_changeGender = m_changeStatus = false;
+    m_bulkDepartment.clear(); m_bulkCourse.clear(); m_bulkYearLevel.clear();
+    m_bulkGender.clear(); m_bulkStatus.clear(); m_bulkCourses.clear();
+    emit changeDepartmentChanged(); emit changeCourseChanged(); emit changeYearLevelChanged();
+    emit changeGenderChanged(); emit changeStatusChanged();
+    emit bulkDepartmentChanged(); emit bulkCourseChanged(); emit bulkYearLevelChanged();
+    emit bulkGenderChanged(); emit bulkStatusChanged(); emit bulkCoursesChanged();
+    emitBulkDerivedChanged();
+    m_editMode = EditMode::BulkEdit;
+    emit bulkEditReady();
 }
 
 void DatabaseViewModel::setBulkCourse(const QString &v)

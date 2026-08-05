@@ -47,6 +47,9 @@ private slots:
     void setBulkDepartmentClearsCourseValue();
     void canApplyBulkGating();
     void bulkChangeSummaryListsOnlyToggledInOrder();
+    void courseTargetRoutesBulkVsSingle();
+    void beginBulkEditSelectedGuardsBelowTwo();
+    void beginBulkEditSelectedResetsStateAndEmitsReady();
 };
 
 // A DatabaseViewModel test-ctor takes a StudentController*; but StudentController
@@ -505,6 +508,50 @@ void TestDatabaseViewModel::bulkChangeSummaryListsOnlyToggledInOrder()
              (QStringList{ QStringLiteral("Department → CBA"),
                            QStringLiteral("Course → BSBA"),
                            QStringLiteral("Status → Inactive") }));
+}
+
+void TestDatabaseViewModel::courseTargetRoutesBulkVsSingle()
+{
+    DatabaseViewModel vm;
+    vm.setBulkDepartment("CBA");                 // sets target = BulkEdit (+ fires a load)
+    vm.onEditCoursesLoaded({"BSBA", "BSA"});
+    QCOMPARE(vm.bulkCourses(), (QStringList{"BSBA", "BSA"}));
+    QVERIFY(vm.editCourses().isEmpty());          // single list untouched
+
+    StudentRecord r; r.schoolId="A"; r.name="Ann"; r.department="CCS"; r.course="BSIT";
+    vm.onSearchFinished(SearchOutcome::Results, {r}, "", "", 1);
+    vm.beginEdit("A");                            // sets target = SingleEdit
+    vm.onEditCoursesLoaded({"BSIT", "BSCS"});
+    QCOMPARE(vm.editCourses(), (QStringList{"BSIT", "BSCS"}));
+    QCOMPARE(vm.bulkCourses(), (QStringList{"BSBA", "BSA"}));   // bulk list unchanged
+}
+
+void TestDatabaseViewModel::beginBulkEditSelectedGuardsBelowTwo()
+{
+    DatabaseViewModel vm;
+    StudentRecord a; a.schoolId="A"; a.name="Ann";
+    vm.onSearchFinished(SearchOutcome::Results, {a}, "", "", 1);
+    vm.students()->toggle("A");                   // only 1 selected
+    QSignalSpy readySpy(&vm, &DatabaseViewModel::bulkEditReady);
+    vm.beginBulkEditSelected();
+    QCOMPARE(readySpy.count(), 0);                 // guarded — needs >= 2
+}
+
+void TestDatabaseViewModel::beginBulkEditSelectedResetsStateAndEmitsReady()
+{
+    DatabaseViewModel vm;
+    StudentRecord a; a.schoolId="A"; a.name="Ann";
+    StudentRecord b; b.schoolId="B"; b.name="Ben";
+    vm.onSearchFinished(SearchOutcome::Results, {a, b}, "", "", 1);
+    vm.students()->toggle("A"); vm.students()->toggle("B");   // 2 selected
+    // Dirty the bulk state from a prior open.
+    vm.setChangeStatus(true); vm.setBulkStatus("Inactive");
+    QSignalSpy readySpy(&vm, &DatabaseViewModel::bulkEditReady);
+    vm.beginBulkEditSelected();
+    QCOMPARE(vm.changeStatus(), false);            // reset
+    QCOMPARE(vm.bulkStatus(), QString());
+    QCOMPARE(vm.canApplyBulk(), false);
+    QCOMPARE(readySpy.count(), 1);
 }
 
 QTEST_MAIN(TestDatabaseViewModel)

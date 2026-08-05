@@ -63,6 +63,9 @@ class DatabaseViewModel : public QObject
 public:
     explicit DatabaseViewModel(QObject *parent = nullptr);
 
+    enum class EditMode     { NoEdit, SingleEdit, BulkEdit };
+    enum class CourseTarget { SingleEdit, BulkEdit };
+
     static constexpr int kTypeToConfirmThreshold = 10;
 
     // Pure: copies each selected record, overriding ONLY the toggled fields;
@@ -135,6 +138,7 @@ public:
     Q_INVOKABLE void setBulkYearLevel(const QString &v);
     Q_INVOKABLE void setBulkGender(const QString &v);
     Q_INVOKABLE void setBulkStatus(const QString &v);
+    Q_INVOKABLE void beginBulkEditSelected();
 
     // Public slots (test seam — driven network-free, like SearchViewModel).
     void onSearchFinished(SearchOutcome outcome, const QList<StudentRecord> &records,
@@ -181,6 +185,8 @@ signals:
     void bulkCoursesChanged();
     void canApplyBulkChanged();
     void bulkChangeSummaryChanged();
+    void bulkEditReady();
+    void bulkEditFinished();
 
 private:
     bool acceptRequest(quint64 requestId);
@@ -218,6 +224,9 @@ private:
          m_changeGender = false, m_changeStatus = false;
     QString m_bulkDepartment, m_bulkCourse, m_bulkYearLevel, m_bulkGender, m_bulkStatus;
     QStringList m_bulkCourses;
+
+    EditMode     m_editMode     = EditMode::NoEdit;
+    CourseTarget m_courseTarget = CourseTarget::SingleEdit;
 };
 
 #endif // DATABASEVIEWMODEL_H
