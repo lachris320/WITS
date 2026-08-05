@@ -384,10 +384,19 @@ void DatabaseViewModel::setChangeDepartment(bool v)
 
 void DatabaseViewModel::setChangeCourse(bool v)
 {
-    // Course tracks Department; independent enabling is a guarded no-op.
-    const bool target = v && m_changeDepartment;
-    if (m_changeCourse == target) return;
-    m_changeCourse = target; emit changeCourseChanged(); emitBulkDerivedChanged();
+    // Course-change is 1:1 COUPLED to Department-change and is driven
+    // exclusively by setChangeDepartment. A direct write is honored only when
+    // it agrees with the current department-toggle; a disagreeing write (which
+    // would desync the pair and resend a stale course on a dept change) is
+    // rejected. Defensive: the dialog's Course toggle is disabled and never
+    // calls this.
+    if (v != m_changeDepartment)
+        return;                       // reject desync (independent enable OR disable)
+    if (m_changeCourse == v)
+        return;                       // already consistent
+    m_changeCourse = v;
+    emit changeCourseChanged();
+    emitBulkDerivedChanged();
 }
 
 void DatabaseViewModel::setChangeYearLevel(bool v)

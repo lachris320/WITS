@@ -44,6 +44,7 @@ private slots:
     void buildBulkUpdatesOverridesOnlyToggledFieldsAndCarriesRest();
     void couplingDepartmentDrivesCourseToggle();
     void setChangeCourseWithoutDepartmentIsNoOp();
+    void setChangeCourseCannotDesyncFromDepartment();
     void setBulkDepartmentClearsCourseValue();
     void canApplyBulkGating();
     void bulkChangeSummaryListsOnlyToggledInOrder();
@@ -473,6 +474,20 @@ void TestDatabaseViewModel::setChangeCourseWithoutDepartmentIsNoOp()
     DatabaseViewModel vm;
     vm.setChangeCourse(true);                     // no department toggled
     QCOMPARE(vm.changeCourse(), false);           // guarded no-op
+}
+
+void TestDatabaseViewModel::setChangeCourseCannotDesyncFromDepartment()
+{
+    DatabaseViewModel vm;
+    vm.setChangeDepartment(true);          // couples: changeCourse becomes true
+    QCOMPARE(vm.changeCourse(), true);
+    vm.setChangeCourse(false);             // independent disable must be REJECTED
+    QCOMPARE(vm.changeCourse(), true);     // stays coupled to department
+
+    // Independent enable without department also stays a no-op (existing contract).
+    DatabaseViewModel vm2;
+    vm2.setChangeCourse(true);
+    QCOMPARE(vm2.changeCourse(), false);
 }
 
 void TestDatabaseViewModel::setBulkDepartmentClearsCourseValue()
