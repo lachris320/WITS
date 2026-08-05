@@ -42,6 +42,11 @@ private slots:
     void serverRejectionSharedByDeleteAndBulk();
     void saveEditEntersGuardedPath();
     void buildBulkUpdatesOverridesOnlyToggledFieldsAndCarriesRest();
+    void couplingDepartmentDrivesCourseToggle();
+    void setChangeCourseWithoutDepartmentIsNoOp();
+    void setBulkDepartmentClearsCourseValue();
+    void canApplyBulkGating();
+    void bulkChangeSummaryListsOnlyToggledInOrder();
 };
 
 // A DatabaseViewModel test-ctor takes a StudentController*; but StudentController
@@ -444,6 +449,62 @@ void TestDatabaseViewModel::buildBulkUpdatesOverridesOnlyToggledFieldsAndCarries
     QCOMPARE(out[1].name,      QStringLiteral("Ben"));   // NOT wiped
     QCOMPARE(out[1].yearLevel, QStringLiteral("3"));
     QCOMPARE(out[1].visits,    9);
+}
+
+void TestDatabaseViewModel::couplingDepartmentDrivesCourseToggle()
+{
+    DatabaseViewModel vm;
+    vm.setChangeDepartment(true);
+    QCOMPARE(vm.changeCourse(), true);           // dept ON forces course ON
+    vm.setBulkCourse("BSBA");
+    vm.setChangeDepartment(false);
+    QCOMPARE(vm.changeCourse(), false);          // dept OFF forces course OFF
+    QCOMPARE(vm.bulkCourse(), QString());         // and clears the course value
+}
+
+void TestDatabaseViewModel::setChangeCourseWithoutDepartmentIsNoOp()
+{
+    DatabaseViewModel vm;
+    vm.setChangeCourse(true);                     // no department toggled
+    QCOMPARE(vm.changeCourse(), false);           // guarded no-op
+}
+
+void TestDatabaseViewModel::setBulkDepartmentClearsCourseValue()
+{
+    DatabaseViewModel vm;
+    vm.setChangeDepartment(true);
+    vm.setBulkDepartment("CCS");
+    vm.setBulkCourse("BSIT");
+    vm.setBulkDepartment("CBA");                  // real dept change
+    QCOMPARE(vm.bulkCourse(), QString());          // dependent-clear
+}
+
+void TestDatabaseViewModel::canApplyBulkGating()
+{
+    DatabaseViewModel vm;
+    QCOMPARE(vm.canApplyBulk(), false);                    // nothing toggled
+    vm.setChangeYearLevel(true);
+    QCOMPARE(vm.canApplyBulk(), false);                    // toggled but empty value
+    vm.setBulkYearLevel("3");
+    QCOMPARE(vm.canApplyBulk(), true);                     // one valid change
+    // Department requires a course too.
+    DatabaseViewModel vm2;
+    vm2.setChangeDepartment(true);
+    vm2.setBulkDepartment("CBA");
+    QCOMPARE(vm2.canApplyBulk(), false);                   // dept set, course still empty
+    vm2.setBulkCourse("BSBA");
+    QCOMPARE(vm2.canApplyBulk(), true);
+}
+
+void TestDatabaseViewModel::bulkChangeSummaryListsOnlyToggledInOrder()
+{
+    DatabaseViewModel vm;
+    vm.setChangeDepartment(true);  vm.setBulkDepartment("CBA");  vm.setBulkCourse("BSBA");
+    vm.setChangeStatus(true);      vm.setBulkStatus("Inactive");
+    QCOMPARE(vm.bulkChangeSummary(),
+             (QStringList{ QStringLiteral("Department → CBA"),
+                           QStringLiteral("Course → BSBA"),
+                           QStringLiteral("Status → Inactive") }));
 }
 
 QTEST_MAIN(TestDatabaseViewModel)

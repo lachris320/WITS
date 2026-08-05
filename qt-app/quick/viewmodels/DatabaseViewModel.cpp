@@ -299,6 +299,103 @@ bool DatabaseViewModel::exportCsv(const QUrl &fileUrl)
     return true;
 }
 
+BulkEditChanges DatabaseViewModel::currentChanges() const
+{
+    BulkEditChanges c;
+    c.changeDepartment = m_changeDepartment; c.department = m_bulkDepartment;
+    c.changeCourse     = m_changeCourse;     c.course     = m_bulkCourse;
+    c.changeYearLevel  = m_changeYearLevel;  c.yearLevel  = m_bulkYearLevel;
+    c.changeGender     = m_changeGender;     c.gender     = m_bulkGender;
+    c.changeStatus     = m_changeStatus;     c.status     = m_bulkStatus;
+    return c;
+}
+
+void DatabaseViewModel::emitBulkDerivedChanged()
+{
+    emit canApplyBulkChanged();
+    emit bulkChangeSummaryChanged();
+}
+
+bool DatabaseViewModel::canApplyBulk() const
+{
+    const BulkEditChanges c = currentChanges();
+    bool any = false;
+    if (c.changeDepartment) {                  // dept + course move together
+        if (c.department.isEmpty() || c.course.isEmpty()) return false;
+        any = true;
+    } else if (c.changeCourse) {
+        return false;                          // course without dept is invalid
+    }
+    if (c.changeYearLevel) { if (c.yearLevel.isEmpty()) return false; any = true; }
+    if (c.changeGender)    { if (c.gender.isEmpty())    return false; any = true; }
+    if (c.changeStatus)    { if (c.status.isEmpty())    return false; any = true; }
+    return any;
+}
+
+QStringList DatabaseViewModel::bulkChangeSummary() const
+{
+    const BulkEditChanges c = currentChanges();
+    QStringList lines;
+    if (c.changeDepartment) lines << tr("%1 → %2").arg(tr("Department"), c.department);
+    if (c.changeCourse)     lines << tr("%1 → %2").arg(tr("Course"),     c.course);
+    if (c.changeYearLevel)  lines << tr("%1 → %2").arg(tr("Year Level"), c.yearLevel);
+    if (c.changeGender)     lines << tr("%1 → %2").arg(tr("Gender"),     c.gender);
+    if (c.changeStatus)     lines << tr("%1 → %2").arg(tr("Status"),     c.status);
+    return lines;
+}
+
+void DatabaseViewModel::setChangeDepartment(bool v)
+{
+    if (m_changeDepartment == v) return;
+    m_changeDepartment = v; emit changeDepartmentChanged();
+    // Coupling: Department and Course toggle together.
+    if (v) {
+        if (!m_changeCourse) { m_changeCourse = true; emit changeCourseChanged(); }
+    } else {
+        if (m_changeCourse) { m_changeCourse = false; emit changeCourseChanged(); }
+        if (!m_bulkCourse.isEmpty()) { m_bulkCourse.clear(); emit bulkCourseChanged(); }
+    }
+    emitBulkDerivedChanged();
+}
+
+void DatabaseViewModel::setChangeCourse(bool v)
+{
+    // Course tracks Department; independent enabling is a guarded no-op.
+    const bool target = v && m_changeDepartment;
+    if (m_changeCourse == target) return;
+    m_changeCourse = target; emit changeCourseChanged(); emitBulkDerivedChanged();
+}
+
+void DatabaseViewModel::setChangeYearLevel(bool v)
+{ if (m_changeYearLevel == v) return; m_changeYearLevel = v; emit changeYearLevelChanged(); emitBulkDerivedChanged(); }
+
+void DatabaseViewModel::setChangeGender(bool v)
+{ if (m_changeGender == v) return; m_changeGender = v; emit changeGenderChanged(); emitBulkDerivedChanged(); }
+
+void DatabaseViewModel::setChangeStatus(bool v)
+{ if (m_changeStatus == v) return; m_changeStatus = v; emit changeStatusChanged(); emitBulkDerivedChanged(); }
+
+void DatabaseViewModel::setBulkDepartment(const QString &v)
+{
+    if (m_bulkDepartment == v) return;
+    m_bulkDepartment = v; emit bulkDepartmentChanged();
+    if (!m_bulkCourse.isEmpty()) { m_bulkCourse.clear(); emit bulkCourseChanged(); }
+    // NOTE: the dependent course-list LOAD is wired in Task 5.
+    emitBulkDerivedChanged();
+}
+
+void DatabaseViewModel::setBulkCourse(const QString &v)
+{ if (m_bulkCourse == v) return; m_bulkCourse = v; emit bulkCourseChanged(); emitBulkDerivedChanged(); }
+
+void DatabaseViewModel::setBulkYearLevel(const QString &v)
+{ if (m_bulkYearLevel == v) return; m_bulkYearLevel = v; emit bulkYearLevelChanged(); emitBulkDerivedChanged(); }
+
+void DatabaseViewModel::setBulkGender(const QString &v)
+{ if (m_bulkGender == v) return; m_bulkGender = v; emit bulkGenderChanged(); emitBulkDerivedChanged(); }
+
+void DatabaseViewModel::setBulkStatus(const QString &v)
+{ if (m_bulkStatus == v) return; m_bulkStatus = v; emit bulkStatusChanged(); emitBulkDerivedChanged(); }
+
 void DatabaseViewModel::setLoading(bool v) { if (m_loading != v) { m_loading = v; emit loadingChanged(); } }
 void DatabaseViewModel::setError(const QString &e) { if (m_errorText != e) { m_errorText = e; emit errorTextChanged(); } }
 void DatabaseViewModel::setStatusMessage(const QString &m) { m_statusMessage = m; emit statusMessageChanged(); }

@@ -47,6 +47,19 @@ class DatabaseViewModel : public QObject
     Q_PROPERTY(QString editDepartment READ editDepartment NOTIFY editDepartmentChanged)
     Q_PROPERTY(QString editCourse READ editCourse WRITE setEditCourse NOTIFY editCourseChanged)
     Q_PROPERTY(QStringList editCourses READ editCourses NOTIFY editCoursesChanged)
+    Q_PROPERTY(bool changeDepartment READ changeDepartment WRITE setChangeDepartment NOTIFY changeDepartmentChanged)
+    Q_PROPERTY(bool changeCourse     READ changeCourse     WRITE setChangeCourse     NOTIFY changeCourseChanged)
+    Q_PROPERTY(bool changeYearLevel  READ changeYearLevel  WRITE setChangeYearLevel  NOTIFY changeYearLevelChanged)
+    Q_PROPERTY(bool changeGender     READ changeGender     WRITE setChangeGender     NOTIFY changeGenderChanged)
+    Q_PROPERTY(bool changeStatus     READ changeStatus     WRITE setChangeStatus     NOTIFY changeStatusChanged)
+    Q_PROPERTY(QString bulkDepartment READ bulkDepartment WRITE setBulkDepartment NOTIFY bulkDepartmentChanged)
+    Q_PROPERTY(QString bulkCourse     READ bulkCourse     WRITE setBulkCourse     NOTIFY bulkCourseChanged)
+    Q_PROPERTY(QString bulkYearLevel  READ bulkYearLevel  WRITE setBulkYearLevel  NOTIFY bulkYearLevelChanged)
+    Q_PROPERTY(QString bulkGender     READ bulkGender     WRITE setBulkGender     NOTIFY bulkGenderChanged)
+    Q_PROPERTY(QString bulkStatus     READ bulkStatus     WRITE setBulkStatus     NOTIFY bulkStatusChanged)
+    Q_PROPERTY(QStringList bulkCourses READ bulkCourses NOTIFY bulkCoursesChanged)
+    Q_PROPERTY(bool canApplyBulk READ canApplyBulk NOTIFY canApplyBulkChanged)
+    Q_PROPERTY(QStringList bulkChangeSummary READ bulkChangeSummary NOTIFY bulkChangeSummaryChanged)
 public:
     explicit DatabaseViewModel(QObject *parent = nullptr);
 
@@ -77,6 +90,19 @@ public:
     QString editDepartment() const { return m_editDepartment; }
     QString editCourse() const { return m_editCourse; }
     QStringList editCourses() const { return m_editCourses; }
+    bool changeDepartment() const { return m_changeDepartment; }
+    bool changeCourse() const { return m_changeCourse; }
+    bool changeYearLevel() const { return m_changeYearLevel; }
+    bool changeGender() const { return m_changeGender; }
+    bool changeStatus() const { return m_changeStatus; }
+    QString bulkDepartment() const { return m_bulkDepartment; }
+    QString bulkCourse() const { return m_bulkCourse; }
+    QString bulkYearLevel() const { return m_bulkYearLevel; }
+    QString bulkGender() const { return m_bulkGender; }
+    QString bulkStatus() const { return m_bulkStatus; }
+    QStringList bulkCourses() const { return m_bulkCourses; }
+    bool canApplyBulk() const;
+    QStringList bulkChangeSummary() const;
 
     Q_INVOKABLE void refresh();                          // load departments + all students
     Q_INVOKABLE void setDepartment(const QString &department);
@@ -98,6 +124,17 @@ public:
     Q_INVOKABLE void setEditStatus(const QString &v);
     Q_INVOKABLE void setEditCourse(const QString &v);
     Q_INVOKABLE void saveEdit();
+
+    Q_INVOKABLE void setChangeDepartment(bool v);
+    Q_INVOKABLE void setChangeCourse(bool v);
+    Q_INVOKABLE void setChangeYearLevel(bool v);
+    Q_INVOKABLE void setChangeGender(bool v);
+    Q_INVOKABLE void setChangeStatus(bool v);
+    Q_INVOKABLE void setBulkDepartment(const QString &v);
+    Q_INVOKABLE void setBulkCourse(const QString &v);
+    Q_INVOKABLE void setBulkYearLevel(const QString &v);
+    Q_INVOKABLE void setBulkGender(const QString &v);
+    Q_INVOKABLE void setBulkStatus(const QString &v);
 
     // Public slots (test seam — driven network-free, like SearchViewModel).
     void onSearchFinished(SearchOutcome outcome, const QList<StudentRecord> &records,
@@ -131,6 +168,19 @@ signals:
     void editCoursesChanged();
     void editReady();
     void editFinished();
+    void changeDepartmentChanged();
+    void changeCourseChanged();
+    void changeYearLevelChanged();
+    void changeGenderChanged();
+    void changeStatusChanged();
+    void bulkDepartmentChanged();
+    void bulkCourseChanged();
+    void bulkYearLevelChanged();
+    void bulkGenderChanged();
+    void bulkStatusChanged();
+    void bulkCoursesChanged();
+    void canApplyBulkChanged();
+    void bulkChangeSummaryChanged();
 
 private:
     bool acceptRequest(quint64 requestId);
@@ -139,6 +189,11 @@ private:
     void setStatusMessage(const QString &m);
     void setAuthFailure(bool v);
     void applyServerRejection(const QString &message, const QString &genericFallback);
+    // Packs the live toggle/value state into the POD for buildBulkUpdates,
+    // canApplyBulk and bulkChangeSummary.
+    BulkEditChanges currentChanges() const;
+    // Every setter re-emits the two derived read-outs.
+    void emitBulkDerivedChanged();
 
     QNetworkAccessManager *m_nam = nullptr;
     StudentController *m_controller = nullptr;
@@ -158,6 +213,11 @@ private:
     QString m_editDepartment, m_editCourse, m_editCode;
     int m_editVisits = 0;
     QStringList m_editCourses;
+
+    bool m_changeDepartment = false, m_changeCourse = false, m_changeYearLevel = false,
+         m_changeGender = false, m_changeStatus = false;
+    QString m_bulkDepartment, m_bulkCourse, m_bulkYearLevel, m_bulkGender, m_bulkStatus;
+    QStringList m_bulkCourses;
 };
 
 #endif // DATABASEVIEWMODEL_H
