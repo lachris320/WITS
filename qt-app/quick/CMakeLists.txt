@@ -68,6 +68,7 @@ qt_add_qml_module(witsquickmodule
         qml/components/LConfirmDialog.qml
         qml/components/LComboBox.qml
         qml/components/LCascadingSelect.qml
+        qml/components/LCheckbox.qml
         qml/kiosk/GuestDialog.qml
     SOURCES
         HttpForm.h HttpForm.cpp
