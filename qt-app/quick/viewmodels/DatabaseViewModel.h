@@ -60,6 +60,7 @@ class DatabaseViewModel : public QObject
     Q_PROPERTY(QStringList bulkCourses READ bulkCourses NOTIFY bulkCoursesChanged)
     Q_PROPERTY(bool canApplyBulk READ canApplyBulk NOTIFY canApplyBulkChanged)
     Q_PROPERTY(QStringList bulkChangeSummary READ bulkChangeSummary NOTIFY bulkChangeSummaryChanged)
+    Q_PROPERTY(bool bulkBusy READ bulkBusy NOTIFY bulkBusyChanged)
 public:
     explicit DatabaseViewModel(QObject *parent = nullptr);
 
@@ -106,6 +107,7 @@ public:
     QStringList bulkCourses() const { return m_bulkCourses; }
     bool canApplyBulk() const;
     QStringList bulkChangeSummary() const;
+    bool bulkBusy() const { return m_bulkInFlight; }
 
     Q_INVOKABLE void refresh();                          // load departments + all students
     Q_INVOKABLE void setDepartment(const QString &department);
@@ -139,6 +141,7 @@ public:
     Q_INVOKABLE void setBulkGender(const QString &v);
     Q_INVOKABLE void setBulkStatus(const QString &v);
     Q_INVOKABLE void beginBulkEditSelected();
+    Q_INVOKABLE void applyBulkEdit();
 
     // Public slots (test seam — driven network-free, like SearchViewModel).
     void onSearchFinished(SearchOutcome outcome, const QList<StudentRecord> &records,
@@ -187,6 +190,7 @@ signals:
     void bulkChangeSummaryChanged();
     void bulkEditReady();
     void bulkEditFinished();
+    void bulkBusyChanged();
 
 private:
     bool acceptRequest(quint64 requestId);
@@ -227,6 +231,7 @@ private:
 
     EditMode     m_editMode     = EditMode::NoEdit;
     CourseTarget m_courseTarget = CourseTarget::SingleEdit;
+    bool m_bulkInFlight = false;
 };
 
 #endif // DATABASEVIEWMODEL_H

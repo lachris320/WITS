@@ -50,6 +50,9 @@ private slots:
     void courseTargetRoutesBulkVsSingle();
     void beginBulkEditSelectedGuardsBelowTwo();
     void beginBulkEditSelectedResetsStateAndEmitsReady();
+    void onBulkUpdateFinishedPluralCountMessage();
+    void applyBulkEditRoutesBulkFinishedAndClearsBusy();
+    void applyBulkEditGuardsEmptyInvalidAndReentry();
 };
 
 // A DatabaseViewModel test-ctor takes a StudentController*; but StudentController
@@ -329,7 +332,7 @@ void TestDatabaseViewModel::onBulkUpdateFinishedSuccessSetsStatusReloadsAndFinis
     BulkUpdateResult res; res.ok = true; res.updatedCount = 1;
     vm.onBulkUpdateFinished(res);
 
-    QCOMPARE(vm.statusMessage(), QStringLiteral("Student updated"));
+    QCOMPARE(vm.statusMessage(), QStringLiteral("Updated 1 student"));
     QVERIFY(!vm.authFailure());
     QVERIFY(vm.loading());                 // reloadTable() flipped loading on
     QCOMPARE(finishedSpy.count(), 1);
@@ -552,6 +555,66 @@ void TestDatabaseViewModel::beginBulkEditSelectedResetsStateAndEmitsReady()
     QCOMPARE(vm.bulkStatus(), QString());
     QCOMPARE(vm.canApplyBulk(), false);
     QCOMPARE(readySpy.count(), 1);
+}
+
+void TestDatabaseViewModel::onBulkUpdateFinishedPluralCountMessage()
+{
+    DatabaseViewModel vm;
+    BulkUpdateResult res; res.ok = true; res.updatedCount = 3;
+    vm.onBulkUpdateFinished(res);
+    QCOMPARE(vm.statusMessage(), QStringLiteral("Updated 3 students"));
+}
+
+void TestDatabaseViewModel::applyBulkEditRoutesBulkFinishedAndClearsBusy()
+{
+    DatabaseViewModel vm;
+    AdminSession::instance().setKey("held-key");
+    StudentRecord a; a.schoolId="A"; a.name="Ann"; a.status="Active";
+    StudentRecord b; b.schoolId="B"; b.name="Ben"; b.status="Active";
+    vm.onSearchFinished(SearchOutcome::Results, {a, b}, "", "", 1);
+    vm.students()->toggle("A"); vm.students()->toggle("B");
+    vm.beginBulkEditSelected();                         // mode = BulkEdit
+    vm.setChangeStatus(true); vm.setBulkStatus("Inactive");
+
+    QSignalSpy bulkDone(&vm, &DatabaseViewModel::bulkEditFinished);
+    QSignalSpy singleDone(&vm, &DatabaseViewModel::editFinished);
+    QCOMPARE(vm.bulkBusy(), false);
+    vm.applyBulkEdit();
+    QCOMPARE(vm.bulkBusy(), true);                       // in flight
+
+    BulkUpdateResult res; res.ok = true; res.updatedCount = 2;
+    vm.onBulkUpdateFinished(res);
+    QCOMPARE(vm.statusMessage(), QStringLiteral("Updated 2 students"));
+    QCOMPARE(vm.bulkBusy(), false);                      // guard released
+    QCOMPARE(bulkDone.count(), 1);                       // routed to BULK finished
+    QCOMPARE(singleDone.count(), 0);
+    AdminSession::instance().clear();
+}
+
+void TestDatabaseViewModel::applyBulkEditGuardsEmptyInvalidAndReentry()
+{
+    DatabaseViewModel vm;
+    AdminSession::instance().setKey("held-key");
+    // No selection -> no-op, never goes busy.
+    vm.applyBulkEdit();
+    QCOMPARE(vm.bulkBusy(), false);
+
+    StudentRecord a; a.schoolId="A"; a.name="Ann"; a.status="Active";
+    StudentRecord b; b.schoolId="B"; b.name="Ben"; b.status="Active";
+    vm.onSearchFinished(SearchOutcome::Results, {a, b}, "", "", 1);
+    vm.students()->toggle("A"); vm.students()->toggle("B");
+    vm.beginBulkEditSelected();
+    // Selection present but no toggled change -> canApplyBulk false -> no-op.
+    vm.applyBulkEdit();
+    QCOMPARE(vm.bulkBusy(), false);
+
+    // Valid change -> goes busy; a second call is a re-entry no-op.
+    vm.setChangeStatus(true); vm.setBulkStatus("Inactive");
+    vm.applyBulkEdit();
+    QCOMPARE(vm.bulkBusy(), true);
+    vm.applyBulkEdit();                                  // must not crash / double-post
+    QCOMPARE(vm.bulkBusy(), true);
+    AdminSession::instance().clear();
 }
 
 QTEST_MAIN(TestDatabaseViewModel)

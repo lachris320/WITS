@@ -259,19 +259,35 @@ void DatabaseViewModel::saveEdit()
     m_controller->bulkUpdateStudents({rec}, AdminSession::instance().key());
 }
 
+void DatabaseViewModel::applyBulkEdit()
+{
+    if (m_bulkInFlight) return;                             // re-entry guard
+    const QList<StudentRecord> sel = m_students.selectedRecords();
+    if (sel.isEmpty() || !canApplyBulk()) return;           // nothing to do
+    const QList<StudentRecord> updates = buildBulkUpdates(sel, currentChanges());
+    m_bulkInFlight = true; emit bulkBusyChanged();
+    m_controller->bulkUpdateStudents(updates, AdminSession::instance().key());
+}
+
 void DatabaseViewModel::onBulkUpdateFinished(const BulkUpdateResult &result)
 {
-    if (result.ok && result.updatedCount >= 1) {
+    m_bulkInFlight = false; emit bulkBusyChanged();
+    if (result.ok) {
         setAuthFailure(false);
-        setStatusMessage(tr("Student updated"));
-        reloadTable();                 // re-fetch the current dept/course filter
-        emit editFinished();
-        return;
-    }
-    if (result.ok) {                   // updatedCount == 0: no-op edit is a success
-        setAuthFailure(false);
-        setStatusMessage(tr("No changes to save"));
-        emit editFinished();
+        if (result.updatedCount >= 1) {
+            setStatusMessage(result.updatedCount == 1
+                ? tr("Updated 1 student")
+                : tr("Updated %1 students").arg(result.updatedCount));
+            reloadTable();                 // re-fetch the current dept/course filter
+            m_students.clearSelection();
+        } else {
+            setStatusMessage(tr("No changes to save"));   // no-op is a success
+        }
+        // Close whichever dialog is open (single vs bulk); NoEdit -> single, so
+        // the existing single-edit tests that never set BulkEdit still get editFinished.
+        if (m_editMode == EditMode::BulkEdit) emit bulkEditFinished();
+        else                                  emit editFinished();
+        m_editMode = EditMode::NoEdit;        // consumed — reset for the next round
         return;
     }
     // Server rejection. Distinguish a 401 held-key failure from a generic error
@@ -281,6 +297,7 @@ void DatabaseViewModel::onBulkUpdateFinished(const BulkUpdateResult &result)
 
 void DatabaseViewModel::onBulkUpdateFailed(const QString & /*errorString*/)
 {
+    m_bulkInFlight = false; emit bulkBusyChanged();
     setAuthFailure(false);
     setStatusMessage(tr("Update failed — check your connection."));
 }
