@@ -18,6 +18,7 @@ target_include_directories(witsappsettings PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_library(witscore STATIC
     apiconfig.h
+    apiconfigloader.h apiconfigloader.cpp
     settingsdata.h
     settingscontroller.h settingscontroller.cpp
     visitordata.h
