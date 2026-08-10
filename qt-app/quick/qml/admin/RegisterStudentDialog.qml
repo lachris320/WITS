@@ -3,25 +3,21 @@ import QtQuick.Layouts
 import QtQuick.Dialogs
 import LOAMS
 
-// New-student registration form (Phase 4a.2b-iv). An LDialog-based modal driven
-// by plain `visible`. Takes `property var vm` (a DatabaseViewModel, or a
-// plain-QML stub in QuickTests). A FRESH form — no prefill — so it carries no
-// prefill-guard machinery, only the narrow dept->course re-sync (LComboBox
-// severs its own binding on pick). Deliberately parallel to StudentEditDialog so
-// a later shared-base extraction is mechanical.
+// New-student registration form (Phase 4a.2b-iv). LDialog-based modal driven by
+// plain `visible`. Takes `property var vm` (a DatabaseViewModel, or a plain-QML
+// stub in QuickTests). A FRESH form — no prefill machinery, only the narrow
+// dept->course re-sync. Two-column grid so short fields pair up and every combo
+// gets a guaranteed half-width (GUI-smoke: paired combos were collapsing).
 LDialog {
     id: root
     property var vm
     title: qsTr("Register student")
+    maxWidth: 620
 
-    // `resetting` guards the on-open control reset so pushing placeholder state
-    // into the combos/fields doesn't re-enter the vm setters. (selectValue("")
-    // EMITS selected(""), and text="" fires onTextChanged.)
+    // Guards the on-open control reset so pushing placeholder state into the
+    // combos/fields doesn't re-enter the vm setters.
     property bool resetting: false
 
-    // Re-sync the Course combo whenever the vm clears/changes regCourse (a real
-    // department change sets it to ""); and on a duplicate result, refocus the
-    // School ID field and select its text so the fix is one keystroke away.
     Connections {
         target: root.vm ? root.vm : null
         function onRegCourseChanged() { courseCombo.selectValue(root.vm.regCourse); }
@@ -34,8 +30,6 @@ LDialog {
     }
 
     onVisibleChanged: if (visible && root.vm) {
-        // Reset the CONTROLS to match the vm's already-clean state (beginRegister
-        // ran before this opened). resetting=true so none of these push to the vm.
         root.resetting = true;
         schoolIdField.text = "";
         nameField.text = "";
@@ -49,38 +43,58 @@ LDialog {
         schoolIdField.forceFieldFocus();   // autofocus School ID (also the wedge-scan target)
     }
 
-    // Enter-to-submit, guarded so a bare School-ID scan (Name still blank ->
-    // canRegister false) can't half-submit.
     function trySubmit() {
         if (root.vm && root.vm.canRegister && !root.vm.regBusy)
             root.vm.registerStudent();
     }
-    // Esc-to-cancel (blocked mid-request). The scrim is non-dismissing (LDialog),
-    // so an accidental click never discards a filled form.
     Keys.onEscapePressed: if (root.vm && !root.vm.regBusy) root.visible = false;
 
     ColumnLayout {
         width: parent.width
         spacing: Theme.spacing.md
 
-        LTextField {
-            id: schoolIdField
-            objectName: "regSchoolIdField"
+        // Row 1: School ID (+ inline duplicate error under it) | Code
+        RowLayout {
             Layout.fillWidth: true
-            label: qsTr("School ID *")
-            onTextChanged: if (!root.resetting && root.vm) root.vm.setRegSchoolId(text)
-            onAccepted: root.trySubmit()
-        }
-        Text {
-            objectName: "regDuplicateError"
-            visible: root.vm ? root.vm.regDuplicate : false
-            text: qsTr("This School ID already exists.")
-            textFormat: Text.PlainText
-            color: Theme.error
-            font.family: Theme.typography.sans
-            font.pixelSize: Theme.typography.control
+            spacing: Theme.spacing.md
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.preferredWidth: 100
+                Layout.alignment: Qt.AlignTop
+                spacing: Theme.spacing.xs
+                LTextField {
+                    id: schoolIdField
+                    objectName: "regSchoolIdField"
+                    Layout.fillWidth: true
+                    label: qsTr("School ID *")
+                    onTextChanged: if (!root.resetting && root.vm) root.vm.setRegSchoolId(text)
+                    onAccepted: root.trySubmit()
+                }
+                Text {
+                    objectName: "regDuplicateError"
+                    visible: root.vm ? root.vm.regDuplicate : false
+                    Layout.fillWidth: true
+                    text: qsTr("This School ID already exists.")
+                    textFormat: Text.PlainText
+                    wrapMode: Text.WordWrap
+                    color: Theme.error
+                    font.family: Theme.typography.sans
+                    font.pixelSize: Theme.typography.control
+                }
+            }
+            LTextField {
+                id: codeField
+                objectName: "regCodeField"
+                Layout.fillWidth: true
+                Layout.preferredWidth: 100
+                Layout.alignment: Qt.AlignTop
+                label: qsTr("Code")
+                onTextChanged: if (!root.resetting && root.vm) root.vm.setRegCode(text)
+                onAccepted: root.trySubmit()
+            }
         }
 
+        // Row 2: Name (full width)
         LTextField {
             id: nameField
             objectName: "regNameField"
@@ -90,42 +104,33 @@ LDialog {
             onAccepted: root.trySubmit()
         }
 
-        LTextField {
-            id: codeField
-            objectName: "regCodeField"
+        // Row 3: Department | Course
+        RowLayout {
             Layout.fillWidth: true
-            label: qsTr("Code")
-            onTextChanged: if (!root.resetting && root.vm) root.vm.setRegCode(text)
-            onAccepted: root.trySubmit()
+            spacing: Theme.spacing.md
+            LComboBox {
+                id: deptCombo
+                objectName: "regDeptCombo"
+                Layout.fillWidth: true
+                Layout.preferredWidth: 100
+                Layout.minimumWidth: 140
+                model: root.vm ? root.vm.departments : []
+                placeholder: qsTr("Department")
+                onSelected: function(value) { if (!root.resetting && root.vm) root.vm.setRegDepartment(value); }
+            }
+            LComboBox {
+                id: courseCombo
+                objectName: "regCourseCombo"
+                Layout.fillWidth: true
+                Layout.preferredWidth: 100
+                Layout.minimumWidth: 140
+                model: root.vm ? root.vm.regCourses : []
+                placeholder: qsTr("Course")
+                onSelected: function(value) { if (!root.resetting && root.vm) root.vm.setRegCourse(value); }
+            }
         }
 
-        LComboBox {
-            id: deptCombo
-            objectName: "regDeptCombo"
-            Layout.fillWidth: true
-            model: root.vm ? root.vm.departments : []
-            placeholder: qsTr("Department")
-            onSelected: function(value) { if (!root.resetting && root.vm) root.vm.setRegDepartment(value); }
-        }
-        LComboBox {
-            id: courseCombo
-            objectName: "regCourseCombo"
-            Layout.fillWidth: true
-            model: root.vm ? root.vm.regCourses : []
-            placeholder: qsTr("Course")
-            onSelected: function(value) { if (!root.resetting && root.vm) root.vm.setRegCourse(value); }
-        }
-
-        LTextField {
-            id: yearField
-            objectName: "regYearField"
-            Layout.fillWidth: true
-            label: qsTr("Year Level")
-            placeholder: qsTr("e.g. 1, 2, 3, 4")
-            onTextChanged: if (!root.resetting && root.vm) root.vm.setRegYearLevel(text)
-            onAccepted: root.trySubmit()
-        }
-
+        // Row 4: Gender | Status
         RowLayout {
             Layout.fillWidth: true
             spacing: Theme.spacing.md
@@ -133,6 +138,8 @@ LDialog {
                 id: genderCombo
                 objectName: "regGenderCombo"
                 Layout.fillWidth: true
+                Layout.preferredWidth: 100
+                Layout.minimumWidth: 140
                 model: ["Male", "Female"]
                 placeholder: qsTr("Gender")
                 onSelected: function(value) { if (!root.resetting && root.vm) root.vm.setRegGender(value); }
@@ -141,13 +148,32 @@ LDialog {
                 id: statusCombo
                 objectName: "regStatusCombo"
                 Layout.fillWidth: true
+                Layout.preferredWidth: 100
+                Layout.minimumWidth: 140
                 model: ["Active", "Inactive"]
                 placeholder: qsTr("Status")
                 onSelected: function(value) { if (!root.resetting && root.vm) root.vm.setRegStatus(value); }
             }
         }
 
-        // Photo (optional) — no preview; only the picked filename + constraints.
+        // Row 5: Year Level | spacer (keeps Year at half width)
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Theme.spacing.md
+            LTextField {
+                id: yearField
+                objectName: "regYearField"
+                Layout.fillWidth: true
+                Layout.preferredWidth: 100
+                label: qsTr("Year Level")
+                placeholder: qsTr("e.g. 1, 2, 3, 4")
+                onTextChanged: if (!root.resetting && root.vm) root.vm.setRegYearLevel(text)
+                onAccepted: root.trySubmit()
+            }
+            Item { Layout.fillWidth: true; Layout.preferredWidth: 100 }
+        }
+
+        // Photo (optional) — full width; no preview, only filename + constraints.
         RowLayout {
             Layout.fillWidth: true
             spacing: Theme.spacing.md
