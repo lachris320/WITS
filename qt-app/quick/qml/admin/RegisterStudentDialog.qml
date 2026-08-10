@@ -12,7 +12,7 @@ LDialog {
     id: root
     property var vm
     title: qsTr("Register student")
-    maxWidth: 620
+    maxWidth: 560
 
     // Guards the on-open control reset so pushing placeholder state into the
     // combos/fields doesn't re-enter the vm setters.
@@ -190,7 +190,7 @@ LDialog {
                 Layout.fillWidth: true
                 text: (root.vm && root.vm.regPhotoName.length > 0)
                       ? root.vm.regPhotoName
-                      : qsTr("No photo selected — JPG, PNG, or GIF, up to 5MB")
+                      : qsTr("JPG, PNG, or GIF · up to 5MB")
                 textFormat: Text.PlainText
                 elide: Text.ElideMiddle
                 color: (root.vm && root.vm.regPhotoName.length > 0) ? Theme.text : Theme.mutedTextCaption
