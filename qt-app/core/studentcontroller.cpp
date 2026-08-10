@@ -2,6 +2,10 @@
 #include "apiconfig.h"
 #include "csvutil.h"
 
+#include <QFile>
+#include <QFileInfo>
+#include <QHttpMultiPart>
+#include <QHttpPart>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -103,6 +107,24 @@ bool StudentController::parseDeleteResponse(const QByteArray &raw, QString &outM
         return true;
     outMessage = obj["message"].toString();
     return false;
+}
+
+RegisterOutcome StudentController::parseRegisterResponse(const QByteArray &raw, QString &outMessage)
+{
+    outMessage.clear();
+    const QJsonDocument doc = QJsonDocument::fromJson(raw);
+    if (!doc.isObject()) {
+        outMessage = QStringLiteral("Invalid server response.");
+        return RegisterOutcome::Error;
+    }
+    const QJsonObject obj = doc.object();
+    const QString status = obj["status"].toString();
+    if (status == QLatin1String("success"))
+        return RegisterOutcome::Success;
+    if (status == QLatin1String("duplicate"))
+        return RegisterOutcome::Duplicate;   // inline field error is client-side text
+    outMessage = obj["message"].toString();
+    return RegisterOutcome::Error;
 }
 
 QByteArray StudentController::toCsv(const QList<StudentRecord> &rows)
@@ -310,6 +332,72 @@ void StudentController::deleteStudents(const QStringList &schoolIds, const QStri
             emit deleteFinished(ok, requestedCount, message);   // 401 body reaches here
         } else {
             emit deleteFailed(errorString);                     // genuine transport failure only
+        }
+    });
+}
+
+void StudentController::registerStudent(const StudentRecord &rec,
+                                        const QString &photoFilePath,
+                                        const QString &adminKey)
+{
+    QNetworkRequest request(ApiConfig::endpoint(QStringLiteral("register_student.php")));
+    // Do NOT set ContentTypeHeader — QHttpMultiPart sets the multipart boundary
+    // Content-Type itself (matches the legacy call-site at adminwindow.cpp:742).
+    QHttpMultiPart *multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
+
+    auto addText = [multiPart](const QString &name, const QString &value) {
+        QHttpPart part;
+        part.setHeader(QNetworkRequest::ContentDispositionHeader,
+                       QVariant(QStringLiteral("form-data; name=\"%1\"").arg(name)));
+        part.setBody(value.toUtf8());
+        multiPart->append(part);
+    };
+
+    addText(QStringLiteral("code"),       rec.code);
+    addText(QStringLiteral("name"),       rec.name);
+    addText(QStringLiteral("school_id"),  rec.schoolId);
+    addText(QStringLiteral("year_level"), rec.yearLevel);
+    addText(QStringLiteral("course"),     rec.course);
+    addText(QStringLiteral("department"), rec.department);
+    addText(QStringLiteral("gender"),     rec.gender);
+    addText(QStringLiteral("status"),     rec.status);
+    addText(QStringLiteral("admin_key"),  adminKey);   // guard field — never logged
+
+    if (!photoFilePath.isEmpty()) {
+        QHttpPart filePart;
+        filePart.setHeader(QNetworkRequest::ContentDispositionHeader,
+                           QVariant(QStringLiteral("form-data; name=\"photo\"; filename=\"%1\"")
+                                        .arg(QFileInfo(photoFilePath).fileName())));
+        QFile *file = new QFile(photoFilePath);
+        if (!file->open(QIODevice::ReadOnly)) {
+            delete file;
+            delete multiPart;                       // never send a half-built request
+            emit registerFailed(QStringLiteral("Could not open the photo file."));
+            return;
+        }
+        filePart.setBodyDevice(file);
+        file->setParent(multiPart);                 // auto-delete with the multipart
+        multiPart->append(filePart);
+    }
+
+    QNetworkReply *reply = m_nam->post(request, multiPart);
+    multiPart->setParent(reply);                    // auto-delete with the reply
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        const QByteArray resp = reply->readAll();
+        const bool hadError = reply->error() != QNetworkReply::NoError;
+        const QString errorString = reply->errorString();
+        const QVariant statusAttr =
+            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
+        const int httpStatus = statusAttr.isValid() ? statusAttr.toInt() : 0;
+        reply->deleteLater();
+
+        if (replyIsServerAnswer(hadError, httpStatus, resp)) {
+            QString message;
+            const RegisterOutcome outcome = parseRegisterResponse(resp, message);
+            emit registerFinished(outcome, message);   // 401 body reaches here
+        } else {
+            emit registerFailed(errorString);          // genuine transport failure only
         }
     });
 }

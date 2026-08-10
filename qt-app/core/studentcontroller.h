@@ -28,6 +28,11 @@ public:
     // Returns true when status=="success"; on failure sets outMessage to the
     // server "message" field (empty on success).
     static bool parseDeleteResponse(const QByteArray &raw, QString &outMessage);
+    // status "success" -> Success; "duplicate" -> Duplicate; else / invalid JSON
+    // -> Error with outMessage set (server "message", or "Invalid server
+    // response." when the body is not a JSON object). Reuses replyIsServerAnswer
+    // at the call site so a guard 401-with-body reaches this parser.
+    static RegisterOutcome parseRegisterResponse(const QByteArray &raw, QString &outMessage);
     // Pure, network-free CSV serializer for the Database export (Phase 4a.2b-i).
     // RFC-4180: a cell is quoted iff it contains a comma, quote, CR, or LF, and
     // embedded quotes are doubled; CRLF line terminators; a UTF-8 BOM is
@@ -65,6 +70,15 @@ public:
     // sent as a FORM field (delete_students.php is requireAdminAuth-guarded).
     void deleteStudents(const QStringList &schoolIds, const QString &adminKey);
 
+    // Async — result arrives via registerFinished / registerFailed. Builds a
+    // multipart/form-data POST to register_student.php: text parts for
+    // code/name/school_id/year_level/course/department/gender/status +
+    // admin_key, and an optional `photo` file part when photoFilePath is
+    // non-empty. Mirrors ImportController::uploadStudents' ownership pattern.
+    // Does NOT send `visits` (endpoint defaults 0 for a new student).
+    void registerStudent(const StudentRecord &rec, const QString &photoFilePath,
+                         const QString &adminKey);
+
     // Async — result arrives via departmentsLoaded (empty on error/!success).
     void loadDepartments();
 
@@ -91,6 +105,8 @@ signals:
     // message on failure. deleteFailed fires only on a transport error.
     void deleteFinished(bool ok, int requestedCount, const QString &message);
     void deleteFailed(const QString &errorString);
+    void registerFinished(RegisterOutcome outcome, const QString &message);
+    void registerFailed(const QString &errorString);
     void departmentsLoaded(const QStringList &departments);
     void coursesLoaded(const QStringList &courses);
 
