@@ -715,6 +715,7 @@ adminWindow::adminWindow(QWidget *parent)
         addPart("department", ui->departmentLineEdit->text());
         addPart("gender", ui->genderComboBox->currentText());
         addPart("status", ui->statusComboBox->currentText());
+        addPart("admin_key", m_adminKey);   // guarded endpoint (4a.2b-iv); m_adminKey held via setAdminKey
 
         // Add image file if selected
         if (!selectedPhotoPath.isEmpty()) {
