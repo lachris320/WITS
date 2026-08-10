@@ -9,6 +9,7 @@ Item {
     id: dlg
     property string title: ""
     property string message: ""
+    property int maxWidth: 460
     default property alias content: body.data
 
     anchors.fill: parent
@@ -22,7 +23,7 @@ Item {
 
     Rectangle {
         anchors.centerIn: parent
-        width: Math.min(parent.width - Theme.spacing.xxxl * 2, 460)
+        width: Math.min(parent.width - Theme.spacing.xxxl * 2, dlg.maxWidth)
         implicitHeight: card.implicitHeight + Theme.spacing.xxl * 2
         color: Theme.card
         radius: Theme.radius.card

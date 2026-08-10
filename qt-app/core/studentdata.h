@@ -42,4 +42,14 @@ enum class SearchOutcome
     NetworkError      // reply->error() != NoError (routed via searchFailed, not searchFinished)
 };
 
+// Decoded register_student.php outcome. "success" -> Success (row inserted);
+// "duplicate" -> Duplicate (school_id already exists — surfaced as an inline
+// field error, not a toast); anything else / invalid JSON -> Error (+ message).
+enum class RegisterOutcome
+{
+    Success,
+    Duplicate,
+    Error
+};
+
 #endif // STUDENTDATA_H

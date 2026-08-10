@@ -54,6 +54,17 @@ private slots:
     void onBulkUpdateFinishedPluralCountMessage();
     void applyBulkEditRoutesBulkFinishedAndClearsBusy();
     void applyBulkEditGuardsEmptyInvalidAndReentry();
+    void canRegisterGatingRequiresSchoolIdAndName();
+    void beginRegisterResetsFieldsClearsDuplicateAndEmitsReady();
+    void setRegSchoolIdClearsDuplicate();
+    void setRegDepartmentRoutesCoursesToRegisterTarget();
+    void setRegPhotoAndClearSetsAndClearsPhotoName();
+    void onRegisterFinishedSuccessSetsStatusReloadsAndFinishes();
+    void onRegisterFinishedDuplicateSetsFlagNoFinishNoReload();
+    void onRegisterFinishedAuthFailureSetsAuthStateKeepsOpen();
+    void onRegisterFinishedGenericErrorSetsStatusNoAuth();
+    void onRegisterFailedSetsTransientStatusClearsBusy();
+    void registerStudentReentryGuard();
 };
 
 // A DatabaseViewModel test-ctor takes a StudentController*; but StudentController
@@ -629,6 +640,128 @@ void TestDatabaseViewModel::applyBulkEditGuardsEmptyInvalidAndReentry()
     QCOMPARE(vm.bulkBusy(), true);
     vm.applyBulkEdit();                                  // must not crash / double-post
     QCOMPARE(vm.bulkBusy(), true);
+    AdminSession::instance().clear();
+}
+
+void TestDatabaseViewModel::canRegisterGatingRequiresSchoolIdAndName()
+{
+    DatabaseViewModel vm;
+    QCOMPARE(vm.canRegister(), false);
+    vm.setRegSchoolId("2023-050");
+    QCOMPARE(vm.canRegister(), false);                 // name still empty
+    vm.setRegName("   ");                              // whitespace-only doesn't count
+    QCOMPARE(vm.canRegister(), false);
+    vm.setRegName("Ana Reyes");
+    QCOMPARE(vm.canRegister(), true);
+}
+
+void TestDatabaseViewModel::beginRegisterResetsFieldsClearsDuplicateAndEmitsReady()
+{
+    DatabaseViewModel vm;
+    vm.setRegSchoolId("2023-050"); vm.setRegName("Ana");
+    vm.onRegisterFinished(RegisterOutcome::Duplicate, QString());   // set regDuplicate
+    QVERIFY(vm.regDuplicate());
+
+    QSignalSpy readySpy(&vm, &DatabaseViewModel::registerReady);
+    vm.beginRegister();
+    QVERIFY(vm.regSchoolId().isEmpty());
+    QVERIFY(vm.regName().isEmpty());
+    QVERIFY(!vm.regDuplicate());
+    QCOMPARE(vm.canRegister(), false);
+    QCOMPARE(readySpy.count(), 1);
+}
+
+void TestDatabaseViewModel::setRegSchoolIdClearsDuplicate()
+{
+    DatabaseViewModel vm;
+    vm.onRegisterFinished(RegisterOutcome::Duplicate, QString());
+    QVERIFY(vm.regDuplicate());
+    vm.setRegSchoolId("2023-051");                     // editing the rejected value clears it
+    QVERIFY(!vm.regDuplicate());
+}
+
+void TestDatabaseViewModel::setRegDepartmentRoutesCoursesToRegisterTarget()
+{
+    DatabaseViewModel vm;
+    vm.setRegDepartment("CCS");                        // sets target = Register (+ fires a load)
+    vm.onEditCoursesLoaded({"BSIT", "BSCS"});
+    QCOMPARE(vm.regCourses(), (QStringList{"BSIT", "BSCS"}));
+    QVERIFY(vm.editCourses().isEmpty());                // single-edit list untouched
+    QVERIFY(vm.bulkCourses().isEmpty());                // bulk list untouched
+}
+
+void TestDatabaseViewModel::setRegPhotoAndClearSetsAndClearsPhotoName()
+{
+    DatabaseViewModel vm;
+    vm.setRegPhoto(QUrl::fromLocalFile("C:/tmp/ana_photo.jpg"));
+    QCOMPARE(vm.regPhotoName(), QStringLiteral("ana_photo.jpg"));
+    vm.clearRegPhoto();
+    QVERIFY(vm.regPhotoName().isEmpty());
+}
+
+void TestDatabaseViewModel::onRegisterFinishedSuccessSetsStatusReloadsAndFinishes()
+{
+    DatabaseViewModel vm;
+    vm.setRegSchoolId("2023-050"); vm.setRegName("Ana Reyes");
+    QSignalSpy finishedSpy(&vm, &DatabaseViewModel::registerFinished);
+    vm.onRegisterFinished(RegisterOutcome::Success, QStringLiteral("Student registered successfully"));
+    QCOMPARE(vm.statusMessage(), QStringLiteral("Registered Ana Reyes"));
+    QVERIFY(!vm.authFailure());
+    QVERIFY(vm.loading());                              // reloadTable() flipped loading on
+    QCOMPARE(finishedSpy.count(), 1);
+}
+
+void TestDatabaseViewModel::onRegisterFinishedDuplicateSetsFlagNoFinishNoReload()
+{
+    DatabaseViewModel vm;
+    vm.setRegSchoolId("2023-050"); vm.setRegName("Ana");
+    QSignalSpy finishedSpy(&vm, &DatabaseViewModel::registerFinished);
+    vm.onRegisterFinished(RegisterOutcome::Duplicate, QString());
+    QVERIFY(vm.regDuplicate());
+    QCOMPARE(finishedSpy.count(), 0);                   // dialog stays open
+    QVERIFY(!vm.loading());                             // no reload on a duplicate
+}
+
+void TestDatabaseViewModel::onRegisterFinishedAuthFailureSetsAuthStateKeepsOpen()
+{
+    DatabaseViewModel vm;
+    QSignalSpy finishedSpy(&vm, &DatabaseViewModel::registerFinished);
+    vm.onRegisterFinished(RegisterOutcome::Error, QStringLiteral("Invalid admin key"));
+    QVERIFY(vm.authFailure());
+    QVERIFY(!vm.statusMessage().isEmpty());
+    QCOMPARE(finishedSpy.count(), 0);
+}
+
+void TestDatabaseViewModel::onRegisterFinishedGenericErrorSetsStatusNoAuth()
+{
+    DatabaseViewModel vm;
+    vm.onRegisterFinished(RegisterOutcome::Error, QStringLiteral("School ID and Name are required."));
+    QVERIFY(!vm.authFailure());
+    QCOMPARE(vm.statusMessage(), QStringLiteral("School ID and Name are required."));
+}
+
+void TestDatabaseViewModel::onRegisterFailedSetsTransientStatusClearsBusy()
+{
+    DatabaseViewModel vm;
+    vm.onRegisterFailed(QStringLiteral("Connection refused"));
+    QVERIFY(!vm.authFailure());
+    QVERIFY(!vm.statusMessage().isEmpty());
+    QCOMPARE(vm.regBusy(), false);
+}
+
+void TestDatabaseViewModel::registerStudentReentryGuard()
+{
+    DatabaseViewModel vm;
+    AdminSession::instance().setKey("held-key");
+    // No School ID/Name -> canRegister false -> no-op, never goes busy.
+    vm.registerStudent();
+    QCOMPARE(vm.regBusy(), false);
+
+    vm.setRegSchoolId("2023-050"); vm.setRegName("Ana");
+    vm.registerStudent();                               // posts via the VM's own NAM
+    QCOMPARE(vm.regBusy(), true);
+    vm.registerStudent();                               // second call is a no-op
+    QCOMPARE(vm.regBusy(), true);
     AdminSession::instance().clear();
 }
 

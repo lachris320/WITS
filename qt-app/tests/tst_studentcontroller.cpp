@@ -51,6 +51,12 @@ private slots:
     void parseDeleteResponse_failure_returnsFalseWithMessage();
     void parseDeleteResponse_invalidJson_returnsFalseEmptyMessage();
 
+    // parseRegisterResponse
+    void parseRegisterResponse_success_returnsSuccessEmptyMessage();
+    void parseRegisterResponse_duplicate_returnsDuplicate();
+    void parseRegisterResponse_error_returnsErrorWithMessage();
+    void parseRegisterResponse_invalidJson_returnsErrorWithDefault();
+
     // request assembly (harmonized FORM + admin_key)
     void deleteStudents_buildsFormBodyWithAdminKey();
     void bulkUpdate_buildsFormBodyWithStudentsJsonAndAdminKey();
@@ -266,6 +272,40 @@ void TestStudentController::parseDeleteResponse_invalidJson_returnsFalseEmptyMes
     const bool ok = StudentController::parseDeleteResponse("not json", msg);
     QVERIFY(!ok);
     QVERIFY(msg.isEmpty());
+}
+
+void TestStudentController::parseRegisterResponse_success_returnsSuccessEmptyMessage()
+{
+    QString msg = "sentinel";
+    const RegisterOutcome outcome = StudentController::parseRegisterResponse(
+        R"({"status":"success","message":"Student registered successfully"})", msg);
+    QCOMPARE(outcome, RegisterOutcome::Success);
+    QVERIFY(msg.isEmpty());   // success carries no surfaced message
+}
+
+void TestStudentController::parseRegisterResponse_duplicate_returnsDuplicate()
+{
+    QString msg;
+    const RegisterOutcome outcome = StudentController::parseRegisterResponse(
+        R"({"status":"duplicate","message":"Student already exists."})", msg);
+    QCOMPARE(outcome, RegisterOutcome::Duplicate);
+}
+
+void TestStudentController::parseRegisterResponse_error_returnsErrorWithMessage()
+{
+    QString msg;
+    const RegisterOutcome outcome = StudentController::parseRegisterResponse(
+        R"({"status":"error","message":"School ID and Name are required."})", msg);
+    QCOMPARE(outcome, RegisterOutcome::Error);
+    QCOMPARE(msg, QStringLiteral("School ID and Name are required."));
+}
+
+void TestStudentController::parseRegisterResponse_invalidJson_returnsErrorWithDefault()
+{
+    QString msg;
+    const RegisterOutcome outcome = StudentController::parseRegisterResponse("not json", msg);
+    QCOMPARE(outcome, RegisterOutcome::Error);
+    QCOMPARE(msg, QStringLiteral("Invalid server response."));
 }
 
 void TestStudentController::parseSearchReadsVisits()

@@ -3,6 +3,8 @@ error_reporting(E_ALL);
 ini_set('display_errors',1);
 header("Content-Type: application/json");
 include "db.php";
+include "auth_helper.php";
+requireAdminAuth($conn);   // 401 "Admin authentication required" before anything
 
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $school_id  = isset($_POST['school_id']) ? trim($_POST['school_id']) : '';
