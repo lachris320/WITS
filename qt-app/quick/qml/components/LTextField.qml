@@ -13,6 +13,15 @@ ColumnLayout {
     property string label: ""
     property string placeholder: ""
     property bool isPassword: false
+    // Emitted when the user presses Return/Enter in the field (forwarded from
+    // the inner TextInput). Lets a dialog wire Enter-to-submit without reaching
+    // into the private TextInput.
+    signal accepted()
+    // Focus/selection passthroughs — the focusable element is the inner
+    // TextInput, not this ColumnLayout, so a consumer can't forceActiveFocus()
+    // the field directly. Additive; no behavior change for existing callers.
+    function forceFieldFocus() { input.forceActiveFocus(); }
+    function selectAllText() { input.selectAll(); }
     spacing: Theme.spacing.xs
 
     Text {
@@ -45,6 +54,7 @@ ColumnLayout {
             font.family: Theme.typography.sans
             font.pixelSize: Theme.typography.body
             echoMode: root.isPassword ? TextInput.Password : TextInput.Normal
+            onAccepted: root.accepted()
 
             Text {
                 anchors.fill: parent

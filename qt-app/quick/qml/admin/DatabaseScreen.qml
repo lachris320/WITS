@@ -74,6 +74,16 @@ Rectangle {
 
             Item { Layout.fillWidth: true }   // spacer pushes the actions right
 
+            LButton {
+                objectName: "addStudentButton"
+                variant: "Outline"
+                compact: true
+                text: qsTr("＋ Add Student")
+                // Create is independent of selection; only disabled while loading.
+                enabled: screen.vm ? !screen.vm.loading : false
+                onClicked: if (screen.vm) screen.vm.beginRegister()
+            }
+
             TextMetrics {
                 id: exportMetrics
                 font.family: Theme.typography.sans
@@ -218,6 +228,12 @@ Rectangle {
         onApplyRequested: bulkEditConfirm.visible = true
     }
 
+    RegisterStudentDialog {
+        id: registerDialog
+        objectName: "registerDialog"
+        vm: screen.vm
+    }
+
     // Change-preview gate. Declared AFTER bulkEditDialog so its scrim renders on
     // top of the still-open bulk dialog (LDialog stacks by declaration order).
     LConfirmDialog {
@@ -243,5 +259,10 @@ Rectangle {
         function onEditFinished() { editDialog.visible = false; }
         function onBulkEditReady() { bulkEditDialog.visible = true; }
         function onBulkEditFinished() { bulkEditDialog.visible = false; }
+        function onRegisterReady() { registerDialog.visible = true; }
+        function onRegisterFinished() {
+            registerDialog.visible = false;
+            studentsTable.forceActiveFocus();   // keep working the list after a register
+        }
     }
 }

@@ -11,10 +11,10 @@ Item {
     //
     // Geometry ledger (x 0 column):   dash 0..760 | search 760..1460 |
     //   logs 1460..2160 | settings 2160..3760 | database 3800..4500
-    //   | editDialog 4500..5200 | bulkEdit 5200..5900.
+    //   | editDialog 4500..5200 | bulkEdit 5200..5900 | registerDialog 5900..6600.
     // Parked no-vm column (x 2000): vmlessSearch 0..700 |
     //   vmlessLogs 760..1460 | vmlessSettings 1560..2260.
-    width: 1100; height: 5900
+    width: 1100; height: 6600
 
     // --- Dashboard stub VM ---
     // maxValue is declared on the stubs because the screen binds
@@ -1718,6 +1718,37 @@ Item {
             function setBulkYearLevel(v) { bulkYearLevel = v; }
             function setBulkGender(v) { bulkGender = v; }
             function setBulkStatus(v) { bulkStatus = v; }
+
+            // Register surface the hosted RegisterStudentDialog binds to.
+            property string regSchoolId: ""
+            property string regName: ""
+            property string regCode: ""
+            property string regYearLevel: ""
+            property string regGender: ""
+            property string regStatus: ""
+            property string regDepartment: ""
+            property string regCourse: ""
+            property var regCourses: []
+            property string regPhotoName: ""
+            property bool canRegister: false
+            property bool regBusy: false
+            property bool regDuplicate: false
+            property int beginRegisterCount: 0
+            property int registerStudentCount: 0
+            signal registerReady()
+            signal registerFinished()
+            function beginRegister() { beginRegisterCount++; registerReady(); }
+            function setRegSchoolId(v) { regSchoolId = v; regDuplicate = false; }
+            function setRegName(v) { regName = v; }
+            function setRegCode(v) { regCode = v; }
+            function setRegYearLevel(v) { regYearLevel = v; }
+            function setRegGender(v) { regGender = v; }
+            function setRegStatus(v) { regStatus = v; }
+            function setRegCourse(v) { regCourse = v; }
+            function setRegDepartment(v) { regDepartment = v; regCourse = ""; }
+            function setRegPhoto(u) { regPhotoName = ("" + u).split("/").pop(); }
+            function clearRegPhoto() { regPhotoName = ""; }
+            function registerStudent() { registerStudentCount++; }
         }
 
         DatabaseScreen { id: databaseScreen; anchors.fill: parent; vm: stubVm }
@@ -1753,6 +1784,10 @@ Item {
                 if (bd) bd.visible = false;
                 var bc = findChild(databaseScreen, "bulkEditConfirm");
                 if (bc) { bc.visible = false; bc.clearKey(); }
+                stubVm.beginRegisterCount = 0;
+                stubVm.registerStudentCount = 0;
+                var rd = findChild(databaseScreen, "registerDialog");
+                if (rd) rd.visible = false;
             }
             function test_showsCascadingFilter() {
                 verify(findChild(databaseScreen, "cascDept") !== null);
@@ -1901,6 +1936,18 @@ Item {
                 compare(ed.visible, true);
                 stubVm.editFinished();
                 compare(ed.visible, false);
+            }
+            function test_addStudentButtonInvokesBeginRegisterAndOpensDialog() {
+                var btn = findChild(databaseScreen, "addStudentButton");
+                verify(btn !== null);
+                waitForRendering(databaseScreen);
+                mouseClick(btn);
+                compare(stubVm.beginRegisterCount, 1);
+                var d = findChild(databaseScreen, "registerDialog");
+                verify(d !== null);
+                compare(d.visible, true);
+                stubVm.registerFinished();
+                compare(d.visible, false);
             }
         }
     }
@@ -2100,6 +2147,124 @@ Item {
                 bulkDialog.visible = true;
                 waitForRendering(bulkDialog);
                 compare(statusCheck.checked, false);     // re-synced, not stale
+            }
+        }
+    }
+    // --- RegisterStudentDialog fixture (own band below bulkEdit, y 5900..6600) ---
+    Item {
+        id: registerBand
+        y: 5900
+        width: 900; height: 700
+
+        QtObject {
+            id: regStub
+            property var departments: ["CCS", "CBA"]
+            property var regCourses: ["BSIT", "BSCS"]
+            property string regSchoolId: ""
+            property string regName: ""
+            property string regCode: ""
+            property string regYearLevel: ""
+            property string regGender: ""
+            property string regStatus: ""
+            property string regDepartment: ""
+            property string regCourse: ""
+            property string regPhotoName: ""
+            property bool canRegister: false
+            property bool regBusy: false
+            property bool regDuplicate: false
+            property int setRegDeptCount: 0
+            property string lastRegDept: ""
+            property int registerStudentCount: 0
+            function setRegSchoolId(v) { regSchoolId = v; regDuplicate = false; }
+            function setRegName(v) { regName = v; }
+            function setRegCode(v) { regCode = v; }
+            function setRegYearLevel(v) { regYearLevel = v; }
+            function setRegGender(v) { regGender = v; }
+            function setRegStatus(v) { regStatus = v; }
+            function setRegCourse(v) { regCourse = v; }
+            function setRegDepartment(v) { setRegDeptCount++; lastRegDept = v; regDepartment = v; regCourse = ""; }
+            function setRegPhoto(u) { regPhotoName = ("" + u).split("/").pop(); }
+            function clearRegPhoto() { regPhotoName = ""; }
+            function registerStudent() { registerStudentCount++; }
+        }
+
+        RegisterStudentDialog { id: registerDialog2; anchors.fill: parent; vm: regStub }
+
+        TestCase {
+            name: "RegisterStudentDialog"; when: windowShown
+            function init() {
+                regStub.regSchoolId = ""; regStub.regName = ""; regStub.regCourse = "";
+                regStub.regDepartment = ""; regStub.regPhotoName = "";
+                regStub.canRegister = false; regStub.regBusy = false; regStub.regDuplicate = false;
+                regStub.setRegDeptCount = 0; regStub.lastRegDept = "";
+                regStub.registerStudentCount = 0;
+                registerDialog2.visible = false;
+            }
+            function test_submitDisabledUntilCanRegister() {
+                registerDialog2.visible = true;
+                waitForRendering(registerDialog2);
+                var submit = findChild(registerDialog2, "regSubmitButton");
+                verify(submit !== null);
+                compare(submit.enabled, false);
+                regStub.canRegister = true;
+                compare(submit.enabled, true);
+            }
+            function test_submitLabelSwapsWhenBusy() {
+                regStub.canRegister = true;
+                registerDialog2.visible = true;
+                waitForRendering(registerDialog2);
+                var submit = findChild(registerDialog2, "regSubmitButton");
+                compare(submit.text, "Register");
+                regStub.regBusy = true;
+                compare(submit.text, "Registering…");
+                compare(submit.enabled, false);   // disabled while busy
+            }
+            function test_submitInvokesVmRegisterStudent() {
+                regStub.canRegister = true;
+                registerDialog2.visible = true;
+                waitForRendering(registerDialog2);
+                mouseClick(findChild(registerDialog2, "regSubmitButton"));
+                compare(regStub.registerStudentCount, 1);
+            }
+            function test_duplicateErrorVisibleAndClearsOnSchoolIdEdit() {
+                registerDialog2.visible = true;
+                waitForRendering(registerDialog2);
+                var err = findChild(registerDialog2, "regDuplicateError");
+                verify(err !== null);
+                compare(err.visible, false);
+                regStub.regDuplicate = true;
+                compare(err.visible, true);
+                // Editing School ID clears the duplicate (stub setter drops the flag).
+                var idField = findChild(registerDialog2, "regSchoolIdField");
+                idField.text = "2023-999";
+                compare(err.visible, false);
+            }
+            function test_departmentPickDrivesSetRegDepartment() {
+                registerDialog2.visible = true;
+                waitForRendering(registerDialog2);
+                findChild(registerDialog2, "regDeptCombo").selectValue("CBA");
+                compare(regStub.setRegDeptCount, 1);
+                compare(regStub.lastRegDept, "CBA");
+                // vm cleared regCourse; the re-sync Connections resets the combo.
+                compare(findChild(registerDialog2, "regCourseCombo").currentValue, "");
+            }
+            function test_photoPickShowsFilenameAndRemoveClears() {
+                registerDialog2.visible = true;
+                waitForRendering(registerDialog2);
+                var label = findChild(registerDialog2, "regPhotoLabel");
+                var remove = findChild(registerDialog2, "regRemovePhotoButton");
+                compare(remove.visible, false);
+                regStub.setRegPhoto("file:///tmp/ana_reyes.png");
+                compare(label.text, "ana_reyes.png");
+                compare(remove.visible, true);
+                mouseClick(remove);
+                compare(regStub.regPhotoName, "");
+            }
+            function test_cancelClosesDialog() {
+                registerDialog2.visible = true;
+                waitForRendering(registerDialog2);
+                mouseClick(findChild(registerDialog2, "regCancelButton"));
+                compare(registerDialog2.visible, false);
             }
         }
     }
