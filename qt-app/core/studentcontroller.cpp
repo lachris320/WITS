@@ -336,6 +336,42 @@ void StudentController::deleteStudents(const QStringList &schoolIds, const QStri
     });
 }
 
+void StudentController::departmentOperation(DeptOp op, const QString &department,
+                                            const QString &adminKey)
+{
+    const QString endpoint = (op == DeptOp::Deactivate)
+        ? QStringLiteral("deactivate_department.php")
+        : QStringLiteral("delete_department.php");
+    QNetworkRequest request(ApiConfig::endpoint(endpoint));
+    request.setHeader(QNetworkRequest::ContentTypeHeader,
+                      QStringLiteral("application/x-www-form-urlencoded"));
+
+    QUrlQuery body;
+    body.addQueryItem(QStringLiteral("department"), department);
+    body.addQueryItem(QStringLiteral("admin_key"), adminKey);
+
+    QNetworkReply *reply =
+        m_nam->post(request, body.toString(QUrl::FullyEncoded).toUtf8());
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, op]() {
+        const QByteArray resp = reply->readAll();
+        const bool hadError = reply->error() != QNetworkReply::NoError;
+        const QString errorString = reply->errorString();
+        const QVariant statusAttr =
+            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
+        const int httpStatus = statusAttr.isValid() ? statusAttr.toInt() : 0;
+        reply->deleteLater();
+
+        if (replyIsServerAnswer(hadError, httpStatus, resp)) {
+            QString message;
+            const bool ok = parseDeleteResponse(resp, message);   // {status,message}
+            emit departmentOpFinished(op, ok, message);           // 401 body reaches here
+        } else {
+            emit departmentOpFailed(op, errorString);             // transport failure only
+        }
+    });
+}
+
 void StudentController::registerStudent(const StudentRecord &rec,
                                         const QString &photoFilePath,
                                         const QString &adminKey)
