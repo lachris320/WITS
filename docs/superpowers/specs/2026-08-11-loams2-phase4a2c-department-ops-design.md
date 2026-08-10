@@ -136,7 +136,13 @@ decode reply, 401-route) is written **once** (DRY; the two ops differ only by
 endpoint):
 
 ```cpp
-enum class DeptOp { Deactivate, Delete };   // Q_ENUM (SearchOutcome/RegisterOutcome precedent)
+// Plain enum class — NO registration needed. Precedent: SearchOutcome /
+// RegisterOutcome (core/studentdata.h) are plain enum class with neither
+// Q_ENUM nor Q_DECLARE_METATYPE, carried directly in signals connected to VM
+// slots by function-pointer connect (same-thread direct connection). DeptOp is
+// never exposed to QML (§4.3 QML calls two separate invokables, never passes an
+// op), so it works identically without Q_ENUM.
+enum class DeptOp { Deactivate, Delete };
 
 // POSTs application/x-www-form-urlencoded: department=<dept>&admin_key=<key>
 // to the endpoint chosen by `op`. adminKey is held by AdminSession (RAM-only,
@@ -172,17 +178,35 @@ void onDepartmentOpFinished(StudentController::DeptOp op, bool ok, const QString
 void onDepartmentOpFailed(StudentController::DeptOp op, const QString &errorString);
 ```
 
+> **Header note:** because the two slots take a **nested** enum
+> (`StudentController::DeptOp`), which cannot be forward-declared,
+> `DatabaseViewModel.h` must `#include "studentcontroller.h"` — it currently
+> only forward-declares `class StudentController;`. Add the include.
+
 - Both invokables use the **primary** `m_controller` (one-shot mutation, like
   `deleteStudents`) and the held `AdminSession::instance().key()`. Guard: no-op if
   `m_department` is empty or `m_deptOpBusy` is already true.
 - `m_deptOpBusy` set **before** the controller call; cleared in both slots — the
   re-entry guard + button-disable source.
-- **Success (`ok == true`):**
+- **Success (`ok == true`):** first `setAuthFailure(false)` (clear any stale auth
+  banner on a recovered op — mirrors `onDeleteFinished`/`onBulkUpdateFinished`/
+  `onRegisterFinished`, DatabaseViewModel.cpp:132/283/560), then:
   - `Deactivate` → `setStatusMessage("All students in '<dept>' deactivated.")` then
-    `refresh()` (reload departments + table; statuses now show Inactive; dept remains).
+    `refresh()` (reload departments + table; statuses now show Inactive; the dept
+    **remains**, so a bare `refresh()` is correct here and the selection is kept).
   - `Delete` → `setStatusMessage("Department '<dept>' deleted (<N> students).")` then
-    `refresh()` (departments reload — the dept is gone — cascade resets to "All", table
-    reloads).
+    **reset the department filter** — the dept no longer exists, so a bare `refresh()`
+    would leave a *ghost selection*: `refresh()` (= `loadDepartments()` +
+    `reloadTable()`, DatabaseViewModel.cpp:45–49) never touches `m_department`, so
+    `m_department` would stay `"CE"` — the cascade would show a value absent from its
+    own reloaded model, the enable gate (`department != "" && course == ""`) would stay
+    **true**, and both destructive buttons would remain enabled targeting a deleted
+    department (a second Delete would confirm "0 records" and the backend would answer
+    success on 0 rows). Instead the slot must **`setDepartment("")`** — which resets the
+    selection to "All", dependent-clears `m_course`, re-scopes the (empty) course list,
+    and reloads the table to all remaining students (DatabaseViewModel.cpp:59–72) — **and**
+    `m_controller->loadDepartments()` so the deleted department drops out of the cascade.
+    With `department == ""` the two buttons then correctly disable.
 - **Server-answered failure (`ok == false`):** route through the existing
   `applyServerRejection(message, genericFallback)` — sets `authFailure` on an auth
   message, otherwise a generic toast. (Same auth-vs-generic split as delete/bulk.)
@@ -193,8 +217,12 @@ void onDepartmentOpFailed(StudentController::DeptOp op, const QString &errorStri
 
 ### 4.3 `DatabaseScreen.qml`
 
-- Two `LButton`s appended to `filterRow` (right of the cascade, after a
-  `Item { Layout.fillWidth: true }` spacer so they right-align).
+- Two `LButton`s appended to `filterRow` (right of the cascade). The existing
+  `LCascadingSelect` already has `Layout.fillWidth: true` (DatabaseScreen.qml:47–48),
+  so do **not** add a second `Item { Layout.fillWidth: true }` stretch — two competing
+  `fillWidth` items would split the row and collapse the cascade to ~half width.
+  Right-align the buttons by **dropping the cascade's `fillWidth`** (or giving it a
+  `Layout.preferredWidth`) so the buttons take their implicit width at the row's end.
 - Two `LConfirmDialog`s (`deactivateDeptConfirm`, `deleteDeptConfirm`) with distinct
   `objectName`s for QuickTest.
 - `onConfirmed` handlers hide the dialog then call the matching VM invokable.
@@ -219,8 +247,12 @@ void onDepartmentOpFailed(StudentController::DeptOp op, const QString &errorStri
 - `deactivateDepartment()` / `deleteDepartment()` are no-ops when `m_department` is
   empty or `deptOpBusy` is already true (re-entry guard).
 - Busy: `deptOpBusy` true after invoke, false after the finished/failed slot.
-- Success routes: Deactivate → status message + `refresh()` invoked; Delete → status
-  message (with count) + `refresh()` invoked.
+- Success routes: Deactivate → status message; the department selection is **kept**
+  (`m_department` unchanged). Delete → status message (with count) **and the department
+  filter resets** — assert `department() == ""` and `course() == ""` after a
+  Delete-success (the ghost-selection regression: a bare `refresh()` would leave
+  `m_department == "CE"` and the buttons enabled).
+- On any dept-op success, `authFailure` is cleared (`setAuthFailure(false)`).
 - `ok == false` with an auth message → `authFailure` set (via `applyServerRejection`).
 - `onDepartmentOpFailed` → generic error toast, busy cleared.
 
@@ -249,7 +281,9 @@ Full suite must stay green (`ctest --test-dir <build> --output-on-failure`).
   already disabled at Department=All; the VM double-checks).
 - **Delete of a department that no longer exists** (deleted in another window) → the
   endpoint's `DELETE ... WHERE department=?` affects 0 rows and still answers success;
-  `refresh()` reconciles the cascade. Acceptable.
+  the Delete-success path (`setDepartment("")` + `loadDepartments()`, §4.2) reconciles
+  the cascade regardless of the affected-row count. Acceptable. (Note: a bare
+  `refresh()` would **not** reconcile — see §4.2 for why the filter reset is required.)
 - **Re-entry** (double-click) → `m_deptOpBusy` short-circuits the second call and the
   buttons are disabled while busy.
 - **`+` in the admin key** corrupts over `x-www-form-urlencoded` — a pre-existing,
