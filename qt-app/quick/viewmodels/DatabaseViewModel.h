@@ -61,11 +61,24 @@ class DatabaseViewModel : public QObject
     Q_PROPERTY(bool canApplyBulk READ canApplyBulk NOTIFY canApplyBulkChanged)
     Q_PROPERTY(QStringList bulkChangeSummary READ bulkChangeSummary NOTIFY bulkChangeSummaryChanged)
     Q_PROPERTY(bool bulkBusy READ bulkBusy NOTIFY bulkBusyChanged)
+    Q_PROPERTY(QString regSchoolId READ regSchoolId WRITE setRegSchoolId NOTIFY regSchoolIdChanged)
+    Q_PROPERTY(QString regName READ regName WRITE setRegName NOTIFY regNameChanged)
+    Q_PROPERTY(QString regCode READ regCode WRITE setRegCode NOTIFY regCodeChanged)
+    Q_PROPERTY(QString regYearLevel READ regYearLevel WRITE setRegYearLevel NOTIFY regYearLevelChanged)
+    Q_PROPERTY(QString regGender READ regGender WRITE setRegGender NOTIFY regGenderChanged)
+    Q_PROPERTY(QString regStatus READ regStatus WRITE setRegStatus NOTIFY regStatusChanged)
+    Q_PROPERTY(QString regDepartment READ regDepartment NOTIFY regDepartmentChanged)
+    Q_PROPERTY(QString regCourse READ regCourse WRITE setRegCourse NOTIFY regCourseChanged)
+    Q_PROPERTY(QStringList regCourses READ regCourses NOTIFY regCoursesChanged)
+    Q_PROPERTY(QString regPhotoName READ regPhotoName NOTIFY regPhotoNameChanged)
+    Q_PROPERTY(bool canRegister READ canRegister NOTIFY canRegisterChanged)
+    Q_PROPERTY(bool regBusy READ regBusy NOTIFY regBusyChanged)
+    Q_PROPERTY(bool regDuplicate READ regDuplicate NOTIFY regDuplicateChanged)
 public:
     explicit DatabaseViewModel(QObject *parent = nullptr);
 
     enum class EditMode     { NoEdit, SingleEdit, BulkEdit };
-    enum class CourseTarget { SingleEdit, BulkEdit };
+    enum class CourseTarget { SingleEdit, BulkEdit, Register };
 
     static constexpr int kTypeToConfirmThreshold = 10;
 
@@ -109,6 +122,21 @@ public:
     QStringList bulkChangeSummary() const;
     bool bulkBusy() const { return m_bulkInFlight; }
 
+    QString regSchoolId() const { return m_regSchoolId; }
+    QString regName() const { return m_regName; }
+    QString regCode() const { return m_regCode; }
+    QString regYearLevel() const { return m_regYearLevel; }
+    QString regGender() const { return m_regGender; }
+    QString regStatus() const { return m_regStatus; }
+    QString regDepartment() const { return m_regDepartment; }
+    QString regCourse() const { return m_regCourse; }
+    QStringList regCourses() const { return m_regCourses; }
+    QString regPhotoName() const { return m_regPhotoName; }
+    bool canRegister() const
+    { return !m_regSchoolId.trimmed().isEmpty() && !m_regName.trimmed().isEmpty(); }
+    bool regBusy() const { return m_regInFlight; }
+    bool regDuplicate() const { return m_regDuplicate; }
+
     Q_INVOKABLE void refresh();                          // load departments + all students
     Q_INVOKABLE void setDepartment(const QString &department);
     Q_INVOKABLE void setCourse(const QString &course);
@@ -143,6 +171,19 @@ public:
     Q_INVOKABLE void beginBulkEditSelected();
     Q_INVOKABLE void applyBulkEdit();
 
+    Q_INVOKABLE void beginRegister();
+    Q_INVOKABLE void setRegSchoolId(const QString &v);
+    Q_INVOKABLE void setRegName(const QString &v);
+    Q_INVOKABLE void setRegCode(const QString &v);
+    Q_INVOKABLE void setRegYearLevel(const QString &v);
+    Q_INVOKABLE void setRegGender(const QString &v);
+    Q_INVOKABLE void setRegStatus(const QString &v);
+    Q_INVOKABLE void setRegCourse(const QString &v);
+    Q_INVOKABLE void setRegDepartment(const QString &dept);
+    Q_INVOKABLE void setRegPhoto(const QUrl &fileUrl);
+    Q_INVOKABLE void clearRegPhoto();
+    Q_INVOKABLE void registerStudent();
+
     // Public slots (test seam — driven network-free, like SearchViewModel).
     void onSearchFinished(SearchOutcome outcome, const QList<StudentRecord> &records,
                           const QString &message, const QString &searchTerm, quint64 requestId);
@@ -154,6 +195,8 @@ public:
     void onEditCoursesLoaded(const QStringList &courses);
     void onBulkUpdateFinished(const BulkUpdateResult &result);
     void onBulkUpdateFailed(const QString &errorString);
+    void onRegisterFinished(RegisterOutcome outcome, const QString &message);
+    void onRegisterFailed(const QString &errorString);
 
 signals:
     void departmentsChanged();
@@ -191,6 +234,21 @@ signals:
     void bulkEditReady();
     void bulkEditFinished();
     void bulkBusyChanged();
+    void regSchoolIdChanged();
+    void regNameChanged();
+    void regCodeChanged();
+    void regYearLevelChanged();
+    void regGenderChanged();
+    void regStatusChanged();
+    void regDepartmentChanged();
+    void regCourseChanged();
+    void regCoursesChanged();
+    void regPhotoNameChanged();
+    void canRegisterChanged();
+    void regBusyChanged();
+    void regDuplicateChanged();
+    void registerReady();
+    void registerFinished();
 
 private:
     bool acceptRequest(quint64 requestId);
@@ -232,6 +290,12 @@ private:
     EditMode     m_editMode     = EditMode::NoEdit;
     CourseTarget m_courseTarget = CourseTarget::SingleEdit;
     bool m_bulkInFlight = false;
+
+    QString m_regSchoolId, m_regName, m_regCode, m_regYearLevel, m_regGender, m_regStatus;
+    QString m_regDepartment, m_regCourse, m_regPhotoName, m_regPhotoPath;
+    QStringList m_regCourses;
+    bool m_regInFlight = false;
+    bool m_regDuplicate = false;
 };
 
 #endif // DATABASEVIEWMODEL_H

@@ -35,6 +35,11 @@ DatabaseViewModel::DatabaseViewModel(QObject *parent)
             this, &DatabaseViewModel::onBulkUpdateFinished);
     connect(m_controller, &StudentController::bulkUpdateFailed,
             this, &DatabaseViewModel::onBulkUpdateFailed);
+
+    connect(m_controller, &StudentController::registerFinished,
+            this, &DatabaseViewModel::onRegisterFinished);
+    connect(m_controller, &StudentController::registerFailed,
+            this, &DatabaseViewModel::onRegisterFailed);
 }
 
 void DatabaseViewModel::refresh()
@@ -191,7 +196,9 @@ void DatabaseViewModel::setEditDepartment(const QString &dept)
 
 void DatabaseViewModel::onEditCoursesLoaded(const QStringList &courses)
 {
-    if (m_courseTarget == CourseTarget::BulkEdit) {
+    if (m_courseTarget == CourseTarget::Register) {
+        m_regCourses = courses; emit regCoursesChanged();
+    } else if (m_courseTarget == CourseTarget::BulkEdit) {
         m_bulkCourses = courses; emit bulkCoursesChanged();
     } else {
         m_editCourses = courses; emit editCoursesChanged();
@@ -451,3 +458,124 @@ void DatabaseViewModel::setLoading(bool v) { if (m_loading != v) { m_loading = v
 void DatabaseViewModel::setError(const QString &e) { if (m_errorText != e) { m_errorText = e; emit errorTextChanged(); } }
 void DatabaseViewModel::setStatusMessage(const QString &m) { m_statusMessage = m; emit statusMessageChanged(); }
 void DatabaseViewModel::setAuthFailure(bool v) { if (m_authFailure != v) { m_authFailure = v; emit authFailureChanged(); } }
+
+void DatabaseViewModel::beginRegister()
+{
+    m_regSchoolId.clear();  emit regSchoolIdChanged();
+    m_regName.clear();      emit regNameChanged();
+    m_regCode.clear();      emit regCodeChanged();
+    m_regYearLevel.clear(); emit regYearLevelChanged();
+    m_regGender.clear();    emit regGenderChanged();
+    m_regStatus.clear();    emit regStatusChanged();
+    m_regDepartment.clear();emit regDepartmentChanged();
+    m_regCourse.clear();    emit regCourseChanged();
+    m_regCourses.clear();   emit regCoursesChanged();
+    m_regPhotoPath.clear();
+    m_regPhotoName.clear(); emit regPhotoNameChanged();
+    if (m_regDuplicate) { m_regDuplicate = false; emit regDuplicateChanged(); }
+    emit canRegisterChanged();
+    emit registerReady();
+}
+
+void DatabaseViewModel::setRegSchoolId(const QString &v)
+{
+    if (m_regSchoolId == v) return;
+    m_regSchoolId = v; emit regSchoolIdChanged();
+    // Editing the rejected value makes the "already exists" claim stale.
+    if (m_regDuplicate) { m_regDuplicate = false; emit regDuplicateChanged(); }
+    emit canRegisterChanged();
+}
+
+void DatabaseViewModel::setRegName(const QString &v)
+{
+    if (m_regName == v) return;
+    m_regName = v; emit regNameChanged();
+    emit canRegisterChanged();
+}
+
+void DatabaseViewModel::setRegCode(const QString &v)
+{ if (m_regCode != v) { m_regCode = v; emit regCodeChanged(); } }
+
+void DatabaseViewModel::setRegYearLevel(const QString &v)
+{ if (m_regYearLevel != v) { m_regYearLevel = v; emit regYearLevelChanged(); } }
+
+void DatabaseViewModel::setRegGender(const QString &v)
+{ if (m_regGender != v) { m_regGender = v; emit regGenderChanged(); } }
+
+void DatabaseViewModel::setRegStatus(const QString &v)
+{ if (m_regStatus != v) { m_regStatus = v; emit regStatusChanged(); } }
+
+void DatabaseViewModel::setRegCourse(const QString &v)
+{ if (m_regCourse != v) { m_regCourse = v; emit regCourseChanged(); } }
+
+void DatabaseViewModel::setRegDepartment(const QString &dept)
+{
+    // Guard makes a re-entrant setRegDepartment("") from the dialog's on-open
+    // combo reset a hard no-op (m_regDepartment is already "" after
+    // beginRegister), so reopening never fires a spurious empty-dept load.
+    if (m_regDepartment == dept) return;
+    m_regDepartment = dept; emit regDepartmentChanged();
+    if (!m_regCourse.isEmpty()) { m_regCourse.clear(); emit regCourseChanged(); }
+    m_courseTarget = CourseTarget::Register;
+    m_editController->loadCourses(dept);   // dependent course list for the register dialog
+}
+
+void DatabaseViewModel::setRegPhoto(const QUrl &fileUrl)
+{
+    m_regPhotoPath = fileUrl.toLocalFile();
+    m_regPhotoName = QFileInfo(m_regPhotoPath).fileName();
+    emit regPhotoNameChanged();
+}
+
+void DatabaseViewModel::clearRegPhoto()
+{
+    if (m_regPhotoPath.isEmpty() && m_regPhotoName.isEmpty()) return;
+    m_regPhotoPath.clear();
+    m_regPhotoName.clear();
+    emit regPhotoNameChanged();
+}
+
+void DatabaseViewModel::registerStudent()
+{
+    if (m_regInFlight || !canRegister()) return;    // re-entry + precondition guard
+    StudentRecord rec;
+    rec.schoolId   = m_regSchoolId;
+    rec.name       = m_regName;
+    rec.code       = m_regCode;
+    rec.yearLevel  = m_regYearLevel;
+    rec.department = m_regDepartment;
+    rec.course     = m_regCourse;
+    rec.gender     = m_regGender;
+    rec.status     = m_regStatus;
+    rec.visits     = 0;                              // new student has no visits
+    m_regInFlight = true; emit regBusyChanged();     // set BEFORE the call (sync failure safety)
+    m_controller->registerStudent(rec, m_regPhotoPath, AdminSession::instance().key());
+}
+
+void DatabaseViewModel::onRegisterFinished(RegisterOutcome outcome, const QString &message)
+{
+    m_regInFlight = false; emit regBusyChanged();
+    switch (outcome) {
+    case RegisterOutcome::Success:
+        setAuthFailure(false);
+        setStatusMessage(m_regName.isEmpty() ? tr("Student registered")
+                                             : tr("Registered %1").arg(m_regName));
+        reloadTable();                              // re-fetch the current dept/course filter
+        emit registerFinished();                    // closes the dialog
+        break;
+    case RegisterOutcome::Duplicate:
+        if (!m_regDuplicate) { m_regDuplicate = true; emit regDuplicateChanged(); }
+        break;                                      // inline error; no toast, no reload
+    case RegisterOutcome::Error:
+        // 401 held-key vs generic — the SAME split delete/bulk use. Dialog stays open.
+        applyServerRejection(message, tr("Registration failed."));
+        break;
+    }
+}
+
+void DatabaseViewModel::onRegisterFailed(const QString & /*errorString*/)
+{
+    m_regInFlight = false; emit regBusyChanged();
+    setAuthFailure(false);
+    setStatusMessage(tr("Registration failed — check your connection."));
+}
