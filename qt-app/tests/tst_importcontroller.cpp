@@ -44,6 +44,7 @@ private slots:
 
     // parseUploadResponse
     void parseUploadResponseSuccess();
+    void parseUploadResponseReadsSkippedCount();
     void parseUploadResponseStatusNotSuccess();
     void parseUploadResponsePlainTextFallback();
 
@@ -283,6 +284,7 @@ void TestImportController::parseUploadResponseSuccess()
         "status": "success",
         "message": "All good.",
         "success_count": 10,
+        "skipped_count": 2,
         "error_count": 1
     })";
 
@@ -291,7 +293,27 @@ void TestImportController::parseUploadResponseSuccess()
     QVERIFY(!result.plainText);
     QCOMPARE(result.message, QString("All good."));
     QCOMPARE(result.successCount, 10);
+    QCOMPARE(result.skippedCount, 2);
     QCOMPARE(result.errorCount, 1);
+}
+
+void TestImportController::parseUploadResponseReadsSkippedCount()
+{
+    // skipped_count present and non-zero is read verbatim (regression guard:
+    // the field did not exist before 4a.3).
+    const QByteArray json = R"({
+        "status": "success",
+        "message": "Partial import.",
+        "success_count": 5,
+        "skipped_count": 4,
+        "error_count": 0
+    })";
+
+    const UploadResult result = ImportController::parseUploadResponse(json);
+    QVERIFY(result.ok);
+    QCOMPARE(result.successCount, 5);
+    QCOMPARE(result.skippedCount, 4);
+    QCOMPARE(result.errorCount, 0);
 }
 
 void TestImportController::parseUploadResponseStatusNotSuccess()

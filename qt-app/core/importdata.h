@@ -23,6 +23,7 @@ struct UploadResult
     bool    ok = false;
     QString message;
     int     successCount = 0;
+    int     skippedCount = 0;
     int     errorCount = 0;
     bool    plainText = false;   // true when the response was not a JSON object
     QString rawText;             // populated only when plainText is true

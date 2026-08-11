@@ -324,11 +324,13 @@ UploadResult ImportController::parseUploadResponse(const QByteArray &raw)
     const QString status       = obj[QLatin1String("status")].toString();
     const QString message      = obj[QLatin1String("message")].toString();
     const int successCount     = obj[QLatin1String("success_count")].toInt();
+    const int skippedCount     = obj[QLatin1String("skipped_count")].toInt();
     const int errorCount       = obj[QLatin1String("error_count")].toInt();
 
     UploadResult result;
     result.message      = message;
     result.successCount = successCount;
+    result.skippedCount = skippedCount;
     result.errorCount   = errorCount;
     result.plainText    = false;
     result.ok           = (status == QLatin1String("success"));
