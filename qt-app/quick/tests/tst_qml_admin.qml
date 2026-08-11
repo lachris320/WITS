@@ -1749,6 +1749,12 @@ Item {
             function setRegPhoto(u) { regPhotoName = ("" + u).split("/").pop(); }
             function clearRegPhoto() { regPhotoName = ""; }
             function registerStudent() { registerStudentCount++; }
+
+            property bool deptOpBusy: false
+            property int deactivateDepartmentCount: 0
+            property int deleteDepartmentCount: 0
+            function deactivateDepartment() { deactivateDepartmentCount++; }
+            function deleteDepartment() { deleteDepartmentCount++; }
         }
 
         DatabaseScreen { id: databaseScreen; anchors.fill: parent; vm: stubVm }
@@ -1843,6 +1849,73 @@ Item {
                 compare(btn.enabled, false);                // gated until DELETE typed
                 findChild(dlg, "confirmTypedField").text = "DELETE";
                 compare(btn.enabled, true);
+            }
+            function test_deptButtonsDisabledWhenNoDepartment() {
+                stubVm.department = "";
+                stubVm.course = "";
+                stubVm.deptOpBusy = false;
+                waitForRendering(databaseScreen);
+                compare(findChild(databaseScreen, "deptDeactivateButton").enabled, false);
+                compare(findChild(databaseScreen, "deptDeleteButton").enabled, false);
+            }
+            function test_deptButtonsDisabledWhenCourseSelected() {
+                stubVm.department = "CCS";
+                stubVm.course = "BSIT";
+                stubVm.deptOpBusy = false;
+                waitForRendering(databaseScreen);
+                compare(findChild(databaseScreen, "deptDeactivateButton").enabled, false);
+                compare(findChild(databaseScreen, "deptDeleteButton").enabled, false);
+                stubVm.department = ""; stubVm.course = "";
+            }
+            function test_deptButtonsEnabledWhenDeptAndCourseAll() {
+                stubVm.department = "CCS";
+                stubVm.course = "";
+                stubVm.deptOpBusy = false;
+                waitForRendering(databaseScreen);
+                compare(findChild(databaseScreen, "deptDeactivateButton").enabled, true);
+                compare(findChild(databaseScreen, "deptDeleteButton").enabled, true);
+                stubVm.department = "";
+            }
+            function test_deptButtonsDisabledWhenBusy() {
+                stubVm.department = "CCS";
+                stubVm.course = "";
+                stubVm.deptOpBusy = true;
+                waitForRendering(databaseScreen);
+                compare(findChild(databaseScreen, "deptDeactivateButton").enabled, false);
+                compare(findChild(databaseScreen, "deptDeleteButton").enabled, false);
+                stubVm.department = ""; stubVm.deptOpBusy = false;
+            }
+            function test_deactivateOpensPlainConfirmAndInvokesVm() {
+                stubVm.department = "CCS";
+                stubVm.course = "";
+                stubVm.deptOpBusy = false;
+                waitForRendering(databaseScreen);
+                mouseClick(findChild(databaseScreen, "deptDeactivateButton"));
+                var dlg = findChild(databaseScreen, "deptDeactivateConfirm");
+                verify(dlg !== null);
+                compare(dlg.visible, true);
+                compare(dlg.requireTypedConfirmation, false);   // reversible, no typed gate
+                mouseClick(findChild(dlg, "confirmButton"));
+                compare(stubVm.deactivateDepartmentCount, 1);
+                stubVm.department = "";
+            }
+            function test_deleteUsesTypedGateAndInvokesVm() {
+                stubVm.department = "CCS";
+                stubVm.course = "";
+                stubVm.deptOpBusy = false;
+                waitForRendering(databaseScreen);
+                mouseClick(findChild(databaseScreen, "deptDeleteButton"));
+                var dlg = findChild(databaseScreen, "deptDeleteConfirm");
+                verify(dlg !== null);
+                compare(dlg.visible, true);
+                compare(dlg.requireTypedConfirmation, true);     // unconditional typed gate
+                var btn = findChild(dlg, "confirmButton");
+                compare(btn.enabled, false);                     // gated until DELETE typed
+                findChild(dlg, "confirmTypedField").text = "DELETE";
+                compare(btn.enabled, true);
+                mouseClick(btn);
+                compare(stubVm.deleteDepartmentCount, 1);
+                stubVm.department = "";
             }
             function test_fileDialogAcceptInvokesExportCsv() {
                 var dlg = findChild(databaseScreen, "exportDialog");
