@@ -65,6 +65,14 @@ private slots:
     void onRegisterFinishedGenericErrorSetsStatusNoAuth();
     void onRegisterFailedSetsTransientStatusClearsBusy();
     void registerStudentReentryGuard();
+    void deactivateGuardsEmptyDepartmentAndReentry();
+    void deleteGuardsEmptyDepartmentAndReentry();
+    void deptOpBusyTogglesAroundDeactivate();
+    void deactivateSuccessSetsStatusKeepsDepartment();
+    void deleteSuccessResetsDepartmentFilterAndClearsCourse();
+    void deptOpSuccessClearsAuthFailure();
+    void deptOpAuthFailureSetsAuthState();
+    void deptOpTransportFailureSetsStatusNoAuth();
 };
 
 // A DatabaseViewModel test-ctor takes a StudentController*; but StudentController
@@ -763,6 +771,105 @@ void TestDatabaseViewModel::registerStudentReentryGuard()
     vm.registerStudent();                               // second call is a no-op
     QCOMPARE(vm.regBusy(), true);
     AdminSession::instance().clear();
+}
+
+void TestDatabaseViewModel::deactivateGuardsEmptyDepartmentAndReentry()
+{
+    DatabaseViewModel vm;
+    AdminSession::instance().setKey("held-key");
+
+    vm.deactivateDepartment();               // m_department is "" -> no-op
+    QCOMPARE(vm.deptOpBusy(), false);
+
+    vm.setDepartment("CE");
+    vm.deactivateDepartment();               // now posts; busy latches
+    QCOMPARE(vm.deptOpBusy(), true);
+    vm.deactivateDepartment();               // re-entry guard: still one op
+    QCOMPARE(vm.deptOpBusy(), true);
+}
+
+void TestDatabaseViewModel::deleteGuardsEmptyDepartmentAndReentry()
+{
+    DatabaseViewModel vm;
+    AdminSession::instance().setKey("held-key");
+
+    vm.deleteDepartment();                    // "" -> no-op
+    QCOMPARE(vm.deptOpBusy(), false);
+
+    vm.setDepartment("CE");
+    vm.deleteDepartment();
+    QCOMPARE(vm.deptOpBusy(), true);
+    vm.deleteDepartment();                    // re-entry guard
+    QCOMPARE(vm.deptOpBusy(), true);
+}
+
+void TestDatabaseViewModel::deptOpBusyTogglesAroundDeactivate()
+{
+    DatabaseViewModel vm;
+    AdminSession::instance().setKey("k");
+    vm.setDepartment("CE");
+    QSignalSpy busySpy(&vm, &DatabaseViewModel::deptOpBusyChanged);
+
+    vm.deactivateDepartment();
+    QCOMPARE(vm.deptOpBusy(), true);
+    vm.onDepartmentOpFinished(StudentController::DeptOp::Deactivate, true, QString());
+    QCOMPARE(vm.deptOpBusy(), false);
+    QVERIFY(busySpy.count() >= 2);            // true then false
+}
+
+void TestDatabaseViewModel::deactivateSuccessSetsStatusKeepsDepartment()
+{
+    DatabaseViewModel vm;
+    vm.setDepartment("CE");
+    vm.onDepartmentOpFinished(StudentController::DeptOp::Deactivate, true, QString());
+    QVERIFY(vm.statusMessage().contains("CE"));
+    QCOMPARE(vm.department(), QStringLiteral("CE"));   // dept persists; selection kept
+}
+
+void TestDatabaseViewModel::deleteSuccessResetsDepartmentFilterAndClearsCourse()
+{
+    DatabaseViewModel vm;
+    vm.setDepartment("CE");
+    vm.setCourse("BSCpE");
+    vm.onDepartmentOpFinished(StudentController::DeptOp::Delete, true, QString());
+    // Ghost-selection regression: a bare refresh() would leave department()=="CE"
+    // with the destructive buttons still enabled. The reset drops it to "All".
+    QCOMPARE(vm.department(), QString());
+    QCOMPARE(vm.course(), QString());
+    QVERIFY(vm.statusMessage().contains("CE"));
+}
+
+void TestDatabaseViewModel::deptOpSuccessClearsAuthFailure()
+{
+    DatabaseViewModel vm;
+    vm.setDepartment("CE");
+    // Simulate a prior auth failure, then a recovered op.
+    vm.onDepartmentOpFinished(StudentController::DeptOp::Deactivate, false,
+                              QStringLiteral("Admin authentication required"));
+    QCOMPARE(vm.authFailure(), true);
+    vm.onDepartmentOpFinished(StudentController::DeptOp::Deactivate, true, QString());
+    QCOMPARE(vm.authFailure(), false);
+}
+
+void TestDatabaseViewModel::deptOpAuthFailureSetsAuthState()
+{
+    DatabaseViewModel vm;
+    vm.setDepartment("CE");
+    vm.onDepartmentOpFinished(StudentController::DeptOp::Delete, false,
+                              QStringLiteral("Admin authentication required"));
+    QCOMPARE(vm.authFailure(), true);
+    QCOMPARE(vm.deptOpBusy(), false);
+}
+
+void TestDatabaseViewModel::deptOpTransportFailureSetsStatusNoAuth()
+{
+    DatabaseViewModel vm;
+    vm.setDepartment("CE");
+    vm.onDepartmentOpFailed(StudentController::DeptOp::Delete,
+                            QStringLiteral("Connection refused"));
+    QCOMPARE(vm.authFailure(), false);
+    QVERIFY(!vm.statusMessage().isEmpty());
+    QCOMPARE(vm.deptOpBusy(), false);
 }
 
 QTEST_MAIN(TestDatabaseViewModel)
