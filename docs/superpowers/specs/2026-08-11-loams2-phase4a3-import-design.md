@@ -102,7 +102,10 @@ The **only** QML-facing surface for import. Owns an `ImportController` **and its
 
 - import state as `Q_PROPERTY` (busy/phase flags, parsed-row counts, duplicate counts, last result),
 - actions as `Q_INVOKABLE` (pick data file, pick photos ZIP, start import, continue-after-duplicates,
-  cancel, download template),
+  cancel, download template) — **`cancel` is pre-upload / return-to-idle only** (dismiss at the
+  file-select or duplicate-confirm stage). It does **not** abort an in-flight upload: `ImportController`
+  exposes no `QNetworkReply::abort` path today (legacy's `cancelUpload` flag never aborted the reply
+  either), and adding one is out of scope for this slice.
 - results as signals.
 
 Register it for QML (declarative registration, per the module conventions).
@@ -157,14 +160,23 @@ Add an **"Import"** toolbar button next to **＋Add Student**; wire it to the di
 
 ### 4.5 Modified (legacy) — `adminwindow.cpp`
 
-Update the **3 call sites** to pass the parsed `ParsedTable` rows + `m_adminKey` (already retained via
-`setAdminKey`):
+Update the **3 call sites** to pass the row data + `m_adminKey` (already retained via `setAdminKey`):
 
 - `checkDuplicates` (~line 918),
 - `uploadStudents` (~line 931 and ~line 981).
 
-Legacy **already parses** the file for its preview, so it has the `ParsedTable` to pass. **Legacy import
-must keep working end-to-end.**
+**Correction to a naive assumption — legacy does NOT hold a `ParsedTable`.** `adminwindow` retains only
+`selectedExcelPath` (a `QString`), `selectedZipPath`, and `bulkHeaderIndex` (a `QMap`); the row data lives
+in the **live, user-editable `ui->bulkTable`** (`QTableWidget`). The duplicate-check path deliberately
+reads that live table via a `getCell` lambda **specifically to pick up hand-edits made after preview**
+([adminwindow.cpp:898-916](qt-app/adminwindow.cpp) — "school IDs are NOT cached from the ParsedTable, only
+`bulkHeaderIndex` is"), and the upload call sites currently pass `selectedExcelPath` (the raw file).
+
+**Therefore the legacy implementer must BUILD a `ParsedTable` (or the serialized rows) from the live
+`ui->bulkTable` + `bulkHeaderIndex`, NOT by re-parsing `selectedExcelPath`.** Re-parsing the file would
+silently discard the user's hand-edits — a behavior regression. This reconstruction is required legacy
+work (not a free hand-off) and must feed the same `serializeRows` seam the Quick path uses. `m_adminKey`
+is confirmed retained. **Legacy import must keep working end-to-end, hand-edits included.**
 
 ### 4.6 Modified (backend, deployed WITH client — BREAKING)
 
@@ -173,19 +185,26 @@ must keep working end-to-end.**
 1. `requireAdminAuth($conn)` **FIRST** — before any DB read, ZIP extract, or insert.
 2. Read rows from `$_POST['rows']` (`json_decode` to an array of 7-key row objects).
 3. Build a skip-set from `$_POST['skip_ids']` (existing comma-joined format).
+1a. If `photos_zip` provided, extract once via **core `ZipArchive`** to a temp dir (before the row loop).
 4. For each row:
    - **Server-side re-validate** `school_id` & `name` non-empty (invalid → `error_count++`, skip).
    - If `school_id` in skip-set → `skipped_count++`.
-   - Else **prepared INSERT** of the 7 core columns, and **CHECK `execute()`** (success →
+   - Else: **if a ZIP was extracted**, glob-match `*school_id*` in the extracted photos and copy the match
+     to the students photo dir → `photoPath` (else `photoPath = NULL`). Then **prepared INSERT** of the
+     7 core columns **plus `photo`** (bound to `photoPath`), and **CHECK `execute()`** (success →
      `success_count++`, failure → `error_count++`).
-5. **Photos:** if `photos_zip` provided, extract via **core `ZipArchive`** to a temp dir and glob-match
-   `*school_id*` to copy the photo (unchanged logic).
+5. (photo extraction moved to step 1a; per-row matching folded into step 4 — this preserves today's
+   per-row `photo`-path persistence exactly.)
 6. Return JSON `{status:"success", success_count, skipped_count, error_count, message}`.
 7. **REMOVE** `use PhpOffice\PhpSpreadsheet\IOFactory;` and `require 'vendor/autoload.php'`.
 
-INSERT writes **only the 7 core columns** (`code`/`visits`/`photo`-field left to their **DB defaults**,
-matching today's working behavior — this avoids the blank-`code` `UNIQUE ''` collision noted as a
-4a.2b-iv follow-up).
+INSERT writes the **7 core columns PLUS `photo`** (`photo` = the ZIP-matched path for that `school_id`,
+else `NULL` — mirroring today's working behavior at `upload_students_zip.php:65-78`, so the retained
+photos-ZIP feature keeps persisting the path, not just copying the file). **`code` and `visits` are
+excluded** and left to their DB defaults. Per the tracked schema (`deliverables/sql/wits_app.sql:97,106,331`)
+`code varchar(50) DEFAULT NULL` and `photo varchar(255) DEFAULT NULL`, with `UNIQUE` only on `school_id` —
+so omitting `code` is safe because it is **nullable**, not because of any `UNIQUE` constraint (import has
+no RFID-`code` source; that is the actual reason to exclude it).
 
 **`check_duplicates.php`:**
 
@@ -236,7 +255,7 @@ reply; fabricated counts; unguarded.
 
 ```
 POST upload_students_zip.php  (multipart/form-data)
-  file=<students.xlsx>        ← server re-parses, positional A–G
+  excel=<students.xlsx>       ← form part named "excel" ($_FILES['excel']); server re-parses, positional A–G
   photos_zip=<photos.zip>     (optional)
   skip_ids=21-1-0001,...      ← IGNORED
 → 200 text/plain "✅ Upload complete!"   (no real counts)
@@ -257,8 +276,8 @@ POST upload_students_zip.php  (multipart/form-data)
 → 401 { ...auth-failure body... }
 ```
 
-INSERT writes only: `school_id, name, course, department, year_level, gender, status`.
-`code`, `visits`, `photo`-field → DB defaults.
+INSERT writes: `school_id, name, course, department, year_level, gender, status, photo`
+(`photo` = ZIP-matched path for the row's `school_id`, else `NULL`). `code`, `visits` → DB defaults.
 
 ---
 
@@ -323,11 +342,15 @@ independently** (§4.6) — client validation is for UX; **server validation pro
 ## 8. Scope decisions
 
 - **Formats:** `.xlsx` + `.csv` (both already parsed by the existing controller).
-- **Fields written:** the **7 core** — `school_id, name, course, department, year_level, gender, status`.
-  `code`, `visits`, and the `photo` field are **EXCLUDED** even if present in the file (avoids the
-  blank-`code` `UNIQUE ''` collision; the photo comes **only** via the ZIP match).
+- **Fields written:** the **7 core** — `school_id, name, course, department, year_level, gender, status` —
+  **plus `photo`** (written from the ZIP match for that `school_id`, else `NULL`; the photo value comes
+  **only** from the ZIP match, never from a file column). `code` and `visits` are **EXCLUDED** even if
+  present in the file — `code` because import has no RFID-code source (it is nullable in the tracked
+  schema, so omitting it is safe), `visits` because import must not seed visit counts.
 - **Extra columns ignored;** only required columns (`school_id`, `name`) must be present.
 - **Progress:** upload bytes, then indeterminate "Processing…"; **no fabricated** server-side row progress.
+  Note the byte bar is only meaningful when a **photos ZIP** is attached — the `rows` JSON field is tiny, so
+  a rows-only import jumps to 100% instantly and the real wait is the indeterminate "Processing…" phase.
 - **Duplicate resolution:** inline skip-confirm in the **same** dialog (Continue / Cancel; all-dupes →
   Close). The backend can only **SKIP** (no overwrite path) — **do not offer overwrite**.
 - **Result:** real counts "X imported · Y skipped · Z failed", from the new JSON response.
