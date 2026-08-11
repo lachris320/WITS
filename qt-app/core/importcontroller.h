@@ -20,6 +20,13 @@ public:
     static void    mapHeaders(const QStringList &headers, QMap<QString, int> &indexOut);
     static ParsedTable parseCsv(const QString &rawText);
 
+    // Pure serializer (4a.3): the parsed table -> a compact JSON array of
+    // 7-key row objects (school_id/name/course/department/year_level/gender/
+    // status), mapped through table.headerIndex. code/visits/unrecognized
+    // columns are excluded; each value is trimmed; a missing/out-of-range
+    // column contributes "". Empty table -> "[]". Primary upload-body seam.
+    static QByteArray serializeRows(const ParsedTable &table);
+
     // Synchronous QXlsx parse. Requires a QGuiApplication (see Testing).
     // errorOut (when non-null) reports which of the three legacy failure
     // cases occurred so the View can show the exact original dialog.

@@ -100,6 +100,32 @@ ParsedTable ImportController::parseCsv(const QString &rawText)
     return table;
 }
 
+QByteArray ImportController::serializeRows(const ParsedTable &table)
+{
+    static const QStringList kKeys = {
+        QStringLiteral("school_id"), QStringLiteral("name"),
+        QStringLiteral("course"),    QStringLiteral("department"),
+        QStringLiteral("year_level"),QStringLiteral("gender"),
+        QStringLiteral("status")
+    };
+
+    QJsonArray out;
+    for (const QStringList &row : table.rows) {
+        QJsonObject obj;
+        for (const QString &key : kKeys) {
+            QString value;
+            if (table.headerIndex.contains(key)) {
+                const int col = table.headerIndex.value(key);
+                if (col >= 0 && col < row.size())
+                    value = row.at(col).trimmed();
+            }
+            obj[key] = value;   // absent/out-of-range column -> "" (key still present)
+        }
+        out.append(obj);
+    }
+    return QJsonDocument(out).toJson(QJsonDocument::Compact);
+}
+
 ParsedTable ImportController::parseExcel(const QString &filePath, ExcelParseError *errorOut)
 {
     ParsedTable table;

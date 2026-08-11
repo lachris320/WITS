@@ -1,5 +1,8 @@
 #include <QtTest>
 #include <QByteArray>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QMap>
 #include <QString>
 #include <QStringList>
@@ -35,6 +38,14 @@ private slots:
     void parseCsvRaggedRowKeptAsIs();
     void parseCsvEmptyTextReturnsEmptyTable();
     void parseCsvColNFallbackEndToEnd();
+
+    // serializeRows
+    void serializeRowsMapsSevenCoreKeys();
+    void serializeRowsExcludesCodeAndVisits();
+    void serializeRowsIgnoresUnrecognizedColumn();
+    void serializeRowsTrimsValues();
+    void serializeRowsShortRowFillsEmpty();
+    void serializeRowsEmptyTableIsEmptyArray();
 
     // parseDuplicateResponse
     void parseDuplicateResponseSuccessWithDuplicates();
@@ -231,6 +242,98 @@ void TestImportController::parseCsvColNFallbackEndToEnd()
     QCOMPARE(table.headerIndex.value("school_id"), 0);
     QCOMPARE(table.headerIndex.value("col_1"), 1);
     QVERIFY(!table.headerIndex.contains("notes"));
+}
+
+static QJsonArray decodeRows(const QByteArray &bytes)
+{
+    return QJsonDocument::fromJson(bytes).array();
+}
+
+void TestImportController::serializeRowsMapsSevenCoreKeys()
+{
+    ParsedTable t;
+    t.headers = {"School ID", "Full Name", "Course", "Year Level",
+                 "Department", "Gender", "Status"};
+    ImportController::mapHeaders(t.headers, t.headerIndex);
+    t.rows << QStringList{"21-1-0001", "Juan Dela Cruz", "BSIT", "1",
+                          "CCS", "Male", "Active"};
+
+    const QJsonArray arr = decodeRows(ImportController::serializeRows(t));
+    QCOMPARE(arr.size(), 1);
+    const QJsonObject o = arr.at(0).toObject();
+    QCOMPARE(o.value("school_id").toString(),  QString("21-1-0001"));
+    QCOMPARE(o.value("name").toString(),       QString("Juan Dela Cruz"));
+    QCOMPARE(o.value("course").toString(),     QString("BSIT"));
+    QCOMPARE(o.value("year_level").toString(), QString("1"));
+    QCOMPARE(o.value("department").toString(), QString("CCS"));
+    QCOMPARE(o.value("gender").toString(),     QString("Male"));
+    QCOMPARE(o.value("status").toString(),     QString("Active"));
+    // Exactly the 7 core keys — nothing else.
+    QCOMPARE(o.keys().size(), 7);
+}
+
+void TestImportController::serializeRowsExcludesCodeAndVisits()
+{
+    ParsedTable t;
+    t.headers = {"School ID", "Full Name", "Code", "Visits"};
+    ImportController::mapHeaders(t.headers, t.headerIndex);   // maps code + visits
+    t.rows << QStringList{"21-1-0002", "Maria Clara", "RFID-9", "42"};
+
+    const QJsonObject o = decodeRows(ImportController::serializeRows(t)).at(0).toObject();
+    QVERIFY(!o.contains("code"));
+    QVERIFY(!o.contains("visits"));
+    QCOMPARE(o.value("school_id").toString(), QString("21-1-0002"));
+    QCOMPARE(o.value("name").toString(),      QString("Maria Clara"));
+    // Unmapped core columns still present, empty.
+    QCOMPARE(o.value("course").toString(), QString());
+}
+
+void TestImportController::serializeRowsIgnoresUnrecognizedColumn()
+{
+    ParsedTable t;
+    t.headers = {"School ID", "Notes"};
+    ImportController::mapHeaders(t.headers, t.headerIndex);   // Notes -> col_1
+    t.rows << QStringList{"21-1-0003", "ignore me"};
+
+    const QJsonObject o = decodeRows(ImportController::serializeRows(t)).at(0).toObject();
+    QVERIFY(!o.contains("col_1"));
+    QVERIFY(!o.contains("notes"));
+    QCOMPARE(o.keys().size(), 7);
+    QCOMPARE(o.value("school_id").toString(), QString("21-1-0003"));
+}
+
+void TestImportController::serializeRowsTrimsValues()
+{
+    ParsedTable t;
+    t.headers = {"School ID", "Full Name"};
+    ImportController::mapHeaders(t.headers, t.headerIndex);
+    t.rows << QStringList{"  21-1-0004  ", "\tAna Reyes \n"};
+
+    const QJsonObject o = decodeRows(ImportController::serializeRows(t)).at(0).toObject();
+    QCOMPARE(o.value("school_id").toString(), QString("21-1-0004"));
+    QCOMPARE(o.value("name").toString(),      QString("Ana Reyes"));
+}
+
+void TestImportController::serializeRowsShortRowFillsEmpty()
+{
+    ParsedTable t;
+    t.headers = {"School ID", "Full Name", "Course"};
+    ImportController::mapHeaders(t.headers, t.headerIndex);   // course -> index 2
+    t.rows << QStringList{"21-1-0005", "Jose Rizal"};         // only 2 cells (ragged)
+
+    const QJsonObject o = decodeRows(ImportController::serializeRows(t)).at(0).toObject();
+    QCOMPARE(o.value("school_id").toString(), QString("21-1-0005"));
+    QCOMPARE(o.value("name").toString(),      QString("Jose Rizal"));
+    QCOMPARE(o.value("course").toString(),    QString());   // index 2 out of range -> ""
+}
+
+void TestImportController::serializeRowsEmptyTableIsEmptyArray()
+{
+    ParsedTable t;
+    t.headers = {"School ID", "Full Name"};
+    ImportController::mapHeaders(t.headers, t.headerIndex);
+    // no rows appended
+    QCOMPARE(ImportController::serializeRows(t), QByteArray("[]"));
 }
 
 void TestImportController::parseDuplicateResponseSuccessWithDuplicates()
