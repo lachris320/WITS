@@ -4,9 +4,12 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMap>
+#include <QSignalSpy>
 #include <QString>
 #include <QStringList>
 #include <QTemporaryDir>
+#include <QUrlQuery>
+#include "capturingnam.h"
 #include "importcontroller.h"
 #include "importdata.h"
 #include "xlsxdocument.h"
@@ -63,6 +66,10 @@ private slots:
     void parseExcelRoundTrip();
     void parseExcelHeaderOnlyNoDataRows();
     void parseExcelOpenFailedOnBadPath();
+
+    // checkDuplicates (request assembly + 401 routing)
+    void checkDuplicatesPostsFormWithSchoolIdsAndAdminKey();
+    void checkDuplicates401RoutesToAuthError();
 };
 
 void TestImportController::normalizeHeaderTrimsLowersStrips()
@@ -507,6 +514,47 @@ void TestImportController::parseExcelOpenFailedOnBadPath()
     QCOMPARE(err, ExcelParseError::OpenFailed);
     QVERIFY(table.headers.isEmpty());
     QVERIFY(table.rows.isEmpty());
+}
+
+void TestImportController::checkDuplicatesPostsFormWithSchoolIdsAndAdminKey()
+{
+    CapturingNam nam(R"({"status":"success","duplicates":[]})");
+    ImportController controller(&nam);
+
+    controller.checkDuplicates({"21-1-0001", "21-1-0002"}, "s3cr3t-key");
+
+    QCOMPARE(nam.lastOp, QNetworkAccessManager::PostOperation);
+    QVERIFY(nam.lastUrl.toString().endsWith("check_duplicates.php"));
+    QCOMPARE(nam.lastContentType, QString("application/x-www-form-urlencoded"));
+
+    // school_ids is a JSON-array string field; admin_key is a sibling field.
+    QUrlQuery q(QString::fromUtf8(nam.lastBody));
+    QVERIFY(q.hasQueryItem("school_ids"));
+    QVERIFY(q.hasQueryItem("admin_key"));
+    QCOMPARE(q.queryItemValue("admin_key", QUrl::FullyDecoded), QString("s3cr3t-key"));
+    const QString idsField = q.queryItemValue("school_ids", QUrl::FullyDecoded);
+    const QJsonArray ids = QJsonDocument::fromJson(idsField.toUtf8()).array();
+    QCOMPARE(ids.size(), 2);
+    QCOMPARE(ids.at(0).toString(), QString("21-1-0001"));
+    QCOMPARE(ids.at(1).toString(), QString("21-1-0002"));
+}
+
+void TestImportController::checkDuplicates401RoutesToAuthError()
+{
+    // A guard rejection: AuthenticationRequiredError + HTTP 401 + a decodable body.
+    CapturingNam nam(R"({"status":"error","message":"Admin authentication required"})",
+                     QNetworkReply::AuthenticationRequiredError, 401);
+    ImportController controller(&nam);
+
+    QSignalSpy errSpy(&controller, &ImportController::importError);
+    QSignalSpy okSpy(&controller, &ImportController::duplicatesResolved);
+
+    controller.checkDuplicates({"21-1-0001"}, "bad-key");
+    QVERIFY(errSpy.wait(1000));            // CannedReply finishes on the next loop turn
+    QCOMPARE(okSpy.count(), 0);            // NOT reported as a normal resolve
+    QCOMPARE(errSpy.count(), 1);
+    const QString message = errSpy.at(0).at(1).toString();
+    QVERIFY(message.contains("authentication", Qt::CaseInsensitive));
 }
 
 QTEST_MAIN(TestImportController)

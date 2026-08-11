@@ -90,9 +90,17 @@ qt_add_executable(tst_importcontroller
     ${CMAKE_SOURCE_DIR}/core/importcontroller.cpp
     ${CMAKE_SOURCE_DIR}/core/importcontroller.h
     ${CMAKE_SOURCE_DIR}/core/importdata.h
+    ${CMAKE_SOURCE_DIR}/core/studentcontroller.cpp
+    ${CMAKE_SOURCE_DIR}/core/studentcontroller.h
+    ${CMAKE_SOURCE_DIR}/core/studentdata.h
+    ${CMAKE_SOURCE_DIR}/core/csvutil.cpp
+    ${CMAKE_SOURCE_DIR}/core/csvutil.h
+    ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
+    ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
 )
 set_target_properties(tst_importcontroller PROPERTIES WIN32_EXECUTABLE FALSE)
-target_include_directories(tst_importcontroller PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/core)
+target_include_directories(tst_importcontroller PRIVATE
+    ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/core ${CMAKE_SOURCE_DIR}/testsupport)
 target_link_libraries(tst_importcontroller PRIVATE
     Qt${QT_VERSION_MAJOR}::Test
     Qt${QT_VERSION_MAJOR}::Network

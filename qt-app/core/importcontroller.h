@@ -32,8 +32,10 @@ public:
     // cases occurred so the View can show the exact original dialog.
     ParsedTable parseExcel(const QString &filePath, ExcelParseError *errorOut = nullptr);
 
-    // Async — result arrives via duplicatesResolved / importError.
-    void checkDuplicates(const QStringList &schoolIds);
+    // Async — result arrives via duplicatesResolved / importError. adminKey is
+    // sent as a form field (check_duplicates.php is requireAdminAuth-guarded);
+    // a 401-with-body routes to importError with a clear auth message.
+    void checkDuplicates(const QStringList &schoolIds, const QString &adminKey);
 
     // Async — result arrives via uploadStarted / uploadProgress / uploadFinished / uploadFailed.
     void uploadStudents(const QString &excelPath, const QString &zipPath,

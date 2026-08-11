@@ -11,7 +11,9 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QUrlQuery>
 
+#include "studentcontroller.h"
 #include "xlsxdocument.h"
 #include "xlsxcellrange.h"
 
@@ -178,42 +180,53 @@ ParsedTable ImportController::parseExcel(const QString &filePath, ExcelParseErro
     return table;
 }
 
-void ImportController::checkDuplicates(const QStringList &schoolIds)
+void ImportController::checkDuplicates(const QStringList &schoolIds, const QString &adminKey)
 {
     QNetworkRequest request(ApiConfig::endpoint(QStringLiteral("check_duplicates.php")));
     request.setHeader(QNetworkRequest::ContentTypeHeader,
-                      QStringLiteral("application/json"));
+                      QStringLiteral("application/x-www-form-urlencoded"));
 
+    // school_ids as a JSON-array string in one form field (mirrors how
+    // bulk_update_students sends `students`), admin_key as a sibling field.
     QJsonArray idsArray;
     for (const QString &id : schoolIds)
         idsArray.append(id);
+    const QByteArray idsJson = QJsonDocument(idsArray).toJson(QJsonDocument::Compact);
 
-    QJsonObject payload;
-    payload[QLatin1String("school_ids")] = idsArray;
+    QUrlQuery body;
+    body.addQueryItem(QStringLiteral("school_ids"), QString::fromUtf8(idsJson));
+    body.addQueryItem(QStringLiteral("admin_key"), adminKey);
 
-    QNetworkReply *reply = m_nam->post(request, QJsonDocument(payload).toJson());
+    QNetworkReply *reply =
+        m_nam->post(request, body.toString(QUrl::FullyEncoded).toUtf8());
 
-    // `this` (the controller) as the context object is mandatory: the
-    // connection auto-disconnects if the controller is destroyed while the
-    // reply — owned by the shared QNetworkAccessManager — is still in flight.
+    // `this` as the context object: auto-disconnect if the controller dies
+    // while the reply (owned by the shared NAM) is still in flight.
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            // Legacy uses "Error" as the title here, not "Network Error"
-            // (adminwindow.cpp:1180) — preserved verbatim, not unified with
-            // VisitorController's "Network Error" convention.
-            emit importError(QStringLiteral("Error"), reply->errorString(),
-                             ImportSeverity::Critical);
-            reply->deleteLater();
+        const QByteArray resp = reply->readAll();
+        const bool hadError = reply->error() != QNetworkReply::NoError;
+        const QString errorString = reply->errorString();
+        const QVariant statusAttr =
+            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
+        const int httpStatus = statusAttr.isValid() ? statusAttr.toInt() : 0;
+        reply->deleteLater();
+
+        if (!StudentController::replyIsServerAnswer(hadError, httpStatus, resp)) {
+            // Genuine transport failure (no server answer). Legacy title "Error".
+            emit importError(QStringLiteral("Error"), errorString, ImportSeverity::Critical);
             return;
         }
-
-        const QByteArray resp = reply->readAll();
-        reply->deleteLater();
 
         QStringList duplicates;
         QString errorMsg;
         if (!parseDuplicateResponse(resp, &duplicates, &errorMsg)) {
-            emit importError(QStringLiteral("Error"), errorMsg, ImportSeverity::Warning);
+            // A 401-with-body is a server answer; surface it as a clear auth error.
+            if (httpStatus == 401)
+                emit importError(QStringLiteral("Authentication"),
+                                 QStringLiteral("Admin authentication required — re-enter via admin login."),
+                                 ImportSeverity::Critical);
+            else
+                emit importError(QStringLiteral("Error"), errorMsg, ImportSeverity::Warning);
             return;
         }
 
