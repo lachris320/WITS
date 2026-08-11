@@ -53,6 +53,30 @@ Rectangle {
                     onDepartmentPicked: function(d) { if (screen.vm) screen.vm.setDepartment(d); }
                     onCoursePicked: function(c) { if (screen.vm) screen.vm.setCourse(c); }
                 }
+                LButton {
+                    objectName: "deptDeactivateButton"
+                    variant: "Outline"
+                    compact: true
+                    text: qsTr("Deactivate %1").arg(screen.vm ? screen.vm.department : "")
+                    enabled: screen.vm
+                             ? (screen.vm.department !== "" && screen.vm.course === ""
+                                && !screen.vm.deptOpBusy)
+                             : false
+                    tooltipText: qsTr("Set all students in this department to Inactive. Clear the course filter to act on the whole department.")
+                    onClicked: deptDeactivateConfirm.visible = true
+                }
+                LButton {
+                    objectName: "deptDeleteButton"
+                    variant: "Danger"
+                    compact: true
+                    text: qsTr("Delete %1").arg(screen.vm ? screen.vm.department : "")
+                    enabled: screen.vm
+                             ? (screen.vm.department !== "" && screen.vm.course === ""
+                                && !screen.vm.deptOpBusy)
+                             : false
+                    tooltipText: qsTr("Permanently delete this entire department and all its visit history. Clear the course filter to act on the whole department.")
+                    onClicked: deptDeleteConfirm.visible = true
+                }
             }
         }
 
@@ -191,6 +215,31 @@ Rectangle {
         requireTypedConfirmation: screen.vm ? screen.vm.requiresTypedConfirmation(screen.selectedCount) : false
         confirmationWord: "DELETE"
         onConfirmed: { deleteConfirm.visible = false; if (screen.vm) screen.vm.deleteSelected(); }
+    }
+
+    LConfirmDialog {
+        id: deptDeactivateConfirm
+        objectName: "deptDeactivateConfirm"
+        title: qsTr("Deactivate all students in \"%1\"?").arg(screen.vm ? screen.vm.department : "")
+        message: qsTr("This sets all %1 students in department \"%2\" to Inactive — they will not be able to log in until reactivated.\n\nYou can undo this later: filter to %2 → select all → Edit → set Status → Active.")
+                    .arg(screen.resultCount).arg(screen.vm ? screen.vm.department : "")
+        confirmText: qsTr("Deactivate")
+        // Reversible via bulk-edit → no typed gate.
+        requireTypedConfirmation: false
+        onConfirmed: { deptDeactivateConfirm.visible = false; if (screen.vm) screen.vm.deactivateDepartment(); }
+    }
+
+    LConfirmDialog {
+        id: deptDeleteConfirm
+        objectName: "deptDeleteConfirm"
+        title: qsTr("Delete entire department \"%1\"?").arg(screen.vm ? screen.vm.department : "")
+        message: qsTr("This will permanently delete:\n• %1 student records in \"%2\"\n• all associated visit history\n\nThis cannot be undone.")
+                    .arg(screen.resultCount).arg(screen.vm ? screen.vm.department : "")
+        confirmText: qsTr("Delete")
+        // The app's most destructive op → unconditional typed gate.
+        requireTypedConfirmation: true
+        confirmationWord: "DELETE"
+        onConfirmed: { deptDeleteConfirm.visible = false; if (screen.vm) screen.vm.deleteDepartment(); }
     }
 
     LToast {

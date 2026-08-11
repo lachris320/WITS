@@ -40,6 +40,11 @@ DatabaseViewModel::DatabaseViewModel(QObject *parent)
             this, &DatabaseViewModel::onRegisterFinished);
     connect(m_controller, &StudentController::registerFailed,
             this, &DatabaseViewModel::onRegisterFailed);
+
+    connect(m_controller, &StudentController::departmentOpFinished,
+            this, &DatabaseViewModel::onDepartmentOpFinished);
+    connect(m_controller, &StudentController::departmentOpFailed,
+            this, &DatabaseViewModel::onDepartmentOpFailed);
 }
 
 void DatabaseViewModel::refresh()
@@ -578,4 +583,58 @@ void DatabaseViewModel::onRegisterFailed(const QString & /*errorString*/)
     m_regInFlight = false; emit regBusyChanged();
     setAuthFailure(false);
     setStatusMessage(tr("Registration failed — check your connection."));
+}
+
+void DatabaseViewModel::deactivateDepartment()
+{
+    if (m_department.isEmpty() || m_deptOpInFlight) return;
+    m_deptOpInFlight = true; emit deptOpBusyChanged();
+    m_controller->departmentOperation(StudentController::DeptOp::Deactivate,
+                                      m_department, AdminSession::instance().key());
+}
+
+void DatabaseViewModel::deleteDepartment()
+{
+    if (m_department.isEmpty() || m_deptOpInFlight) return;
+    m_deptOpInFlight = true; emit deptOpBusyChanged();
+    m_controller->departmentOperation(StudentController::DeptOp::Delete,
+                                      m_department, AdminSession::instance().key());
+}
+
+void DatabaseViewModel::onDepartmentOpFinished(StudentController::DeptOp op, bool ok,
+                                               const QString &message)
+{
+    m_deptOpInFlight = false; emit deptOpBusyChanged();
+    if (ok) {
+        setAuthFailure(false);
+        if (op == StudentController::DeptOp::Deactivate) {
+            setStatusMessage(tr("All students in '%1' deactivated.").arg(m_department));
+            refresh();                       // dept persists; keep the selection
+        } else {
+            // Capture the count BEFORE the reset (setDepartment reloads the table
+            // asynchronously; count() is truthful now under the Course=All gate).
+            const int n = m_students.count();
+            const QString dept = m_department;
+            setStatusMessage(tr("Department '%1' deleted (%2 students).").arg(dept).arg(n));
+            // NOT a bare refresh(): the dept no longer exists, so reset the filter
+            // to "All" (clears selection + m_course + reloads all students), and
+            // reload departments so the deleted dept drops out of the cascade.
+            setDepartment(QString());
+            m_controller->loadDepartments();
+        }
+        return;
+    }
+    applyServerRejection(message, op == StudentController::DeptOp::Deactivate
+                                      ? tr("Deactivate failed.")
+                                      : tr("Delete failed."));
+}
+
+void DatabaseViewModel::onDepartmentOpFailed(StudentController::DeptOp op,
+                                             const QString & /*errorString*/)
+{
+    m_deptOpInFlight = false; emit deptOpBusyChanged();
+    setAuthFailure(false);
+    setStatusMessage(op == StudentController::DeptOp::Deactivate
+                         ? tr("Deactivate failed — check your connection.")
+                         : tr("Delete failed — check your connection."));
 }

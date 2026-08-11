@@ -91,6 +91,18 @@ public:
     // no-department-selected course-chip load is scoped.
     void loadCourses(const QString &department);
 
+    // Department-scoped destructive ops (4a.2c). One generic path single-sources
+    // the near-identical network plumbing; the endpoint is chosen by `op`.
+    // Plain enum class — NO registration (SearchOutcome/RegisterOutcome precedent);
+    // carried in same-thread direct-connect signals, never exposed to QML.
+    enum class DeptOp { Deactivate, Delete };
+
+    // POSTs application/x-www-form-urlencoded: department + admin_key to the op's
+    // endpoint. adminKey is held by AdminSession (RAM-only, body, never logged).
+    // Result via departmentOpFinished / departmentOpFailed. A guard 401-with-body
+    // routes to departmentOpFinished(op,false,message) via replyIsServerAnswer.
+    void departmentOperation(DeptOp op, const QString &department, const QString &adminKey);
+
 signals:
     void searchFinished(SearchOutcome outcome,
                         const QList<StudentRecord> &records,
@@ -109,6 +121,11 @@ signals:
     void registerFailed(const QString &errorString);
     void departmentsLoaded(const QStringList &departments);
     void coursesLoaded(const QStringList &courses);
+    // ok==true => server answered success; ok==false => server answered failure
+    // (incl. a guard 401-with-body). op is echoed so one VM slot routes by op.
+    void departmentOpFinished(DeptOp op, bool ok, const QString &message);
+    // Fires only on a genuine transport error (no server answer).
+    void departmentOpFailed(DeptOp op, const QString &errorString);
 
 private:
     QNetworkAccessManager *m_nam;   // injected, not owned — adminWindow keeps ownership

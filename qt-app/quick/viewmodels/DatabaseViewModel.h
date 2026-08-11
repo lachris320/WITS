@@ -7,9 +7,9 @@
 #include <qqml.h>                 // QML_ELEMENT — AdminScreen instantiates this type
 #include "studentdata.h"
 #include "StudentsTableModel.h"
+#include "studentcontroller.h"
 
 class QNetworkAccessManager;
-class StudentController;
 
 // The operator's bulk-edit choices: a toggle + value per editable field.
 // Passed to DatabaseViewModel::buildBulkUpdates (pure, unit-tested).
@@ -74,6 +74,7 @@ class DatabaseViewModel : public QObject
     Q_PROPERTY(bool canRegister READ canRegister NOTIFY canRegisterChanged)
     Q_PROPERTY(bool regBusy READ regBusy NOTIFY regBusyChanged)
     Q_PROPERTY(bool regDuplicate READ regDuplicate NOTIFY regDuplicateChanged)
+    Q_PROPERTY(bool deptOpBusy READ deptOpBusy NOTIFY deptOpBusyChanged)
 public:
     explicit DatabaseViewModel(QObject *parent = nullptr);
 
@@ -136,6 +137,7 @@ public:
     { return !m_regSchoolId.trimmed().isEmpty() && !m_regName.trimmed().isEmpty(); }
     bool regBusy() const { return m_regInFlight; }
     bool regDuplicate() const { return m_regDuplicate; }
+    bool deptOpBusy() const { return m_deptOpInFlight; }
 
     Q_INVOKABLE void refresh();                          // load departments + all students
     Q_INVOKABLE void setDepartment(const QString &department);
@@ -170,6 +172,8 @@ public:
     Q_INVOKABLE void setBulkStatus(const QString &v);
     Q_INVOKABLE void beginBulkEditSelected();
     Q_INVOKABLE void applyBulkEdit();
+    Q_INVOKABLE void deactivateDepartment();
+    Q_INVOKABLE void deleteDepartment();
 
     Q_INVOKABLE void beginRegister();
     Q_INVOKABLE void setRegSchoolId(const QString &v);
@@ -197,6 +201,8 @@ public:
     void onBulkUpdateFailed(const QString &errorString);
     void onRegisterFinished(RegisterOutcome outcome, const QString &message);
     void onRegisterFailed(const QString &errorString);
+    void onDepartmentOpFinished(StudentController::DeptOp op, bool ok, const QString &message);
+    void onDepartmentOpFailed(StudentController::DeptOp op, const QString &errorString);
 
 signals:
     void departmentsChanged();
@@ -249,6 +255,7 @@ signals:
     void regDuplicateChanged();
     void registerReady();
     void registerFinished();
+    void deptOpBusyChanged();
 
 private:
     bool acceptRequest(quint64 requestId);
@@ -296,6 +303,7 @@ private:
     QStringList m_regCourses;
     bool m_regInFlight = false;
     bool m_regDuplicate = false;
+    bool m_deptOpInFlight = false;
 };
 
 #endif // DATABASEVIEWMODEL_H

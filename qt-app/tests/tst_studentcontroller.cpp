@@ -69,6 +69,14 @@ private slots:
     // never bulkUpdateFailed (Task 1 of 4a.2b-ii).
     void bulkUpdate_guard401WithBody_emitsBulkUpdateFinishedNotFailed();
 
+    // departmentOperation (4a.2c t1) — generic department-scoped op
+    void departmentOp_deactivate_buildsFormBodyToDeactivateEndpoint();
+    void departmentOp_delete_targetsDeleteEndpoint();
+    void departmentOp_success_emitsFinishedTrueWithOp();
+    void departmentOp_serverError_emitsFinishedFalseWithMessage();
+    void departmentOp_guard401WithBody_emitsFinishedNotFailed();
+    void departmentOp_transportError_emitsFailedWithOp();
+
     // replyIsServerAnswer (mirrors HttpForm::isServerAnswer)
     void replyIsServerAnswer_transportNoStatus_isFalse();
     void replyIsServerAnswer_401WithBody_isTrue();
@@ -604,6 +612,115 @@ void TestStudentController::toCsv_prefixesApostropheWhenGenderStartsWithEquals()
     r.visits = 1;
     const QByteArray csv = StudentController::toCsv({r});
     QVERIFY(csv.contains(",'=EVIL,Active,1\r\n"));
+}
+
+void TestStudentController::departmentOp_deactivate_buildsFormBodyToDeactivateEndpoint()
+{
+    CapturingNam nam;
+    StudentController ctrl(&nam);
+
+    ctrl.departmentOperation(StudentController::DeptOp::Deactivate, "CE", "test-key");
+
+    QCOMPARE(nam.lastOp, QNetworkAccessManager::PostOperation);
+    QCOMPARE(nam.lastContentType, QStringLiteral("application/x-www-form-urlencoded"));
+    QVERIFY(nam.lastUrl.toString().endsWith(QStringLiteral("deactivate_department.php")));
+
+    const QUrlQuery q(QString::fromUtf8(nam.lastBody));
+    QCOMPARE(q.queryItemValue("department"), QStringLiteral("CE"));
+    QCOMPARE(q.queryItemValue("admin_key"), QStringLiteral("test-key"));
+    QVERIFY(!nam.lastBody.contains("{"));   // not a JSON body
+}
+
+void TestStudentController::departmentOp_delete_targetsDeleteEndpoint()
+{
+    CapturingNam nam;
+    StudentController ctrl(&nam);
+
+    ctrl.departmentOperation(StudentController::DeptOp::Delete, "CE", "test-key");
+
+    QVERIFY(nam.lastUrl.toString().endsWith(QStringLiteral("delete_department.php")));
+    const QUrlQuery q(QString::fromUtf8(nam.lastBody));
+    QCOMPARE(q.queryItemValue("department"), QStringLiteral("CE"));
+    QCOMPARE(q.queryItemValue("admin_key"), QStringLiteral("test-key"));
+}
+
+void TestStudentController::departmentOp_success_emitsFinishedTrueWithOp()
+{
+    CapturingNam nam;   // default canned body: {"status":"success"}, HTTP 200
+    StudentController ctrl(&nam);
+
+    QSignalSpy finishedSpy(&ctrl, &StudentController::departmentOpFinished);
+    QSignalSpy failedSpy(&ctrl, &StudentController::departmentOpFailed);
+
+    ctrl.departmentOperation(StudentController::DeptOp::Deactivate, "CE", "k");
+
+    QVERIFY(finishedSpy.wait(1000));
+    QCOMPARE(finishedSpy.count(), 1);
+    QCOMPARE(failedSpy.count(), 0);
+    const QList<QVariant> args = finishedSpy.takeFirst();
+    QCOMPARE(args.at(0).value<StudentController::DeptOp>(),
+             StudentController::DeptOp::Deactivate);   // op echoed unchanged
+    QCOMPARE(args.at(1).toBool(), true);
+}
+
+void TestStudentController::departmentOp_serverError_emitsFinishedFalseWithMessage()
+{
+    const QByteArray body = R"({"status":"error","message":"No department provided."})";
+    CapturingNam nam(body);   // HTTP 200, error status in body
+    StudentController ctrl(&nam);
+
+    QSignalSpy finishedSpy(&ctrl, &StudentController::departmentOpFinished);
+    QSignalSpy failedSpy(&ctrl, &StudentController::departmentOpFailed);
+
+    ctrl.departmentOperation(StudentController::DeptOp::Delete, "CE", "k");
+
+    QVERIFY(finishedSpy.wait(1000));
+    QCOMPARE(finishedSpy.count(), 1);
+    QCOMPARE(failedSpy.count(), 0);
+    const QList<QVariant> args = finishedSpy.takeFirst();
+    QCOMPARE(args.at(1).toBool(), false);
+    QCOMPARE(args.at(2).toString(), QStringLiteral("No department provided."));
+}
+
+void TestStudentController::departmentOp_guard401WithBody_emitsFinishedNotFailed()
+{
+    // A stale/bad admin key => HTTP 401 + JSON error body. replyIsServerAnswer must
+    // route the body to departmentOpFinished(false, msg), NOT departmentOpFailed.
+    const QByteArray body = R"({"status":"error","message":"Invalid admin key"})";
+    CapturingNam nam(body, QNetworkReply::AuthenticationRequiredError, 401);
+    StudentController ctrl(&nam);
+
+    QSignalSpy finishedSpy(&ctrl, &StudentController::departmentOpFinished);
+    QSignalSpy failedSpy(&ctrl, &StudentController::departmentOpFailed);
+
+    ctrl.departmentOperation(StudentController::DeptOp::Delete, "CE", "stale-key");
+
+    QVERIFY(finishedSpy.wait(1000));
+    QCOMPARE(finishedSpy.count(), 1);
+    QCOMPARE(failedSpy.count(), 0);
+    const QList<QVariant> args = finishedSpy.takeFirst();
+    QCOMPARE(args.at(0).value<StudentController::DeptOp>(),
+             StudentController::DeptOp::Delete);
+    QCOMPARE(args.at(1).toBool(), false);
+    QCOMPARE(args.at(2).toString(), QStringLiteral("Invalid admin key"));
+}
+
+void TestStudentController::departmentOp_transportError_emitsFailedWithOp()
+{
+    // Empty body + connection error + no HTTP status => genuine transport failure.
+    CapturingNam nam(QByteArray(), QNetworkReply::ConnectionRefusedError, 0);
+    StudentController ctrl(&nam);
+
+    QSignalSpy finishedSpy(&ctrl, &StudentController::departmentOpFinished);
+    QSignalSpy failedSpy(&ctrl, &StudentController::departmentOpFailed);
+
+    ctrl.departmentOperation(StudentController::DeptOp::Deactivate, "CE", "k");
+
+    QVERIFY(failedSpy.wait(1000));
+    QCOMPARE(failedSpy.count(), 1);
+    QCOMPARE(finishedSpy.count(), 0);
+    QCOMPARE(failedSpy.takeFirst().at(0).value<StudentController::DeptOp>(),
+             StudentController::DeptOp::Deactivate);
 }
 
 QTEST_MAIN(TestStudentController)
