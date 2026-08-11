@@ -185,16 +185,15 @@ is confirmed retained. **Legacy import must keep working end-to-end, hand-edits 
 1. `requireAdminAuth($conn)` **FIRST** — before any DB read, ZIP extract, or insert.
 2. Read rows from `$_POST['rows']` (`json_decode` to an array of 7-key row objects).
 3. Build a skip-set from `$_POST['skip_ids']` (existing comma-joined format).
-1a. If `photos_zip` provided, extract once via **core `ZipArchive`** to a temp dir (before the row loop).
-4. For each row:
+4. If `photos_zip` provided, extract it once via **core `ZipArchive`** to a temp dir (before the row loop).
+5. For each row:
    - **Server-side re-validate** `school_id` & `name` non-empty (invalid → `error_count++`, skip).
    - If `school_id` in skip-set → `skipped_count++`.
    - Else: **if a ZIP was extracted**, glob-match `*school_id*` in the extracted photos and copy the match
      to the students photo dir → `photoPath` (else `photoPath = NULL`). Then **prepared INSERT** of the
      7 core columns **plus `photo`** (bound to `photoPath`), and **CHECK `execute()`** (success →
-     `success_count++`, failure → `error_count++`).
-5. (photo extraction moved to step 1a; per-row matching folded into step 4 — this preserves today's
-   per-row `photo`-path persistence exactly.)
+     `success_count++`, failure → `error_count++`). Folding per-row matching into the insert preserves
+     today's per-row `photo`-path persistence exactly.
 6. Return JSON `{status:"success", success_count, skipped_count, error_count, message}`.
 7. **REMOVE** `use PhpOffice\PhpSpreadsheet\IOFactory;` and `require 'vendor/autoload.php'`.
 
