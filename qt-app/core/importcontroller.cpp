@@ -128,6 +128,40 @@ QByteArray ImportController::serializeRows(const ParsedTable &table)
     return QJsonDocument(out).toJson(QJsonDocument::Compact);
 }
 
+QString ImportController::validateForImport(const ParsedTable &table, QStringList *badRowsOut)
+{
+    if (badRowsOut)
+        badRowsOut->clear();
+
+    const QString found = QStringLiteral("\nFound columns: ") + table.headers.join(QStringLiteral(", "));
+
+    if (!table.headerIndex.contains(QStringLiteral("school_id")))
+        return QStringLiteral("Missing required column: School ID.") + found;
+    if (!table.headerIndex.contains(QStringLiteral("name")))
+        return QStringLiteral("Missing required column: Name.") + found;
+
+    const int idCol = table.headerIndex.value(QStringLiteral("school_id"));
+    QStringList offenders;
+    for (int r = 0; r < table.rows.size(); ++r) {
+        const QStringList &row = table.rows.at(r);
+        const QString id = (idCol >= 0 && idCol < row.size()) ? row.at(idCol).trimmed() : QString();
+        if (id.isEmpty())
+            offenders << QStringLiteral("Row %1").arg(r + 1);   // 1-based over data rows
+    }
+
+    if (badRowsOut)
+        *badRowsOut = offenders;
+
+    if (!offenders.isEmpty()) {
+        const QStringList head = offenders.mid(0, 3);
+        QString msg = QStringLiteral("Some rows have no School ID: ") + head.join(QStringLiteral(", "));
+        if (offenders.size() > 3)
+            msg += QStringLiteral(", and more");
+        return msg;
+    }
+    return QString();   // OK
+}
+
 ParsedTable ImportController::parseExcel(const QString &filePath, ExcelParseError *errorOut)
 {
     ParsedTable table;

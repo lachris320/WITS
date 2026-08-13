@@ -27,6 +27,14 @@ public:
     // column contributes "". Empty table -> "[]". Primary upload-body seam.
     static QByteArray serializeRows(const ParsedTable &table);
 
+    // Pure client-side validation (4a.3, spec §7). Returns "" when importable;
+    // else a friendly message. Requires school_id + name columns (else names
+    // the found columns); each data row must have a non-empty school_id (empty
+    // ones are appended to *badRowsOut as "Row N", 1-based over data rows).
+    // Extra columns are ignored, never an error.
+    static QString validateForImport(const ParsedTable &table,
+                                     QStringList *badRowsOut = nullptr);
+
     // Synchronous QXlsx parse. Requires a QGuiApplication (see Testing).
     // errorOut (when non-null) reports which of the three legacy failure
     // cases occurred so the View can show the exact original dialog.

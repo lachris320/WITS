@@ -75,6 +75,13 @@ private slots:
     void uploadStudentsPostsRowsAndAdminKeyMultipart();
     void uploadStudentsOmitsSkipIdsWhenEmpty();
     void uploadStudents401RoutesToUploadFailed();
+
+    // validateForImport
+    void validateForImportOkOnGoodTable();
+    void validateForImportMissingSchoolIdColumn();
+    void validateForImportMissingNameColumn();
+    void validateForImportEmptySchoolIdRowsReported();
+    void validateForImportIgnoresExtraColumns();
 };
 
 void TestImportController::normalizeHeaderTrimsLowersStrips()
@@ -617,6 +624,66 @@ void TestImportController::uploadStudents401RoutesToUploadFailed()
     QVERIFY(failSpy.wait(1000));
     QCOMPARE(finSpy.count(), 0);
     QVERIFY(failSpy.at(0).at(0).toString().contains("authentication", Qt::CaseInsensitive));
+}
+
+void TestImportController::validateForImportOkOnGoodTable()
+{
+    ParsedTable t;
+    t.headers = {"School ID", "Full Name"};
+    ImportController::mapHeaders(t.headers, t.headerIndex);
+    t.rows << QStringList{"21-1-0001", "Juan Dela Cruz"};
+
+    QStringList bad;
+    QCOMPARE(ImportController::validateForImport(t, &bad), QString());   // "" == OK
+    QVERIFY(bad.isEmpty());
+}
+
+void TestImportController::validateForImportMissingSchoolIdColumn()
+{
+    ParsedTable t;
+    t.headers = {"Full Name", "Course"};
+    ImportController::mapHeaders(t.headers, t.headerIndex);   // no school_id
+    t.rows << QStringList{"Juan Dela Cruz", "BSIT"};
+
+    const QString msg = ImportController::validateForImport(t, nullptr);
+    QVERIFY(msg.contains("School ID"));
+    QVERIFY(msg.contains("Found columns"));
+}
+
+void TestImportController::validateForImportMissingNameColumn()
+{
+    ParsedTable t;
+    t.headers = {"School ID", "Course"};
+    ImportController::mapHeaders(t.headers, t.headerIndex);   // no name
+    t.rows << QStringList{"21-1-0001", "BSIT"};
+
+    const QString msg = ImportController::validateForImport(t, nullptr);
+    QVERIFY(msg.contains("Name"));
+}
+
+void TestImportController::validateForImportEmptySchoolIdRowsReported()
+{
+    ParsedTable t;
+    t.headers = {"School ID", "Full Name"};
+    ImportController::mapHeaders(t.headers, t.headerIndex);
+    t.rows << QStringList{"21-1-0001", "Juan Dela Cruz"};
+    t.rows << QStringList{"", "Maria Clara"};          // row 2: empty school_id
+
+    QStringList bad;
+    const QString msg = ImportController::validateForImport(t, &bad);
+    QVERIFY(!msg.isEmpty());
+    QCOMPARE(bad, QStringList({"Row 2"}));
+}
+
+void TestImportController::validateForImportIgnoresExtraColumns()
+{
+    ParsedTable t;
+    t.headers = {"School ID", "Full Name", "Notes"};   // Notes -> col_2, ignored
+    ImportController::mapHeaders(t.headers, t.headerIndex);
+    t.rows << QStringList{"21-1-0001", "Juan Dela Cruz", "vip"};
+
+    QStringList bad;
+    QCOMPARE(ImportController::validateForImport(t, &bad), QString());   // extra col is fine
 }
 
 QTEST_MAIN(TestImportController)
