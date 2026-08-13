@@ -37,9 +37,12 @@ public:
     // a 401-with-body routes to importError with a clear auth message.
     void checkDuplicates(const QStringList &schoolIds, const QString &adminKey);
 
-    // Async — result arrives via uploadStarted / uploadProgress / uploadFinished / uploadFailed.
-    void uploadStudents(const QString &excelPath, const QString &zipPath,
-                        const QStringList &skipIds);
+    // Async — result arrives via uploadStarted / uploadProgress /
+    // uploadFinished / uploadFailed. Serializes `table` to a `rows` JSON form
+    // field (via serializeRows) + admin_key + optional skip_ids + optional
+    // photos_zip file. A 401-with-body routes to uploadFailed(auth message).
+    void uploadStudents(const ParsedTable &table, const QString &zipPath,
+                        const QStringList &skipIds, const QString &adminKey);
 
     // Pure response parsers
     static bool parseDuplicateResponse(const QByteArray &raw,
@@ -50,7 +53,7 @@ public:
 signals:
     void duplicatesResolved(const QStringList &duplicates);   // empty = none found
     void importError(const QString &title, const QString &message, ImportSeverity severity);
-    void uploadStarted();                        // excel file opened OK; request about to post
+    void uploadStarted();                        // request about to post
     void uploadProgress(int percent);
     void uploadFinished(const UploadResult &result);
     void uploadFailed(const QString &message);   // always critical, title "Upload Failed"

@@ -234,39 +234,30 @@ void ImportController::checkDuplicates(const QStringList &schoolIds, const QStri
     });
 }
 
-void ImportController::uploadStudents(const QString &excelPath, const QString &zipPath,
-                                      const QStringList &skipIds)
+void ImportController::uploadStudents(const ParsedTable &table, const QString &zipPath,
+                                      const QStringList &skipIds, const QString &adminKey)
 {
     QNetworkRequest uploadRequest(ApiConfig::endpoint(QStringLiteral("upload_students_zip.php")));
     QHttpMultiPart *multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
 
-    // Excel part (mandatory, fatal on failure).
-    QHttpPart excelPart;
-    excelPart.setHeader(QNetworkRequest::ContentDispositionHeader,
-                        QVariant("form-data; name=\"excel\"; filename=\"" +
-                                 QFileInfo(excelPath).fileName() + "\""));
-    QFile *excelFile = new QFile(excelPath);
-    if (!excelFile->open(QIODevice::ReadOnly)) {
-        // Fatal, exactly as legacy (adminwindow.cpp:1270-1278): free what was
-        // already allocated and abort before sending anything. uploadStarted
-        // never fires here, so the View never sets progress/button state —
-        // nothing to revert, reproducing legacy's set-then-revert net effect.
-        emit importError(QStringLiteral("Error"), QStringLiteral("Cannot open Excel file."),
-                         ImportSeverity::Critical);
-        delete excelFile;
-        delete multiPart;
-        return;
-    }
-    excelPart.setBodyDevice(excelFile);
-    excelFile->setParent(multiPart);
-    multiPart->append(excelPart);
+    auto addText = [multiPart](const QString &name, const QByteArray &value) {
+        QHttpPart part;
+        part.setHeader(QNetworkRequest::ContentDispositionHeader,
+                       QVariant(QStringLiteral("form-data; name=\"%1\"").arg(name)));
+        part.setBody(value);
+        multiPart->append(part);
+    };
 
-    // The excel file opened OK — this is the exact point legacy passed line
-    // 1270 and had already set the progress/button state at lines 1251-1258.
-    // The View sets that state in its onUploadStarted slot.
-    emit uploadStarted();
+    // rows: the client-parsed, header-mapped payload (the ONLY serializeRows
+    // call site). Replaces the old raw-Excel file part.
+    addText(QStringLiteral("rows"), serializeRows(table));
+    addText(QStringLiteral("admin_key"), adminKey.toUtf8());   // guard field — never logged
 
-    // ZIP part (optional, non-fatal on failure).
+    // skip_ids — only appended when non-empty (comma-joined; preserved).
+    if (!skipIds.isEmpty())
+        addText(QStringLiteral("skip_ids"), skipIds.join(QLatin1Char(',')).toUtf8());
+
+    // photos_zip (optional, non-fatal on open failure).
     if (!zipPath.isEmpty()) {
         QHttpPart zipPart;
         zipPart.setHeader(QNetworkRequest::ContentDispositionHeader,
@@ -274,10 +265,6 @@ void ImportController::uploadStudents(const QString &excelPath, const QString &z
                                    QFileInfo(zipPath).fileName() + "\""));
         QFile *zipFile = new QFile(zipPath);
         if (!zipFile->open(QIODevice::ReadOnly)) {
-            // Non-fatal as legacy (adminwindow.cpp:1291): warn and continue
-            // the upload without the ZIP part. The delete below fixes a
-            // pre-existing zipFile leak (legacy never freed it on this
-            // branch); no observable behavior change.
             emit importError(QStringLiteral("Warning"),
                              QStringLiteral("Cannot open ZIP file. Proceeding without photos."),
                              ImportSeverity::Warning);
@@ -289,14 +276,9 @@ void ImportController::uploadStudents(const QString &excelPath, const QString &z
         }
     }
 
-    // skip_ids part — only appended when non-empty (adminwindow.cpp:1300-1306).
-    if (!skipIds.isEmpty()) {
-        QHttpPart dupPart;
-        dupPart.setHeader(QNetworkRequest::ContentDispositionHeader,
-                          QVariant("form-data; name=\"skip_ids\""));
-        dupPart.setBody(skipIds.join(",").toUtf8());
-        multiPart->append(dupPart);
-    }
+    // The client already parsed the file, so there is no fatal open branch:
+    // fire uploadStarted immediately before the POST.
+    emit uploadStarted();
 
     QNetworkReply *uploadReply = m_nam->post(uploadRequest, multiPart);
     multiPart->setParent(uploadReply);
@@ -309,19 +291,25 @@ void ImportController::uploadStudents(const QString &excelPath, const QString &z
                 }
             });
 
-    // `this` (the controller) as the context object — same rationale as
-    // checkDuplicates and VisitorController::fetchVisitors.
     connect(uploadReply, &QNetworkReply::finished, this, [this, uploadReply]() {
-        if (uploadReply->error() != QNetworkReply::NoError) {
-            emit uploadFailed(uploadReply->errorString());
-            uploadReply->deleteLater();
-            return;
-        }
-
         const QByteArray response = uploadReply->readAll();
+        const bool hadError = uploadReply->error() != QNetworkReply::NoError;
+        const QString errorString = uploadReply->errorString();
+        const QVariant statusAttr =
+            uploadReply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
+        const int httpStatus = statusAttr.isValid() ? statusAttr.toInt() : 0;
         uploadReply->deleteLater();
 
-        emit uploadFinished(parseUploadResponse(response));
+        if (!StudentController::replyIsServerAnswer(hadError, httpStatus, response)) {
+            emit uploadFailed(errorString);                    // genuine transport failure
+            return;
+        }
+        if (httpStatus == 401) {
+            emit uploadFailed(QStringLiteral(
+                "Admin authentication required — re-enter via admin login."));
+            return;
+        }
+        emit uploadFinished(parseUploadResponse(response));    // real JSON counts
     });
 }
 

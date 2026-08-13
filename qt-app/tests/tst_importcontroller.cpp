@@ -70,6 +70,11 @@ private slots:
     // checkDuplicates (request assembly + 401 routing)
     void checkDuplicatesPostsFormWithSchoolIdsAndAdminKey();
     void checkDuplicates401RoutesToAuthError();
+
+    // uploadStudents (multipart assembly)
+    void uploadStudentsPostsRowsAndAdminKeyMultipart();
+    void uploadStudentsOmitsSkipIdsWhenEmpty();
+    void uploadStudents401RoutesToUploadFailed();
 };
 
 void TestImportController::normalizeHeaderTrimsLowersStrips()
@@ -555,6 +560,63 @@ void TestImportController::checkDuplicates401RoutesToAuthError()
     QCOMPARE(errSpy.count(), 1);
     const QString message = errSpy.at(0).at(1).toString();
     QVERIFY(message.contains("authentication", Qt::CaseInsensitive));
+}
+
+static ParsedTable oneRowTable()
+{
+    ParsedTable t;
+    t.headers = {"School ID", "Full Name"};
+    ImportController::mapHeaders(t.headers, t.headerIndex);
+    t.rows << QStringList{"21-1-0001", "Juan Dela Cruz"};
+    return t;
+}
+
+void TestImportController::uploadStudentsPostsRowsAndAdminKeyMultipart()
+{
+    CapturingNam nam(R"({"status":"success","success_count":1,"skipped_count":1,"error_count":0})");
+    ImportController controller(&nam);
+    QSignalSpy startedSpy(&controller, &ImportController::uploadStarted);
+
+    controller.uploadStudents(oneRowTable(), QString(), {"21-1-0002"}, "s3cr3t-key");
+
+    QCOMPARE(startedSpy.count(), 1);   // fires immediately before the POST
+    QCOMPARE(nam.lastOp, QNetworkAccessManager::PostOperation);
+    QVERIFY(nam.lastUrl.toString().endsWith("upload_students_zip.php"));
+
+    const QString body = QString::fromUtf8(nam.lastBody);
+    QVERIFY(body.contains("name=\"rows\""));
+    QVERIFY(body.contains("name=\"admin_key\""));
+    QVERIFY(body.contains("name=\"skip_ids\""));   // skipIds non-empty -> present
+    QVERIFY(body.contains("21-1-0001"));            // the serialized row payload
+    QVERIFY(body.contains("s3cr3t-key"));
+    QVERIFY(!body.contains("name=\"excel\""));      // raw Excel part removed
+}
+
+void TestImportController::uploadStudentsOmitsSkipIdsWhenEmpty()
+{
+    CapturingNam nam(R"({"status":"success","success_count":1,"skipped_count":0,"error_count":0})");
+    ImportController controller(&nam);
+
+    controller.uploadStudents(oneRowTable(), QString(), QStringList{}, "s3cr3t-key");
+
+    const QString body = QString::fromUtf8(nam.lastBody);
+    QVERIFY(body.contains("name=\"rows\""));
+    QVERIFY(body.contains("name=\"admin_key\""));
+    QVERIFY(!body.contains("name=\"skip_ids\""));   // empty -> absent
+}
+
+void TestImportController::uploadStudents401RoutesToUploadFailed()
+{
+    CapturingNam nam(R"({"status":"error","message":"Admin authentication required"})",
+                     QNetworkReply::AuthenticationRequiredError, 401);
+    ImportController controller(&nam);
+    QSignalSpy failSpy(&controller, &ImportController::uploadFailed);
+    QSignalSpy finSpy(&controller, &ImportController::uploadFinished);
+
+    controller.uploadStudents(oneRowTable(), QString(), QStringList{}, "bad-key");
+    QVERIFY(failSpy.wait(1000));
+    QCOMPARE(finSpy.count(), 0);
+    QVERIFY(failSpy.at(0).at(0).toString().contains("authentication", Qt::CaseInsensitive));
 }
 
 QTEST_MAIN(TestImportController)
