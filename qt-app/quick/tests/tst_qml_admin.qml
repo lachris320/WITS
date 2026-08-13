@@ -1660,6 +1660,12 @@ Item {
             property url lastExportUrl: ""
             property bool exportResult: true
             property bool canEdit: false
+            // no-op insurance: Import wires reloadTable() as its post-import
+            // refresh hook (see Connections in DatabaseScreen.qml). The open
+            // test never triggers it (it only asserts dialog visibility), but
+            // the stub exposes it so any future test that drives an import
+            // through the fixture doesn't hit an undefined-method warning.
+            function reloadTable() {}
             property string editSchoolId: "2023-001"
             property string editName: "Ann"
             property string editYearLevel: "2"
@@ -1795,6 +1801,10 @@ Item {
                 stubVm.registerStudentCount = 0;
                 var rd = findChild(databaseScreen, "registerDialog");
                 if (rd) rd.visible = false;
+                // A leaked-open import dialog scrim would swallow later clicks
+                // the same way deleteConfirm/bulkEditConfirm do above.
+                var idlg = findChild(databaseScreen, "importDialog");
+                if (idlg) idlg.visible = false;
             }
             function test_showsCascadingFilter() {
                 verify(findChild(databaseScreen, "cascDept") !== null);
@@ -2022,6 +2032,16 @@ Item {
                 compare(d.visible, true);
                 stubVm.registerFinished();
                 compare(d.visible, false);
+            }
+            function test_importButtonOpensDialog() {
+                var btn = findChild(databaseScreen, "importStudentsButton");
+                verify(btn !== null);
+                var dlg = findChild(databaseScreen, "importDialog");
+                verify(dlg !== null);
+                compare(dlg.visible, false);
+                mouseClick(btn);
+                compare(dlg.visible, true);
+                dlg.visible = false;   // reset for later tests
             }
         }
     }
