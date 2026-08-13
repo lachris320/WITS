@@ -93,6 +93,7 @@ qt_add_qml_module(witsquickmodule
         viewmodels/SearchViewModel.h viewmodels/SearchViewModel.cpp
         viewmodels/DatabaseViewModel.cpp viewmodels/DatabaseViewModel.h
         viewmodels/SettingsViewModel.h viewmodels/SettingsViewModel.cpp
+        viewmodels/ImportViewModel.cpp viewmodels/ImportViewModel.h
 )
 
 target_link_libraries(witsquickmodule PUBLIC
@@ -302,6 +303,15 @@ wits_add_qttest(tst_qml_admin
 # the async POST paths (T10-T13) and Gui via witsquickmodule propagation. ---
 wits_add_qttest(tst_settingsviewmodel
     SOURCES tests/tst_settingsviewmodel.cpp
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    OFFSCREEN)
+
+# --- ImportViewModel unit test (C++ QtTest, offscreen). The VM builds a real
+# QNetworkAccessManager + ImportController; startImport() fires a
+# fire-and-forget post() (harmless, never resolves in-test), and the state
+# machine is driven via the public on* slots — mirrors tst_databaseviewmodel. ---
+wits_add_qttest(tst_importviewmodel
+    SOURCES tests/tst_importviewmodel.cpp
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
     OFFSCREEN)
 
