@@ -35,6 +35,11 @@ public:
     static QString validateForImport(const ParsedTable &table,
                                      QStringList *badRowsOut = nullptr);
 
+    // Pure sample-CSV generator for the "Download Template" button (spec §7).
+    // Header line of the recognized columns + one synthetic example row (opaque
+    // hyphenated school_id like 21-1-0001; no real PII). UTF-8, no BOM.
+    static QByteArray importTemplateCsv();
+
     // Synchronous QXlsx parse. Requires a QGuiApplication (see Testing).
     // errorOut (when non-null) reports which of the three legacy failure
     // cases occurred so the View can show the exact original dialog.

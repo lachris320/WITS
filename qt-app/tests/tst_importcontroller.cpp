@@ -82,6 +82,9 @@ private slots:
     void validateForImportMissingNameColumn();
     void validateForImportEmptySchoolIdRowsReported();
     void validateForImportIgnoresExtraColumns();
+
+    // importTemplateCsv
+    void importTemplateCsvHasHeadersAndExampleRow();
 };
 
 void TestImportController::normalizeHeaderTrimsLowersStrips()
@@ -684,6 +687,26 @@ void TestImportController::validateForImportIgnoresExtraColumns()
 
     QStringList bad;
     QCOMPARE(ImportController::validateForImport(t, &bad), QString());   // extra col is fine
+}
+
+void TestImportController::importTemplateCsvHasHeadersAndExampleRow()
+{
+    const QString csv = QString::fromUtf8(ImportController::importTemplateCsv());
+    const QStringList lines = csv.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    QVERIFY(lines.size() >= 2);   // header + at least one example row
+
+    const QString header = lines.first();
+    QVERIFY(header.contains("School ID"));
+    QVERIFY(header.contains("Name"));
+    QVERIFY(header.contains("Course"));
+    QVERIFY(header.contains("Department"));
+    QVERIFY(header.contains("Year Level"));
+    QVERIFY(header.contains("Gender"));
+    QVERIFY(header.contains("Status"));
+
+    // The example row uses an opaque hyphenated School ID (reinforces that it is
+    // a School ID, not an admin key) and must NOT leak real PII.
+    QVERIFY(lines.at(1).contains("21-1-0001"));
 }
 
 QTEST_MAIN(TestImportController)

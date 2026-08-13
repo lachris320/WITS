@@ -3,6 +3,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QNetworkAccessManager>
+#include <QSaveFile>
 #include "importcontroller.h"
 #include "AdminSession.h"
 #include "SettingsViewModel.h"
@@ -191,7 +192,13 @@ void ImportViewModel::cancel()
     setPhase(Phase::Idle);
 }
 
-bool ImportViewModel::downloadTemplate(const QUrl & /*fileUrl*/)
+bool ImportViewModel::downloadTemplate(const QUrl &fileUrl)
 {
-    return false;   // implemented in Task 11
+    const QByteArray bytes = ImportController::importTemplateCsv();
+    QSaveFile file(fileUrl.toLocalFile());
+    if (!file.open(QIODevice::WriteOnly))
+        return false;
+    if (file.write(bytes) != bytes.size() || !file.commit())
+        return false;
+    return true;
 }

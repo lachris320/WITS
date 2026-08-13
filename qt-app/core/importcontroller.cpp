@@ -162,6 +162,17 @@ QString ImportController::validateForImport(const ParsedTable &table, QStringLis
     return QString();   // OK
 }
 
+QByteArray ImportController::importTemplateCsv()
+{
+    // Recognized columns, in a natural order. Extra columns are ignored on
+    // import and column order does not matter, but this is the friendly shape.
+    const QString header = QStringLiteral(
+        "School ID,Name,Course,Department,Year Level,Gender,Status\n");
+    const QString example = QStringLiteral(
+        "21-1-0001,Juan Dela Cruz,BSIT,CCS,1,Male,Active\n");
+    return (header + example).toUtf8();
+}
+
 ParsedTable ImportController::parseExcel(const QString &filePath, ExcelParseError *errorOut)
 {
     ParsedTable table;
