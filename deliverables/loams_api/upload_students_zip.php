@@ -59,7 +59,7 @@ $stmt = $conn->prepare("INSERT INTO students
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
 
 if (!$stmt) {
-    echo json_encode(["status" => "error", "message" => "Prepare failed: " . $conn->error]);
+    echo json_encode(["status" => "error", "message" => "Import failed to initialize."]);
     exit;
 }
 

@@ -21,6 +21,10 @@ if (!is_array($school_ids)) {
 
 $duplicates = [];
 $stmt = $conn->prepare("SELECT id FROM students WHERE school_id = ?");
+if (!$stmt) {
+    echo json_encode(["status" => "error", "message" => "Duplicate check failed."]);
+    exit;
+}
 foreach ($school_ids as $school_id) {
     $stmt->bind_param("s", $school_id);
     $stmt->execute();
