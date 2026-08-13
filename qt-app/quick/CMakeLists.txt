@@ -48,6 +48,7 @@ qt_add_qml_module(witsquickmodule
         qml/admin/DatabaseScreen.qml
         qml/admin/StudentEditDialog.qml
         qml/admin/RegisterStudentDialog.qml
+        qml/admin/ImportStudentsDialog.qml
         qml/admin/BulkEditDialog.qml
         qml/admin/ReportingScreen.qml
         qml/admin/SettingsScreen.qml
