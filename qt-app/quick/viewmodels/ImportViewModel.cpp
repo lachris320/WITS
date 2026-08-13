@@ -150,6 +150,17 @@ void ImportViewModel::onUploadProgress(int percent)
 
 void ImportViewModel::onUploadFinished(const UploadResult &result)
 {
+    if (!result.ok && !result.plainText) {
+        // HTTP 200 with {"status":"error",...} — a server ANSWER, not a
+        // transport failure (that goes through onUploadFailed instead).
+        // Route it to Failed rather than displaying a fake "0 imported" success.
+        setError(result.message.isEmpty() ? tr("Import failed.") : result.message);
+        const bool auth = SettingsViewModel::isAuthFailureMessage(result.message);
+        if (m_authFailure != auth) { m_authFailure = auth; emit authFailureChanged(); }
+        setPhase(Phase::Failed);
+        return;
+    }
+
     if (result.plainText) {
         m_resultText = result.rawText;       // older/partly-deployed endpoint
     } else {

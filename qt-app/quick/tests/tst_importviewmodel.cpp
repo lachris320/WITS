@@ -14,6 +14,7 @@ private slots:
     void allDuplicatesBlocksContinue();
     void validationFailureStaysIdle();
     void uploadFailedAuthSetsAuthFailure();
+    void uploadFinishedServerErrorRoutesToFailed();
 
 private:
     // Writes a minimal CSV and returns its file:// URL.
@@ -96,6 +97,28 @@ void TestImportViewModel::uploadFailedAuthSetsAuthFailure()
     QCOMPARE(vm.phase(), ImportViewModel::Phase::Failed);
     QVERIFY(vm.authFailure());
     QVERIFY(!vm.errorText().isEmpty());
+}
+
+void TestImportViewModel::uploadFinishedServerErrorRoutesToFailed()
+{
+    // Reworked endpoint can answer HTTP 200 with {"status":"error",...} — that
+    // reaches onUploadFinished with ok=false, plainText=false (not a transport
+    // failure, so onUploadFailed is never invoked). Must route to Failed, not
+    // be displayed as a fake "0 imported" success.
+    AdminSession::instance().setKey("s3cr3t-key");
+    ImportViewModel vm;
+    QSignalSpy finishedOkSpy(&vm, &ImportViewModel::finishedOk);
+
+    UploadResult r;
+    r.ok = false;
+    r.plainText = false;
+    r.message = QStringLiteral("Invalid rows payload.");
+    vm.onUploadFinished(r);
+
+    QCOMPARE(vm.phase(), ImportViewModel::Phase::Failed);
+    QVERIFY(vm.errorText().contains("Invalid rows payload."));
+    QCOMPARE(finishedOkSpy.count(), 0);
+    QVERIFY(!vm.resultText().contains("imported", Qt::CaseInsensitive));
 }
 
 QTEST_MAIN(TestImportViewModel)
