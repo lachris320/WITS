@@ -114,7 +114,7 @@ Rectangle {
                 compact: true
                 text: qsTr("Import")
                 enabled: screen.vm ? !screen.vm.loading : false
-                onClicked: { importDialog.vm = importVm; importDialog.visible = true; }
+                onClicked: importDialog.visible = true
             }
 
             TextMetrics {

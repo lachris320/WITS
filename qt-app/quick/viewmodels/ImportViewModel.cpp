@@ -41,6 +41,18 @@ void ImportViewModel::setError(const QString &e)
     if (m_errorText != e) { m_errorText = e; emit errorTextChanged(); }
 }
 
+void ImportViewModel::setAuthFailure(bool v)
+{
+    if (m_authFailure != v) { m_authFailure = v; emit authFailureChanged(); }
+}
+
+void ImportViewModel::failWith(const QString &message)
+{
+    setError(message);
+    setAuthFailure(SettingsViewModel::isAuthFailureMessage(message));
+    setPhase(Phase::Failed);
+}
+
 void ImportViewModel::setDataFile(const QUrl &fileUrl)
 {
     m_dataFilePath = fileUrl.toLocalFile();
@@ -59,8 +71,9 @@ void ImportViewModel::setDataFile(const QUrl &fileUrl)
     m_table = parsed;
     m_duplicates.clear();
     setError(QString());
-    if (m_authFailure) { m_authFailure = false; emit authFailureChanged(); }
+    setAuthFailure(false);
     if (!m_resultText.isEmpty()) { m_resultText.clear(); emit resultTextChanged(); }
+    if (m_uploadPercent != 0) { m_uploadPercent = 0; emit uploadPercentChanged(); }
     setPhase(Phase::Idle);
     emit parsedCountChanged();
     emit duplicateCountChanged();
@@ -154,10 +167,7 @@ void ImportViewModel::onUploadFinished(const UploadResult &result)
         // HTTP 200 with {"status":"error",...} — a server ANSWER, not a
         // transport failure (that goes through onUploadFailed instead).
         // Route it to Failed rather than displaying a fake "0 imported" success.
-        setError(result.message.isEmpty() ? tr("Import failed.") : result.message);
-        const bool auth = SettingsViewModel::isAuthFailureMessage(result.message);
-        if (m_authFailure != auth) { m_authFailure = auth; emit authFailureChanged(); }
-        setPhase(Phase::Failed);
+        failWith(result.message.isEmpty() ? tr("Import failed.") : result.message);
         return;
     }
 
@@ -174,10 +184,7 @@ void ImportViewModel::onUploadFinished(const UploadResult &result)
 
 void ImportViewModel::onUploadFailed(const QString &message)
 {
-    setError(message);
-    const bool auth = SettingsViewModel::isAuthFailureMessage(message);
-    if (m_authFailure != auth) { m_authFailure = auth; emit authFailureChanged(); }
-    setPhase(Phase::Failed);
+    failWith(message);
 }
 
 void ImportViewModel::onImportError(const QString & /*title*/, const QString &message,
@@ -185,10 +192,7 @@ void ImportViewModel::onImportError(const QString & /*title*/, const QString &me
 {
     if (severity == ImportSeverity::Warning)
         return;   // e.g. ZIP-open warning — upload proceeds; nothing to surface fatally
-    setError(message);
-    const bool auth = SettingsViewModel::isAuthFailureMessage(message);
-    if (m_authFailure != auth) { m_authFailure = auth; emit authFailureChanged(); }
-    setPhase(Phase::Failed);
+    failWith(message);
 }
 
 void ImportViewModel::cancel()

@@ -88,6 +88,8 @@ signals:
 private:
     void setPhase(Phase p);
     void setError(const QString &e);
+    void setAuthFailure(bool v);
+    void failWith(const QString &message);
     void beginUpload();
 
     QNetworkAccessManager *m_nam = nullptr;
