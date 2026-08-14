@@ -27,6 +27,10 @@ private slots:
     void onYearsLoadedPopulates();
     void onCoursesLoadedPopulates();
     void setDepartmentClearsCourse();
+    void onReportDataReadyPopulatesPreview();
+    void onReportDataReadyEmptyIsSuccessNotError();
+    void onReportErrorSetsErrorClearsLoading();
+    void generateWhileLoadingIsNoop();
 };
 
 void TestReportingViewModel::buildFiltersDaySendsStringTypeAndRange()
@@ -224,6 +228,64 @@ void TestReportingViewModel::setDepartmentClearsCourse()
     QCOMPARE(vm.course(), QStringLiteral("BSCE"));
     vm.setDepartment("IT");
     QCOMPARE(vm.course(), QString());     // dependent-clear
+}
+
+void TestReportingViewModel::onReportDataReadyPopulatesPreview()
+{
+    ReportingViewModel vm;
+    QSignalSpy resultSpy(&vm, &ReportingViewModel::resultChanged);
+    const QJsonArray data = QJsonDocument::fromJson(R"([
+        {"name":"A","course":"BSCE","year_level":"1","visits":"10"},
+        {"name":"B","course":"BSIT","year_level":"2","visits":"4"}
+    ])").array();
+    vm.onReportDataReady(data);
+    QVERIFY(vm.hasResult());
+    QCOMPARE(vm.rows()->count(), 2);
+    QCOMPARE(vm.courseBars()->rowCount(), 2);
+    QCOMPARE(vm.totalVisits(), 14);
+    QCOMPARE(vm.studentsShown(), 2);
+    QCOMPARE(vm.topCourse(), QStringLiteral("BSCE"));
+    QVERIFY(!vm.loading());
+    QVERIFY(vm.errorText().isEmpty());
+    QVERIFY(resultSpy.count() >= 1);
+}
+
+void TestReportingViewModel::onReportDataReadyEmptyIsSuccessNotError()
+{
+    ReportingViewModel vm;
+    vm.onReportDataReady(QJsonArray());
+    QVERIFY(vm.hasResult());
+    QCOMPARE(vm.rows()->count(), 0);
+    QCOMPARE(vm.totalVisits(), 0);
+    QCOMPARE(vm.topCourse(), QStringLiteral("—"));
+    QVERIFY(vm.errorText().isEmpty());   // empty result is NOT an error
+}
+
+void TestReportingViewModel::onReportErrorSetsErrorClearsLoading()
+{
+    ReportingViewModel vm;
+    vm.onReportError("Department is required", false);
+    QCOMPARE(vm.errorText(), QStringLiteral("Department is required"));
+    QVERIFY(!vm.loading());
+}
+
+void TestReportingViewModel::generateWhileLoadingIsNoop()
+{
+    ReportingViewModel vm;
+    vm.setDepartment("CE");
+    vm.setDurationType(0);
+    vm.setDay("2026-08-14");
+    QVERIFY(vm.canGenerate());
+    vm.generateReport();                 // fires; sets loading true
+    QVERIFY(vm.loading());
+    QVERIFY(!vm.canGenerate());          // gated while loading
+    // A second call while loading must not clear/replace state.
+    vm.generateReport();                 // no-op
+    QVERIFY(vm.loading());
+    // A result clears loading and re-enables generate.
+    vm.onReportDataReady(QJsonArray());
+    QVERIFY(!vm.loading());
+    QVERIFY(vm.canGenerate());
 }
 
 QTEST_MAIN(TestReportingViewModel)

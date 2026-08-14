@@ -184,8 +184,23 @@ void ReportingViewModel::setCustomEnd(const QString &v)
     if (m_customEnd == v) return;
     m_customEnd = v; emit customEndChanged(); emit canGenerateChanged();
 }
-void ReportingViewModel::generateReport() {}
-void ReportingViewModel::retry() {}
+void ReportingViewModel::generateReport()
+{
+    if (!canGenerate())          // includes the !loading gate → single-in-flight
+        return;
+    setError(QString());
+    setLoading(true);
+    const QJsonObject filters = buildFilters(
+        m_department, m_course, m_durationType,
+        parseDate(m_day), m_month, m_monthYear,
+        m_semester, m_semYear, parseDate(m_customStart), parseDate(m_customEnd));
+    m_controller->fetchReportRows(filters);
+}
+
+void ReportingViewModel::retry()
+{
+    generateReport();            // re-runs with the current filter state
+}
 void ReportingViewModel::onDepartmentsLoaded(const QStringList &departments)
 {
     m_departments = departments;
@@ -201,9 +216,23 @@ void ReportingViewModel::onCoursesLoaded(const QStringList &courses)
     m_courses = courses;
     emit coursesChanged();
 }
-void ReportingViewModel::onReportDataReady(const QJsonArray &) {}
-void ReportingViewModel::onReportError(const QString &, bool) {}
-void ReportingViewModel::onLoadError(const QString &, const QString &, bool) {}
+void ReportingViewModel::onReportDataReady(const QJsonArray &data)
+{
+    setLoading(false);
+    applyResult(data);
+}
+
+void ReportingViewModel::onReportError(const QString &message, bool /*critical*/)
+{
+    setLoading(false);
+    setError(message.isEmpty() ? QStringLiteral("Report failed. Please try again.") : message);
+}
+
+void ReportingViewModel::onLoadError(const QString &/*title*/, const QString &message, bool /*critical*/)
+{
+    // Bootstrap (departments/years/courses) failures surface in the same banner.
+    setError(message.isEmpty() ? QStringLiteral("Failed to load filters. Please try again.") : message);
+}
 void ReportingViewModel::setLoading(bool v)
 {
     if (m_loading == v) return;
@@ -217,4 +246,15 @@ void ReportingViewModel::setError(const QString &e)
     m_errorText = e;
     emit errorTextChanged();
 }
-void ReportingViewModel::applyResult(const QJsonArray &) {}
+void ReportingViewModel::applyResult(const QJsonArray &data)
+{
+    m_rows.setRows(data);
+    m_courseBars.setBars(aggregateVisitsByCourse(data));
+    const Tiles t = deriveTiles(data);
+    m_totalVisits = t.totalVisits;
+    m_studentsShown = t.studentsShown;
+    m_topCourse = t.topCourse;
+    m_hasResult = true;
+    setError(QString());
+    emit resultChanged();
+}
