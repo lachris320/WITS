@@ -11,8 +11,9 @@ Item {
     // sharing a position/z with a later-declared sibling silently absorb
     // synthetic mouse events meant for the earlier one. Also accommodates
     // `rowActBand` (4a.2b-ii Task 4), the LTable.rowActivated double-click
-    // fixture, in its own band below `casc`.
-    width: 400; height: 3160
+    // fixture, in its own band below `casc`. And `datePicker` (Phase 4b-i
+    // Task 7), the LDatePicker fixture, in its own band below `chk`.
+    width: 400; height: 3600
 
     LButton    { id: b;  text: "OK" }
     LButton {
@@ -1469,4 +1470,45 @@ Item {
         }
     }
     Component { id: signalSpy; SignalSpy {} }
+
+    // --- LDatePicker fixture (own band below chk) ---
+    LDatePicker { id: datePicker; y: 3200; width: 280; height: 44 }
+    SignalSpy { id: datePickerSpy; target: datePicker; signalName: "picked" }
+
+    TestCase {
+        name: "LDatePicker"; when: windowShown
+        function init() { datePickerSpy.clear(); datePicker.selectedDate = ""; }
+
+        function test_selectDayEmitsIsoDateAndSetsSelection() {
+            datePicker.showMonth(2026, 8);       // August 2026
+            datePicker.selectDay(14);
+            compare(datePicker.selectedDate, "2026-08-14");
+            compare(datePickerSpy.count, 1);
+            compare(datePickerSpy.signalArguments[0][0], "2026-08-14");
+        }
+
+        function test_navigatesMonths() {
+            datePicker.showMonth(2026, 8);
+            datePicker.nextMonth();
+            compare(datePicker.displayYear, 2026);
+            compare(datePicker.displayMonth, 9);
+            datePicker.prevMonth();
+            datePicker.prevMonth();
+            compare(datePicker.displayMonth, 7);
+        }
+
+        function test_navigatesAcrossYearBoundary() {
+            datePicker.showMonth(2026, 12);
+            datePicker.nextMonth();
+            compare(datePicker.displayYear, 2027);
+            compare(datePicker.displayMonth, 1);
+        }
+
+        function test_fieldShowsSelection() {
+            datePicker.selectedDate = "2026-08-14";
+            var field = findChild(datePicker, "datePickerField");   // a root child, not in the popup
+            verify(field, "field text element exists");
+            compare(field.text, "2026-08-14");
+        }
+    }
 }
