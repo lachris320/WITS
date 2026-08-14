@@ -91,19 +91,78 @@ ReportingViewModel::Tiles ReportingViewModel::deriveTiles(const QJsonArray &data
     return t;
 }
 
+bool ReportingViewModel::canGenerate() const
+{
+    if (m_department.isEmpty() || m_loading)
+        return false;
+    switch (m_durationType) {
+    case 0: return parseDate(m_day).isValid();
+    case 1: return m_month >= 1 && m_month <= 12 && m_monthYear > 0;
+    case 2: return !m_semester.isEmpty() && m_semYear > 0;
+    case 3: {
+        const QDate s = parseDate(m_customStart), e = parseDate(m_customEnd);
+        return s.isValid() && e.isValid() && s <= e;
+    }
+    default: return false;
+    }
+}
+
 // --- Stubs filled by later tasks (present so the class links now) ---
-bool ReportingViewModel::canGenerate() const { return false; }
 void ReportingViewModel::loadDepartments() {}
-void ReportingViewModel::setDepartment(const QString &) {}
+void ReportingViewModel::setDepartment(const QString &department)
+{
+    if (m_department == department) return;
+    m_department = department;
+    m_course.clear();                 // dependent-clear (finalized in Task 5)
+    emit departmentChanged();
+    emit courseChanged();
+    emit canGenerateChanged();
+    if (!department.isEmpty())
+        m_controller->loadCourses(department);
+}
 void ReportingViewModel::setCourse(const QString &) {}
-void ReportingViewModel::setDurationType(int) {}
-void ReportingViewModel::setDay(const QString &) {}
-void ReportingViewModel::setMonth(int) {}
-void ReportingViewModel::setMonthYear(int) {}
-void ReportingViewModel::setSemester(const QString &) {}
-void ReportingViewModel::setSemYear(int) {}
-void ReportingViewModel::setCustomStart(const QString &) {}
-void ReportingViewModel::setCustomEnd(const QString &) {}
+void ReportingViewModel::setDurationType(int t)
+{
+    if (m_durationType == t) return;
+    m_durationType = t;
+    emit durationTypeChanged();
+    emit canGenerateChanged();
+}
+void ReportingViewModel::setDay(const QString &v)
+{
+    if (m_day == v) return;
+    m_day = v; emit dayChanged(); emit canGenerateChanged();
+}
+void ReportingViewModel::setMonth(int v)
+{
+    if (m_month == v) return;
+    m_month = v; emit monthChanged(); emit canGenerateChanged();
+}
+void ReportingViewModel::setMonthYear(int v)
+{
+    if (m_monthYear == v) return;
+    m_monthYear = v; emit monthYearChanged(); emit canGenerateChanged();
+}
+void ReportingViewModel::setSemester(const QString &v)
+{
+    if (m_semester == v) return;
+    m_semester = v; emit semesterChanged(); emit canGenerateChanged();
+}
+void ReportingViewModel::setSemYear(int v)
+{
+    if (m_semYear == v) return;
+    m_semYear = v; emit semYearChanged(); emit canGenerateChanged();
+}
+void ReportingViewModel::setCustomStart(const QString &v)
+{
+    if (m_customStart == v) return;
+    m_customStart = v; emit customStartChanged(); emit canGenerateChanged();
+}
+void ReportingViewModel::setCustomEnd(const QString &v)
+{
+    if (m_customEnd == v) return;
+    m_customEnd = v; emit customEndChanged(); emit canGenerateChanged();
+}
 void ReportingViewModel::generateReport() {}
 void ReportingViewModel::retry() {}
 void ReportingViewModel::onDepartmentsLoaded(const QStringList &) {}
@@ -112,6 +171,17 @@ void ReportingViewModel::onCoursesLoaded(const QStringList &) {}
 void ReportingViewModel::onReportDataReady(const QJsonArray &) {}
 void ReportingViewModel::onReportError(const QString &, bool) {}
 void ReportingViewModel::onLoadError(const QString &, const QString &, bool) {}
-void ReportingViewModel::setLoading(bool) {}
-void ReportingViewModel::setError(const QString &) {}
+void ReportingViewModel::setLoading(bool v)
+{
+    if (m_loading == v) return;
+    m_loading = v;
+    emit loadingChanged();
+    emit canGenerateChanged();   // loading gates canGenerate
+}
+void ReportingViewModel::setError(const QString &e)
+{
+    if (m_errorText == e) return;
+    m_errorText = e;
+    emit errorTextChanged();
+}
 void ReportingViewModel::applyResult(const QJsonArray &) {}

@@ -17,6 +17,12 @@ private slots:
     void aggregateEmptyIsEmpty();
     void deriveTilesComputesTotals();
     void deriveTilesEmptyIsZeroAndDash();
+    void canGenerateFalseWithoutDepartment();
+    void canGenerateDayRequiresValidDate();
+    void canGenerateMonthRequiresMonthAndYear();
+    void canGenerateSemesterRequiresSemesterAndYear();
+    void canGenerateCustomRequiresOrderedRange();
+    void settersEmitAndUpdateCanGenerate();
 };
 
 void TestReportingViewModel::buildFiltersDaySendsStringTypeAndRange()
@@ -107,6 +113,76 @@ void TestReportingViewModel::deriveTilesEmptyIsZeroAndDash()
     QCOMPARE(t.totalVisits, 0);
     QCOMPARE(t.studentsShown, 0);
     QCOMPARE(t.topCourse, QStringLiteral("—"));
+}
+
+void TestReportingViewModel::canGenerateFalseWithoutDepartment()
+{
+    ReportingViewModel vm;
+    vm.setDurationType(0);
+    vm.setDay("2026-08-14");
+    QVERIFY(!vm.canGenerate());          // no department
+}
+
+void TestReportingViewModel::canGenerateDayRequiresValidDate()
+{
+    ReportingViewModel vm;
+    vm.setDepartment("CE");              // NOTE: in this task setDepartment only stores + fires network; see Task 5
+    vm.setDurationType(0);
+    QVERIFY(!vm.canGenerate());          // no day yet
+    vm.setDay("2026-08-14");
+    QVERIFY(vm.canGenerate());
+    vm.setDay("not-a-date");
+    QVERIFY(!vm.canGenerate());
+}
+
+void TestReportingViewModel::canGenerateMonthRequiresMonthAndYear()
+{
+    ReportingViewModel vm;
+    vm.setDepartment("CE");
+    vm.setDurationType(1);
+    vm.setMonth(2);
+    QVERIFY(!vm.canGenerate());          // no year
+    vm.setMonthYear(2026);
+    QVERIFY(vm.canGenerate());
+    vm.setMonth(0);
+    QVERIFY(!vm.canGenerate());          // month out of 1..12
+}
+
+void TestReportingViewModel::canGenerateSemesterRequiresSemesterAndYear()
+{
+    ReportingViewModel vm;
+    vm.setDepartment("CE");
+    vm.setDurationType(2);
+    vm.setSemester("First Semester");
+    QVERIFY(!vm.canGenerate());          // no year
+    vm.setSemYear(2026);
+    QVERIFY(vm.canGenerate());
+}
+
+void TestReportingViewModel::canGenerateCustomRequiresOrderedRange()
+{
+    ReportingViewModel vm;
+    vm.setDepartment("CE");
+    vm.setDurationType(3);
+    vm.setCustomStart("2026-03-31");
+    vm.setCustomEnd("2026-01-01");
+    QVERIFY(!vm.canGenerate());          // start > end
+    vm.setCustomEnd("2026-06-30");
+    QVERIFY(vm.canGenerate());
+}
+
+void TestReportingViewModel::settersEmitAndUpdateCanGenerate()
+{
+    ReportingViewModel vm;
+    QSignalSpy canGenSpy(&vm, &ReportingViewModel::canGenerateChanged);
+    QSignalSpy durSpy(&vm, &ReportingViewModel::durationTypeChanged);
+    vm.setDurationType(3);
+    QVERIFY(durSpy.count() >= 1);
+    vm.setDepartment("CE");
+    vm.setCustomStart("2026-01-01");
+    vm.setCustomEnd("2026-02-01");
+    QVERIFY(vm.canGenerate());
+    QVERIFY(canGenSpy.count() >= 1);
 }
 
 QTEST_MAIN(TestReportingViewModel)
