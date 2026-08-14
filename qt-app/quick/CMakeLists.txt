@@ -96,6 +96,7 @@ qt_add_qml_module(witsquickmodule
         viewmodels/DatabaseViewModel.cpp viewmodels/DatabaseViewModel.h
         viewmodels/SettingsViewModel.h viewmodels/SettingsViewModel.cpp
         viewmodels/ImportViewModel.cpp viewmodels/ImportViewModel.h
+        viewmodels/ReportingViewModel.h viewmodels/ReportingViewModel.cpp
 )
 
 target_link_libraries(witsquickmodule PUBLIC
@@ -320,6 +321,15 @@ wits_add_qttest(tst_settingsviewmodel
 # machine is driven via the public on* slots — mirrors tst_databaseviewmodel. ---
 wits_add_qttest(tst_importviewmodel
     SOURCES tests/tst_importviewmodel.cpp
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    OFFSCREEN)
+
+# --- ReportingViewModel unit test (C++ QtTest, offscreen). Builds a real
+# QNetworkAccessManager + ReportController; generateReport() fires a
+# fire-and-forget post() (harmless in-test), and the reply handlers are driven
+# via the public on* slots — mirrors tst_databaseviewmodel. ---
+wits_add_qttest(tst_reportingviewmodel
+    SOURCES tests/tst_reportingviewmodel.cpp
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
     OFFSCREEN)
 
