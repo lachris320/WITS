@@ -93,8 +93,17 @@ connects to `ReportController`'s signals, and re-exposes state as QML properties
 - **Result state:** `ReportRowsModel *rowsModel` (table), `BarsModel *courseBarsModel`
   (visits-by-course), and stat-tile scalars (`int totalVisits`, `int studentsShown`,
   `QString topCourse`) — all `NOTIFY`ed.
-- **Status:** `bool loading`, `QString errorText` (Dashboard pattern), request-seq guard
-  (`nextRequestSeq`/`isCurrentRequest`) so a superseded fetch is dropped.
+- **Status:** `bool loading`, `QString errorText` (Dashboard pattern). **Concurrency —
+  single-in-flight, NOT the Dashboard request-seq guard.** `DashboardViewModel`'s
+  `nextRequestSeq`/`isCurrentRequest` works because that VM issues its own `QNetworkReply` and
+  captures `seq` in the reply lambda; here the VM delegates to `ReportController::fetchReportRows()`
+  and receives results via the **token-less** `reportDataReady(QJsonArray)` signal — it cannot tell
+  a superseded emission from the current one. Since "no witscore change" and "use `fetchReportRows`"
+  are locked, the resolution is to **allow only one report fetch at a time**: `generateReport()`
+  is a no-op while `loading`, and `canGenerate` is false while `loading` (Generate disabled). This
+  makes the out-of-order question moot without a request token. The same single-flight discipline
+  covers the bootstrap fetches; the rapid `setDepartment`→`loadCourses`/`coursesLoaded` path is
+  last-write-wins (a stale course list is harmless — the cascade self-clears an invalid course).
 - **Invokables:**
   - `loadDepartments()` — bootstrap entry called by `AdminScreen`'s existing `Loader.onLoaded`
     gate (§4.4). Loads **both** departments and years (`ReportController::loadDepartments()` +
@@ -163,6 +172,17 @@ report is fetched. Selecting a department → `setDepartment()` → `loadCourses
 the endpoint reads (`get_report_data.php:18-24`): `department` (required), `course`
 (omitted/`""`/`"All Courses"` = dept-wide), `durationType`, `start`, `end`, `year`, `semester`.
 
+**`durationType` is a STRING, not the VM's int.** `get_report_data.php:20,57-64` reads `durationType`
+as the strings `"day"`/`"month"`/`"semester"`/`"custom"`. The VM stores an int (0..3, matching
+`computeDateRange`); `buildFilters` **must translate int → the exact string token**. Emitting the
+int (or `"0"`) makes the server silently apply **no** date filter and return all-time visits with no
+error — so `buildFilters`'s test asserts the literal string per mode.
+
+**`semester` must carry a server-recognized token.** The server only ranges when `semester` contains
+`1`/`first`, `2`/`second`, or `summer` (`get_report_data.php:66-81`); anything else falls through to
+all-time. `buildFilters` emits a `semester` string carrying one of those tokens (the test asserts the
+literal value).
+
 - **Day / Month / Custom:** the client computes `start`/`end` via
   `ReportController::computeDateRange(...)` and sends them; the server uses `BETWEEN start AND end`.
 - **Semester:** send `durationType="semester"`, `year`, `semester`; the server computes its own
@@ -175,11 +195,17 @@ On `reportDataReady(data)` (request-seq current): `rowsModel.setRows(data)`;
 
 ### 5.3 `canGenerate` gate
 
-`department != ""` **and**:
+`department != ""` **and not `loading`** **and**:
 - Day → `day` valid; Month → `month`∈1..12 and `monthYear`>0; Semester → `semester` set and
   `semYear`>0; Custom → `customStart` and `customEnd` valid and `customStart <= customEnd`.
 
-Course is optional throughout.
+Course is optional throughout. The `not loading` term enforces single-in-flight (§4.2): Generate is
+disabled while a report fetch is outstanding.
+
+**Year-combo data note (pre-existing, not a bug):** `get_years.php` returns
+`DISTINCT YEAR(login_time)` from `library_visits` (fallback: current year only). A year with **zero**
+logged visits is therefore not selectable in the Month/Semester year combos. This is existing
+endpoint behavior, out of scope for 4b-i — noted so QA doesn't mistake it for a defect.
 
 ## 6. Testing & gates (TDD, ctest)
 
@@ -193,8 +219,12 @@ New target **`tst_reportingviewmodel`**:
   Day/Month/Custom; the semester component-passing per §9); Course omitted when empty/"All".
 - `aggregateVisitsByCourse(...)` — rows → ranked by-course bars (sum per course, order).
 - `deriveTiles(...)` — total visits, students shown, top course; empty-data → zeros/"—".
-- `canGenerate` truth table across modes + missing/invalid inputs.
-- Request-seq guard: a superseded `reportDataReady` does not flip `loading`/models.
+- `canGenerate` truth table across modes + missing/invalid inputs, **including `loading` → false**.
+- Single-in-flight: `generateReport()` while `loading` is a no-op (no second `fetchReportRows`);
+  `loading` flips true on fetch, false on `reportDataReady`/`reportError`; `canGenerate` is false
+  throughout the in-flight window.
+- `durationType` int→string token per mode, and the `semester` literal token (§5.2) — asserted in
+  the `buildFilters` cases (silent-all-time is the failure mode being guarded).
 
 `ReportRowsModel` role coverage (add to an existing models test target or a small new one).
 `ReportController::computeDateRange` is already covered by `tst_reportcontroller` — untouched.
