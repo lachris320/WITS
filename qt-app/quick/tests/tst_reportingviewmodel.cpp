@@ -23,6 +23,10 @@ private slots:
     void canGenerateSemesterRequiresSemesterAndYear();
     void canGenerateCustomRequiresOrderedRange();
     void settersEmitAndUpdateCanGenerate();
+    void onDepartmentsLoadedPopulates();
+    void onYearsLoadedPopulates();
+    void onCoursesLoadedPopulates();
+    void setDepartmentClearsCourse();
 };
 
 void TestReportingViewModel::buildFiltersDaySendsStringTypeAndRange()
@@ -183,6 +187,43 @@ void TestReportingViewModel::settersEmitAndUpdateCanGenerate()
     vm.setCustomEnd("2026-02-01");
     QVERIFY(vm.canGenerate());
     QVERIFY(canGenSpy.count() >= 1);
+}
+
+void TestReportingViewModel::onDepartmentsLoadedPopulates()
+{
+    ReportingViewModel vm;
+    QSignalSpy spy(&vm, &ReportingViewModel::departmentsChanged);
+    vm.onDepartmentsLoaded({ "CE", "IT" });
+    QCOMPARE(vm.departments(), QStringList({ "CE", "IT" }));
+    QVERIFY(spy.count() >= 1);
+}
+
+void TestReportingViewModel::onYearsLoadedPopulates()
+{
+    ReportingViewModel vm;
+    QSignalSpy spy(&vm, &ReportingViewModel::yearsChanged);
+    vm.onYearsLoaded({ "2026", "2025" });
+    QCOMPARE(vm.years(), QStringList({ "2026", "2025" }));
+    QVERIFY(spy.count() >= 1);
+}
+
+void TestReportingViewModel::onCoursesLoadedPopulates()
+{
+    ReportingViewModel vm;
+    QSignalSpy spy(&vm, &ReportingViewModel::coursesChanged);
+    vm.onCoursesLoaded({ "BSCE", "BSEE" });
+    QCOMPARE(vm.courses(), QStringList({ "BSCE", "BSEE" }));
+    QVERIFY(spy.count() >= 1);
+}
+
+void TestReportingViewModel::setDepartmentClearsCourse()
+{
+    ReportingViewModel vm;
+    vm.onCoursesLoaded({ "BSCE" });
+    vm.setCourse("BSCE");
+    QCOMPARE(vm.course(), QStringLiteral("BSCE"));
+    vm.setDepartment("IT");
+    QCOMPARE(vm.course(), QString());     // dependent-clear
 }
 
 QTEST_MAIN(TestReportingViewModel)

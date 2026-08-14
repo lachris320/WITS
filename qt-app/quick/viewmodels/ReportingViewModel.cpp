@@ -11,7 +11,18 @@ ReportingViewModel::ReportingViewModel(QObject *parent)
     , m_nam(new QNetworkAccessManager(this))
     , m_controller(new ReportController(m_nam, this))
 {
-    // Signal wiring added in Task 5/6.
+    connect(m_controller, &ReportController::departmentsLoaded,
+            this, &ReportingViewModel::onDepartmentsLoaded);
+    connect(m_controller, &ReportController::yearsLoaded,
+            this, &ReportingViewModel::onYearsLoaded);
+    connect(m_controller, &ReportController::coursesLoaded,
+            this, &ReportingViewModel::onCoursesLoaded);
+    connect(m_controller, &ReportController::reportDataReady,
+            this, &ReportingViewModel::onReportDataReady);
+    connect(m_controller, &ReportController::reportError,
+            this, &ReportingViewModel::onReportError);
+    connect(m_controller, &ReportController::loadError,
+            this, &ReportingViewModel::onLoadError);
 }
 
 QJsonObject ReportingViewModel::buildFilters(const QString &department, const QString &course,
@@ -108,7 +119,11 @@ bool ReportingViewModel::canGenerate() const
 }
 
 // --- Stubs filled by later tasks (present so the class links now) ---
-void ReportingViewModel::loadDepartments() {}
+void ReportingViewModel::loadDepartments()
+{
+    m_controller->loadDepartments();
+    m_controller->loadYears();
+}
 void ReportingViewModel::setDepartment(const QString &department)
 {
     if (m_department == department) return;
@@ -120,7 +135,13 @@ void ReportingViewModel::setDepartment(const QString &department)
     if (!department.isEmpty())
         m_controller->loadCourses(department);
 }
-void ReportingViewModel::setCourse(const QString &) {}
+void ReportingViewModel::setCourse(const QString &course)
+{
+    if (m_course == course) return;
+    m_course = course;
+    emit courseChanged();
+    emit canGenerateChanged();
+}
 void ReportingViewModel::setDurationType(int t)
 {
     if (m_durationType == t) return;
@@ -165,9 +186,21 @@ void ReportingViewModel::setCustomEnd(const QString &v)
 }
 void ReportingViewModel::generateReport() {}
 void ReportingViewModel::retry() {}
-void ReportingViewModel::onDepartmentsLoaded(const QStringList &) {}
-void ReportingViewModel::onYearsLoaded(const QStringList &) {}
-void ReportingViewModel::onCoursesLoaded(const QStringList &) {}
+void ReportingViewModel::onDepartmentsLoaded(const QStringList &departments)
+{
+    m_departments = departments;
+    emit departmentsChanged();
+}
+void ReportingViewModel::onYearsLoaded(const QStringList &years)
+{
+    m_years = years;
+    emit yearsChanged();
+}
+void ReportingViewModel::onCoursesLoaded(const QStringList &courses)
+{
+    m_courses = courses;
+    emit coursesChanged();
+}
 void ReportingViewModel::onReportDataReady(const QJsonArray &) {}
 void ReportingViewModel::onReportError(const QString &, bool) {}
 void ReportingViewModel::onLoadError(const QString &, const QString &, bool) {}
