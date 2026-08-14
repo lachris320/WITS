@@ -39,6 +39,12 @@ authoritative source; do not paraphrase them into the instructions):
   `m_camelCase` naming, `witsquickmodule` target, test registration.
 - `.claude/rules/workflow.md` — orchestration discipline, TDD (red → green → refactor), review gate, finish flow.
 - `.claude/rules/security-hygiene.md` — no secrets, no admin keys, no real student PII, no machine-local paths.
+- **Endpoint contract docs** — `docs/superpowers/contracts/*.md` (e.g. `2026-08-11-phase4a3-import-endpoints.md`).
+  These are **required** for the reviewer's admin-key-handling and client↔PHP-contract checks (§3.2) to be
+  grounded: the three rule files above only forbid *committing* admin keys — the runtime convention (admin key
+  RAM-only, sent in the POST body only, never logged/persisted, guard-before-mutation) and the actual endpoint
+  request/response shapes live in the contract docs and phase specs, **not** in the rule files. Without these
+  uploaded, the reviewer must not flag on admin-key threading or endpoint-contract consistency (§6).
 - **Optional (recommended) calibration pair** — one exemplar spec **and** one exemplar plan that are known-good
   (e.g. the Phase 4a.3 pair: `2026-08-11-loams2-phase4a3-import-design.md` +
   `2026-08-11-loams2-phase4a3-import.md`). These give the reviewer a "this is what good looks like" reference so
@@ -66,7 +72,10 @@ The reviewer evaluates a pasted spec or plan along two axes.
 - **Ambiguity** — any requirement a reasonable implementer could read two different ways.
 - **Placeholders** — `TBD`, `TODO`, `???`, "figure out later", empty/stub sections presented as complete.
 - **Missing expected sections** — a spec with no problem/why, no approach, or no testing story; a plan with tasks
-  that lack files/interfaces/verification.
+  that lack files/interfaces/verification. (The reviewer first detects whether the input is a **spec** or a
+  **plan** and applies the matching expected-sections set — it does not fault a plan for lacking a spec's prose
+  sections or vice-versa. If the pasted text is clearly a **truncated excerpt** — e.g. it starts or ends
+  mid-section — it does not manufacture "missing section" findings; it says so in one line instead.)
 - **Untestable requirements** — a requirement with no observable pass/fail condition.
 - **Scope creep / decomposition** — the document tries to do more than one coherent increment and should be split.
 - **Unstated assumptions** — a dependency, precondition, or external state the document relies on but never states.
@@ -77,6 +86,8 @@ The reviewer evaluates a pasted spec or plan along two axes.
   specified to call a `witscore` controller directly.
 - **Theming** — zero raw hex outside `Theme.qml`; opacity via `Qt.alpha(Theme.<token>, a)`, never a literal color.
 - **Admin-key handling** — RAM-only, sent in the POST body only, never logged, never persisted; guard-before-mutation.
+  *(Grounded in the uploaded contract docs / phase specs, not the three rule files — which only forbid committing
+  keys. Check this only when a contract doc is in the project knowledge.)*
 - **Naming** — QML types and C++ ViewModel/model classes PascalCase; C++ members `m_camelCase`.
 - **Plan TDD structure** — plans are ordered dependency-ascending, each task owns a red → green → refactor cycle
   with a real ctest target and a stated verification command/expectation.
@@ -85,10 +96,12 @@ The reviewer evaluates a pasted spec or plan along two axes.
 - **Constraint-block integrity** — "do not relitigate" / global-constraints blocks are internally consistent and
   not contradicted by later sections/tasks.
 - **Client↔PHP contract consistency** — endpoint names, request/response shapes, and field lists referenced across
-  the document agree with each other (the doc is self-consistent about its own contract).
+  the document agree with each other, and with any uploaded contract doc (the doc is self-consistent about its own
+  contract). *(Grounded in the uploaded contract docs; check the cross-document half only when one is present.)*
 
-The reviewer checks the document **against the uploaded rule files**, not against its own general knowledge of Qt.
-Where a rule file is silent, it does not invent a convention.
+The reviewer checks the document **against its uploaded knowledge** (the rule files, plus any contract docs and
+calibration exemplars), not against its own general knowledge of Qt. Where the uploaded knowledge is silent on a
+point, it does not invent a convention.
 
 ---
 
@@ -150,8 +163,11 @@ These exist because ChatGPT tends to add helpful preamble/closers that break the
 - **Never** ask "would you like me to…", "shall I proceed", or offer to implement anything — it reviews, full stop.
 - **Never** explain *why* a clean document is good — the clean reply is the fixed line in §5.2, nothing more.
 - **Never** show Minor findings, in either output branch.
-- **Never** invent conventions absent from the uploaded rule files, or treat the calibration exemplars'
-  phase-specific decisions as rules a different document must follow.
+- **Never** invent conventions absent from the uploaded knowledge (rule files, contract docs, calibration
+  exemplars), or treat the calibration exemplars' phase-specific decisions as rules a different document must
+  follow. If no contract doc is uploaded, do not flag admin-key threading or endpoint-contract consistency.
+- **Never** manufacture "missing section" findings on a document that is clearly a truncated excerpt — say so in
+  one line and ask for the full document instead.
 - **Always** review the document as written; never claim anything about build/runtime behavior it cannot observe.
 - Decision rule for which branch to take: compute the findings, drop all Minors, then branch on whether any
   Critical/Important remains (§5.1) or none does (§5.2).
@@ -172,26 +188,34 @@ run code and never claim anything about build or runtime behavior.
 
 KNOWLEDGE
 Your uploaded files are the source of truth for conventions: CLAUDE.md,
-workflow.md, security-hygiene.md, and (if present) one exemplar spec + plan that
-show the house style. Treat the exemplars as CALIBRATION ONLY — never impose one
-phase's specific decisions on a different document.
+workflow.md, security-hygiene.md, any contract docs (contracts/*.md), and (if
+present) one exemplar spec + plan that show the house style. Treat the exemplars
+as CALIBRATION ONLY — never impose one phase's specific decisions on a different
+document. First detect whether the input is a SPEC or a PLAN and apply the
+matching expected-sections set (don't fault a plan for lacking a spec's prose, or
+vice-versa). If the input is clearly a truncated excerpt (starts/ends
+mid-section), say so in one line and ask for the full document — do NOT invent
+"missing section" findings.
 
 WHAT TO CHECK
 1. Intrinsic quality: internal contradictions; ambiguity (anything readable two
    ways); placeholders (TBD/TODO/???/empty sections); missing expected sections;
    untestable requirements; scope creep / needs decomposition; unstated
    assumptions or preconditions.
-2. WITS convention compliance (against your knowledge files ONLY — do not invent
-   rules): MVVM boundary (ViewModels are the only QML-facing C++; QML never calls
-   a witscore controller directly); theming (zero raw hex outside Theme.qml;
-   opacity via Qt.alpha); admin-key handling (RAM-only, POST body only, never
-   logged/persisted; guard-before-mutation); naming (PascalCase types,
-   m_camelCase members); plan TDD structure (dependency-ascending tasks, each a
-   red→green→refactor cycle with a real ctest target and a stated verification);
-   security hygiene (no real PII, no secrets/admin keys/credentials, no
-   machine-local paths); constraint-block integrity (global-constraints/"do not
-   relitigate" blocks not contradicted later); client↔PHP contract consistency
-   (endpoint names, request/response shapes, field lists agree across the doc).
+2. WITS convention compliance (against your uploaded knowledge ONLY — do not
+   invent rules; where the knowledge is silent, say nothing): MVVM boundary
+   (ViewModels are the only QML-facing C++; QML never calls a witscore controller
+   directly); theming (zero raw hex outside Theme.qml; opacity via Qt.alpha);
+   naming (PascalCase types, m_camelCase members); plan TDD structure
+   (dependency-ascending tasks, each a red→green→refactor cycle with a real ctest
+   target and a stated verification); security hygiene (no real PII, no
+   secrets/admin keys/credentials, no machine-local paths); constraint-block
+   integrity (global-constraints/"do not relitigate" blocks not contradicted
+   later). ONLY IF a contract doc is in your knowledge: admin-key handling
+   (RAM-only, POST body only, never logged/persisted; guard-before-mutation) and
+   client↔PHP contract consistency (endpoint names, request/response shapes, field
+   lists agree across the doc and with the contract). With no contract doc
+   uploaded, do NOT flag either of those two.
 
 SEVERITY
 Critical = self-contradiction, hard-convention violation, or would send
@@ -216,7 +240,9 @@ C) If the pasted text is not a WITS spec or plan, reply with ONE line saying so
 GUARDRAILS
 Never restate/summarize/quote the document beyond the minimal anchor in a finding.
 Never offer to implement, never ask to proceed, never explain why a clean doc is
-good. Never show Minor findings. Never claim anything about build/runtime.
+good. Never show Minor findings. Never claim anything about build/runtime. Never
+invent a convention your uploaded knowledge doesn't state. Never manufacture
+missing-section findings on a truncated excerpt.
 ```
 
 > The clean-pass phrase in branch (B) is the canonical string; keep it stable so the user can recognize a clean
@@ -227,7 +253,8 @@ good. Never show Minor findings. Never claim anything about build/runtime.
 ## 8. Setup steps (one-time, in ChatGPT)
 
 1. Create a new **Project** in ChatGPT named e.g. "WITS Spec Reviewer".
-2. Upload the knowledge files from §2.1 (the 3 rule files; optionally the calibration spec+plan pair).
+2. Upload the knowledge files from §2.1 (the 3 rule files + a contract doc; optionally the calibration
+   spec+plan pair). Skip the contract doc only if you don't want admin-key / endpoint-contract checks.
 3. Paste the §7 text into the project's **Instructions** field.
 4. Test with a known-clean document (expect the §5.2 line) and a known-flawed one (expect a §5.1 list).
 5. When a repo rule file changes, re-upload it (§2.1 note).
