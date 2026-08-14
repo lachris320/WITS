@@ -1556,7 +1556,7 @@ Register the QML file — add to `qt-app/quick/CMakeLists.txt` `QML_FILES` (afte
 - [ ] **Step 4: Run the test to verify it passes**
 
 Run: `cmake --build C:/b/loams-4b -t tst_qml_components && ctest --test-dir C:/b/loams-4b -R tst_qml_components --output-on-failure`
-Expected: PASS (existing component tests + the 3 new date-picker functions).
+Expected: PASS (existing component tests + the 4 new date-picker functions).
 
 - [ ] **Step 5: Commit**
 
