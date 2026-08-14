@@ -1,6 +1,8 @@
 #include "ReportingViewModel.h"
 
+#include <QMap>
 #include <QNetworkAccessManager>
+#include <algorithm>
 #include "reportcontroller.h"
 #include "reportdata.h"
 
@@ -56,9 +58,40 @@ QJsonObject ReportingViewModel::buildFilters(const QString &department, const QS
     return f;
 }
 
+QList<BarsModel::Bar> ReportingViewModel::aggregateVisitsByCourse(const QJsonArray &data)
+{
+    QMap<QString, int> byCourse;   // sorted by key; we re-sort by value below
+    for (const QJsonValue &v : data) {
+        const QJsonObject o = v.toObject();
+        const QString course = o.value("course").toString();
+        byCourse[course] += reportVisits(o);
+    }
+    QList<BarsModel::Bar> bars;
+    bars.reserve(byCourse.size());
+    for (auto it = byCourse.cbegin(); it != byCourse.cend(); ++it)
+        bars.append({ it.key(), double(it.value()) });
+    // Rank descending by value; stable so equal totals keep name (key) order.
+    std::stable_sort(bars.begin(), bars.end(),
+                     [](const BarsModel::Bar &a, const BarsModel::Bar &b) { return a.value > b.value; });
+    return bars;
+}
+
+ReportingViewModel::Tiles ReportingViewModel::deriveTiles(const QJsonArray &data)
+{
+    Tiles t;
+    t.studentsShown = data.size();
+    t.topCourse = QStringLiteral("—");
+    if (data.isEmpty())
+        return t;
+    const QList<BarsModel::Bar> bars = aggregateVisitsByCourse(data);
+    for (const BarsModel::Bar &b : bars)
+        t.totalVisits += int(b.value);
+    if (!bars.isEmpty())
+        t.topCourse = bars.first().label;   // already ranked descending
+    return t;
+}
+
 // --- Stubs filled by later tasks (present so the class links now) ---
-QList<BarsModel::Bar> ReportingViewModel::aggregateVisitsByCourse(const QJsonArray &) { return {}; }
-ReportingViewModel::Tiles ReportingViewModel::deriveTiles(const QJsonArray &) { return {}; }
 bool ReportingViewModel::canGenerate() const { return false; }
 void ReportingViewModel::loadDepartments() {}
 void ReportingViewModel::setDepartment(const QString &) {}

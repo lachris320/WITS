@@ -1,6 +1,7 @@
 #include <QtTest>
 #include <QDate>
 #include <QJsonObject>
+#include <QJsonDocument>
 #include "ReportingViewModel.h"
 
 class TestReportingViewModel : public QObject
@@ -12,6 +13,10 @@ private slots:
     void buildFiltersSemesterSendsComponentsNotRange();
     void buildFiltersCustomSendsRange();
     void buildFiltersPassesDeptAndCourse();
+    void aggregateSumsAndRanksByCourse();
+    void aggregateEmptyIsEmpty();
+    void deriveTilesComputesTotals();
+    void deriveTilesEmptyIsZeroAndDash();
 };
 
 void TestReportingViewModel::buildFiltersDaySendsStringTypeAndRange()
@@ -59,6 +64,49 @@ void TestReportingViewModel::buildFiltersPassesDeptAndCourse()
         "CE", "BSCE", 0, QDate(2026, 8, 14), 0, 0, "", 0, QDate(), QDate());
     QCOMPARE(f.value("department").toString(), QStringLiteral("CE"));
     QCOMPARE(f.value("course").toString(), QStringLiteral("BSCE"));
+}
+
+void TestReportingViewModel::aggregateSumsAndRanksByCourse()
+{
+    const QJsonArray data = QJsonDocument::fromJson(R"([
+        {"course":"BSIT","visits":"3"},
+        {"course":"BSCE","visits":"10"},
+        {"course":"BSIT","visits":"4"},
+        {"course":"BSCE","visits":"5"}
+    ])").array();
+    const QList<BarsModel::Bar> bars = ReportingViewModel::aggregateVisitsByCourse(data);
+    QCOMPARE(bars.size(), 2);
+    // Ranked descending by total: BSCE=15 then BSIT=7.
+    QCOMPARE(bars.at(0).label, QStringLiteral("BSCE"));
+    QCOMPARE(bars.at(0).value, 15.0);
+    QCOMPARE(bars.at(1).label, QStringLiteral("BSIT"));
+    QCOMPARE(bars.at(1).value, 7.0);
+}
+
+void TestReportingViewModel::aggregateEmptyIsEmpty()
+{
+    QCOMPARE(ReportingViewModel::aggregateVisitsByCourse(QJsonArray()).size(), 0);
+}
+
+void TestReportingViewModel::deriveTilesComputesTotals()
+{
+    const QJsonArray data = QJsonDocument::fromJson(R"([
+        {"course":"BSIT","visits":"3"},
+        {"course":"BSCE","visits":"10"},
+        {"course":"BSCE","visits":"5"}
+    ])").array();
+    const ReportingViewModel::Tiles t = ReportingViewModel::deriveTiles(data);
+    QCOMPARE(t.totalVisits, 18);
+    QCOMPARE(t.studentsShown, 3);
+    QCOMPARE(t.topCourse, QStringLiteral("BSCE"));   // 15 > 3
+}
+
+void TestReportingViewModel::deriveTilesEmptyIsZeroAndDash()
+{
+    const ReportingViewModel::Tiles t = ReportingViewModel::deriveTiles(QJsonArray());
+    QCOMPARE(t.totalVisits, 0);
+    QCOMPARE(t.studentsShown, 0);
+    QCOMPARE(t.topCourse, QStringLiteral("—"));
 }
 
 QTEST_MAIN(TestReportingViewModel)
