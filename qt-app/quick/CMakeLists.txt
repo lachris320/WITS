@@ -91,6 +91,7 @@ qt_add_qml_module(witsquickmodule
         viewmodels/VisitLogsViewModel.h viewmodels/VisitLogsViewModel.cpp
         models/SearchResultsModel.h models/SearchResultsModel.cpp
         models/StudentsTableModel.cpp models/StudentsTableModel.h
+        models/ReportRowsModel.h models/ReportRowsModel.cpp
         viewmodels/SearchViewModel.h viewmodels/SearchViewModel.cpp
         viewmodels/DatabaseViewModel.cpp viewmodels/DatabaseViewModel.h
         viewmodels/SettingsViewModel.h viewmodels/SettingsViewModel.cpp
@@ -240,6 +241,12 @@ wits_add_qttest(tst_barsmodel
 # only (which now contains StudentsTableModel.cpp) to avoid a duplicate symbol.
 wits_add_qttest(tst_studentstablemodel
     SOURCES tests/tst_studentstablemodel.cpp
+    LIBS witsquickmodule)
+
+# --- ReportRowsModel unit test (C++ QtTest). Pure QAbstractListModel over
+# JSON rows, no NAM -> QTEST_APPLESS_MAIN, no OFFSCREEN. ---
+wits_add_qttest(tst_reportrowsmodel
+    SOURCES tests/tst_reportrowsmodel.cpp
     LIBS witsquickmodule)
 
 # --- L* component skeletons Quick test (offscreen) ---
