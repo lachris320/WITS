@@ -1300,44 +1300,58 @@ git commit -m "feat(reporting): generateReport single-in-flight fetch + result/e
 
 - [ ] **Step 1: Write the failing QuickTest**
 
-Add to `qt-app/quick/tests/tst_qml_components.qml`. First add the fixture near the other component fixtures (place it so it does not overlap existing ones; give it its own id):
+In `qt-app/quick/tests/tst_qml_components.qml`, raise the host height so the new fixture gets its own band: change `width: 400; height: 3160` (line ~15) to `width: 400; height: 3600`.
+
+Add the fixture in its OWN y-band below the last one (`chk` at `y: 3090`) — this file's convention is that every interactive fixture gets a non-overlapping band or it "silently absorbs synthetic mouse events meant for the other one". Add near the end of `host`, after the LCheckbox fixture:
 
 ```qml
-    LDatePicker {
-        id: datePicker
-        width: 280
-        height: 44
-    }
+    // --- LDatePicker fixture (own band below chk) ---
+    LDatePicker { id: datePicker; y: 3200; width: 280; height: 44 }
+    SignalSpy { id: datePickerSpy; target: datePicker; signalName: "picked" }
 ```
 
-Add these `TestCase` functions (inside the existing `TestCase` block in that file):
+Add a NEW `TestCase` block (not folded into an existing one — the `mouseClick`-free
+tests still need `when: windowShown` for the fixture window). Selection is driven
+through the `selectDay()` function, NOT a click inside the Controls `Popup` (which
+QuickTest cannot reliably hit — this repo has no precedent for `findChild`+`mouseClick`
+reaching a Popup's reparented overlay content):
 
 ```qml
-    function test_datePickerPickEmitsIsoDate() {
-        datePicker.selectedDate = "";
-        datePicker.showMonth(2026, 8);   // August 2026
-        datePicker.open();
-        var cell = findChild(datePicker, "dayCell_14");
-        verify(cell, "day cell 14 exists in the open popup");
-        mouseClick(cell);
-        compare(datePicker.selectedDate, "2026-08-14");
-    }
+    TestCase {
+        name: "LDatePicker"; when: windowShown
+        function init() { datePickerSpy.clear(); datePicker.selectedDate = ""; }
 
-    function test_datePickerNavigatesMonths() {
-        datePicker.showMonth(2026, 8);
-        datePicker.nextMonth();
-        compare(datePicker.displayYear, 2026);
-        compare(datePicker.displayMonth, 9);
-        datePicker.prevMonth();
-        datePicker.prevMonth();
-        compare(datePicker.displayMonth, 7);
-    }
+        function test_selectDayEmitsIsoDateAndSetsSelection() {
+            datePicker.showMonth(2026, 8);       // August 2026
+            datePicker.selectDay(14);
+            compare(datePicker.selectedDate, "2026-08-14");
+            compare(datePickerSpy.count, 1);
+            compare(datePickerSpy.signalArguments[0][0], "2026-08-14");
+        }
 
-    function test_datePickerFieldShowsSelection() {
-        datePicker.selectedDate = "2026-08-14";
-        var field = findChild(datePicker, "datePickerField");
-        verify(field, "field text element exists");
-        compare(field.text, "2026-08-14");
+        function test_navigatesMonths() {
+            datePicker.showMonth(2026, 8);
+            datePicker.nextMonth();
+            compare(datePicker.displayYear, 2026);
+            compare(datePicker.displayMonth, 9);
+            datePicker.prevMonth();
+            datePicker.prevMonth();
+            compare(datePicker.displayMonth, 7);
+        }
+
+        function test_navigatesAcrossYearBoundary() {
+            datePicker.showMonth(2026, 12);
+            datePicker.nextMonth();
+            compare(datePicker.displayYear, 2027);
+            compare(datePicker.displayMonth, 1);
+        }
+
+        function test_fieldShowsSelection() {
+            datePicker.selectedDate = "2026-08-14";
+            var field = findChild(datePicker, "datePickerField");   // a root child, not in the popup
+            verify(field, "field text element exists");
+            compare(field.text, "2026-08-14");
+        }
     }
 ```
 
@@ -1381,6 +1395,15 @@ Item {
     function prevMonth() {
         if (root.displayMonth === 1) { root.displayMonth = 12; root.displayYear-- }
         else root.displayMonth--
+    }
+    // Popup-independent selection seam: the cell MouseArea AND the QuickTest
+    // both call this, so day-selection is testable without driving a click
+    // inside the Controls Popup overlay (which QuickTest cannot reliably hit).
+    function selectDay(d) {
+        var iso = root.displayYear + "-" + root._pad(root.displayMonth) + "-" + root._pad(d);
+        root.selectedDate = iso;
+        root.picked(iso);
+        root.close();
     }
 
     // Two-digit zero-pad without printf: "8" -> "08".
@@ -1513,13 +1536,7 @@ Item {
                             }
                             MouseArea {
                                 anchors.fill: parent
-                                onClicked: {
-                                    var iso = root.displayYear + "-" + root._pad(root.displayMonth)
-                                              + "-" + root._pad(modelData);
-                                    root.selectedDate = iso;
-                                    root.picked(iso);
-                                    root.close();
-                                }
+                                onClicked: root.selectDay(modelData)
                             }
                         }
                     }
@@ -1623,44 +1640,58 @@ Add the stub VM + fixture (place after the import-dialog fixtures, near the bott
     ReportingScreen { id: vmlessReporting; x: 2000; y: 7300; width: 1100; height: 800 }
 ```
 
-Add TestCase functions:
+Add a NEW `TestCase` block (this file groups each screen's tests in its own
+`TestCase { … when: windowShown }` — required because `test_reportingGenerateInvokesVm`
+uses `mouseClick`). Place it near the other admin-screen TestCase blocks:
 
 ```qml
-    function test_reportingGenerateDisabledUntilCanGenerate() {
-        reportingStub.canGenerate = false;
-        var btn = findChild(reporting, "generateButton");
-        verify(btn, "generate button exists");
-        verify(!btn.enabled, "disabled when canGenerate false");
-        reportingStub.canGenerate = true;
-        verify(btn.enabled, "enabled when canGenerate true");
-    }
+    TestCase {
+        name: "ReportingScreen"; when: windowShown
+        function init() {
+            reportingStub.canGenerate = false;
+            reportingStub.durationType = 0;
+            reportingStub.hasResult = true;
+        }
 
-    function test_reportingGenerateInvokesVm() {
-        reportingStub.canGenerate = true;
-        var before = reportingStub.generateCount;
-        var btn = findChild(reporting, "generateButton");
-        mouseClick(btn);
-        compare(reportingStub.generateCount, before + 1);
-    }
+        function test_generateDisabledUntilCanGenerate() {
+            reportingStub.canGenerate = false;
+            var btn = findChild(reporting, "generateButton");
+            verify(btn, "generate button exists");
+            verify(!btn.enabled, "disabled when canGenerate false");
+            reportingStub.canGenerate = true;
+            verify(btn.enabled, "enabled when canGenerate true");
+        }
 
-    function test_reportingPreviewRendersRowsAndTiles() {
-        reportingStub.hasResult = true;
-        var table = findChild(reporting, "reportTable");
-        verify(table, "report table exists");
-        compare(table.rowCount, 2);
-        var tile = findChild(reporting, "totalVisitsTile");
-        verify(tile, "total-visits tile exists");
-        compare(tile.value, "49");
-    }
+        function test_generateInvokesVm() {
+            reportingStub.canGenerate = true;
+            var before = reportingStub.generateCount;
+            var btn = findChild(reporting, "generateButton");
+            mouseClick(btn);
+            compare(reportingStub.generateCount, before + 1);
+        }
 
-    function test_reportingDurationSwapShowsCustomPickers() {
-        reportingStub.setDurationType(3);   // Custom
-        var startPicker = findChild(reporting, "customStartPicker");
-        verify(startPicker, "custom start picker visible in Custom mode");
-    }
+        function test_previewRendersRowsAndTiles() {
+            reportingStub.hasResult = true;
+            var table = findChild(reporting, "reportTable");
+            verify(table, "report table exists");
+            compare(table.rowCount, 2);
+            var tile = findChild(reporting, "totalVisitsTile");
+            verify(tile, "total-visits tile exists");
+            compare(tile.value, "49");
+        }
 
-    function test_reportingVmlessDoesNotCrash() {
-        verify(vmlessReporting !== null, "vm-less screen instantiates");
+        function test_durationSwapShowsCustomPickers() {
+            reportingStub.durationType = 0;      // Day mode
+            var startPicker = findChild(reporting, "customStartPicker");
+            verify(startPicker, "picker exists as a QObject regardless of mode");
+            verify(!startPicker.visible, "custom start picker hidden in Day mode");
+            reportingStub.durationType = 3;      // Custom mode
+            verify(startPicker.visible, "custom start picker shown in Custom mode");
+        }
+
+        function test_vmlessDoesNotCrash() {
+            verify(vmlessReporting !== null, "vm-less screen instantiates");
+        }
     }
 ```
 
@@ -1697,11 +1728,18 @@ Rectangle {
         anchors.margins: Theme.spacing.xxl
         spacing: Theme.spacing.lg
 
-        // --- Filter card ---
-        LCard {
+        // --- Filter card (self-sizing Rectangle: LCard has a fixed
+        // implicitHeight of 96 and does NOT grow to fit slotted content, so
+        // the two-row filter would clip — mirror DatabaseScreen's filter card). ---
+        Rectangle {
             Layout.fillWidth: true
+            color: Theme.card; radius: Theme.radius.card
+            border.width: 2; border.color: Theme.border
+            implicitHeight: filterCol.implicitHeight + Theme.spacing.xl * 2
             ColumnLayout {
+                id: filterCol
                 anchors.fill: parent
+                anchors.margins: Theme.spacing.xl
                 spacing: Theme.spacing.md
 
                 LCascadingSelect {
