@@ -1,88 +1,118 @@
 <?php
-include 'db.php'; // adjust to your DB connection path
+error_reporting(E_ALL);
+ini_set('display_errors', 0);
+ini_set('log_errors', 1);
+header("Content-Type: application/json");
+include "db.php";
+include "auth_helper.php";
+requireAdminAuth($conn);   // 401 before any DB read, ZIP extract, or insert
 
-use PhpOffice\PhpSpreadsheet\IOFactory;
-require 'vendor/autoload.php'; // PhpSpreadsheet autoload
-
-$uploadDir = "uploads/temp/";
-if (!is_dir($uploadDir)) mkdir($uploadDir, 0777, true);
-
-// === 1. Save uploaded Excel file ===
-if (empty($_FILES['excel']['tmp_name'])) {
-    die("No Excel file uploaded.");
+if ($_SERVER["REQUEST_METHOD"] !== "POST") {
+    echo json_encode(["status" => "error", "message" => "POST required"]);
+    exit;
 }
 
-$excelPath = $uploadDir . basename($_FILES['excel']['name']);
-move_uploaded_file($_FILES['excel']['tmp_name'], $excelPath);
+// === 1. Client-sent, header-mapped rows (JSON array of 7-key objects) ===
+$rowsJson = isset($_POST['rows']) ? $_POST['rows'] : '';
+$rows = json_decode($rowsJson, true);
+if (!is_array($rows)) {
+    echo json_encode(["status" => "error", "message" => "Invalid rows payload."]);
+    exit;
+}
 
-// === 2. Extract ZIP if provided ===
+// === 2. Skip-set from skip_ids (comma-joined) ===
+$skipSet = [];
+if (!empty($_POST['skip_ids'])) {
+    foreach (explode(',', $_POST['skip_ids']) as $sid) {
+        $sid = trim($sid);
+        if ($sid !== '') $skipSet[$sid] = true;
+    }
+}
+
+// === 3. Optional photos ZIP — extracted ONCE, before the row loop (core ext-zip) ===
+$uploadDir = "uploads/temp/";
+if (!is_dir($uploadDir)) mkdir($uploadDir, 0777, true);
 $photoDir = $uploadDir . "photos/";
 $zipExtracted = false;
 
 if (!empty($_FILES['photos_zip']['tmp_name'])) {
     $zipPath = $uploadDir . basename($_FILES['photos_zip']['name']);
     move_uploaded_file($_FILES['photos_zip']['tmp_name'], $zipPath);
-
     $zip = new ZipArchive;
     if ($zip->open($zipPath) === TRUE) {
         $zip->extractTo($photoDir);
         $zip->close();
         $zipExtracted = true;
-    } else {
-        echo "Warning: Failed to extract ZIP file.\n";
     }
+    // A failed ZIP open is non-fatal: import proceeds with photo = NULL.
 }
-
-// === 3. Parse Excel ===
-$spreadsheet = IOFactory::load($excelPath);
-$sheet = $spreadsheet->getActiveSheet();
-$rows = $sheet->toArray(null, true, true, true);
-
-// === 4. Loop through rows ===
-$count = 0;
-$photosMatched = 0;
 
 if (!is_dir("uploads/students/")) mkdir("uploads/students/", 0777, true);
 
-foreach ($rows as $i => $row) {
-    if ($i == 1) continue; // Skip header row
+// === 4. Per-row insert ===
+$success_count = 0;
+$skipped_count = 0;
+$error_count   = 0;
 
-    $school_id = trim($row['A']);
-    $name = trim($row['B']);
-    $course = trim($row['C']);
-    $department = trim($row['D']);
-    $year_level = trim($row['E']);
-    $gender = trim($row['F']);
-    $status = trim($row['G']);
+$stmt = $conn->prepare("INSERT INTO students
+    (school_id, name, course, department, year_level, gender, status, photo)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
 
+if (!$stmt) {
+    echo json_encode(["status" => "error", "message" => "Import failed to initialize."]);
+    exit;
+}
+
+foreach ($rows as $row) {
+    $school_id  = isset($row['school_id'])  ? trim($row['school_id'])  : '';
+    $name       = isset($row['name'])       ? trim($row['name'])       : '';
+    $course     = isset($row['course'])     ? trim($row['course'])     : '';
+    $department = isset($row['department'])  ? trim($row['department']) : '';
+    $year_level = isset($row['year_level'])  ? trim($row['year_level']) : '';
+    $gender     = isset($row['gender'])      ? trim($row['gender'])     : '';
+    $status     = isset($row['status'])      ? trim($row['status'])     : '';
+
+    // Server-side re-validate: school_id + name required (the data guarantee).
+    if ($school_id === '' || $name === '') {
+        $error_count++;
+        continue;
+    }
+    // Client-resolved duplicates are skipped here.
+    if (isset($skipSet[$school_id])) {
+        $skipped_count++;
+        continue;
+    }
+
+    // Photo comes ONLY from the ZIP match (never from a file column).
     $photoPath = null;
-
-    // Try to match photo if ZIP provided
-    if ($zipExtracted && !empty($school_id)) {
-        $candidates = glob($photoDir . "*$school_id*.*");
-        if (count($candidates) > 0) {
-            $photoSrc = $candidates[0];
+    if ($zipExtracted) {
+        $candidates = glob($photoDir . "*" . $school_id . "*.*");
+        if ($candidates && count($candidates) > 0) {
             $targetPhoto = "uploads/students/" . $school_id . ".jpg";
-            copy($photoSrc, $targetPhoto);
-            $photoPath = $targetPhoto;
-            $photosMatched++;
+            if (copy($candidates[0], $targetPhoto)) {
+                $photoPath = $targetPhoto;
+            }
         }
     }
 
-    // Insert into DB
-    $stmt = $conn->prepare("INSERT INTO students
-        (school_id, name, course, department, year_level, gender, status, photo)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
     $stmt->bind_param("ssssssss",
         $school_id, $name, $course, $department,
         $year_level, $gender, $status, $photoPath);
-    $stmt->execute();
 
-    $count++;
+    if ($stmt->execute()) {
+        $success_count++;
+    } else {
+        $error_count++;
+    }
 }
 
-echo "✅ Upload complete!\n";
-echo "Total students inserted: $count\n";
-if ($zipExtracted) echo "Photos matched and saved: $photosMatched\n";
-else echo "No photo ZIP uploaded.\n";
+$stmt->close();
+
+echo json_encode([
+    "status"        => "success",
+    "success_count" => $success_count,
+    "skipped_count" => $skipped_count,
+    "error_count"   => $error_count,
+    "message"       => "Imported $success_count, skipped $skipped_count, failed $error_count."
+]);
 ?>

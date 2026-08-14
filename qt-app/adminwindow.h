@@ -136,6 +136,11 @@ private:
     void showTemporaryOverlay(QWidget *parent, const QString &message);
     QMap<QString,int> bulkHeaderIndex;    // track cancellation
 
+    // Reconstructs a ParsedTable from the LIVE, user-editable ui->bulkTable +
+    // bulkHeaderIndex (NOT by re-parsing selectedExcelPath — that would discard
+    // hand-edits made after preview). Feeds the shared serializeRows seam.
+    ParsedTable buildBulkTableParsed() const;
+
     QLabel *overlayText = nullptr;            // optional
 
     QFrame *m_headerBar = nullptr;

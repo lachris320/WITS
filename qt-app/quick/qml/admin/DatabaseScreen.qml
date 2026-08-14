@@ -108,6 +108,15 @@ Rectangle {
                 onClicked: if (screen.vm) screen.vm.beginRegister()
             }
 
+            LButton {
+                objectName: "importStudentsButton"
+                variant: "Outline"
+                compact: true
+                text: qsTr("Import")
+                enabled: screen.vm ? !screen.vm.loading : false
+                onClicked: importDialog.visible = true
+            }
+
             TextMetrics {
                 id: exportMetrics
                 font.family: Theme.typography.sans
@@ -281,6 +290,24 @@ Rectangle {
         id: registerDialog
         objectName: "registerDialog"
         vm: screen.vm
+    }
+
+    // Import owns its OWN ViewModel (separate from the DatabaseViewModel `vm`):
+    // it wraps a distinct ImportController + QNetworkAccessManager. On a
+    // successful import, refresh the student table so new rows appear.
+    ImportViewModel { id: importVm }
+
+    ImportStudentsDialog {
+        id: importDialog
+        objectName: "importDialog"
+        vm: importVm
+    }
+
+    Connections {
+        target: importVm
+        function onFinishedOk() {
+            if (screen.vm) screen.vm.reloadTable();
+        }
     }
 
     // Change-preview gate. Declared AFTER bulkEditDialog so its scrim renders on

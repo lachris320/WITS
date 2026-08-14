@@ -872,6 +872,33 @@ void adminWindow::onAttachFileBtnClicked()
     }
 }
 
+ParsedTable adminWindow::buildBulkTableParsed() const
+{
+    ParsedTable table;
+    table.headerIndex = bulkHeaderIndex;   // the mapping captured at preview load
+
+    const int cols = ui->bulkTable->columnCount();
+    const int rows = ui->bulkTable->rowCount();
+
+    // Header row from the live widget's horizontal header labels, so
+    // table.headers stays consistent with headerIndex's column positions.
+    for (int c = 0; c < cols; ++c) {
+        QTableWidgetItem *h = ui->bulkTable->horizontalHeaderItem(c);
+        table.headers << (h ? h->text() : QString());
+    }
+
+    for (int r = 0; r < rows; ++r) {
+        QStringList row;
+        row.reserve(cols);
+        for (int c = 0; c < cols; ++c) {
+            QTableWidgetItem *it = ui->bulkTable->item(r, c);
+            row << (it ? it->text().trimmed() : QString());
+        }
+        table.rows << row;
+    }
+    return table;
+}
+
 void adminWindow::onUpdateDatabaseBtnClicked()
 {
     if (selectedExcelPath.isEmpty()) {
@@ -915,7 +942,7 @@ void adminWindow::onUpdateDatabaseBtnClicked()
             schoolIds << sid;
     }
 
-    m_importController->checkDuplicates(schoolIds);
+    m_importController->checkDuplicates(schoolIds, m_adminKey);
 }
 
 void adminWindow::onCancelUploadBtnClicked()
@@ -928,7 +955,8 @@ void adminWindow::onCancelUploadBtnClicked()
 void adminWindow::onImportDuplicatesResolved(const QStringList &duplicates)
 {
     if (duplicates.isEmpty()) {
-        m_importController->uploadStudents(selectedExcelPath, selectedZipPath, QStringList{});
+        m_importController->uploadStudents(buildBulkTableParsed(), selectedZipPath,
+                                           QStringList{}, m_adminKey);
         return;
     }
 
@@ -978,7 +1006,8 @@ void adminWindow::onImportDuplicatesResolved(const QStringList &duplicates)
     // Yes (either directly or via the Show More re-ask) — the entire
     // duplicates list becomes skipIds, matching legacy line 1300's guard
     // which always sends the full list.
-    m_importController->uploadStudents(selectedExcelPath, selectedZipPath, duplicates);
+    m_importController->uploadStudents(buildBulkTableParsed(), selectedZipPath,
+                                       duplicates, m_adminKey);
 }
 
 void adminWindow::onImportError(const QString &title, const QString &message, ImportSeverity severity)

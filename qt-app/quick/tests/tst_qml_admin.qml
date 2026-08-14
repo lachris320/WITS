@@ -11,10 +11,11 @@ Item {
     //
     // Geometry ledger (x 0 column):   dash 0..760 | search 760..1460 |
     //   logs 1460..2160 | settings 2160..3760 | database 3800..4500
-    //   | editDialog 4500..5200 | bulkEdit 5200..5900 | registerDialog 5900..6600.
+    //   | editDialog 4500..5200 | bulkEdit 5200..5900 | registerDialog 5900..6600
+    //   | importDialog 6600..7300.
     // Parked no-vm column (x 2000): vmlessSearch 0..700 |
     //   vmlessLogs 760..1460 | vmlessSettings 1560..2260.
-    width: 1100; height: 6600
+    width: 1100; height: 7300
 
     // --- Dashboard stub VM ---
     // maxValue is declared on the stubs because the screen binds
@@ -1659,6 +1660,12 @@ Item {
             property url lastExportUrl: ""
             property bool exportResult: true
             property bool canEdit: false
+            // no-op insurance: Import wires reloadTable() as its post-import
+            // refresh hook (see Connections in DatabaseScreen.qml). The open
+            // test never triggers it (it only asserts dialog visibility), but
+            // the stub exposes it so any future test that drives an import
+            // through the fixture doesn't hit an undefined-method warning.
+            function reloadTable() {}
             property string editSchoolId: "2023-001"
             property string editName: "Ann"
             property string editYearLevel: "2"
@@ -1794,6 +1801,10 @@ Item {
                 stubVm.registerStudentCount = 0;
                 var rd = findChild(databaseScreen, "registerDialog");
                 if (rd) rd.visible = false;
+                // A leaked-open import dialog scrim would swallow later clicks
+                // the same way deleteConfirm/bulkEditConfirm do above.
+                var idlg = findChild(databaseScreen, "importDialog");
+                if (idlg) idlg.visible = false;
             }
             function test_showsCascadingFilter() {
                 verify(findChild(databaseScreen, "cascDept") !== null);
@@ -2021,6 +2032,16 @@ Item {
                 compare(d.visible, true);
                 stubVm.registerFinished();
                 compare(d.visible, false);
+            }
+            function test_importButtonOpensDialog() {
+                var btn = findChild(databaseScreen, "importStudentsButton");
+                verify(btn !== null);
+                var dlg = findChild(databaseScreen, "importDialog");
+                verify(dlg !== null);
+                compare(dlg.visible, false);
+                mouseClick(btn);
+                compare(dlg.visible, true);
+                dlg.visible = false;   // reset for later tests
             }
         }
     }
@@ -2338,6 +2359,144 @@ Item {
                 waitForRendering(registerDialog2);
                 mouseClick(findChild(registerDialog2, "regCancelButton"));
                 compare(registerDialog2.visible, false);
+            }
+        }
+    }
+
+    // --- ImportStudentsDialog fixture (own band below registerDialog, y 6600..7300) ---
+    Item {
+        id: importBand
+        y: 6600
+        width: 900; height: 700
+
+        QtObject {
+            id: importStub
+            property int phase: 0            // 0=Idle .. 6=Failed (mirrors Phase enum)
+            property bool busy: false
+            property int parsedCount: 0
+            property int duplicateCount: 0
+            property bool allDuplicates: false
+            property int uploadPercent: 0
+            property string dataFileName: ""
+            property string photosZipName: ""
+            property string errorText: ""
+            property string resultText: ""
+            property bool authFailure: false
+
+            property int startImportCount: 0
+            property int continueCount: 0
+            property int cancelCount: 0
+            property url lastDataUrl: ""
+            property url lastZipUrl: ""
+            property url lastTemplateUrl: ""
+            signal finishedOk()
+
+            function setDataFile(u) { lastDataUrl = u; dataFileName = ("" + u).split("/").pop(); parsedCount = 2; phase = 0; }
+            function setPhotosZip(u) { lastZipUrl = u; photosZipName = ("" + u).split("/").pop(); }
+            function clearPhotosZip() { photosZipName = ""; }
+            function startImport() { startImportCount++; }
+            function continueAfterDuplicates() { continueCount++; }
+            function cancel() { cancelCount++; phase = 0; duplicateCount = 0; allDuplicates = false; }
+            function downloadTemplate(u) { lastTemplateUrl = u; return true; }
+        }
+
+        ImportStudentsDialog { id: importDialog2; anchors.fill: parent; vm: importStub }
+
+        TestCase {
+            name: "ImportStudentsDialog"; when: windowShown
+            function init() {
+                importStub.phase = 0;
+                importStub.busy = false;
+                importStub.parsedCount = 0;
+                importStub.duplicateCount = 0;
+                importStub.allDuplicates = false;
+                importStub.dataFileName = "";
+                importStub.photosZipName = "";
+                importStub.errorText = "";
+                importStub.resultText = "";
+                importStub.startImportCount = 0;
+                importStub.continueCount = 0;
+                importStub.cancelCount = 0;
+                importDialog2.visible = false;
+            }
+
+            function test_importDisabledUntilDataFileChosen() {
+                importDialog2.visible = true;
+                waitForRendering(importDialog2);
+                var submit = findChild(importDialog2, "importSubmitButton");
+                verify(submit !== null);
+                compare(submit.enabled, false);
+                importStub.setDataFile("file:///tmp/students.csv");
+                compare(submit.enabled, true);
+            }
+
+            function test_importInvokesStartImport() {
+                importStub.setDataFile("file:///tmp/students.csv");
+                importDialog2.visible = true;
+                waitForRendering(importDialog2);
+                mouseClick(findChild(importDialog2, "importSubmitButton"));
+                compare(importStub.startImportCount, 1);
+            }
+
+            function test_someDuplicatesShowsContinueAndCancel() {
+                importStub.setDataFile("file:///tmp/students.csv");
+                importStub.parsedCount = 3;
+                importStub.duplicateCount = 1;
+                importStub.allDuplicates = false;
+                importStub.phase = 2;   // AwaitingDuplicates
+                importDialog2.visible = true;
+                waitForRendering(importDialog2);
+                verify(findChild(importDialog2, "importDuplicateSome").visible);
+                verify(!findChild(importDialog2, "importDuplicateAll").visible);
+                mouseClick(findChild(importDialog2, "importDupContinueButton"));
+                compare(importStub.continueCount, 1);
+            }
+
+            function test_allDuplicatesShowsCloseOnly() {
+                importStub.setDataFile("file:///tmp/students.csv");
+                importStub.parsedCount = 2;
+                importStub.duplicateCount = 2;
+                importStub.allDuplicates = true;
+                importStub.phase = 2;   // AwaitingDuplicates
+                importDialog2.visible = true;
+                waitForRendering(importDialog2);
+                verify(findChild(importDialog2, "importDuplicateAll").visible);
+                verify(!findChild(importDialog2, "importDuplicateSome").visible);
+                // No Continue button in the all-dupes branch; Close closes the dialog.
+                mouseClick(findChild(importDialog2, "importDupCloseButton"));
+                compare(importDialog2.visible, false);
+            }
+
+            function test_processingShowsIndeterminateAndLabel() {
+                importStub.setDataFile("file:///tmp/students.csv");
+                importStub.phase = 4;   // Processing
+                importDialog2.visible = true;
+                waitForRendering(importDialog2);
+                var bar = findChild(importDialog2, "importProgressBar");
+                verify(bar !== null);
+                compare(bar.indeterminate, true);
+                compare(findChild(importDialog2, "importProcessingLabel").visible, true);
+            }
+
+            function test_resultLineShownOnDone() {
+                importStub.setDataFile("file:///tmp/students.csv");
+                importStub.resultText = "5 imported · 1 skipped · 0 failed";
+                importStub.phase = 5;   // Done
+                importDialog2.visible = true;
+                waitForRendering(importDialog2);
+                var res = findChild(importDialog2, "importResultText");
+                verify(res.visible);
+                compare(res.text, "5 imported · 1 skipped · 0 failed");
+            }
+
+            function test_templateButtonInvokesDownload() {
+                importDialog2.visible = true;
+                waitForRendering(importDialog2);
+                // Drive the VM method directly (FileDialog is native/modal and not
+                // clickable under offscreen); assert the wiring point exists.
+                importStub.downloadTemplate("file:///tmp/template.csv");
+                compare(("" + importStub.lastTemplateUrl).length > 0, true);
+                verify(findChild(importDialog2, "importTemplateButton") !== null);
             }
         }
     }

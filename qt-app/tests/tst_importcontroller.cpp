@@ -1,9 +1,15 @@
 #include <QtTest>
 #include <QByteArray>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QMap>
+#include <QSignalSpy>
 #include <QString>
 #include <QStringList>
 #include <QTemporaryDir>
+#include <QUrlQuery>
+#include "capturingnam.h"
 #include "importcontroller.h"
 #include "importdata.h"
 #include "xlsxdocument.h"
@@ -36,6 +42,14 @@ private slots:
     void parseCsvEmptyTextReturnsEmptyTable();
     void parseCsvColNFallbackEndToEnd();
 
+    // serializeRows
+    void serializeRowsMapsSevenCoreKeys();
+    void serializeRowsExcludesCodeAndVisits();
+    void serializeRowsIgnoresUnrecognizedColumn();
+    void serializeRowsTrimsValues();
+    void serializeRowsShortRowFillsEmpty();
+    void serializeRowsEmptyTableIsEmptyArray();
+
     // parseDuplicateResponse
     void parseDuplicateResponseSuccessWithDuplicates();
     void parseDuplicateResponseSuccessEmpty();
@@ -44,6 +58,7 @@ private slots:
 
     // parseUploadResponse
     void parseUploadResponseSuccess();
+    void parseUploadResponseReadsSkippedCount();
     void parseUploadResponseStatusNotSuccess();
     void parseUploadResponsePlainTextFallback();
 
@@ -51,6 +66,25 @@ private slots:
     void parseExcelRoundTrip();
     void parseExcelHeaderOnlyNoDataRows();
     void parseExcelOpenFailedOnBadPath();
+
+    // checkDuplicates (request assembly + 401 routing)
+    void checkDuplicatesPostsFormWithSchoolIdsAndAdminKey();
+    void checkDuplicates401RoutesToAuthError();
+
+    // uploadStudents (multipart assembly)
+    void uploadStudentsPostsRowsAndAdminKeyMultipart();
+    void uploadStudentsOmitsSkipIdsWhenEmpty();
+    void uploadStudents401RoutesToUploadFailed();
+
+    // validateForImport
+    void validateForImportOkOnGoodTable();
+    void validateForImportMissingSchoolIdColumn();
+    void validateForImportMissingNameColumn();
+    void validateForImportEmptySchoolIdRowsReported();
+    void validateForImportIgnoresExtraColumns();
+
+    // importTemplateCsv
+    void importTemplateCsvHasHeadersAndExampleRow();
 };
 
 void TestImportController::normalizeHeaderTrimsLowersStrips()
@@ -232,6 +266,98 @@ void TestImportController::parseCsvColNFallbackEndToEnd()
     QVERIFY(!table.headerIndex.contains("notes"));
 }
 
+static QJsonArray decodeRows(const QByteArray &bytes)
+{
+    return QJsonDocument::fromJson(bytes).array();
+}
+
+void TestImportController::serializeRowsMapsSevenCoreKeys()
+{
+    ParsedTable t;
+    t.headers = {"School ID", "Full Name", "Course", "Year Level",
+                 "Department", "Gender", "Status"};
+    ImportController::mapHeaders(t.headers, t.headerIndex);
+    t.rows << QStringList{"21-1-0001", "Juan Dela Cruz", "BSIT", "1",
+                          "CCS", "Male", "Active"};
+
+    const QJsonArray arr = decodeRows(ImportController::serializeRows(t));
+    QCOMPARE(arr.size(), 1);
+    const QJsonObject o = arr.at(0).toObject();
+    QCOMPARE(o.value("school_id").toString(),  QString("21-1-0001"));
+    QCOMPARE(o.value("name").toString(),       QString("Juan Dela Cruz"));
+    QCOMPARE(o.value("course").toString(),     QString("BSIT"));
+    QCOMPARE(o.value("year_level").toString(), QString("1"));
+    QCOMPARE(o.value("department").toString(), QString("CCS"));
+    QCOMPARE(o.value("gender").toString(),     QString("Male"));
+    QCOMPARE(o.value("status").toString(),     QString("Active"));
+    // Exactly the 7 core keys — nothing else.
+    QCOMPARE(o.keys().size(), 7);
+}
+
+void TestImportController::serializeRowsExcludesCodeAndVisits()
+{
+    ParsedTable t;
+    t.headers = {"School ID", "Full Name", "Code", "Visits"};
+    ImportController::mapHeaders(t.headers, t.headerIndex);   // maps code + visits
+    t.rows << QStringList{"21-1-0002", "Maria Clara", "RFID-9", "42"};
+
+    const QJsonObject o = decodeRows(ImportController::serializeRows(t)).at(0).toObject();
+    QVERIFY(!o.contains("code"));
+    QVERIFY(!o.contains("visits"));
+    QCOMPARE(o.value("school_id").toString(), QString("21-1-0002"));
+    QCOMPARE(o.value("name").toString(),      QString("Maria Clara"));
+    // Unmapped core columns still present, empty.
+    QCOMPARE(o.value("course").toString(), QString());
+}
+
+void TestImportController::serializeRowsIgnoresUnrecognizedColumn()
+{
+    ParsedTable t;
+    t.headers = {"School ID", "Notes"};
+    ImportController::mapHeaders(t.headers, t.headerIndex);   // Notes -> col_1
+    t.rows << QStringList{"21-1-0003", "ignore me"};
+
+    const QJsonObject o = decodeRows(ImportController::serializeRows(t)).at(0).toObject();
+    QVERIFY(!o.contains("col_1"));
+    QVERIFY(!o.contains("notes"));
+    QCOMPARE(o.keys().size(), 7);
+    QCOMPARE(o.value("school_id").toString(), QString("21-1-0003"));
+}
+
+void TestImportController::serializeRowsTrimsValues()
+{
+    ParsedTable t;
+    t.headers = {"School ID", "Full Name"};
+    ImportController::mapHeaders(t.headers, t.headerIndex);
+    t.rows << QStringList{"  21-1-0004  ", "\tAna Reyes \n"};
+
+    const QJsonObject o = decodeRows(ImportController::serializeRows(t)).at(0).toObject();
+    QCOMPARE(o.value("school_id").toString(), QString("21-1-0004"));
+    QCOMPARE(o.value("name").toString(),      QString("Ana Reyes"));
+}
+
+void TestImportController::serializeRowsShortRowFillsEmpty()
+{
+    ParsedTable t;
+    t.headers = {"School ID", "Full Name", "Course"};
+    ImportController::mapHeaders(t.headers, t.headerIndex);   // course -> index 2
+    t.rows << QStringList{"21-1-0005", "Jose Rizal"};         // only 2 cells (ragged)
+
+    const QJsonObject o = decodeRows(ImportController::serializeRows(t)).at(0).toObject();
+    QCOMPARE(o.value("school_id").toString(), QString("21-1-0005"));
+    QCOMPARE(o.value("name").toString(),      QString("Jose Rizal"));
+    QCOMPARE(o.value("course").toString(),    QString());   // index 2 out of range -> ""
+}
+
+void TestImportController::serializeRowsEmptyTableIsEmptyArray()
+{
+    ParsedTable t;
+    t.headers = {"School ID", "Full Name"};
+    ImportController::mapHeaders(t.headers, t.headerIndex);
+    // no rows appended
+    QCOMPARE(ImportController::serializeRows(t), QByteArray("[]"));
+}
+
 void TestImportController::parseDuplicateResponseSuccessWithDuplicates()
 {
     const QByteArray json = R"({
@@ -283,6 +409,7 @@ void TestImportController::parseUploadResponseSuccess()
         "status": "success",
         "message": "All good.",
         "success_count": 10,
+        "skipped_count": 2,
         "error_count": 1
     })";
 
@@ -291,7 +418,27 @@ void TestImportController::parseUploadResponseSuccess()
     QVERIFY(!result.plainText);
     QCOMPARE(result.message, QString("All good."));
     QCOMPARE(result.successCount, 10);
+    QCOMPARE(result.skippedCount, 2);
     QCOMPARE(result.errorCount, 1);
+}
+
+void TestImportController::parseUploadResponseReadsSkippedCount()
+{
+    // skipped_count present and non-zero is read verbatim (regression guard:
+    // the field did not exist before 4a.3).
+    const QByteArray json = R"({
+        "status": "success",
+        "message": "Partial import.",
+        "success_count": 5,
+        "skipped_count": 4,
+        "error_count": 0
+    })";
+
+    const UploadResult result = ImportController::parseUploadResponse(json);
+    QVERIFY(result.ok);
+    QCOMPARE(result.successCount, 5);
+    QCOMPARE(result.skippedCount, 4);
+    QCOMPARE(result.errorCount, 0);
 }
 
 void TestImportController::parseUploadResponseStatusNotSuccess()
@@ -382,6 +529,184 @@ void TestImportController::parseExcelOpenFailedOnBadPath()
     QCOMPARE(err, ExcelParseError::OpenFailed);
     QVERIFY(table.headers.isEmpty());
     QVERIFY(table.rows.isEmpty());
+}
+
+void TestImportController::checkDuplicatesPostsFormWithSchoolIdsAndAdminKey()
+{
+    CapturingNam nam(R"({"status":"success","duplicates":[]})");
+    ImportController controller(&nam);
+
+    controller.checkDuplicates({"21-1-0001", "21-1-0002"}, "s3cr3t-key");
+
+    QCOMPARE(nam.lastOp, QNetworkAccessManager::PostOperation);
+    QVERIFY(nam.lastUrl.toString().endsWith("check_duplicates.php"));
+    QCOMPARE(nam.lastContentType, QString("application/x-www-form-urlencoded"));
+
+    // school_ids is a JSON-array string field; admin_key is a sibling field.
+    QUrlQuery q(QString::fromUtf8(nam.lastBody));
+    QVERIFY(q.hasQueryItem("school_ids"));
+    QVERIFY(q.hasQueryItem("admin_key"));
+    QCOMPARE(q.queryItemValue("admin_key", QUrl::FullyDecoded), QString("s3cr3t-key"));
+    const QString idsField = q.queryItemValue("school_ids", QUrl::FullyDecoded);
+    const QJsonArray ids = QJsonDocument::fromJson(idsField.toUtf8()).array();
+    QCOMPARE(ids.size(), 2);
+    QCOMPARE(ids.at(0).toString(), QString("21-1-0001"));
+    QCOMPARE(ids.at(1).toString(), QString("21-1-0002"));
+}
+
+void TestImportController::checkDuplicates401RoutesToAuthError()
+{
+    // A guard rejection: AuthenticationRequiredError + HTTP 401 + a decodable body.
+    CapturingNam nam(R"({"status":"error","message":"Admin authentication required"})",
+                     QNetworkReply::AuthenticationRequiredError, 401);
+    ImportController controller(&nam);
+
+    QSignalSpy errSpy(&controller, &ImportController::importError);
+    QSignalSpy okSpy(&controller, &ImportController::duplicatesResolved);
+
+    controller.checkDuplicates({"21-1-0001"}, "bad-key");
+    QVERIFY(errSpy.wait(1000));            // CannedReply finishes on the next loop turn
+    QCOMPARE(okSpy.count(), 0);            // NOT reported as a normal resolve
+    QCOMPARE(errSpy.count(), 1);
+    const QString message = errSpy.at(0).at(1).toString();
+    QVERIFY(message.contains("authentication", Qt::CaseInsensitive));
+}
+
+static ParsedTable oneRowTable()
+{
+    ParsedTable t;
+    t.headers = {"School ID", "Full Name"};
+    ImportController::mapHeaders(t.headers, t.headerIndex);
+    t.rows << QStringList{"21-1-0001", "Juan Dela Cruz"};
+    return t;
+}
+
+void TestImportController::uploadStudentsPostsRowsAndAdminKeyMultipart()
+{
+    CapturingNam nam(R"({"status":"success","success_count":1,"skipped_count":1,"error_count":0})");
+    ImportController controller(&nam);
+    QSignalSpy startedSpy(&controller, &ImportController::uploadStarted);
+
+    controller.uploadStudents(oneRowTable(), QString(), {"21-1-0002"}, "s3cr3t-key");
+
+    QCOMPARE(startedSpy.count(), 1);   // fires immediately before the POST
+    QCOMPARE(nam.lastOp, QNetworkAccessManager::PostOperation);
+    QVERIFY(nam.lastUrl.toString().endsWith("upload_students_zip.php"));
+
+    const QString body = QString::fromUtf8(nam.lastBody);
+    QVERIFY(body.contains("name=\"rows\""));
+    QVERIFY(body.contains("name=\"admin_key\""));
+    QVERIFY(body.contains("name=\"skip_ids\""));   // skipIds non-empty -> present
+    QVERIFY(body.contains("21-1-0001"));            // the serialized row payload
+    QVERIFY(body.contains("s3cr3t-key"));
+    QVERIFY(!body.contains("name=\"excel\""));      // raw Excel part removed
+}
+
+void TestImportController::uploadStudentsOmitsSkipIdsWhenEmpty()
+{
+    CapturingNam nam(R"({"status":"success","success_count":1,"skipped_count":0,"error_count":0})");
+    ImportController controller(&nam);
+
+    controller.uploadStudents(oneRowTable(), QString(), QStringList{}, "s3cr3t-key");
+
+    const QString body = QString::fromUtf8(nam.lastBody);
+    QVERIFY(body.contains("name=\"rows\""));
+    QVERIFY(body.contains("name=\"admin_key\""));
+    QVERIFY(!body.contains("name=\"skip_ids\""));   // empty -> absent
+}
+
+void TestImportController::uploadStudents401RoutesToUploadFailed()
+{
+    CapturingNam nam(R"({"status":"error","message":"Admin authentication required"})",
+                     QNetworkReply::AuthenticationRequiredError, 401);
+    ImportController controller(&nam);
+    QSignalSpy failSpy(&controller, &ImportController::uploadFailed);
+    QSignalSpy finSpy(&controller, &ImportController::uploadFinished);
+
+    controller.uploadStudents(oneRowTable(), QString(), QStringList{}, "bad-key");
+    QVERIFY(failSpy.wait(1000));
+    QCOMPARE(finSpy.count(), 0);
+    QVERIFY(failSpy.at(0).at(0).toString().contains("authentication", Qt::CaseInsensitive));
+}
+
+void TestImportController::validateForImportOkOnGoodTable()
+{
+    ParsedTable t;
+    t.headers = {"School ID", "Full Name"};
+    ImportController::mapHeaders(t.headers, t.headerIndex);
+    t.rows << QStringList{"21-1-0001", "Juan Dela Cruz"};
+
+    QStringList bad;
+    QCOMPARE(ImportController::validateForImport(t, &bad), QString());   // "" == OK
+    QVERIFY(bad.isEmpty());
+}
+
+void TestImportController::validateForImportMissingSchoolIdColumn()
+{
+    ParsedTable t;
+    t.headers = {"Full Name", "Course"};
+    ImportController::mapHeaders(t.headers, t.headerIndex);   // no school_id
+    t.rows << QStringList{"Juan Dela Cruz", "BSIT"};
+
+    const QString msg = ImportController::validateForImport(t, nullptr);
+    QVERIFY(msg.contains("School ID"));
+    QVERIFY(msg.contains("Found columns"));
+}
+
+void TestImportController::validateForImportMissingNameColumn()
+{
+    ParsedTable t;
+    t.headers = {"School ID", "Course"};
+    ImportController::mapHeaders(t.headers, t.headerIndex);   // no name
+    t.rows << QStringList{"21-1-0001", "BSIT"};
+
+    const QString msg = ImportController::validateForImport(t, nullptr);
+    QVERIFY(msg.contains("Name"));
+}
+
+void TestImportController::validateForImportEmptySchoolIdRowsReported()
+{
+    ParsedTable t;
+    t.headers = {"School ID", "Full Name"};
+    ImportController::mapHeaders(t.headers, t.headerIndex);
+    t.rows << QStringList{"21-1-0001", "Juan Dela Cruz"};
+    t.rows << QStringList{"", "Maria Clara"};          // row 2: empty school_id
+
+    QStringList bad;
+    const QString msg = ImportController::validateForImport(t, &bad);
+    QVERIFY(!msg.isEmpty());
+    QCOMPARE(bad, QStringList({"Row 2"}));
+}
+
+void TestImportController::validateForImportIgnoresExtraColumns()
+{
+    ParsedTable t;
+    t.headers = {"School ID", "Full Name", "Notes"};   // Notes -> col_2, ignored
+    ImportController::mapHeaders(t.headers, t.headerIndex);
+    t.rows << QStringList{"21-1-0001", "Juan Dela Cruz", "vip"};
+
+    QStringList bad;
+    QCOMPARE(ImportController::validateForImport(t, &bad), QString());   // extra col is fine
+}
+
+void TestImportController::importTemplateCsvHasHeadersAndExampleRow()
+{
+    const QString csv = QString::fromUtf8(ImportController::importTemplateCsv());
+    const QStringList lines = csv.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    QVERIFY(lines.size() >= 2);   // header + at least one example row
+
+    const QString header = lines.first();
+    QVERIFY(header.contains("School ID"));
+    QVERIFY(header.contains("Name"));
+    QVERIFY(header.contains("Course"));
+    QVERIFY(header.contains("Department"));
+    QVERIFY(header.contains("Year Level"));
+    QVERIFY(header.contains("Gender"));
+    QVERIFY(header.contains("Status"));
+
+    // The example row uses an opaque hyphenated School ID (reinforces that it is
+    // a School ID, not an admin key) and must NOT leak real PII.
+    QVERIFY(lines.at(1).contains("21-1-0001"));
 }
 
 QTEST_MAIN(TestImportController)

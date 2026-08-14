@@ -11,7 +11,9 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QUrlQuery>
 
+#include "studentcontroller.h"
 #include "xlsxdocument.h"
 #include "xlsxcellrange.h"
 
@@ -100,6 +102,77 @@ ParsedTable ImportController::parseCsv(const QString &rawText)
     return table;
 }
 
+QByteArray ImportController::serializeRows(const ParsedTable &table)
+{
+    static const QStringList kKeys = {
+        QStringLiteral("school_id"), QStringLiteral("name"),
+        QStringLiteral("course"),    QStringLiteral("department"),
+        QStringLiteral("year_level"),QStringLiteral("gender"),
+        QStringLiteral("status")
+    };
+
+    QJsonArray out;
+    for (const QStringList &row : table.rows) {
+        QJsonObject obj;
+        for (const QString &key : kKeys) {
+            QString value;
+            if (table.headerIndex.contains(key)) {
+                const int col = table.headerIndex.value(key);
+                if (col >= 0 && col < row.size())
+                    value = row.at(col).trimmed();
+            }
+            obj[key] = value;   // absent/out-of-range column -> "" (key still present)
+        }
+        out.append(obj);
+    }
+    return QJsonDocument(out).toJson(QJsonDocument::Compact);
+}
+
+QString ImportController::validateForImport(const ParsedTable &table, QStringList *badRowsOut)
+{
+    if (badRowsOut)
+        badRowsOut->clear();
+
+    const QString found = QStringLiteral("\nFound columns: ") + table.headers.join(QStringLiteral(", "));
+
+    if (!table.headerIndex.contains(QStringLiteral("school_id")))
+        return QStringLiteral("Missing required column: School ID.") + found;
+    if (!table.headerIndex.contains(QStringLiteral("name")))
+        return QStringLiteral("Missing required column: Name.") + found;
+
+    const int idCol = table.headerIndex.value(QStringLiteral("school_id"));
+    QStringList offenders;
+    for (int r = 0; r < table.rows.size(); ++r) {
+        const QStringList &row = table.rows.at(r);
+        const QString id = (idCol >= 0 && idCol < row.size()) ? row.at(idCol).trimmed() : QString();
+        if (id.isEmpty())
+            offenders << QStringLiteral("Row %1").arg(r + 1);   // 1-based over data rows
+    }
+
+    if (badRowsOut)
+        *badRowsOut = offenders;
+
+    if (!offenders.isEmpty()) {
+        const QStringList head = offenders.mid(0, 3);
+        QString msg = QStringLiteral("Some rows have no School ID: ") + head.join(QStringLiteral(", "));
+        if (offenders.size() > 3)
+            msg += QStringLiteral(", and more");
+        return msg;
+    }
+    return QString();   // OK
+}
+
+QByteArray ImportController::importTemplateCsv()
+{
+    // Recognized columns, in a natural order. Extra columns are ignored on
+    // import and column order does not matter, but this is the friendly shape.
+    const QString header = QStringLiteral(
+        "School ID,Name,Course,Department,Year Level,Gender,Status\n");
+    const QString example = QStringLiteral(
+        "21-1-0001,Juan Dela Cruz,BSIT,CCS,1,Male,Active\n");
+    return (header + example).toUtf8();
+}
+
 ParsedTable ImportController::parseExcel(const QString &filePath, ExcelParseError *errorOut)
 {
     ParsedTable table;
@@ -152,42 +225,53 @@ ParsedTable ImportController::parseExcel(const QString &filePath, ExcelParseErro
     return table;
 }
 
-void ImportController::checkDuplicates(const QStringList &schoolIds)
+void ImportController::checkDuplicates(const QStringList &schoolIds, const QString &adminKey)
 {
     QNetworkRequest request(ApiConfig::endpoint(QStringLiteral("check_duplicates.php")));
     request.setHeader(QNetworkRequest::ContentTypeHeader,
-                      QStringLiteral("application/json"));
+                      QStringLiteral("application/x-www-form-urlencoded"));
 
+    // school_ids as a JSON-array string in one form field (mirrors how
+    // bulk_update_students sends `students`), admin_key as a sibling field.
     QJsonArray idsArray;
     for (const QString &id : schoolIds)
         idsArray.append(id);
+    const QByteArray idsJson = QJsonDocument(idsArray).toJson(QJsonDocument::Compact);
 
-    QJsonObject payload;
-    payload[QLatin1String("school_ids")] = idsArray;
+    QUrlQuery body;
+    body.addQueryItem(QStringLiteral("school_ids"), QString::fromUtf8(idsJson));
+    body.addQueryItem(QStringLiteral("admin_key"), adminKey);
 
-    QNetworkReply *reply = m_nam->post(request, QJsonDocument(payload).toJson());
+    QNetworkReply *reply =
+        m_nam->post(request, body.toString(QUrl::FullyEncoded).toUtf8());
 
-    // `this` (the controller) as the context object is mandatory: the
-    // connection auto-disconnects if the controller is destroyed while the
-    // reply — owned by the shared QNetworkAccessManager — is still in flight.
+    // `this` as the context object: auto-disconnect if the controller dies
+    // while the reply (owned by the shared NAM) is still in flight.
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
-        if (reply->error() != QNetworkReply::NoError) {
-            // Legacy uses "Error" as the title here, not "Network Error"
-            // (adminwindow.cpp:1180) — preserved verbatim, not unified with
-            // VisitorController's "Network Error" convention.
-            emit importError(QStringLiteral("Error"), reply->errorString(),
-                             ImportSeverity::Critical);
-            reply->deleteLater();
+        const QByteArray resp = reply->readAll();
+        const bool hadError = reply->error() != QNetworkReply::NoError;
+        const QString errorString = reply->errorString();
+        const QVariant statusAttr =
+            reply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
+        const int httpStatus = statusAttr.isValid() ? statusAttr.toInt() : 0;
+        reply->deleteLater();
+
+        if (!StudentController::replyIsServerAnswer(hadError, httpStatus, resp)) {
+            // Genuine transport failure (no server answer). Legacy title "Error".
+            emit importError(QStringLiteral("Error"), errorString, ImportSeverity::Critical);
             return;
         }
-
-        const QByteArray resp = reply->readAll();
-        reply->deleteLater();
 
         QStringList duplicates;
         QString errorMsg;
         if (!parseDuplicateResponse(resp, &duplicates, &errorMsg)) {
-            emit importError(QStringLiteral("Error"), errorMsg, ImportSeverity::Warning);
+            // A 401-with-body is a server answer; surface it as a clear auth error.
+            if (httpStatus == 401)
+                emit importError(QStringLiteral("Authentication"),
+                                 QStringLiteral("Admin authentication required — re-enter via admin login."),
+                                 ImportSeverity::Critical);
+            else
+                emit importError(QStringLiteral("Error"), errorMsg, ImportSeverity::Warning);
             return;
         }
 
@@ -195,39 +279,30 @@ void ImportController::checkDuplicates(const QStringList &schoolIds)
     });
 }
 
-void ImportController::uploadStudents(const QString &excelPath, const QString &zipPath,
-                                      const QStringList &skipIds)
+void ImportController::uploadStudents(const ParsedTable &table, const QString &zipPath,
+                                      const QStringList &skipIds, const QString &adminKey)
 {
     QNetworkRequest uploadRequest(ApiConfig::endpoint(QStringLiteral("upload_students_zip.php")));
     QHttpMultiPart *multiPart = new QHttpMultiPart(QHttpMultiPart::FormDataType);
 
-    // Excel part (mandatory, fatal on failure).
-    QHttpPart excelPart;
-    excelPart.setHeader(QNetworkRequest::ContentDispositionHeader,
-                        QVariant("form-data; name=\"excel\"; filename=\"" +
-                                 QFileInfo(excelPath).fileName() + "\""));
-    QFile *excelFile = new QFile(excelPath);
-    if (!excelFile->open(QIODevice::ReadOnly)) {
-        // Fatal, exactly as legacy (adminwindow.cpp:1270-1278): free what was
-        // already allocated and abort before sending anything. uploadStarted
-        // never fires here, so the View never sets progress/button state —
-        // nothing to revert, reproducing legacy's set-then-revert net effect.
-        emit importError(QStringLiteral("Error"), QStringLiteral("Cannot open Excel file."),
-                         ImportSeverity::Critical);
-        delete excelFile;
-        delete multiPart;
-        return;
-    }
-    excelPart.setBodyDevice(excelFile);
-    excelFile->setParent(multiPart);
-    multiPart->append(excelPart);
+    auto addText = [multiPart](const QString &name, const QByteArray &value) {
+        QHttpPart part;
+        part.setHeader(QNetworkRequest::ContentDispositionHeader,
+                       QVariant(QStringLiteral("form-data; name=\"%1\"").arg(name)));
+        part.setBody(value);
+        multiPart->append(part);
+    };
 
-    // The excel file opened OK — this is the exact point legacy passed line
-    // 1270 and had already set the progress/button state at lines 1251-1258.
-    // The View sets that state in its onUploadStarted slot.
-    emit uploadStarted();
+    // rows: the client-parsed, header-mapped payload (the ONLY serializeRows
+    // call site). Replaces the old raw-Excel file part.
+    addText(QStringLiteral("rows"), serializeRows(table));
+    addText(QStringLiteral("admin_key"), adminKey.toUtf8());   // guard field — never logged
 
-    // ZIP part (optional, non-fatal on failure).
+    // skip_ids — only appended when non-empty (comma-joined; preserved).
+    if (!skipIds.isEmpty())
+        addText(QStringLiteral("skip_ids"), skipIds.join(QLatin1Char(',')).toUtf8());
+
+    // photos_zip (optional, non-fatal on open failure).
     if (!zipPath.isEmpty()) {
         QHttpPart zipPart;
         zipPart.setHeader(QNetworkRequest::ContentDispositionHeader,
@@ -235,10 +310,6 @@ void ImportController::uploadStudents(const QString &excelPath, const QString &z
                                    QFileInfo(zipPath).fileName() + "\""));
         QFile *zipFile = new QFile(zipPath);
         if (!zipFile->open(QIODevice::ReadOnly)) {
-            // Non-fatal as legacy (adminwindow.cpp:1291): warn and continue
-            // the upload without the ZIP part. The delete below fixes a
-            // pre-existing zipFile leak (legacy never freed it on this
-            // branch); no observable behavior change.
             emit importError(QStringLiteral("Warning"),
                              QStringLiteral("Cannot open ZIP file. Proceeding without photos."),
                              ImportSeverity::Warning);
@@ -250,14 +321,9 @@ void ImportController::uploadStudents(const QString &excelPath, const QString &z
         }
     }
 
-    // skip_ids part — only appended when non-empty (adminwindow.cpp:1300-1306).
-    if (!skipIds.isEmpty()) {
-        QHttpPart dupPart;
-        dupPart.setHeader(QNetworkRequest::ContentDispositionHeader,
-                          QVariant("form-data; name=\"skip_ids\""));
-        dupPart.setBody(skipIds.join(",").toUtf8());
-        multiPart->append(dupPart);
-    }
+    // The client already parsed the file, so there is no fatal open branch:
+    // fire uploadStarted immediately before the POST.
+    emit uploadStarted();
 
     QNetworkReply *uploadReply = m_nam->post(uploadRequest, multiPart);
     multiPart->setParent(uploadReply);
@@ -270,19 +336,25 @@ void ImportController::uploadStudents(const QString &excelPath, const QString &z
                 }
             });
 
-    // `this` (the controller) as the context object — same rationale as
-    // checkDuplicates and VisitorController::fetchVisitors.
     connect(uploadReply, &QNetworkReply::finished, this, [this, uploadReply]() {
-        if (uploadReply->error() != QNetworkReply::NoError) {
-            emit uploadFailed(uploadReply->errorString());
-            uploadReply->deleteLater();
-            return;
-        }
-
         const QByteArray response = uploadReply->readAll();
+        const bool hadError = uploadReply->error() != QNetworkReply::NoError;
+        const QString errorString = uploadReply->errorString();
+        const QVariant statusAttr =
+            uploadReply->attribute(QNetworkRequest::HttpStatusCodeAttribute);
+        const int httpStatus = statusAttr.isValid() ? statusAttr.toInt() : 0;
         uploadReply->deleteLater();
 
-        emit uploadFinished(parseUploadResponse(response));
+        if (!StudentController::replyIsServerAnswer(hadError, httpStatus, response)) {
+            emit uploadFailed(errorString);                    // genuine transport failure
+            return;
+        }
+        if (httpStatus == 401) {
+            emit uploadFailed(QStringLiteral(
+                "Admin authentication required — re-enter via admin login."));
+            return;
+        }
+        emit uploadFinished(parseUploadResponse(response));    // real JSON counts
     });
 }
 
@@ -324,11 +396,13 @@ UploadResult ImportController::parseUploadResponse(const QByteArray &raw)
     const QString status       = obj[QLatin1String("status")].toString();
     const QString message      = obj[QLatin1String("message")].toString();
     const int successCount     = obj[QLatin1String("success_count")].toInt();
+    const int skippedCount     = obj[QLatin1String("skipped_count")].toInt();
     const int errorCount       = obj[QLatin1String("error_count")].toInt();
 
     UploadResult result;
     result.message      = message;
     result.successCount = successCount;
+    result.skippedCount = skippedCount;
     result.errorCount   = errorCount;
     result.plainText    = false;
     result.ok           = (status == QLatin1String("success"));
