@@ -23,6 +23,16 @@ ReportingViewModel::ReportingViewModel(QObject *parent)
             this, &ReportingViewModel::onReportError);
     connect(m_controller, &ReportController::loadError,
             this, &ReportingViewModel::onLoadError);
+
+    // Auto-clear the validation prompt the moment filters become complete —
+    // every filter setter emits canGenerateChanged. A real fetch/bootstrap
+    // error (m_validationError == false) is left untouched by filter changes.
+    connect(this, &ReportingViewModel::canGenerateChanged, this, [this]() {
+        if (m_validationError && filtersComplete()) {
+            m_validationError = false;
+            setError(QString());
+        }
+    });
 }
 
 QJsonObject ReportingViewModel::buildFilters(const QString &department, const QString &course,
@@ -197,8 +207,10 @@ void ReportingViewModel::generateReport()
         setError(m_department.isEmpty()
                      ? QStringLiteral("Select a department before generating a report.")
                      : QStringLiteral("Complete the selected duration before generating a report."));
+        m_validationError = true;
         return;
     }
+    m_validationError = false;
     setError(QString());
     setLoading(true);
     const QJsonObject filters = buildFilters(
@@ -249,12 +261,14 @@ void ReportingViewModel::onReportError(const QString &message, bool /*critical*/
 {
     setLoading(false);
     setError(message.isEmpty() ? QStringLiteral("Report failed. Please try again.") : message);
+    m_validationError = false;   // a real fetch error, not a validation prompt
 }
 
 void ReportingViewModel::onLoadError(const QString &/*title*/, const QString &message, bool /*critical*/)
 {
     // Bootstrap (departments/years/courses) failures surface in the same banner.
     setError(message.isEmpty() ? QStringLiteral("Failed to load filters. Please try again.") : message);
+    m_validationError = false;   // a real bootstrap error, not a validation prompt
 }
 void ReportingViewModel::setLoading(bool v)
 {
@@ -278,6 +292,7 @@ void ReportingViewModel::applyResult(const QJsonArray &data)
     m_studentsShown = t.studentsShown;
     m_topCourse = t.topCourse;
     m_hasResult = true;
+    m_validationError = false;
     setError(QString());
     emit resultChanged();
 }

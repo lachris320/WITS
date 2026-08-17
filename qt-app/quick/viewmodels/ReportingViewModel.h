@@ -143,6 +143,7 @@ private:
 
     bool m_loading = false;
     QString m_errorText;
+    bool m_validationError = false;   // true only while errorText holds an incomplete-filters prompt
     bool m_hasResult = false;
     int m_totalVisits = 0, m_studentsShown = 0;
     QString m_topCourse = QStringLiteral("—");

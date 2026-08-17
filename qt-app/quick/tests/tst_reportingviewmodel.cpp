@@ -35,6 +35,8 @@ private slots:
     void generateReportWithoutDepartmentShowsValidationMessage();
     void generateReportWithIncompleteDurationShowsValidationMessage();
     void filtersCompleteTracksDepartmentAndDuration();
+    void validationMessageClearsWhenFiltersComplete();
+    void realFetchErrorNotAutoClearedByFilterChange();
 };
 
 void TestReportingViewModel::buildFiltersDaySendsStringTypeAndRange()
@@ -334,6 +336,33 @@ void TestReportingViewModel::filtersCompleteTracksDepartmentAndDuration()
     QVERIFY(!vm.filtersComplete());       // no day yet
     vm.setDay("2026-08-14");
     QVERIFY(vm.filtersComplete());
+}
+
+void TestReportingViewModel::validationMessageClearsWhenFiltersComplete()
+{
+    ReportingViewModel vm;
+    vm.generateReport();                 // no department -> validation message
+    QCOMPARE(vm.errorText(), QStringLiteral("Select a department before generating a report."));
+    vm.setDepartment("CE");
+    vm.setDurationType(0);               // Day
+    QVERIFY(!vm.errorText().isEmpty());  // still incomplete (no day) -> message stays
+    vm.setDay("2026-08-14");             // now complete -> message auto-clears
+    QVERIFY(vm.errorText().isEmpty());
+}
+
+void TestReportingViewModel::realFetchErrorNotAutoClearedByFilterChange()
+{
+    ReportingViewModel vm;
+    vm.setDepartment("CE");
+    vm.setDurationType(0);
+    vm.setDay("2026-08-14");
+    QVERIFY(vm.filtersComplete());
+    vm.generateReport();                 // fetches (loading true)
+    vm.onReportError("Server error 500", false);   // a REAL fetch error
+    QCOMPARE(vm.errorText(), QStringLiteral("Server error 500"));
+    // Changing a filter while still complete must NOT clear a real fetch error.
+    vm.setDay("2026-08-15");
+    QCOMPARE(vm.errorText(), QStringLiteral("Server error 500"));
 }
 
 QTEST_MAIN(TestReportingViewModel)
