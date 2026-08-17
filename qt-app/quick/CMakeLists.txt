@@ -72,6 +72,7 @@ qt_add_qml_module(witsquickmodule
         qml/components/LComboBox.qml
         qml/components/LCascadingSelect.qml
         qml/components/LCheckbox.qml
+        qml/components/LDatePicker.qml
         qml/kiosk/GuestDialog.qml
     SOURCES
         HttpForm.h HttpForm.cpp
@@ -91,10 +92,12 @@ qt_add_qml_module(witsquickmodule
         viewmodels/VisitLogsViewModel.h viewmodels/VisitLogsViewModel.cpp
         models/SearchResultsModel.h models/SearchResultsModel.cpp
         models/StudentsTableModel.cpp models/StudentsTableModel.h
+        models/ReportRowsModel.h models/ReportRowsModel.cpp
         viewmodels/SearchViewModel.h viewmodels/SearchViewModel.cpp
         viewmodels/DatabaseViewModel.cpp viewmodels/DatabaseViewModel.h
         viewmodels/SettingsViewModel.h viewmodels/SettingsViewModel.cpp
         viewmodels/ImportViewModel.cpp viewmodels/ImportViewModel.h
+        viewmodels/ReportingViewModel.h viewmodels/ReportingViewModel.cpp
 )
 
 target_link_libraries(witsquickmodule PUBLIC
@@ -242,6 +245,12 @@ wits_add_qttest(tst_studentstablemodel
     SOURCES tests/tst_studentstablemodel.cpp
     LIBS witsquickmodule)
 
+# --- ReportRowsModel unit test (C++ QtTest). Pure QAbstractListModel over
+# JSON rows, no NAM -> QTEST_APPLESS_MAIN, no OFFSCREEN. ---
+wits_add_qttest(tst_reportrowsmodel
+    SOURCES tests/tst_reportrowsmodel.cpp
+    LIBS witsquickmodule)
+
 # --- L* component skeletons Quick test (offscreen) ---
 # Same escape hatch as tst_qml_theme above: "import LOAMS" lives only in the
 # QUICK_TEST_MAIN data file, so the plugin + "_init" object must be linked
@@ -313,6 +322,15 @@ wits_add_qttest(tst_settingsviewmodel
 # machine is driven via the public on* slots — mirrors tst_databaseviewmodel. ---
 wits_add_qttest(tst_importviewmodel
     SOURCES tests/tst_importviewmodel.cpp
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    OFFSCREEN)
+
+# --- ReportingViewModel unit test (C++ QtTest, offscreen). Builds a real
+# QNetworkAccessManager + ReportController; generateReport() fires a
+# fire-and-forget post() (harmless in-test), and the reply handlers are driven
+# via the public on* slots — mirrors tst_databaseviewmodel. ---
+wits_add_qttest(tst_reportingviewmodel
+    SOURCES tests/tst_reportingviewmodel.cpp
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
     OFFSCREEN)
 

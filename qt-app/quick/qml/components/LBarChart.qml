@@ -183,6 +183,7 @@ Item {
                 Text {
                     Layout.alignment: Qt.AlignHCenter
                     text: model.label !== undefined ? model.label : ""
+                    textFormat: Text.PlainText
                     color: Theme.mutedTextCaption
                     font.family: Theme.typography.sans
                     font.pixelSize: Theme.typography.eyebrow
@@ -208,6 +209,7 @@ Item {
                 Text {
                     Layout.preferredWidth: 80
                     text: model.label !== undefined ? model.label : ""
+                    textFormat: Text.PlainText
                     color: Theme.text
                     font.family: Theme.typography.sans
                     font.pixelSize: Theme.typography.control

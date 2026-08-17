@@ -28,6 +28,7 @@ Rectangle {
     VisitLogsViewModel { id: visitLogsVm }
     DatabaseViewModel  { id: databaseVm }
     SettingsViewModel  { id: settingsVm }
+    ReportingViewModel { id: reportingVm }
 
     // Read-only school identity (logo + name) for the sidebar brand block.
     // Reads QSettings at construction and again on demand via reload().
@@ -193,6 +194,6 @@ Rectangle {
     Component { id: searchComponent;    SearchScreen    { objectName: "searchPage";    vm: searchVm } }
     Component { id: visitLogsComponent; VisitLogsScreen { objectName: "visitLogsPage"; vm: visitLogsVm } }
     Component { id: databaseComponent;  DatabaseScreen  { objectName: "databasePage"; vm: databaseVm } }
-    Component { id: reportingComponent; ReportingScreen { objectName: "reportingPage" } }
+    Component { id: reportingComponent; ReportingScreen { objectName: "reportingPage"; vm: reportingVm } }
     Component { id: settingsComponent;  SettingsScreen  { objectName: "settingsPage";  vm: settingsVm } }
 }

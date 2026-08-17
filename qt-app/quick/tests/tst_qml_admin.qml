@@ -12,10 +12,10 @@ Item {
     // Geometry ledger (x 0 column):   dash 0..760 | search 760..1460 |
     //   logs 1460..2160 | settings 2160..3760 | database 3800..4500
     //   | editDialog 4500..5200 | bulkEdit 5200..5900 | registerDialog 5900..6600
-    //   | importDialog 6600..7300.
+    //   | importDialog 6600..7300 | reporting 7300..8100.
     // Parked no-vm column (x 2000): vmlessSearch 0..700 |
     //   vmlessLogs 760..1460 | vmlessSettings 1560..2260.
-    width: 1100; height: 7300
+    width: 1100; height: 8100
 
     // --- Dashboard stub VM ---
     // maxValue is declared on the stubs because the screen binds
@@ -2500,5 +2500,117 @@ Item {
             }
         }
     }
+
+    // --- Reporting stub VM + screen (band y 7300..8100) ---
+    ListModel { id: reportRowsStub
+        ListElement { name: "Maria Santos"; course: "BSCE"; year: "3"; visits: 42 }
+        ListElement { name: "Jose Cruz"; course: "BSIT"; year: "1"; visits: 7 }
+    }
+    ListModel { id: reportBarsStub
+        property real maxValue: 42
+        ListElement { label: "BSCE"; value: 42 }
+        ListElement { label: "BSIT"; value: 7 }
+    }
+    QtObject {
+        id: reportingStub
+        property var departments: ["CE", "IT"]
+        property var courses: ["BSCE", "BSEE"]
+        property var years: ["2026", "2025"]
+        property string department: ""
+        property string course: ""
+        property int durationType: 0
+        property string day: ""
+        property int month: 0
+        property int monthYear: 0
+        property string semester: ""
+        property int semYear: 0
+        property string customStart: ""
+        property string customEnd: ""
+        property bool canGenerate: false
+        property bool filtersComplete: false
+        property bool loading: false
+        property string errorText: ""
+        property bool hasResult: true
+        property var rows: reportRowsStub
+        property var courseBars: reportBarsStub
+        property int totalVisits: 49
+        property int studentsShown: 2
+        property string topCourse: "BSCE"
+        property int generateCount: 0
+        property int loadDepartmentsCount: 0
+        function loadDepartments() { loadDepartmentsCount++ }
+        function setDepartment(d) { department = d; course = ""; canGenerate = (d !== "") }
+        function setCourse(c) { course = c }
+        function setDurationType(t) { durationType = t }
+        function setDay(v) { day = v }
+        function setMonth(v) { month = v }
+        function setMonthYear(v) { monthYear = v }
+        function setSemester(v) { semester = v }
+        function setSemYear(v) { semYear = v }
+        function setCustomStart(v) { customStart = v }
+        function setCustomEnd(v) { customEnd = v }
+        function generateReport() { generateCount++ }
+        function retry() { generateCount++ }
+    }
+    ReportingScreen { id: reporting; x: 0; y: 7300; width: 1100; height: 800; vm: reportingStub }
+
+    // A vm-less instance to cover the `vm ? ... : ...` fallback path.
+    ReportingScreen { id: vmlessReporting; x: 2000; y: 7300; width: 1100; height: 800 }
+
+    TestCase {
+        name: "ReportingScreen"; when: windowShown
+        function init() {
+            reportingStub.canGenerate = false;
+            reportingStub.loading = false;
+            reportingStub.durationType = 0;
+            reportingStub.hasResult = true;
+        }
+
+        function test_generateEnabledUnlessLoading() {
+            // The Generate button is clickable regardless of filter
+            // completeness so an incomplete-filter click can surface a
+            // validation message; it only disables while a fetch is
+            // actually in flight.
+            reportingStub.loading = false;
+            var btn = findChild(reporting, "generateButton");
+            verify(btn, "generate button exists");
+            verify(btn.enabled, "enabled when not loading, even with canGenerate false");
+            reportingStub.loading = true;
+            verify(!btn.enabled, "disabled while loading");
+            reportingStub.loading = false;
+        }
+
+        function test_generateInvokesVm() {
+            reportingStub.canGenerate = true;
+            var before = reportingStub.generateCount;
+            var btn = findChild(reporting, "generateButton");
+            mouseClick(btn);
+            compare(reportingStub.generateCount, before + 1);
+        }
+
+        function test_previewRendersRowsAndTiles() {
+            reportingStub.hasResult = true;
+            var table = findChild(reporting, "reportTable");
+            verify(table, "report table exists");
+            compare(table.rowCount, 2);
+            var tile = findChild(reporting, "totalVisitsTile");
+            verify(tile, "total-visits tile exists");
+            compare(tile.value, "49");
+        }
+
+        function test_durationSwapShowsCustomPickers() {
+            reportingStub.durationType = 0;      // Day mode
+            var startPicker = findChild(reporting, "customStartPicker");
+            verify(startPicker, "picker exists as a QObject regardless of mode");
+            verify(!startPicker.visible, "custom start picker hidden in Day mode");
+            reportingStub.durationType = 3;      // Custom mode
+            verify(startPicker.visible, "custom start picker shown in Custom mode");
+        }
+
+        function test_vmlessDoesNotCrash() {
+            verify(vmlessReporting !== null, "vm-less screen instantiates");
+        }
+    }
+
     Component { id: signalSpy; SignalSpy {} }
 }
