@@ -114,8 +114,8 @@ ReportingViewModel::Tiles ReportingViewModel::deriveTiles(const QJsonArray &data
 
 bool ReportingViewModel::filtersComplete() const
 {
-    if (m_department.isEmpty())
-        return false;
+    // Department is OPTIONAL (empty = all departments; the backend treats an
+    // empty department as no filter). Only a complete duration is required.
     switch (m_durationType) {
     case 0: return parseDate(m_day).isValid();
     case 1: return m_month >= 1 && m_month <= 12 && m_monthYear > 0;
@@ -204,9 +204,7 @@ void ReportingViewModel::generateReport()
     if (m_loading)                // single-in-flight
         return;
     if (!filtersComplete()) {
-        setError(m_department.isEmpty()
-                     ? QStringLiteral("Select a department before generating a report.")
-                     : QStringLiteral("Complete the selected duration before generating a report."));
+        setError(QStringLiteral("Complete the selected duration before generating a report."));
         m_validationError = true;
         return;
     }

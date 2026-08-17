@@ -17,7 +17,7 @@ private slots:
     void aggregateEmptyIsEmpty();
     void deriveTilesComputesTotals();
     void deriveTilesEmptyIsZeroAndDash();
-    void canGenerateFalseWithoutDepartment();
+    void canGenerateWithoutDepartmentWhenDurationValid();
     void canGenerateDayRequiresValidDate();
     void canGenerateMonthRequiresMonthAndYear();
     void canGenerateSemesterRequiresSemesterAndYear();
@@ -34,9 +34,10 @@ private slots:
     void generateWhileLoadingIsNoop();
     void generateReportWithoutDepartmentShowsValidationMessage();
     void generateReportWithIncompleteDurationShowsValidationMessage();
-    void filtersCompleteTracksDepartmentAndDuration();
+    void filtersCompleteTracksDurationOnly();
     void validationMessageClearsWhenFiltersComplete();
     void realFetchErrorNotAutoClearedByFilterChange();
+    void buildFiltersAllowsEmptyDepartment();
 };
 
 void TestReportingViewModel::buildFiltersDaySendsStringTypeAndRange()
@@ -129,12 +130,13 @@ void TestReportingViewModel::deriveTilesEmptyIsZeroAndDash()
     QCOMPARE(t.topCourse, QStringLiteral("—"));
 }
 
-void TestReportingViewModel::canGenerateFalseWithoutDepartment()
+void TestReportingViewModel::canGenerateWithoutDepartmentWhenDurationValid()
 {
     ReportingViewModel vm;
     vm.setDurationType(0);
+    QVERIFY(!vm.canGenerate());     // no duration value yet
     vm.setDay("2026-08-14");
-    QVERIFY(!vm.canGenerate());          // no department
+    QVERIFY(vm.canGenerate());      // department optional -> generatable
 }
 
 void TestReportingViewModel::canGenerateDayRequiresValidDate()
@@ -312,8 +314,8 @@ void TestReportingViewModel::generateWhileLoadingIsNoop()
 void TestReportingViewModel::generateReportWithoutDepartmentShowsValidationMessage()
 {
     ReportingViewModel vm;
-    vm.generateReport();
-    QCOMPARE(vm.errorText(), QStringLiteral("Select a department before generating a report."));
+    vm.generateReport();            // no duration -> validation (department not required)
+    QCOMPARE(vm.errorText(), QStringLiteral("Complete the selected duration before generating a report."));
     QVERIFY(!vm.loading());
 }
 
@@ -327,26 +329,24 @@ void TestReportingViewModel::generateReportWithIncompleteDurationShowsValidation
     QVERIFY(!vm.loading());
 }
 
-void TestReportingViewModel::filtersCompleteTracksDepartmentAndDuration()
+void TestReportingViewModel::filtersCompleteTracksDurationOnly()
 {
     ReportingViewModel vm;
-    QVERIFY(!vm.filtersComplete());       // no department
-    vm.setDepartment("CE");
+    QVERIFY(!vm.filtersComplete());     // no duration
     vm.setDurationType(0);
-    QVERIFY(!vm.filtersComplete());       // no day yet
+    QVERIFY(!vm.filtersComplete());     // no day yet
     vm.setDay("2026-08-14");
-    QVERIFY(vm.filtersComplete());
+    QVERIFY(vm.filtersComplete());      // valid duration, no department needed
 }
 
 void TestReportingViewModel::validationMessageClearsWhenFiltersComplete()
 {
     ReportingViewModel vm;
-    vm.generateReport();                 // no department -> validation message
-    QCOMPARE(vm.errorText(), QStringLiteral("Select a department before generating a report."));
-    vm.setDepartment("CE");
-    vm.setDurationType(0);               // Day
-    QVERIFY(!vm.errorText().isEmpty());  // still incomplete (no day) -> message stays
-    vm.setDay("2026-08-14");             // now complete -> message auto-clears
+    vm.generateReport();                 // no duration -> validation message
+    QCOMPARE(vm.errorText(), QStringLiteral("Complete the selected duration before generating a report."));
+    vm.setDurationType(0);
+    QVERIFY(!vm.errorText().isEmpty());  // still incomplete (no day) -> stays
+    vm.setDay("2026-08-14");             // now complete -> auto-clears
     QVERIFY(vm.errorText().isEmpty());
 }
 
@@ -363,6 +363,14 @@ void TestReportingViewModel::realFetchErrorNotAutoClearedByFilterChange()
     // Changing a filter while still complete must NOT clear a real fetch error.
     vm.setDay("2026-08-15");
     QCOMPARE(vm.errorText(), QStringLiteral("Server error 500"));
+}
+
+void TestReportingViewModel::buildFiltersAllowsEmptyDepartment()
+{
+    const QJsonObject f = ReportingViewModel::buildFilters(
+        "", "", 0, QDate(2026, 8, 14), 0, 0, "", 0, QDate(), QDate());
+    QCOMPARE(f.value("department").toString(), QString());   // empty = all departments
+    QVERIFY(f.contains("department"));
 }
 
 QTEST_MAIN(TestReportingViewModel)

@@ -23,28 +23,31 @@ $end          = isset($data['end'])          ? trim($data['end'])          : '';
 $year         = isset($data['year'])         ? intval($data['year'])       : 0;
 $semester     = isset($data['semester'])     ? trim($data['semester'])     : '';
 
-if ($department === '') {
-    echo json_encode(['status' => 'error', 'message' => 'Department is required']);
-    exit;
-}
-
-
-// Base query
-$query = "SELECT 
-            s.school_id, 
-            s.name, 
+// Base query. Department is OPTIONAL: an empty (or "All") department means
+// "all departments" — the clause is added conditionally, mirroring the course
+// filter below (same WHERE 1=1 pattern as search_students.php).
+$query = "SELECT
+            s.school_id,
+            s.name,
             s.gender,
             s.status,
-            s.course, 
+            s.course,
             s.department,
             s.year_level,
             COUNT(v.id) AS visits
           FROM students s
-          LEFT JOIN library_visits v 
+          LEFT JOIN library_visits v
             ON s.school_id = v.student_id
-          WHERE s.department = ?";
-$params = [$department];
-$types  = "s";
+          WHERE 1=1";
+$params = [];
+$types  = "";
+
+// Department filter (optional — empty/"All" = all departments)
+if ($department !== '' && !in_array(strtolower($department), ['all', 'all departments'])) {
+    $query .= " AND s.department = ?";
+    $params[] = $department;
+    $types   .= "s";
+}
 
 // Course filter
 if ($course !== '' && !in_array(strtolower($course), ['all', 'all courses'])) {
