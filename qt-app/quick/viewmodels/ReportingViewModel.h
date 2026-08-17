@@ -35,6 +35,7 @@ class ReportingViewModel : public QObject
     Q_PROPERTY(QString customStart READ customStart WRITE setCustomStart NOTIFY customStartChanged)
     Q_PROPERTY(QString customEnd READ customEnd WRITE setCustomEnd NOTIFY customEndChanged)
     Q_PROPERTY(bool canGenerate READ canGenerate NOTIFY canGenerateChanged)
+    Q_PROPERTY(bool filtersComplete READ filtersComplete NOTIFY canGenerateChanged)
     Q_PROPERTY(bool loading READ loading NOTIFY loadingChanged)
     Q_PROPERTY(QString errorText READ errorText NOTIFY errorTextChanged)
     Q_PROPERTY(bool hasResult READ hasResult NOTIFY resultChanged)
@@ -71,6 +72,7 @@ public:
     QString customStart() const { return m_customStart; }
     QString customEnd() const { return m_customEnd; }
     bool canGenerate() const;                    // Task 4
+    bool filtersComplete() const;                // GUI-smoke bug 3: dept + valid duration, ignoring loading
     bool loading() const { return m_loading; }
     QString errorText() const { return m_errorText; }
     bool hasResult() const { return m_hasResult; }

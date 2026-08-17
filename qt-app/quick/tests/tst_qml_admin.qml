@@ -2527,6 +2527,7 @@ Item {
         property string customStart: ""
         property string customEnd: ""
         property bool canGenerate: false
+        property bool filtersComplete: false
         property bool loading: false
         property string errorText: ""
         property bool hasResult: true
@@ -2560,17 +2561,23 @@ Item {
         name: "ReportingScreen"; when: windowShown
         function init() {
             reportingStub.canGenerate = false;
+            reportingStub.loading = false;
             reportingStub.durationType = 0;
             reportingStub.hasResult = true;
         }
 
-        function test_generateDisabledUntilCanGenerate() {
-            reportingStub.canGenerate = false;
+        function test_generateEnabledUnlessLoading() {
+            // The Generate button is clickable regardless of filter
+            // completeness so an incomplete-filter click can surface a
+            // validation message; it only disables while a fetch is
+            // actually in flight.
+            reportingStub.loading = false;
             var btn = findChild(reporting, "generateButton");
             verify(btn, "generate button exists");
-            verify(!btn.enabled, "disabled when canGenerate false");
-            reportingStub.canGenerate = true;
-            verify(btn.enabled, "enabled when canGenerate true");
+            verify(btn.enabled, "enabled when not loading, even with canGenerate false");
+            reportingStub.loading = true;
+            verify(!btn.enabled, "disabled while loading");
+            reportingStub.loading = false;
         }
 
         function test_generateInvokesVm() {

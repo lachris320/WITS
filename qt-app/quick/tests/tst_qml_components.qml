@@ -364,6 +364,18 @@ Item {
             verify(t !== null);
             compare(t.textFormat, Text.PlainText);
         }
+
+        // GUI-smoke bug: Reporting's "Top Course" tile overflowed the fixed
+        // tile size on long course names. The value Text must shrink-to-fit
+        // then elide rather than spilling out of the card.
+        function test_statTileValueElidesLongText() {
+            st.value = "Bachelor of Science in Information Technology and Computing";
+            var t = findChild(st, "statTileValue");
+            verify(t !== null);
+            compare(t.elide, Text.ElideRight);
+            compare(t.fontSizeMode, Text.HorizontalFit);
+            st.value = "1";   // restore fixture default for later tests
+        }
     }
 
     TestCase {

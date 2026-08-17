@@ -136,7 +136,11 @@ Rectangle {
                     LButton {
                         objectName: "generateButton"
                         text: qsTr("Generate Report")
-                        enabled: screen.vm ? screen.vm.canGenerate : false
+                        // Clickable unless a fetch is in flight — with
+                        // incomplete filters, clicking surfaces a validation
+                        // message (vm.generateReport()) instead of silently
+                        // doing nothing behind a disabled-looking button.
+                        enabled: screen.vm ? !screen.vm.loading : false
                         onClicked: if (screen.vm) screen.vm.generateReport()
                     }
                 }
@@ -162,6 +166,12 @@ Rectangle {
                 objectName: "reportRetryButton"
                 variant: "Outline"; compact: true
                 text: qsTr("Retry")
+                // Retry re-issues the same fetch, so it only makes sense
+                // once filters were complete enough to have fetched in the
+                // first place (a real network/server error). A validation
+                // prompt means the filters themselves are incomplete —
+                // "retrying" the same fetch would just repeat the message.
+                visible: screen.vm ? screen.vm.filtersComplete : false
                 onClicked: if (screen.vm) screen.vm.retry()
             }
         }

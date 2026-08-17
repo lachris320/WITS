@@ -26,11 +26,15 @@ private slots:
     void onDepartmentsLoadedPopulates();
     void onYearsLoadedPopulates();
     void onCoursesLoadedPopulates();
+    void onCoursesLoadedFiltersServerAllEntry();
     void setDepartmentClearsCourse();
     void onReportDataReadyPopulatesPreview();
     void onReportDataReadyEmptyIsSuccessNotError();
     void onReportErrorSetsErrorClearsLoading();
     void generateWhileLoadingIsNoop();
+    void generateReportWithoutDepartmentShowsValidationMessage();
+    void generateReportWithIncompleteDurationShowsValidationMessage();
+    void filtersCompleteTracksDepartmentAndDuration();
 };
 
 void TestReportingViewModel::buildFiltersDaySendsStringTypeAndRange()
@@ -220,6 +224,21 @@ void TestReportingViewModel::onCoursesLoadedPopulates()
     QVERIFY(spy.count() >= 1);
 }
 
+void TestReportingViewModel::onCoursesLoadedFiltersServerAllEntry()
+{
+    // ReportController::loadCourses requests include_all=true, so the server
+    // list already carries its own "All" entry; LCascadingSelect prepends a
+    // second "All" of its own. onCoursesLoaded must strip the server's entry
+    // (case-insensitive, trimmed) so only the cascade's "All" remains.
+    ReportingViewModel vm;
+    vm.onCoursesLoaded({ "All", "BSCE", "BSEE" });
+    QCOMPARE(vm.courses(), QStringList({ "BSCE", "BSEE" }));
+
+    ReportingViewModel vm2;
+    vm2.onCoursesLoaded({ "all courses", "BSIT" });
+    QCOMPARE(vm2.courses(), QStringList({ "BSIT" }));
+}
+
 void TestReportingViewModel::setDepartmentClearsCourse()
 {
     ReportingViewModel vm;
@@ -286,6 +305,35 @@ void TestReportingViewModel::generateWhileLoadingIsNoop()
     vm.onReportDataReady(QJsonArray());
     QVERIFY(!vm.loading());
     QVERIFY(vm.canGenerate());
+}
+
+void TestReportingViewModel::generateReportWithoutDepartmentShowsValidationMessage()
+{
+    ReportingViewModel vm;
+    vm.generateReport();
+    QCOMPARE(vm.errorText(), QStringLiteral("Select a department before generating a report."));
+    QVERIFY(!vm.loading());
+}
+
+void TestReportingViewModel::generateReportWithIncompleteDurationShowsValidationMessage()
+{
+    ReportingViewModel vm;
+    vm.setDepartment("CE");
+    vm.setDurationType(0);        // Day mode, no day set
+    vm.generateReport();
+    QCOMPARE(vm.errorText(), QStringLiteral("Complete the selected duration before generating a report."));
+    QVERIFY(!vm.loading());
+}
+
+void TestReportingViewModel::filtersCompleteTracksDepartmentAndDuration()
+{
+    ReportingViewModel vm;
+    QVERIFY(!vm.filtersComplete());       // no department
+    vm.setDepartment("CE");
+    vm.setDurationType(0);
+    QVERIFY(!vm.filtersComplete());       // no day yet
+    vm.setDay("2026-08-14");
+    QVERIFY(vm.filtersComplete());
 }
 
 QTEST_MAIN(TestReportingViewModel)

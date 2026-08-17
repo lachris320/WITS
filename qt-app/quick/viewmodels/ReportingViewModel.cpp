@@ -102,9 +102,9 @@ ReportingViewModel::Tiles ReportingViewModel::deriveTiles(const QJsonArray &data
     return t;
 }
 
-bool ReportingViewModel::canGenerate() const
+bool ReportingViewModel::filtersComplete() const
 {
-    if (m_department.isEmpty() || m_loading)
+    if (m_department.isEmpty())
         return false;
     switch (m_durationType) {
     case 0: return parseDate(m_day).isValid();
@@ -116,6 +116,11 @@ bool ReportingViewModel::canGenerate() const
     }
     default: return false;
     }
+}
+
+bool ReportingViewModel::canGenerate() const
+{
+    return filtersComplete() && !m_loading;
 }
 
 // --- Stubs filled by later tasks (present so the class links now) ---
@@ -186,8 +191,14 @@ void ReportingViewModel::setCustomEnd(const QString &v)
 }
 void ReportingViewModel::generateReport()
 {
-    if (!canGenerate())          // includes the !loading gate → single-in-flight
+    if (m_loading)                // single-in-flight
         return;
+    if (!filtersComplete()) {
+        setError(m_department.isEmpty()
+                     ? QStringLiteral("Select a department before generating a report.")
+                     : QStringLiteral("Complete the selected duration before generating a report."));
+        return;
+    }
     setError(QString());
     setLoading(true);
     const QJsonObject filters = buildFilters(
@@ -213,7 +224,19 @@ void ReportingViewModel::onYearsLoaded(const QStringList &years)
 }
 void ReportingViewModel::onCoursesLoaded(const QStringList &courses)
 {
-    m_courses = courses;
+    // The server list is requested with include_all=true, so it already
+    // carries its own "All"/"All Courses" entry; LCascadingSelect prepends
+    // its own "All" on top of whatever this list holds. Strip the server's
+    // entry so the cascade doesn't show "All" twice.
+    m_courses.clear();
+    m_courses.reserve(courses.size());
+    for (const QString &c : courses) {
+        const QString trimmed = c.trimmed();
+        if (trimmed.compare(QStringLiteral("All"), Qt::CaseInsensitive) == 0
+            || trimmed.compare(QStringLiteral("All Courses"), Qt::CaseInsensitive) == 0)
+            continue;
+        m_courses.append(c);
+    }
     emit coursesChanged();
 }
 void ReportingViewModel::onReportDataReady(const QJsonArray &data)
