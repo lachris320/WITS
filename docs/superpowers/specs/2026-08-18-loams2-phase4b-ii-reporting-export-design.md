@@ -11,7 +11,8 @@ author: brainstorming (owner-approved decisions 2026-08-18)
 > Successor slice to **4b-i** (filters + native preview, merged via PR #40). 4b-ii turns the
 > already-fetched report into shareable output — a themed PDF, an Excel workbook, and a printout —
 > reusing the rows 4b-i fetched and the stateless `ReportRenderer` that already exists and is
-> unit-tested in `witscore`.
+> unit-tested in `witscore` (`qt-app/tests/tst_reportrenderer.cpp`, run under the legacy Widgets
+> test harness — see §6 for why that harness masks the application-object issue this slice fixes).
 
 ## 1. Summary
 
@@ -145,15 +146,33 @@ static QJsonObject buildExportFilters(const QString &department, const QString &
 ```
 - `department` / `course`: current state; empty department is rendered as `"All Departments"`,
   empty course as `"All Courses"` for human-readable header text.
-- `start` / `end`: the same `DateRange` 4b-i already computes for the active duration.
+- `start` / `end`: the **Period** printed in the PDF/Excel header. **Source per duration:**
+  - **Day / Month / Custom** — the `DateRange` `computeDateRange` already produces for that mode.
+  - **Semester** — `computeDateRange`'s semester branch does **not** match the data: `buildFilters`
+    sends only `year`+`semester` and lets the server range it, and the server's Philippine-calendar
+    windows (`get_report_data.php`: First = Jun 1–Oct 31, Second = Nov 1–(year+1) Mar 31, Summer =
+    Apr 1–May 31) differ from `computeDateRange`'s Jan–Jun/Jul–Dec, whose `semester.contains("1")`
+    test also never matches the QML labels ("First Semester"/"Second Semester"/"Summer"). So the
+    Period for Semester **must be derived from the server's windows**, via a new pure helper matched
+    to them (labels matched on `"first"`/`"second"`/`"summer"`, case-insensitive — never a digit):
+    ```cpp
+    // Display-only Period for a semester, matching get_report_data.php's server windows,
+    // so the printed range equals the data the server actually returned.
+    static DateRange semesterWindow(const QString &semester, int year);
+    ```
+    (This is display parity, not a second query — the server still ranges the actual rows.)
 - `schoolYear`: `monthYear` (Month), `semYear` (Semester), else the year of `start` (Day/Custom),
   as a string; `""` if indeterminate.
 - `chartType`: `"Bar"` or `"Pie"` from state.
 
 **Header info from settings.** Gather `ReportHeaderInfo` (school name/address/logoPath, admin
-name/position, library open/close hours) from `QSettings` — the same keys Phase 4c Settings writes
-(`school/*`, `admin/*`, `library/*`). Encapsulated in a small private helper
-`ReportHeaderInfo headerInfo() const;` (reads live `QSettings`).
+name/position, library open/close hours) — the same keys Phase 4c Settings writes (`school/*`,
+`admin/*`, `library/*`). **Read them through the project's `AppSettings` seam
+(`qt-app/core/appsettings.h`), NOT a bare `QSettings`.** `AppSettings` is the mandated wrapper (Qt 6's
+`QSettings(org, app)` ignores `setDefaultFormat`/`setPath` and hits the real registry); every test
+isolates settings via that scope (`testsupport/settingsisolation`). A bare `QSettings` here would
+read the wrong hive (mismatching what 4c wrote) and break test isolation. Encapsulated in a small
+private helper `ReportHeaderInfo headerInfo() const;` that constructs an `AppSettings`.
 
 **Shared render seam (private).**
 ```cpp
@@ -185,8 +204,9 @@ bool renderToDevice(QPagedPaintDevice *dev, int resolution);
 
 **Authoritative validation at export (Design OS #3).** `canExport` governs UI availability, but each
 of `exportPdf` / `exportExcel` / `printReport` **independently re-validates** before it renders or
-writes: `m_exportRows` non-empty, target `QUrl` valid and local (PDF/Excel), device opened. If any
-check fails, it sets `exportError` and returns **without** claiming success. **Success is emitted
+writes: `m_exportRows` non-empty; for PDF/Excel the target must yield a non-empty local path
+(`url.toLocalFile()` is empty for a non-file URL — reject it); device opened. If any check fails, it
+sets `exportError` and returns **without** claiming success. **Success is emitted
 only after the actual write/render succeeds** — `saveAs()` returning true for Excel, `paintReport()`
 returning true and the file existing for PDF. Stale or invalid state fails safely, never producing
 misleading output.
@@ -201,8 +221,12 @@ already true. Once actual rendering is to begin (for print, *after* the dialog i
 `exporting = true`, then **defer the blocking render one event-loop turn**
 (`QMetaObject::invokeMethod(this, ..., Qt::QueuedConnection)` or `QTimer::singleShot(0, ...)`) so
 QML paints the busy overlay before the synchronous `paintReport` freezes the loop; on completion set
-`exporting = false` and emit status/error. (The spinner won't animate *during* the freeze — that is
-inherent to GUI-thread rendering — but the user gets a clear "working" state and cannot double-fire.)
+`exporting = false` and emit status/error. This is **best-effort, not a hard guarantee** — posting
+the property change ahead of the blocking render makes the overlay paint first in practice, but does
+not strictly guarantee the frame is on screen before the freeze. That is an accepted tradeoff of
+GUI-thread rendering (§6); the plan should not over-promise it. The spinner won't animate *during*
+the freeze either — inherent to GUI-thread rendering — but the user gets a clear "working" state and
+cannot double-fire.
 
 **Context preservation (Design OS #7).** No export path mutates filters, duration, `m_exportRows`,
 preview models/tiles, `palette`, or `chartType`, and none triggers navigation. Only
@@ -243,7 +267,10 @@ path-derived text rendered `Text.PlainText`.
 
 - **Accessible names** on every export control (`Accessible.name` / `Accessible.role`): the two
   combos ("Report palette", "Chart type") and the three buttons ("Export PDF", "Export Excel",
-  "Print report"). Where an existing `L*` component already sets these from its `text`, reuse that.
+  "Print report"). `LButton` already exposes an `accessibleName` property — reuse it. **`LComboBox`
+  does not** currently pass an accessible name through to its inner `ComboBox` (its root is a bare
+  `Item`); the plan must either add an `Accessible.name` passthrough to `LComboBox` or set it on the
+  inner control, and the QuickTest must assert it.
 - **Disabled state is exposed**, not just styled — bind `Accessible.description`/enabled so a screen
   reader reports *why* (e.g. "unavailable until a report with results is generated"); the empty-state
   line above carries the same reason visibly. State is never communicated by color/spinner/disabled
@@ -256,13 +283,29 @@ path-derived text rendered `Text.PlainText`.
 - **Focus is predictable** across dialog open/close — after a Save/Print dialog closes, focus returns
   to the control that opened it (or a sensible sibling), never lost to the window root.
 
-### 4.4 CMake delta
+### 4.4 Application object (Critical) & CMake delta
 
-- `qt-app/quick/CMakeLists.txt`: add `Qt${QT_VERSION_MAJOR}::PrintSupport` to
-  `target_link_libraries(witsquickmodule PUBLIC …)`. (Charts, Widgets, QXlsx already arrive PUBLIC
-  from `witscore`; `QPdfWriter`/`QPagedPaintDevice` are in Qt::Gui, already linked.)
-- The new OFFSCREEN export test needs `Qt::PrintSupport` too (for the QPrinter-adjacent include) and
-  `Qt::Gui` (already used).
+**WITSQuick must run a `QApplication`, not a `QGuiApplication`.** Today `qt-app/quick/main.cpp:13`
+constructs a **`QGuiApplication`** — WITSQuick is a pure Qt Quick app that never makes a `QWidget`.
+But `ReportRenderer::renderChartToImage` builds a **`QChartView` (a `QWidget`)** for every Bar/Pie
+page, and the Print path uses **`QPrintDialog` (also a `QWidget`)**. Constructing a `QWidget` under a
+`QGuiApplication` is a `qFatal` ("Cannot create a QWidget without QApplication") → the shipped
+`WITSQuick.exe` **aborts on export**. This is invisible to tests (see §6/§7), so it is called out
+here as a hard prerequisite.
+
+- **`qt-app/quick/main.cpp`:** change `QGuiApplication` → `QApplication` (`#include <QApplication>`).
+  `QApplication` *is-a* `QGuiApplication`; Qt Quick runs unchanged under it. This is the minimal
+  remedy and is required regardless of charts, because `QPrintDialog` needs it too. (The deferred
+  alternative — refactor `paintReport` to take pre-rendered `QImage`s and swap the logo `QPixmap`→
+  `QImage` — is *not* taken in this slice; the one-line app-object switch is simpler and lower-risk.)
+- **CMake:**
+  - `qt-app/quick/CMakeLists.txt`: add `Qt${QT_VERSION_MAJOR}::PrintSupport` to
+    `target_link_libraries(witsquickmodule PUBLIC …)`. (Charts, Widgets, QXlsx already arrive PUBLIC
+    from `witscore`; `QPdfWriter`/`QPagedPaintDevice` are Qt::Gui, already linked. `QApplication`
+    comes from Qt::Widgets, likewise already PUBLIC-propagated — so `WITSQuick` needs no new link,
+    only the include; add `Qt::Widgets` explicitly to the `WITSQuick` target for clarity.)
+  - The new OFFSCREEN export test target links `Qt::PrintSupport` (QPrinter-adjacent include) and
+    `Qt::Gui` (already used).
 
 ## 5. Data flow (export)
 
@@ -295,6 +338,15 @@ but threading a single format in isolation adds machinery for little gain.
 blocking render one event-loop turn so the overlay paints first (§4.2). Typical library datasets
 render sub-second; the overlay + input-blocking is sufficient UX. The `paintReport`-refactor remains
 a documented future option if a real report ever janks perceptibly.
+
+**Because these are `QWidget` operations, the app object must be a `QApplication` (§4.4).** This is
+also why the constraint is easy to miss: the existing `tst_reportrenderer` and every QtTest target
+run under `QTEST_MAIN`, which instantiates a **`QApplication`** whenever `Qt::Widgets` is linked
+(it is, PUBLIC from `witscore`). So chart rendering "works in tests" and any OFFSCREEN `exportPdf`
+test passes — while the real `WITSQuick.exe` (a `QGuiApplication`) would `qFatal`. The test harness
+**cannot** catch this mismatch; the guards are (a) making the `main.cpp` switch part of this slice's
+deliverables (§10), and (b) a mandatory manual GUI smoke of a real PDF/Print export on
+`WITSQuick.exe` (§7.4) before the branch is finished.
 
 ## 7. Testing & gates (TDD, ctest)
 
@@ -332,9 +384,17 @@ Feed the VM a synthetic result via the existing `onReportDataReady` seam (no liv
   `palette` / `chartType` / preview bindings.
 
 ### 7.4 Gates
-Full `ctest` green (existing 42 + new). Then project **`create-pr` 3-agent gate** (dry-checker,
+Full `ctest` green (the current suite count — **verify with `ctest` at plan time**, don't hard-code a
+number — plus the new tests). Then project **`create-pr` 3-agent gate** (dry-checker,
 security-reviewer, general-code-reviewer — **no** api-checker). Whole-branch Claude review before
-finishing. Owner GUI smoke on `WITSQuick` (real save + open of a PDF/Excel, a print preview).
+finishing.
+
+**Mandatory manual GUI smoke on the real `WITSQuick.exe` (not tests) — this is a release gate, not
+optional:** because the test harness runs under `QApplication` and cannot catch the
+`QGuiApplication`→`QApplication` fix (§6), the branch is not done until an owner has, on the running
+`WITSQuick.exe`: generated a report, then **Export PDF** (save + open the file), **Export Excel**
+(save + open), and **Print** (open the dialog, print or preview) — each completing without the app
+aborting. A crash here is the exact failure the automated suite is blind to.
 
 ## 8. Security & constraints
 
@@ -344,7 +404,7 @@ finishing. Owner GUI smoke on `WITSQuick` (real save + open of a PDF/Excel, a pr
 - **File writes** go only where the user's Save dialog points (or the chosen printer). No silent
   writes to fixed paths.
 - Reuses fetched rows; **no refetch**, no new network surface, no new endpoint.
-- `logoPath` from `QSettings` is read as an image by `paintReport` (`QPixmap`); a missing/invalid
+- `logoPath` from `AppSettings` is read as an image by `paintReport` (`QPixmap`); a missing/invalid
   path degrades gracefully (renderer already null-checks). No path is taken from network data.
 
 ## 9. Open items to resolve in the plan / review
@@ -362,10 +422,15 @@ finishing. Owner GUI smoke on `WITSQuick` (real save + open of a PDF/Excel, a pr
 
 ## 10. Deliverables
 
+- **`qt-app/quick/main.cpp`** — `QGuiApplication` → `QApplication` (the §4.4 Critical prerequisite;
+  without it the app aborts on export).
 - `qt-app/quick/viewmodels/ReportingViewModel.{h,cpp}` — export state, `buildExportFilters` +
-  `normalizeExportRows` (pure), `headerInfo()`, `renderToDevice()`, `exportPdf/exportExcel/printReport`.
+  `normalizeExportRows` + `semesterWindow` (pure), `headerInfo()` (via `AppSettings`),
+  `renderToDevice()`, `exportPdf/exportExcel/printReport`.
 - `qt-app/quick/qml/admin/ReportingScreen.qml` — export bar, two `FileDialog`s, busy overlay, feedback.
-- `qt-app/quick/CMakeLists.txt` — `Qt::PrintSupport` on `witsquickmodule` (+ the export test target).
+- `qt-app/quick/qml/components/LComboBox.qml` — `Accessible.name` passthrough (if not already present).
+- `qt-app/quick/CMakeLists.txt` — `Qt::PrintSupport` on `witsquickmodule`, `Qt::Widgets` explicit on
+  `WITSQuick` (+ the export test target).
 - `qt-app/quick/tests/tst_reportingviewmodel.cpp` — pure + OFFSCREEN export tests.
 - `qt-app/quick/tests/tst_qml_admin.qml` (+ `.cpp` band) — export-bar QuickTest.
 - This spec; then a `/writing-plans` TDD plan; both `/claude-review`ed before build.
