@@ -23,6 +23,7 @@ Rectangle {
         spacing: Theme.spacing.xs
         Text {
             text: tile.label
+            textFormat: Text.PlainText
             // Phase 4d role map: Hero eyebrow = accent.base (gold) — mockup
             // "VISITORS TODAY" label on the maroon hero is var(--gold)
             // (Admin Dashboard.dc.html:76); was brand.onPrimary (cream).
@@ -31,7 +32,9 @@ Rectangle {
             font.pixelSize: Theme.typography.eyebrow
         }
         Text {
+            objectName: "statTileValue"
             text: tile.value
+            textFormat: Text.PlainText
             color: tile.variant === "Hero" ? Theme.brand.on : Theme.text
             font.family: Theme.typography.sans
             font.pixelSize: Theme.typography.statValue
@@ -39,6 +42,7 @@ Rectangle {
         Text {
             visible: tile.caption.length > 0
             text: tile.caption
+            textFormat: Text.PlainText
             color: Theme.mutedText
             font.family: Theme.typography.sans
             font.pixelSize: Theme.typography.body

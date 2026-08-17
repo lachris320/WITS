@@ -352,6 +352,21 @@ Item {
     }
 
     TestCase {
+        name: "LStatTileValuePlainText"
+        when: windowShown
+        // Reporting's topCourse tile pipes a server-echoed course name into
+        // LStatTile.value over cleartext HTTP. Text defaults to AutoText,
+        // which auto-detects and RENDERS rich text (including a beaconing
+        // remote <img>) — pinned plain here so no consumer has to remember
+        // (same guard as LToastPlainText above).
+        function test_statTileValueIsPlainText() {
+            var t = findChild(st, "statTileValue");
+            verify(t !== null);
+            compare(t.textFormat, Text.PlainText);
+        }
+    }
+
+    TestCase {
         name: "LButtonTooltipAndAccessibleName"
         when: windowShown
         function test_accessibleNameOverridesTextWhenSet() {
