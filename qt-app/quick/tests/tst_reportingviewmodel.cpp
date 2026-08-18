@@ -3,6 +3,10 @@
 #include <QJsonObject>
 #include <QJsonDocument>
 #include <QSignalSpy>
+#include <QUrl>
+#include <QTemporaryDir>
+#include <QFileInfo>
+#include "xlsxdocument.h"
 #include "ReportingViewModel.h"
 
 class TestReportingViewModel : public QObject
@@ -48,6 +52,11 @@ private slots:
     void paletteAndChartTypeSettersEmit();
     void applyResultStoresNormalizedExportRows();
     void failedRefetchDisablesExportAndClearsRows();
+    void exportPdfWritesFile();
+    void exportExcelWritesReadableCell();
+    void exportPdfEmptyRowsShowsNoDataError();
+    void exportPdfInvalidUrlShowsError();
+    void exportWhileExportingIsNoop();
 };
 
 void TestReportingViewModel::buildFiltersDaySendsStringTypeAndRange()
@@ -504,6 +513,77 @@ void TestReportingViewModel::failedRefetchDisablesExportAndClearsRows()
     QVERIFY(!vm.canExport());                // errorText non-empty AND rows cleared
     // (Task 6 adds the complementary assertion that exportPdf then hits the
     // "No data" guard — exportPdf does not exist yet in Task 5.)
+}
+
+void TestReportingViewModel::exportPdfWritesFile()
+{
+    ReportingViewModel vm;
+    vm.onReportDataReady(QJsonDocument::fromJson(
+        R"([{"school_id":"1","name":"Ana","gender":"F","status":"Regular",
+             "course":"BSIT","department":"IT","year_level":"3","visits":"5"}])").array());
+    QTemporaryDir dir;
+    const QString path = dir.filePath("report.pdf");
+    vm.exportPdf(QUrl::fromLocalFile(path));
+    QTRY_VERIFY(!vm.exporting());                 // queued render completes
+    QVERIFY(QFileInfo::exists(path));
+    QFile f(path); QVERIFY(f.open(QIODevice::ReadOnly));
+    QCOMPARE(f.read(4), QByteArray("%PDF"));
+    QVERIFY(!vm.exportStatus().isEmpty());
+    QVERIFY(vm.exportError().isEmpty());
+}
+
+void TestReportingViewModel::exportExcelWritesReadableCell()
+{
+    ReportingViewModel vm;
+    vm.onReportDataReady(QJsonDocument::fromJson(
+        R"([{"school_id":"1","name":"Ana","gender":"F","status":"Regular",
+             "course":"BSIT","department":"IT","year_level":"3","visits":"5"}])").array());
+    QTemporaryDir dir;
+    const QString path = dir.filePath("report.xlsx");
+    vm.exportExcel(QUrl::fromLocalFile(path));
+    QTRY_VERIFY(!vm.exporting());
+    QVERIFY(QFileInfo::exists(path));
+    QXlsx::Document doc(path);
+    QVERIFY(doc.load());
+    // The student name lands somewhere in the sheet's table body.
+    bool foundName = false;
+    for (int r = 1; r <= 40 && !foundName; ++r)
+        for (int c = 1; c <= 8; ++c)
+            if (doc.read(r, c).toString() == QStringLiteral("Ana")) { foundName = true; break; }
+    QVERIFY(foundName);
+}
+
+void TestReportingViewModel::exportPdfEmptyRowsShowsNoDataError()
+{
+    ReportingViewModel vm;   // never generated -> m_exportRows empty
+    QTemporaryDir dir;
+    vm.exportPdf(QUrl::fromLocalFile(dir.filePath("x.pdf")));
+    QVERIFY(vm.exportError().contains(QStringLiteral("No data")));
+    QVERIFY(!vm.exporting());
+}
+
+void TestReportingViewModel::exportPdfInvalidUrlShowsError()
+{
+    ReportingViewModel vm;
+    vm.onReportDataReady(QJsonDocument::fromJson(
+        R"([{"name":"Ana","course":"BSIT","visits":"5"}])").array());
+    vm.exportPdf(QUrl("https://example.com/x.pdf"));   // non-file URL -> empty local path
+    QVERIFY(!vm.exportError().isEmpty());
+    QVERIFY(!vm.exporting());
+}
+
+void TestReportingViewModel::exportWhileExportingIsNoop()
+{
+    ReportingViewModel vm;
+    vm.onReportDataReady(QJsonDocument::fromJson(
+        R"([{"name":"Ana","course":"BSIT","visits":"5"}])").array());
+    QTemporaryDir dir;
+    vm.exportPdf(QUrl::fromLocalFile(dir.filePath("a.pdf")));   // sets exporting=true (queued)
+    QVERIFY(vm.exporting());
+    const QString before = vm.exportError();
+    vm.exportExcel(QUrl::fromLocalFile(dir.filePath("b.xlsx")));   // must no-op while exporting
+    QCOMPARE(vm.exportError(), before);
+    QTRY_VERIFY(!vm.exporting());                               // first export drains
 }
 
 QTEST_MAIN(TestReportingViewModel)

@@ -7,12 +7,14 @@
 #include <QObject>
 #include <QString>
 #include <QStringList>
+#include <QUrl>
 #include <qqml.h>                 // QML_ELEMENT — AdminScreen instantiates this type
 #include "BarsModel.h"
 #include "ReportRowsModel.h"
 #include "reportdata.h"            // DateRange — return type of semesterWindow()
 
 class QNetworkAccessManager;
+class QPagedPaintDevice;
 class ReportController;
 
 // Reporting screen VM (spec 4b-i). Wraps the witscore ReportController (no new
@@ -127,6 +129,8 @@ public:
     Q_INVOKABLE void setCustomEnd(const QString &v);
     Q_INVOKABLE void generateReport();           // Task 6
     Q_INVOKABLE void retry();                     // Task 6
+    Q_INVOKABLE void exportPdf(const QUrl &fileUrl);
+    Q_INVOKABLE void exportExcel(const QUrl &fileUrl);
 
     // Public slots (network-free test seam) — wired to ReportController in Task 5/6.
     void onDepartmentsLoaded(const QStringList &departments);
@@ -168,6 +172,8 @@ private:
     void setExporting(bool v);
     void setExportStatus(const QString &s);
     void setExportError(const QString &e);
+    ReportHeaderInfo headerInfo() const;
+    bool renderToDevice(QPagedPaintDevice *dev, int resolution);
     static QDate parseDate(const QString &s) { return QDate::fromString(s, QStringLiteral("yyyy-MM-dd")); }
 
     QNetworkAccessManager *m_nam = nullptr;

@@ -1,10 +1,17 @@
 #include "ReportingViewModel.h"
 
+#include <QFileInfo>
 #include <QMap>
 #include <QNetworkAccessManager>
+#include <QPageSize>
+#include <QPdfWriter>
+#include <QUrl>
 #include <algorithm>
+#include "appsettings.h"
 #include "reportcontroller.h"
 #include "reportdata.h"
+#include "reportrenderer.h"
+#include "xlsxdocument.h"
 
 ReportingViewModel::ReportingViewModel(QObject *parent)
     : QObject(parent)
@@ -400,4 +407,87 @@ void ReportingViewModel::setExportStatus(const QString &s)
 void ReportingViewModel::setExportError(const QString &e)
 {
     m_exportError = e; emit exportErrorChanged();
+}
+
+ReportHeaderInfo ReportingViewModel::headerInfo() const
+{
+    AppSettings s;   // mandated scope — matches what Phase 4c Settings wrote
+    ReportHeaderInfo info;
+    info.schoolName = s.value(QStringLiteral("school/name"), QStringLiteral("Your School Name")).toString();
+    info.address    = s.value(QStringLiteral("school/address"), QStringLiteral("Your Address")).toString();
+    info.logoPath   = s.value(QStringLiteral("school/logoPath"), QString()).toString();
+    info.librarian  = s.value(QStringLiteral("admin/name"), QString()).toString();
+    info.position   = s.value(QStringLiteral("admin/position"), QString()).toString();
+    info.openHour   = s.value(QStringLiteral("library/openHour"), 7).toInt();
+    info.closeHour  = s.value(QStringLiteral("library/closeHour"), 21).toInt();
+    return info;
+}
+
+bool ReportingViewModel::renderToDevice(QPagedPaintDevice *dev, int resolution)
+{
+    const QJsonObject filters = buildExportFilters(
+        m_department, m_course, m_durationType,
+        parseDate(m_day), m_month, m_monthYear,
+        m_semester, m_semYear, parseDate(m_customStart), parseDate(m_customEnd),
+        m_chartType);
+    const ReportPalette pal = ReportController::getPalette(m_palette);
+    return ReportRenderer::paintReport(dev, resolution, m_exportRows, filters, pal, headerInfo());
+}
+
+void ReportingViewModel::exportPdf(const QUrl &fileUrl)
+{
+    if (m_exporting) return;
+    if (m_exportRows.isEmpty()) {
+        setExportError(tr("No data to export. Adjust the filters and generate a report with results."));
+        return;
+    }
+    const QString path = fileUrl.toLocalFile();
+    if (path.isEmpty()) {
+        setExportError(tr("Couldn't export — choose a local file location."));
+        return;
+    }
+    setExportError(QString());
+    setExporting(true);
+    // Defer one turn so the busy overlay paints before the blocking render.
+    QMetaObject::invokeMethod(this, [this, path]() {
+        QPdfWriter writer(path);
+        writer.setPageSize(QPageSize(QPageSize::A4));
+        const bool ok = renderToDevice(&writer, writer.resolution()) && QFileInfo::exists(path);
+        if (ok)
+            setExportStatus(tr("Saved %1").arg(QFileInfo(path).fileName()));
+        else
+            setExportError(tr("Couldn't write %1 — choose a different location.").arg(QFileInfo(path).fileName()));
+        setExporting(false);
+    }, Qt::QueuedConnection);
+}
+
+void ReportingViewModel::exportExcel(const QUrl &fileUrl)
+{
+    if (m_exporting) return;
+    if (m_exportRows.isEmpty()) {
+        setExportError(tr("No data to export. Adjust the filters and generate a report with results."));
+        return;
+    }
+    const QString path = fileUrl.toLocalFile();
+    if (path.isEmpty()) {
+        setExportError(tr("Couldn't export — choose a local file location."));
+        return;
+    }
+    setExportError(QString());
+    setExporting(true);
+    QMetaObject::invokeMethod(this, [this, path]() {
+        QXlsx::Document doc;
+        const QJsonObject filters = buildExportFilters(
+            m_department, m_course, m_durationType,
+            parseDate(m_day), m_month, m_monthYear,
+            m_semester, m_semYear, parseDate(m_customStart), parseDate(m_customEnd),
+            m_chartType);
+        const bool ok = ReportRenderer::writeReportToXlsx(doc, m_exportRows, filters, headerInfo())
+                        && doc.saveAs(path);
+        if (ok)
+            setExportStatus(tr("Saved %1").arg(QFileInfo(path).fileName()));
+        else
+            setExportError(tr("Couldn't write %1 — choose a different location.").arg(QFileInfo(path).fileName()));
+        setExporting(false);
+    }, Qt::QueuedConnection);
 }
