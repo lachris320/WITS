@@ -7,11 +7,14 @@
 #include <QObject>
 #include <QString>
 #include <QStringList>
+#include <QUrl>
 #include <qqml.h>                 // QML_ELEMENT — AdminScreen instantiates this type
 #include "BarsModel.h"
 #include "ReportRowsModel.h"
+#include "reportdata.h"            // DateRange — return type of semesterWindow()
 
 class QNetworkAccessManager;
+class QPagedPaintDevice;
 class ReportController;
 
 // Reporting screen VM (spec 4b-i). Wraps the witscore ReportController (no new
@@ -44,6 +47,14 @@ class ReportingViewModel : public QObject
     Q_PROPERTY(int totalVisits READ totalVisits NOTIFY resultChanged)
     Q_PROPERTY(int studentsShown READ studentsShown NOTIFY resultChanged)
     Q_PROPERTY(QString topCourse READ topCourse NOTIFY resultChanged)
+    Q_PROPERTY(QStringList palettes READ palettes CONSTANT)
+    Q_PROPERTY(QString palette READ palette WRITE setPalette NOTIFY paletteChanged)
+    Q_PROPERTY(QStringList chartTypes READ chartTypes CONSTANT)
+    Q_PROPERTY(QString chartType READ chartType WRITE setChartType NOTIFY chartTypeChanged)
+    Q_PROPERTY(bool exporting READ exporting NOTIFY exportingChanged)
+    Q_PROPERTY(bool canExport READ canExport NOTIFY canExportChanged)
+    Q_PROPERTY(QString exportStatus READ exportStatus NOTIFY exportStatusChanged)
+    Q_PROPERTY(QString exportError READ exportError NOTIFY exportErrorChanged)
 public:
     explicit ReportingViewModel(QObject *parent = nullptr);
 
@@ -57,6 +68,17 @@ public:
     static QList<BarsModel::Bar> aggregateVisitsByCourse(const QJsonArray &data); // Task 3
     struct Tiles { int totalVisits = 0; int studentsShown = 0; QString topCourse; };
     static Tiles deriveTiles(const QJsonArray &data);                             // Task 3
+    static QJsonArray normalizeExportRows(const QJsonArray &data);   // visits string -> number
+    // Display-only Period for a semester, matching get_report_data.php's server windows.
+    static DateRange semesterWindow(const QString &semester, int year);
+    // Builds the JSON keys the export renderer (paintReport/writeReportToXlsx) reads:
+    // department, course, start, end, schoolYear, chartType.
+    static QJsonObject buildExportFilters(
+        const QString &department, const QString &course, int durationType,
+        const QDate &day, int month, int monthYear,
+        const QString &semester, int semYear,
+        const QDate &customStart, const QDate &customEnd,
+        const QString &chartType);
 
     QStringList departments() const { return m_departments; }
     QStringList courses() const { return m_courses; }
@@ -81,6 +103,18 @@ public:
     int totalVisits() const { return m_totalVisits; }
     int studentsShown() const { return m_studentsShown; }
     QString topCourse() const { return m_topCourse; }
+    QStringList palettes() const { return { QStringLiteral("Default"), QStringLiteral("Blue"),
+                                            QStringLiteral("Green"), QStringLiteral("Red") }; }
+    QString palette() const { return m_palette; }
+    QStringList chartTypes() const { return { QStringLiteral("Bar"), QStringLiteral("Pie") }; }
+    QString chartType() const { return m_chartType; }
+    bool exporting() const { return m_exporting; }
+    bool canExport() const;
+    QString exportStatus() const { return m_exportStatus; }
+    QString exportError() const { return m_exportError; }
+
+    Q_INVOKABLE void setPalette(const QString &p);
+    Q_INVOKABLE void setChartType(const QString &c);
 
     Q_INVOKABLE void loadDepartments();          // bootstrap: departments + years (Task 5)
     Q_INVOKABLE void setDepartment(const QString &department);   // Task 5
@@ -95,6 +129,9 @@ public:
     Q_INVOKABLE void setCustomEnd(const QString &v);
     Q_INVOKABLE void generateReport();           // Task 6
     Q_INVOKABLE void retry();                     // Task 6
+    Q_INVOKABLE void exportPdf(const QUrl &fileUrl);
+    Q_INVOKABLE void exportExcel(const QUrl &fileUrl);
+    Q_INVOKABLE void printReport();
 
     // Public slots (network-free test seam) — wired to ReportController in Task 5/6.
     void onDepartmentsLoaded(const QStringList &departments);
@@ -122,11 +159,28 @@ signals:
     void loadingChanged();
     void errorTextChanged();
     void resultChanged();
+    void paletteChanged();
+    void chartTypeChanged();
+    void exportingChanged();
+    void canExportChanged();
+    void exportStatusChanged();
+    void exportErrorChanged();
 
 private:
     void setLoading(bool v);
     void setError(const QString &e);
     void applyResult(const QJsonArray &data);    // Task 6
+    void setExporting(bool v);
+    void setExportStatus(const QString &s);
+    void setExportError(const QString &e);
+    ReportHeaderInfo headerInfo() const;
+    bool renderToDevice(QPagedPaintDevice *dev, int resolution);
+    // Shared preamble for the file exports: false (with exportError set) if an export is
+    // in flight, there are no rows, or the URL is not a local file; on success sets *outPath,
+    // clears exportError, and flips exporting on.
+    bool beginFileExport(const QUrl &fileUrl, QString *outPath);
+    // The export filters for the current VM state (keys read by ReportRenderer).
+    QJsonObject currentExportFilters() const;
     static QDate parseDate(const QString &s) { return QDate::fromString(s, QStringLiteral("yyyy-MM-dd")); }
 
     QNetworkAccessManager *m_nam = nullptr;
@@ -147,6 +201,13 @@ private:
     bool m_hasResult = false;
     int m_totalVisits = 0, m_studentsShown = 0;
     QString m_topCourse = QStringLiteral("—");
+
+    QString m_palette = QStringLiteral("Default");
+    QString m_chartType = QStringLiteral("Bar");
+    bool m_exporting = false;
+    QString m_exportStatus;
+    QString m_exportError;
+    QJsonArray m_exportRows;
 };
 
 #endif // REPORTINGVIEWMODEL_H

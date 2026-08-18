@@ -15,7 +15,9 @@
 #include <QFont>
 #include <QFontMetrics>
 #include <QGraphicsLayout>
+#include <QGuiApplication>
 #include <QLoggingCategory>
+#include <QScreen>
 #include <QMarginsF>
 #include <QPagedPaintDevice>
 #include <QPainter>
@@ -31,6 +33,15 @@
 // floor suppresses qCDebug); re-enable when troubleshooting with
 //   QT_LOGGING_RULES="wits.report.render.debug=true"
 Q_LOGGING_CATEGORY(lcReportRender, "wits.report.render", QtInfoMsg)
+
+// Scales a legacy ~96-DPI pixel literal to the paged device's resolution.
+// paintReport's vertical advances/rects were raw device-pixel literals tuned
+// for ~96 DPI; on a QPdfWriter (1200 DPI default) they no longer clear the
+// point-sized glyph boxes, so rows overlapped. Scaling by resolution/96 keeps
+// the original 96-DPI proportions at any DPI.
+int ReportRenderer::scaledPx(double basePx, int resolution) {
+    return qRound(basePx * resolution / 96.0);
+}
 
 // Factored out of make{Bar,Pie}ChartImage's aggregation loop (legacy cpp:125-131 / 193-199).
 QMap<QString, int> ReportRenderer::aggregateVisitsByCourse(const QJsonArray &data) {
@@ -64,21 +75,49 @@ QMap<QString, QMap<int, int>> ReportRenderer::aggregateVisitsByCourseHour(
     return courseTimeCounts;
 }
 
+// The chart raster size the QChartView is rendered at. A QChartView is a QWidget
+// the window system clamps to the physical screen, so rendering at print
+// resolution (~9000px) made the chart lay out in a corner with giant fonts.
+// Render at a modest size that FITS THE ACTUAL SCREEN (so the widget is never
+// clamped), and let paintReport scale the raster up to fill the page. square →
+// 1:1 (pie); otherwise ~16:10 landscape (bar/line). Chart fonts (see the makers)
+// are sized to this height, so they read correctly once scaled onto the page.
+QSize ReportRenderer::chartImageSize(int usableWidth, bool square) {
+    Q_UNUSED(usableWidth);
+    QSize base = square ? QSize(1000, 1000) : QSize(1600, 1000);
+    // Shrink (keeping aspect) to fit the available screen, so a narrow display
+    // (e.g. a 1366-wide laptop or a kiosk) can't clamp the QChartView.
+    if (const QScreen *scr = QGuiApplication::primaryScreen()) {
+        const QSize avail = scr->availableSize() * 0.85;
+        if (avail.width() >= 320 && avail.height() >= 240
+            && (base.width() > avail.width() || base.height() > avail.height())) {
+            base.scale(avail, Qt::KeepAspectRatio);
+        }
+    }
+    return base;
+}
+
 // Shared render tail of the three chart makers: paint a configured QChart into
-// an ARGB32 QImage of the requested size. A local QChartView owns `chart` and
-// deletes it when this returns — same ownership as the inline versions it replaces.
+// an ARGB32 QImage of the requested size, via a local QChartView that owns `chart`
+// and deletes it when this returns.
+//
+// IMPORTANT: `size` must stay MODEST (screen-sized, not print-sized). A QChartView
+// is a QWidget and the window system clamps a widget to the physical screen, so
+// rendering it directly at print resolution (~9000px) made the chart lay out at
+// ~screen size in the top-left with huge fonts and a blank remainder. chartImageSize
+// therefore returns a screen-safe size and paintReport scales the raster up to fill
+// the page. (Rendering via a QGraphicsScene instead avoids the clamp but does not
+// lay the bars out — it produced a solid block — so QChartView is the right tool.)
 QImage ReportRenderer::renderChartToImage(QChart *chart, QSize size) {
     QImage chartImage(size, QImage::Format_ARGB32);
     chartImage.fill(Qt::white);
     QPainter painter(&chartImage);
-
     QChartView view(chart);
     view.setRenderHint(QPainter::Antialiasing);
     view.resize(size);
     view.show();
     view.chart()->resize(size);
     view.render(&painter);
-
     return chartImage;
 }
 
@@ -89,41 +128,50 @@ QImage ReportRenderer::makeBarChartImage(const QJsonArray &data, QSize size, con
     // Aggregate visits by course
     QMap<QString, int> courseCounts = aggregateVisitsByCourse(data);
 
-    //color set
-    QBarSeries *series = new QBarSeries();
-    QStringList categories;
-    QVector<QColor> colors = { palette.rowEvenBg, palette.rowOddBg, palette.headerBg };
+    // Fonts are sized to the image height (not fixed points) so labels stay
+    // legible after this large raster is scaled down onto the page.
+    const int h = size.height();
+    QFont titleFont("Arial");  titleFont.setPixelSize(qMax(10, qRound(h * 0.032)));  titleFont.setBold(true);
+    QFont labelFont("Arial");  labelFont.setPixelSize(qMax(8,  qRound(h * 0.024)));
 
-    int colorIndex = 0;
+    // One bar per course, spread across the category axis: a SINGLE QBarSet
+    // holding every course's value (one category each). The legacy build used a
+    // separate one-value barset per course, so all bars piled into category 0 and
+    // the rest of the chart width sat empty. One set + N categories fills the width.
+    QBarSet *set = new QBarSet("Visits");
+    QStringList categories;
     for (auto it = courseCounts.begin(); it != courseCounts.end(); ++it) {
-        QBarSet *set = new QBarSet(it.key());
         *set << it.value();
-        set->setBrush(palette.chartColors[colorIndex % palette.chartColors.size()]);
-        series->append(set);
         categories << it.key();
-        colorIndex++;
     }
+    set->setBrush(palette.chartColors.isEmpty() ? QBrush(palette.headerBg)
+                                                : QBrush(palette.chartColors.first()));
+
+    QBarSeries *series = new QBarSeries();
+    series->append(set);
 
     // Create chart
     QChart *chart = new QChart();
     chart->addSeries(series);
     chart->setTitle("Library Visits by Course");
-    chart->setTitleFont(QFont("Arial", 16, QFont::Bold));
+    chart->setTitleFont(titleFont);
 
     QBarCategoryAxis *axisX = new QBarCategoryAxis();
     axisX->append(categories);
-    axisX->setLabelsFont(QFont("Arial", 12));
+    axisX->setLabelsFont(labelFont);
     chart->addAxis(axisX, Qt::AlignBottom);
     series->attachAxis(axisX);
 
     QValueAxis *axisY = new QValueAxis();
     axisY->setTitleText("Number of Visits");
-    axisY->setLabelsFont(QFont("Arial", 12));
+    axisY->setLabelsFont(labelFont);
+    axisY->setTitleFont(labelFont);
     chart->addAxis(axisY, Qt::AlignLeft);
     series->attachAxis(axisY);
 
-    chart->legend()->setVisible(true);
-    chart->legend()->setFont(QFont("Arial", 12));
+    // Single series → the x-axis course labels identify the bars; a legend would
+    // just repeat "Visits", so hide it and give the chart the full width.
+    chart->legend()->setVisible(false);
 
     // ✅ Remove margins and force chart to fill
     chart->setMargins(QMargins(0, 0, 0, 0));
@@ -141,6 +189,12 @@ QImage ReportRenderer::makePieChartImage(const QJsonArray &data, QSize size, con
     // Aggregate visits by course
     QMap<QString, int> courseCounts = aggregateVisitsByCourse(data);
 
+    // Fonts are sized to the image height (not fixed points) so labels stay
+    // legible after this large raster is scaled down onto the page.
+    const int h = size.height();
+    QFont titleFont("Arial");  titleFont.setPixelSize(qMax(10, qRound(h * 0.032)));  titleFont.setBold(true);
+    QFont labelFont("Arial");  labelFont.setPixelSize(qMax(8,  qRound(h * 0.024)));
+
     // Create pie series
     QPieSeries *series = new QPieSeries();
     QVector<QColor> colors = { palette.rowEvenBg, palette.rowOddBg, palette.headerBg };
@@ -150,7 +204,7 @@ QImage ReportRenderer::makePieChartImage(const QJsonArray &data, QSize size, con
         slice->setLabel(QString("%1: %2").arg(it.key()).arg(it.value()));
         slice->setLabelVisible(true);
         slice->setBrush(palette.chartColors[colorIndex % palette.chartColors.size()]);
-        slice->setLabelFont(QFont("Arial", 14, QFont::Bold)); // ✅ bigger font
+        slice->setLabelFont(labelFont);
         colorIndex++;
     }
 
@@ -158,9 +212,9 @@ QImage ReportRenderer::makePieChartImage(const QJsonArray &data, QSize size, con
     QChart *chart = new QChart();
     chart->addSeries(series);
     chart->setTitle("Library Visits by Course");
-    chart->setTitleFont(QFont("Arial", 16, QFont::Bold));
+    chart->setTitleFont(titleFont);
     chart->legend()->setVisible(true);
-    chart->legend()->setFont(QFont("Arial", 12));
+    chart->legend()->setFont(labelFont);
     chart->legend()->setAlignment(Qt::AlignRight);
 
     // ✅ Remove extra margins so chart fills the image
@@ -184,6 +238,12 @@ QImage ReportRenderer::makeLineChartImage(const QJsonArray &data, QSize size, co
     QMap<QString, QMap<int, int>> courseTimeCounts =
         aggregateVisitsByCourseHour(data, openHour, closeHour);
 
+    // Fonts are sized to the image height (not fixed points) so labels stay
+    // legible after this large raster is scaled down onto the page.
+    const int h = size.height();
+    QFont titleFont("Arial");  titleFont.setPixelSize(qMax(10, qRound(h * 0.032)));  titleFont.setBold(true);
+    QFont labelFont("Arial");  labelFont.setPixelSize(qMax(8,  qRound(h * 0.024)));
+
     int globalMax = 0;
     for (auto it = courseTimeCounts.begin(); it != courseTimeCounts.end(); ++it)
         for (int count : it.value())
@@ -192,7 +252,7 @@ QImage ReportRenderer::makeLineChartImage(const QJsonArray &data, QSize size, co
 
     QChart *chart = new QChart();
     chart->setTitle("Library Peak Hours by Course");
-    chart->setTitleFont(QFont("Arial", 16, QFont::Bold));
+    chart->setTitleFont(titleFont);
 
     // One line series per course
     QVector<QColor> colors = { palette.rowEvenBg, palette.rowOddBg, palette.headerBg };
@@ -217,13 +277,15 @@ QImage ReportRenderer::makeLineChartImage(const QJsonArray &data, QSize size, co
     axisX->setRange(openHour, closeHour);  // ✅ restrict to library hours
     axisX->setTickCount(closeHour - openHour + 1);
     axisX->setLabelFormat("%d:00");   // shows "7:00", "8:00", etc.
-    axisX->setLabelsFont(QFont("Arial", 10));
+    axisX->setLabelsFont(labelFont);
+    axisX->setTitleFont(labelFont);
     chart->addAxis(axisX, Qt::AlignBottom);
 
     // Y axis = number of students (auto-scale)
     QValueAxis *axisY = new QValueAxis();
     axisY->setTitleText("Number of Students");
-    axisY->setLabelsFont(QFont("Arial", 10));
+    axisY->setLabelsFont(labelFont);
+    axisY->setTitleFont(labelFont);
     axisY->setRange(0, globalMax + 1);
     axisY->setTickCount(globalMax + 2);
     chart->addAxis(axisY, Qt::AlignLeft);
@@ -235,7 +297,7 @@ QImage ReportRenderer::makeLineChartImage(const QJsonArray &data, QSize size, co
     }
 
     chart->legend()->setVisible(true);
-    chart->legend()->setFont(QFont("Arial", 12));
+    chart->legend()->setFont(labelFont);
 
     // ✅ Keep your centered & unclipped layout
     chart->setMargins(QMargins(0, 0, 0, 0));
@@ -276,6 +338,11 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
         return clean;
     };
 
+    // Scales a legacy ~96-DPI pixel literal to this device's resolution, so every
+    // vertical advance/rect below keeps its original 96-DPI proportion at any DPI
+    // (QPdfWriter defaults to 1200; raw literals overlapped there — see scaledPx).
+    auto vs = [&](double px) { return ReportRenderer::scaledPx(px, resolution); };
+
     QRectF pageRect = device->pageLayout().paintRectPixels(resolution);
     int pageWidth  = pageRect.width();
     int pageHeight = pageRect.height();
@@ -294,15 +361,15 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
         painter.setPen(Qt::black);
 
         // Left side: system-generated text
-        painter.drawText(QRect(margin, pageHeight - margin - 20,
-                               usableWidth, 20),
+        painter.drawText(QRect(margin, pageHeight - margin - vs(20),
+                               usableWidth, vs(20)),
                          Qt::AlignLeft | Qt::AlignVCenter,
                          "This is a system generated report. LOAMS.2 (Library Occupancy and Attendance Monitoring System), WITS 2016.");
 
         // Right side: page number
         QString footerText = QString("Page %1").arg(pageNum);
-        painter.drawText(QRect(margin, pageHeight - margin - 20,
-                               usableWidth, 20),
+        painter.drawText(QRect(margin, pageHeight - margin - vs(20),
+                               usableWidth, vs(20)),
                          Qt::AlignRight | Qt::AlignVCenter, footerText);
     };
 
@@ -329,28 +396,28 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
             }
         }
 
-        int textLeft = margin + logoSize + 15;
-        int textWidth = usableWidth - logoSize - 15;
+        int textLeft = margin + logoSize + vs(15);
+        int textWidth = usableWidth - logoSize - vs(15);
 
         painter.setFont(QFont("Times New Roman", 16, QFont::Bold));
-        painter.drawText(QRect(textLeft, y, textWidth, 30),
+        painter.drawText(QRect(textLeft, y, textWidth, vs(30)),
                          Qt::AlignLeft | Qt::AlignVCenter, safeText(schoolName));
 
         painter.setFont(QFont("Times New Roman", 11));
-        painter.drawText(QRect(textLeft, y + 25, textWidth, 30),
+        painter.drawText(QRect(textLeft, y + vs(25), textWidth, vs(30)),
                          Qt::AlignLeft | Qt::AlignVCenter, safeText(address));
 
         QString dateStr = QDate::currentDate().toString("dddd, MMMM d, yyyy");
         QString timeStr = QTime::currentTime().toString("hh:mm:ss AP");
         painter.setFont(QFont("Arial", 9));
-        painter.drawText(QRect(margin, y, usableWidth, 20), Qt::AlignRight, dateStr);
-        painter.drawText(QRect(margin, y + 15, usableWidth, 20), Qt::AlignRight, timeStr);
+        painter.drawText(QRect(margin, y, usableWidth, vs(20)), Qt::AlignRight, dateStr);
+        painter.drawText(QRect(margin, y + vs(15), usableWidth, vs(20)), Qt::AlignRight, timeStr);
 
         // Line under header
-        y += logoSize + 20;
+        y += logoSize + vs(20);
         painter.setPen(Qt::black);
         painter.drawLine(margin, y, pageWidth - margin, y);
-        y += 30;  // spacing after header
+        y += vs(30);  // spacing after header
     };
     drawHeader(y);
 
@@ -363,8 +430,8 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
                               .arg(safeText(filters["start"].toString()))
                               .arg(safeText(filters["end"].toString()))
                               .arg(safeText(filters["schoolYear"].toString()));
-    painter.drawText(QRect(margin, y, usableWidth, 30), Qt::AlignLeft, filtersLine);
-    y += 40;
+    painter.drawText(QRect(margin, y, usableWidth, vs(30)), Qt::AlignLeft, filtersLine);
+    y += vs(40);
 
     // ===== TABLE =====
 
@@ -378,8 +445,15 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
     int col7 = margin + (usableWidth * 0.85);            // Year Level
     int col8 = margin + (usableWidth * 0.95);            // Visits
 
+    // Row rhythm: pin the row font, then floor the per-row advance at the glyph
+    // box (height + a little leading) so variable-length data never overlaps even
+    // after the DPI scaling above — this is the guard against the original bug.
+    painter.setFont(QFont("Arial", 10));
+    const QFontMetrics fm = painter.fontMetrics();
+    const int rowPitch = qMax(vs(20), fm.height() + vs(4));
+
     // --- Draw header row ---
-    painter.fillRect(QRect(margin, y - 15, usableWidth, 20), palette.headerBg);
+    painter.fillRect(QRect(margin, y - vs(15), usableWidth, vs(20)), palette.headerBg);
     painter.setPen(palette.headerText);
 
     painter.drawText(col1, y, "School ID");
@@ -391,28 +465,28 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
     painter.drawText(col7, y, "Year Level");
     painter.drawText(col8, y, "Visits");
 
-    y += 25;
+    y += vs(25);
     painter.setPen(Qt::black);
     painter.drawLine(margin, y, pageWidth - margin, y);
-    y += 20;
+    y += vs(20);
 
     int rowIndex = 0;
     for (auto v : data) {
         QJsonObject row = v.toObject();
 
-        QRect rowRect(margin, y - 15, usableWidth, 20);
+        // Fill band tiles exactly at rowPitch so bands abut without gaps/overlap.
+        QRect rowRect(margin, y - fm.ascent(), usableWidth, rowPitch);
         painter.fillRect(rowRect, (rowIndex % 2 == 0) ? palette.rowEvenBg : palette.rowOddBg);
 
         painter.setPen(palette.rowText);
-        QFontMetrics fm = painter.fontMetrics();
 
-        QString schoolId   = fm.elidedText(safeText(row["school_id"].toString()), Qt::ElideRight, col2 - col1 - 5);
-        QString name       = fm.elidedText(safeText(row["name"].toString()), Qt::ElideRight, col3 - col2 - 5);
-        QString gender     = fm.elidedText(safeText(row["gender"].toString()), Qt::ElideRight, col4 - col3 - 5);
-        QString status     = fm.elidedText(safeText(row["status"].toString()), Qt::ElideRight, col5 - col4 - 5);
-        QString course     = fm.elidedText(safeText(row["course"].toString()), Qt::ElideRight, col6 - col5 - 5);
-        QString department = fm.elidedText(safeText(row["department"].toString()), Qt::ElideRight, col7 - col6 - 5);
-        QString yearLevel  = fm.elidedText(safeText(row["year_level"].toString()), Qt::ElideRight, col8 - col7 - 5);
+        QString schoolId   = fm.elidedText(safeText(row["school_id"].toString()), Qt::ElideRight, col2 - col1 - vs(5));
+        QString name       = fm.elidedText(safeText(row["name"].toString()), Qt::ElideRight, col3 - col2 - vs(5));
+        QString gender     = fm.elidedText(safeText(row["gender"].toString()), Qt::ElideRight, col4 - col3 - vs(5));
+        QString status     = fm.elidedText(safeText(row["status"].toString()), Qt::ElideRight, col5 - col4 - vs(5));
+        QString course     = fm.elidedText(safeText(row["course"].toString()), Qt::ElideRight, col6 - col5 - vs(5));
+        QString department = fm.elidedText(safeText(row["department"].toString()), Qt::ElideRight, col7 - col6 - vs(5));
+        QString yearLevel  = fm.elidedText(safeText(row["year_level"].toString()), Qt::ElideRight, col8 - col7 - vs(5));
 
         painter.drawText(col1, y, schoolId);
         painter.drawText(col2, y, name);
@@ -423,15 +497,18 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
         painter.drawText(col7, y, yearLevel);
         painter.drawText(col8, y, QString::number(row["visits"].toInt()));
 
-        y += 20;
+        y += rowPitch;
         rowIndex++;
 
-        if (y > usableHeight - 200) {
+        if (y > usableHeight - vs(200)) {
             drawFooter(currentPage);
             device->newPage();
             currentPage++;
             y = margin;
             drawHeader(y);
+            // drawHeader leaves the font at Arial 9; restore the row font so
+            // continuation-page rows draw at the same Arial 10 that fm measures.
+            painter.setFont(QFont("Arial", 10));
         }
     }
 
@@ -450,7 +527,7 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
         qCDebug(lcReportRender) << "New page created for chart (" << label << "), page:" << currentPage;
 
         // Compute area for chart (leave space for footer)
-        const int bottomReserve = 60;
+        const int bottomReserve = vs(60);
         QRect targetArea(margin, y, usableWidth, pageHeight - y - margin - bottomReserve);
 
         // Scale preserving aspect ratio
@@ -470,23 +547,24 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
 
     QString chartChoice = filters["chartType"].toString();
 
-    // request chart images sized to the full usable area (so the chart is rendered at that resolution)
-    // Before calling chart generation functions, calculate appropriate sizes
-
+    // Chart raster sizes key off usableWidth via chartImageSize (bar/line = 5:3
+    // landscape, pie = square) so they scale with the page at any DPI — no fixed
+    // pixel height that would degenerate into a sliver. The chart makers size their
+    // fonts to the raster so labels stay legible once drawn onto the high-DPI page.
     if (chartChoice.contains("All", Qt::CaseInsensitive)) {
-        QSize barSize(usableWidth, 600);  // Wide rectangle for bar charts
-        QSize pieSize(700, 700);          // Square for pie charts
-        QSize lineSize(usableWidth, 600); // Wide rectangle for line charts
+        QSize barSize  = chartImageSize(usableWidth, false); // Wide rectangle for bar charts
+        QSize pieSize  = chartImageSize(usableWidth, true);  // Square for pie charts
+        QSize lineSize = chartImageSize(usableWidth, false); // Wide rectangle for line charts
 
         drawFullscreenChart("Bar Chart",  makeBarChartImage(data, barSize, palette));
         drawFullscreenChart("Pie Chart",  makePieChartImage(data, pieSize, palette));
         drawFullscreenChart("Line Chart", makeLineChartImage(data, lineSize, palette, info.openHour, info.closeHour));
     } else if (chartChoice.contains("Pie", Qt::CaseInsensitive)) {
-        QSize pieSize(700, 700);  // Square dimensions
+        QSize pieSize = chartImageSize(usableWidth, true);  // Square dimensions
         drawFullscreenChart("Pie Chart", makePieChartImage(data, pieSize, palette));
     } else {
         // For bar and line charts, use rectangular size
-        QSize rectSize(usableWidth, 600);
+        QSize rectSize = chartImageSize(usableWidth, false);
         if (chartChoice.contains("Bar", Qt::CaseInsensitive)) {
             drawFullscreenChart("Bar Chart", makeBarChartImage(data, rectSize, palette));
         } else if (chartChoice.contains("Line", Qt::CaseInsensitive)) {
@@ -501,24 +579,24 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
     device->newPage();
     currentPage++;
 
-    y = margin + 100;
+    y = margin + vs(100);
     drawHeader(y);
 
     painter.setFont(QFont("Arial", 11, QFont::Bold));
     painter.setPen(Qt::black);
-    painter.drawText(QRect(margin, y, pageWidth - 2*margin, 25),
+    painter.drawText(QRect(margin, y, pageWidth - 2*margin, vs(25)),
                      Qt::AlignCenter, QString("Prepared by: %1").arg(safeText(librarian)));
-    y += 25;
+    y += vs(25);
 
     painter.setFont(QFont("Arial", 10));
-    painter.drawText(QRect(margin, y, pageWidth - 2*margin, 20),
+    painter.drawText(QRect(margin, y, pageWidth - 2*margin, vs(20)),
                      Qt::AlignCenter, safeText(position));
-    y += 40;
+    y += vs(40);
 
-    int sigWidth = 240;
+    int sigWidth = vs(240);
     int sigX = (pageWidth - sigWidth) / 2;
     painter.drawLine(sigX, y, sigX + sigWidth, y);
-    painter.drawText(QRect(sigX, y + 5, sigWidth, 20), Qt::AlignCenter, "(Signature)");
+    painter.drawText(QRect(sigX, y + vs(5), sigWidth, vs(20)), Qt::AlignCenter, "(Signature)");
     drawFooter(currentPage);
 
     return true;

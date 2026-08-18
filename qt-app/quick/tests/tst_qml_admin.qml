@@ -12,10 +12,10 @@ Item {
     // Geometry ledger (x 0 column):   dash 0..760 | search 760..1460 |
     //   logs 1460..2160 | settings 2160..3760 | database 3800..4500
     //   | editDialog 4500..5200 | bulkEdit 5200..5900 | registerDialog 5900..6600
-    //   | importDialog 6600..7300 | reporting 7300..8100.
+    //   | importDialog 6600..7300 | reporting 7300..8300.
     // Parked no-vm column (x 2000): vmlessSearch 0..700 |
     //   vmlessLogs 760..1460 | vmlessSettings 1560..2260.
-    width: 1100; height: 8100
+    width: 1100; height: 8300
 
     // --- Dashboard stub VM ---
     // maxValue is declared on the stubs because the screen binds
@@ -2501,7 +2501,7 @@ Item {
         }
     }
 
-    // --- Reporting stub VM + screen (band y 7300..8100) ---
+    // --- Reporting stub VM + screen (band y 7300..8300) ---
     ListModel { id: reportRowsStub
         ListElement { name: "Maria Santos"; course: "BSCE"; year: "3"; visits: 42 }
         ListElement { name: "Jose Cruz"; course: "BSIT"; year: "1"; visits: 7 }
@@ -2538,6 +2538,22 @@ Item {
         property string topCourse: "BSCE"
         property int generateCount: 0
         property int loadDepartmentsCount: 0
+        property var palettes: ["Default", "Blue", "Green", "Red"]
+        property string palette: "Default"
+        property var chartTypes: ["Bar", "Pie"]
+        property string chartType: "Bar"
+        property bool canExport: true
+        property bool exporting: false
+        property string exportStatus: ""
+        property string exportError: ""
+        property int exportPdfCount: 0
+        property int exportExcelCount: 0
+        property int printCount: 0
+        function setPalette(p) { palette = p }
+        function setChartType(c) { chartType = c }
+        function exportPdf(u) { exportPdfCount++ }
+        function exportExcel(u) { exportExcelCount++ }
+        function printReport() { printCount++ }
         function loadDepartments() { loadDepartmentsCount++ }
         function setDepartment(d) { department = d; course = ""; canGenerate = (d !== "") }
         function setCourse(c) { course = c }
@@ -2552,10 +2568,10 @@ Item {
         function generateReport() { generateCount++ }
         function retry() { generateCount++ }
     }
-    ReportingScreen { id: reporting; x: 0; y: 7300; width: 1100; height: 800; vm: reportingStub }
+    ReportingScreen { id: reporting; x: 0; y: 7300; width: 1100; height: 1000; vm: reportingStub }
 
     // A vm-less instance to cover the `vm ? ... : ...` fallback path.
-    ReportingScreen { id: vmlessReporting; x: 2000; y: 7300; width: 1100; height: 800 }
+    ReportingScreen { id: vmlessReporting; x: 2000; y: 7300; width: 1100; height: 1000 }
 
     TestCase {
         name: "ReportingScreen"; when: windowShown
@@ -2564,6 +2580,13 @@ Item {
             reportingStub.loading = false;
             reportingStub.durationType = 0;
             reportingStub.hasResult = true;
+        }
+
+        function cleanup() {
+            if (reportRowsStub.count === 0) {
+                reportRowsStub.append({ name: "Maria Santos", course: "BSCE", year: "3", visits: 42 });
+                reportRowsStub.append({ name: "Jose Cruz", course: "BSIT", year: "1", visits: 7 });
+            }
         }
 
         function test_generateEnabledUnlessLoading() {
@@ -2609,6 +2632,59 @@ Item {
 
         function test_vmlessDoesNotCrash() {
             verify(vmlessReporting !== null, "vm-less screen instantiates");
+        }
+
+        function test_exportButtonsDisabledWhenCannotExport() {
+            reportingStub.canExport = false;
+            var pdf = findChild(reporting, "exportPdfButton");
+            var xls = findChild(reporting, "exportExcelButton");
+            var prn = findChild(reporting, "printButton");
+            verify(pdf && xls && prn);
+            verify(!pdf.enabled); verify(!xls.enabled); verify(!prn.enabled);
+        }
+
+        function test_exportButtonsFireVmMethods() {
+            reportingStub.canExport = true;
+            var prn = findChild(reporting, "printButton");
+            var before = reportingStub.printCount;
+            mouseClick(prn);
+            compare(reportingStub.printCount, before + 1);
+        }
+
+        function test_busyOverlayVisibleWhileExporting() {
+            var overlay = findChild(reporting, "exportBusyOverlay");
+            verify(overlay);
+            reportingStub.exporting = false; verify(!overlay.visible);
+            reportingStub.exporting = true;  verify(overlay.visible);
+            reportingStub.exporting = false;
+        }
+
+        function test_emptyStateShownWhenResultHasNoRows() {
+            reportingStub.hasResult = true;
+            reportRowsStub.clear();                 // count -> 0 (read-only: mutate the model, not the prop)
+            var empty = findChild(reporting, "exportEmptyState");
+            verify(empty);
+            verify(empty.visible);
+            // Restoration happens in cleanup() below, so a failed assert can't leave
+            // the model empty for later (alphabetically-ordered) tests.
+        }
+
+        function test_paletteComboHasAccessibleNameAndWrites() {
+            var combo = findChild(reporting, "paletteCombo");
+            verify(combo);
+            compare(combo.accessibleName, "Report palette");
+            combo.selectValue("Blue");
+            compare(reportingStub.palette, "Blue");
+            reportingStub.palette = "Default";
+        }
+
+        function test_exportErrorPersistsAsFeedback() {
+            reportingStub.exportError = "Couldn't write report.pdf";
+            var fb = findChild(reporting, "exportFeedback");
+            verify(fb);
+            verify(fb.visible);
+            verify(fb.text.indexOf("Couldn't write") >= 0);
+            reportingStub.exportError = "";
         }
     }
 

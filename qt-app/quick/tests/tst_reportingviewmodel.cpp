@@ -2,6 +2,11 @@
 #include <QDate>
 #include <QJsonObject>
 #include <QJsonDocument>
+#include <QSignalSpy>
+#include <QUrl>
+#include <QTemporaryDir>
+#include <QFileInfo>
+#include "xlsxdocument.h"
 #include "ReportingViewModel.h"
 
 class TestReportingViewModel : public QObject
@@ -38,6 +43,21 @@ private slots:
     void validationMessageClearsWhenFiltersComplete();
     void realFetchErrorNotAutoClearedByFilterChange();
     void buildFiltersAllowsEmptyDepartment();
+    void normalizeExportRowsCoercesVisitsToNumber();
+    void semesterWindowMatchesServerRanges();
+    void buildExportFiltersDayHasRangeAndLabels();
+    void buildExportFiltersSemesterUsesServerWindow();
+    void buildExportFiltersMonthSchoolYear();
+    void canExportTruthTable();
+    void paletteAndChartTypeSettersEmit();
+    void applyResultStoresNormalizedExportRows();
+    void failedRefetchDisablesExportAndClearsRows();
+    void exportPdfWritesFile();
+    void exportExcelWritesReadableCell();
+    void exportPdfEmptyRowsShowsNoDataError();
+    void exportPdfInvalidUrlShowsError();
+    void exportWhileExportingIsNoop();
+    void printReportEmptyRowsShowsNoDataError();
 };
 
 void TestReportingViewModel::buildFiltersDaySendsStringTypeAndRange()
@@ -371,6 +391,208 @@ void TestReportingViewModel::buildFiltersAllowsEmptyDepartment()
         "", "", 0, QDate(2026, 8, 14), 0, 0, "", 0, QDate(), QDate());
     QCOMPARE(f.value("department").toString(), QString());   // empty = all departments
     QVERIFY(f.contains("department"));
+}
+
+void TestReportingViewModel::normalizeExportRowsCoercesVisitsToNumber()
+{
+    const QJsonArray in = QJsonDocument::fromJson(R"([
+        {"name":"Ana","course":"BSIT","visits":"5","year_level":"3"},
+        {"name":"Ben","course":"BSCE","visits":8}
+    ])").array();
+    const QJsonArray out = ReportingViewModel::normalizeExportRows(in);
+    QCOMPARE(out.size(), 2);
+    QVERIFY(out.at(0).toObject().value("visits").isDouble());
+    QCOMPARE(out.at(0).toObject().value("visits").toInt(), 5);
+    QCOMPARE(out.at(1).toObject().value("visits").toInt(), 8);
+    QCOMPARE(out.at(0).toObject().value("course").toString(), QStringLiteral("BSIT"));
+    QCOMPARE(ReportingViewModel::normalizeExportRows(QJsonArray()).size(), 0);
+}
+
+void TestReportingViewModel::semesterWindowMatchesServerRanges()
+{
+    DateRange first = ReportingViewModel::semesterWindow("First Semester", 2026);
+    QVERIFY(first.valid);
+    QCOMPARE(first.start, QStringLiteral("2026-06-01"));
+    QCOMPARE(first.end,   QStringLiteral("2026-10-31"));
+
+    DateRange second = ReportingViewModel::semesterWindow("Second Semester", 2026);
+    QCOMPARE(second.start, QStringLiteral("2026-11-01"));
+    QCOMPARE(second.end,   QStringLiteral("2027-03-31"));   // crosses the year
+
+    DateRange summer = ReportingViewModel::semesterWindow("Summer", 2026);
+    QCOMPARE(summer.start, QStringLiteral("2026-04-01"));
+    QCOMPARE(summer.end,   QStringLiteral("2026-05-31"));
+
+    QVERIFY(!ReportingViewModel::semesterWindow("", 2026).valid);
+    QVERIFY(!ReportingViewModel::semesterWindow("First Semester", 0).valid);
+}
+
+void TestReportingViewModel::buildExportFiltersDayHasRangeAndLabels()
+{
+    const QJsonObject f = ReportingViewModel::buildExportFilters(
+        "", "", 0, QDate(2026, 8, 14), 0, 0, "", 0, QDate(), QDate(), "Bar");
+    QCOMPARE(f.value("department").toString(), QStringLiteral("All Departments"));
+    QCOMPARE(f.value("course").toString(),     QStringLiteral("All Courses"));
+    QCOMPARE(f.value("start").toString(),      QStringLiteral("2026-08-14"));
+    QCOMPARE(f.value("end").toString(),        QStringLiteral("2026-08-14"));
+    QCOMPARE(f.value("schoolYear").toString(), QStringLiteral("2026"));
+    QCOMPARE(f.value("chartType").toString(),  QStringLiteral("Bar"));
+}
+
+void TestReportingViewModel::buildExportFiltersSemesterUsesServerWindow()
+{
+    const QJsonObject f = ReportingViewModel::buildExportFilters(
+        "CE", "BSCE", 2, QDate(), 0, 0, "Second Semester", 2026, QDate(), QDate(), "Pie");
+    QCOMPARE(f.value("department").toString(), QStringLiteral("CE"));
+    QCOMPARE(f.value("course").toString(),     QStringLiteral("BSCE"));
+    QCOMPARE(f.value("start").toString(),      QStringLiteral("2026-11-01"));
+    QCOMPARE(f.value("end").toString(),        QStringLiteral("2027-03-31"));
+    QCOMPARE(f.value("schoolYear").toString(), QStringLiteral("2026"));
+    QCOMPARE(f.value("chartType").toString(),  QStringLiteral("Pie"));
+}
+
+void TestReportingViewModel::buildExportFiltersMonthSchoolYear()
+{
+    const QJsonObject f = ReportingViewModel::buildExportFilters(
+        "IT", "", 1, QDate(), 2, 2025, "", 0, QDate(), QDate(), "Bar");
+    QCOMPARE(f.value("start").toString(),      QStringLiteral("2025-02-01"));
+    QCOMPARE(f.value("end").toString(),        QStringLiteral("2025-02-28"));
+    QCOMPARE(f.value("schoolYear").toString(), QStringLiteral("2025"));
+}
+
+void TestReportingViewModel::canExportTruthTable()
+{
+    ReportingViewModel vm;
+    QVERIFY(!vm.canExport());                       // no result yet
+    const QJsonArray data = QJsonDocument::fromJson(
+        R"([{"name":"Ana","course":"BSIT","visits":"5"}])").array();
+    vm.onReportDataReady(data);                     // hasResult + rows>0, not loading/exporting
+    QVERIFY(vm.canExport());
+    vm.onReportDataReady(QJsonArray());             // hasResult true but zero rows
+    QVERIFY(!vm.canExport());
+}
+
+void TestReportingViewModel::paletteAndChartTypeSettersEmit()
+{
+    ReportingViewModel vm;
+    QCOMPARE(vm.palette(), QStringLiteral("Default"));
+    QCOMPARE(vm.chartType(), QStringLiteral("Bar"));
+    QSignalSpy pSpy(&vm, &ReportingViewModel::paletteChanged);
+    QSignalSpy cSpy(&vm, &ReportingViewModel::chartTypeChanged);
+    vm.setPalette("Blue");
+    vm.setChartType("Pie");
+    QCOMPARE(vm.palette(), QStringLiteral("Blue"));
+    QCOMPARE(vm.chartType(), QStringLiteral("Pie"));
+    QCOMPARE(pSpy.count(), 1);
+    QCOMPARE(cSpy.count(), 1);
+    QCOMPARE(vm.palettes().size(), 4);
+    QCOMPARE(vm.chartTypes().size(), 2);
+}
+
+void TestReportingViewModel::applyResultStoresNormalizedExportRows()
+{
+    ReportingViewModel vm;
+    const QJsonArray data = QJsonDocument::fromJson(
+        R"([{"name":"Ana","course":"BSIT","visits":"5"}])").array();
+    vm.onReportDataReady(data);
+    QVERIFY(vm.canExport());   // rows stored + hasResult
+}
+
+void TestReportingViewModel::failedRefetchDisablesExportAndClearsRows()
+{
+    ReportingViewModel vm;
+    vm.onReportDataReady(QJsonDocument::fromJson(
+        R"([{"name":"Ana","course":"BSIT","visits":"5"}])").array());
+    QVERIFY(vm.canExport());                 // a clean result
+
+    // Change filters, then fire a new fetch that fails.
+    vm.setDurationType(0);
+    vm.setDay(QStringLiteral("2026-08-14")); // filtersComplete
+    vm.generateReport();                     // setLoading(true): clears m_exportRows, loading
+    QVERIFY(!vm.canExport());                // gated while loading
+    vm.onReportError(QStringLiteral("Server error"), false);   // loading=false, errorText set
+    QVERIFY(!vm.canExport());                // errorText non-empty AND rows cleared
+    // (Task 6 adds the complementary assertion that exportPdf then hits the
+    // "No data" guard — exportPdf does not exist yet in Task 5.)
+}
+
+void TestReportingViewModel::exportPdfWritesFile()
+{
+    ReportingViewModel vm;
+    vm.onReportDataReady(QJsonDocument::fromJson(
+        R"([{"school_id":"1","name":"Ana","gender":"F","status":"Regular",
+             "course":"BSIT","department":"IT","year_level":"3","visits":"5"}])").array());
+    QTemporaryDir dir;
+    const QString path = dir.filePath("report.pdf");
+    vm.exportPdf(QUrl::fromLocalFile(path));
+    QTRY_VERIFY(!vm.exporting());                 // queued render completes
+    QVERIFY(QFileInfo::exists(path));
+    QFile f(path); QVERIFY(f.open(QIODevice::ReadOnly));
+    QCOMPARE(f.read(4), QByteArray("%PDF"));
+    QVERIFY(!vm.exportStatus().isEmpty());
+    QVERIFY(vm.exportError().isEmpty());
+}
+
+void TestReportingViewModel::exportExcelWritesReadableCell()
+{
+    ReportingViewModel vm;
+    vm.onReportDataReady(QJsonDocument::fromJson(
+        R"([{"school_id":"1","name":"Ana","gender":"F","status":"Regular",
+             "course":"BSIT","department":"IT","year_level":"3","visits":"5"}])").array());
+    QTemporaryDir dir;
+    const QString path = dir.filePath("report.xlsx");
+    vm.exportExcel(QUrl::fromLocalFile(path));
+    QTRY_VERIFY(!vm.exporting());
+    QVERIFY(QFileInfo::exists(path));
+    QXlsx::Document doc(path);
+    QVERIFY(doc.load());
+    // The student name lands somewhere in the sheet's table body.
+    bool foundName = false;
+    for (int r = 1; r <= 40 && !foundName; ++r)
+        for (int c = 1; c <= 8; ++c)
+            if (doc.read(r, c).toString() == QStringLiteral("Ana")) { foundName = true; break; }
+    QVERIFY(foundName);
+}
+
+void TestReportingViewModel::exportPdfEmptyRowsShowsNoDataError()
+{
+    ReportingViewModel vm;   // never generated -> m_exportRows empty
+    QTemporaryDir dir;
+    vm.exportPdf(QUrl::fromLocalFile(dir.filePath("x.pdf")));
+    QVERIFY(vm.exportError().contains(QStringLiteral("No data")));
+    QVERIFY(!vm.exporting());
+}
+
+void TestReportingViewModel::exportPdfInvalidUrlShowsError()
+{
+    ReportingViewModel vm;
+    vm.onReportDataReady(QJsonDocument::fromJson(
+        R"([{"name":"Ana","course":"BSIT","visits":"5"}])").array());
+    vm.exportPdf(QUrl("https://example.com/x.pdf"));   // non-file URL -> empty local path
+    QVERIFY(!vm.exportError().isEmpty());
+    QVERIFY(!vm.exporting());
+}
+
+void TestReportingViewModel::exportWhileExportingIsNoop()
+{
+    ReportingViewModel vm;
+    vm.onReportDataReady(QJsonDocument::fromJson(
+        R"([{"name":"Ana","course":"BSIT","visits":"5"}])").array());
+    QTemporaryDir dir;
+    vm.exportPdf(QUrl::fromLocalFile(dir.filePath("a.pdf")));   // sets exporting=true (queued)
+    QVERIFY(vm.exporting());
+    const QString before = vm.exportError();
+    vm.exportExcel(QUrl::fromLocalFile(dir.filePath("b.xlsx")));   // must no-op while exporting
+    QCOMPARE(vm.exportError(), before);
+    QTRY_VERIFY(!vm.exporting());                               // first export drains
+}
+
+void TestReportingViewModel::printReportEmptyRowsShowsNoDataError()
+{
+    ReportingViewModel vm;   // no rows -> must not open a dialog
+    vm.printReport();
+    QVERIFY(vm.exportError().contains(QStringLiteral("No data")));
+    QVERIFY(!vm.exporting());
 }
 
 QTEST_MAIN(TestReportingViewModel)

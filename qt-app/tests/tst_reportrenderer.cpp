@@ -1,6 +1,9 @@
 #include <QtTest>
+#include <QFont>
+#include <QFontMetrics>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QPainter>
 #include <QPdfWriter>
 #include <QTemporaryDir>
 #include <QFileInfo>
@@ -19,6 +22,9 @@ private slots:
     void makeBarChartImage_nonNullAtSize();
     void makePieChartImage_nonNullAtSize();
     void makeLineChartImage_nonNullAtSize();
+    void chartImageSize_scalesWithWidthNotFixedHeight();
+    void scaledPx_scalesFrom96DpiBaseline();
+    void rowAdvanceClearsFontHeightAtDefaultPdfDpi();
     void paintReport_writesPdf();
     void writeReportToXlsx_populatesCells();
 
@@ -126,6 +132,53 @@ void TstReportRenderer::makeLineChartImage_nonNullAtSize() {
     const QImage img = ReportRenderer::makeLineChartImage(sampleVisits(), QSize(400, 300), pal, 7, 21);
     QVERIFY(!img.isNull());
     QCOMPARE(img.size(), QSize(400, 300));
+}
+
+// The sliver bug: chart heights were a fixed 600px literal while usableWidth is
+// device-scaled (~9008px at 1200 DPI), yielding a ~15:1 strip that KeepAspectRatio
+// shrank to a half-inch band. chartImageSize keys the height off usableWidth so the
+// aspect ratio stays sane (5:3 landscape / square) at any DPI — no fixed 600.
+void TstReportRenderer::chartImageSize_scalesWithWidthNotFixedHeight() {
+    // Screen-adaptive: a QChartView is a QWidget clamped to the physical screen,
+    // so the render size fits the available screen (never exceeds the base) and is
+    // upscaled to the page later. usableWidth is ignored. Assert invariants that
+    // hold regardless of the machine the test runs on.
+    const QSize bar = ReportRenderer::chartImageSize(9000, false);
+    const QSize pie = ReportRenderer::chartImageSize(9000, true);
+    QVERIFY(!bar.isEmpty() && !pie.isEmpty());
+    QVERIFY(bar.width() <= 1600 && bar.height() <= 1000);   // never exceeds the screen-safe base
+    QVERIFY(pie.width() == pie.height());                   // pie is square
+    const double aspect = double(bar.width()) / bar.height();
+    QVERIFY(aspect > 1.2 && aspect < 2.0);                  // sane landscape aspect, no sliver
+    QCOMPARE(ReportRenderer::chartImageSize(500, false), bar); // ignores usableWidth
+}
+
+// The overlap fix scales every legacy ~96-DPI pixel literal by resolution/96.
+// This pins the arithmetic at the DPIs that matter: 96 (baseline, identity),
+// 1200 (QPdfWriter default, where the bug bit), and 72 (down-scale).
+void TstReportRenderer::scaledPx_scalesFrom96DpiBaseline() {
+    QCOMPARE(ReportRenderer::scaledPx(20, 96), 20);
+    QCOMPARE(ReportRenderer::scaledPx(20, 1200), 250);
+    QCOMPARE(ReportRenderer::scaledPx(25, 1200), 313);   // qRound(25*12.5)=313
+    QCOMPARE(ReportRenderer::scaledPx(20, 72), 15);
+}
+
+// Ties the helper to the metric that caused the overlap: at the QPdfWriter
+// default 1200 DPI the legacy raw 20px row advance is far below the row font's
+// glyph box, so rows print on top of each other. The scaled advance clears it.
+void TstReportRenderer::rowAdvanceClearsFontHeightAtDefaultPdfDpi() {
+    QTemporaryDir dir;
+    QVERIFY(dir.isValid());
+    {
+        QPdfWriter pdf(dir.filePath("metrics.pdf"));
+        pdf.setResolution(1200);
+        QPainter p(&pdf);
+        p.setFont(QFont("Arial", 10));            // the table row font
+        const QFontMetrics fm = p.fontMetrics();
+        QVERIFY(20 < fm.height());                                   // documents the legacy overlap: raw 20px < glyph box
+        QVERIFY(ReportRenderer::scaledPx(20, 1200) >= fm.height());  // the fix clears the glyph box
+        p.end();                                  // end painter before QPdfWriter is destroyed
+    }
 }
 
 void TstReportRenderer::paintReport_writesPdf() {

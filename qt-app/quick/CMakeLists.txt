@@ -107,6 +107,7 @@ target_link_libraries(witsquickmodule PUBLIC
     Qt${QT_VERSION_MAJOR}::QuickControls2
     Qt${QT_VERSION_MAJOR}::QuickDialogs2
     Qt${QT_VERSION_MAJOR}::Gui
+    Qt${QT_VERSION_MAJOR}::PrintSupport
 )
 
 # Exposes the quick/ root on witsquickmodule's PUBLIC include path so
@@ -139,6 +140,7 @@ target_link_libraries(WITSQuick PRIVATE
     witsquickmodule
     witsquickmoduleplugin
     witsquickmoduleplugin_init
+    Qt${QT_VERSION_MAJOR}::Widgets
 )
 set_target_properties(WITSQuick PROPERTIES WIN32_EXECUTABLE TRUE)
 

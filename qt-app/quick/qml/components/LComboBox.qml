@@ -20,6 +20,7 @@ Item {
     property alias model: combo.model
     property string placeholder: ""
     property string currentValue: ""
+    property string accessibleName: ""
     property alias count: combo.count
     // `color` alias so the theme-token test reads the background fill directly.
     property alias color: bg.color
@@ -38,6 +39,9 @@ Item {
         id: combo
         anchors.fill: parent
         currentIndex: -1
+
+        Accessible.role: Accessible.ComboBox
+        Accessible.name: root.accessibleName
 
         font.family: Theme.typography.sans
         font.pixelSize: Theme.typography.body

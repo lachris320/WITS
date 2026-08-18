@@ -1,5 +1,7 @@
 import QtQuick
 import QtQuick.Layouts
+import QtQuick.Controls
+import QtQuick.Dialogs
 import LOAMS
 
 // Reporting (spec 4b-i): Dept->Course + duration filters and a native-QML
@@ -7,6 +9,8 @@ import LOAMS
 // by an explicit Generate button. Takes `property var vm` (a ReportingViewModel
 // or a plain-QML stub in QuickTests). No Component.onCompleted fetch — the
 // initial bootstrap is issued by AdminScreen's Loader.onLoaded gate.
+// Also hosts the 4b-ii export bar (palette + chart-type pickers, PDF/Excel/Print
+// actions) alongside the preview.
 Rectangle {
     id: screen
     property var vm
@@ -15,6 +19,7 @@ Rectangle {
     readonly property bool isLoading: vm ? vm.loading : false
     readonly property bool isError: vm ? vm.errorText.length > 0 : false
     readonly property bool showPreview: vm ? (vm.hasResult && !screen.isError) : false
+    readonly property bool canExport: vm ? vm.canExport : false
 
     ColumnLayout {
         anchors.fill: parent
@@ -231,6 +236,138 @@ Rectangle {
                 ]
                 model: screen.vm ? screen.vm.rows : null
                 emptyStateText: qsTr("No visits in this range")
+            }
+        }
+
+        // --- Export bar (visible only when there is a non-empty result) ---
+        Rectangle {
+            Layout.fillWidth: true
+            visible: screen.vm ? (screen.vm.hasResult && screen.vm.rows && screen.vm.rows.count > 0) : false
+            color: Theme.card; radius: Theme.radius.card
+            border.width: 2; border.color: Theme.border
+            implicitHeight: exportRow.implicitHeight + Theme.spacing.xl * 2
+
+            RowLayout {
+                id: exportRow
+                anchors.fill: parent
+                anchors.margins: Theme.spacing.xl
+                spacing: Theme.spacing.md
+
+                LComboBox {
+                    id: paletteCombo
+                    objectName: "paletteCombo"
+                    accessibleName: qsTr("Report palette")
+                    Layout.preferredWidth: 150
+                    model: screen.vm ? screen.vm.palettes : []
+                    placeholder: qsTr("Palette")
+                    currentValue: screen.vm ? screen.vm.palette : "Default"
+                    onSelected: function(v) { if (screen.vm) screen.vm.setPalette(v); }
+                }
+                LComboBox {
+                    id: chartTypeCombo
+                    objectName: "chartTypeCombo"
+                    accessibleName: qsTr("Chart type")
+                    Layout.preferredWidth: 150
+                    model: screen.vm ? screen.vm.chartTypes : []
+                    placeholder: qsTr("Chart")
+                    currentValue: screen.vm ? screen.vm.chartType : "Bar"
+                    onSelected: function(v) { if (screen.vm) screen.vm.setChartType(v); }
+                }
+
+                Item { Layout.fillWidth: true }   // spacer
+
+                // Design OS §4.5: disabled controls expose WHY via Accessible.description.
+                LButton {
+                    objectName: "exportPdfButton"
+                    text: qsTr("Export PDF")
+                    accessibleName: qsTr("Export PDF")
+                    enabled: screen.canExport
+                    Accessible.description: screen.canExport ? "" : qsTr("Generate a report with results to enable export")
+                    onClicked: exportPdfDialog.open()
+                }
+                LButton {
+                    objectName: "exportExcelButton"
+                    text: qsTr("Export Excel")
+                    accessibleName: qsTr("Export Excel")
+                    variant: "Outline"
+                    enabled: screen.canExport
+                    Accessible.description: screen.canExport ? "" : qsTr("Generate a report with results to enable export")
+                    onClicked: exportExcelDialog.open()
+                }
+                LButton {
+                    objectName: "printButton"
+                    text: qsTr("Print")
+                    accessibleName: qsTr("Print report")
+                    variant: "Outline"
+                    enabled: screen.canExport
+                    Accessible.description: screen.canExport ? "" : qsTr("Generate a report with results to enable export")
+                    onClicked: if (screen.vm) screen.vm.printReport()
+                }
+            }
+        }
+
+        // Empty-state affordance (Design OS #4): a report was generated but has no rows.
+        Text {
+            objectName: "exportEmptyState"
+            Layout.fillWidth: true
+            visible: screen.vm ? (screen.vm.hasResult && (!screen.vm.rows || screen.vm.rows.count === 0)) : false
+            text: qsTr("No data to export. Adjust the filters and generate a report with results.")
+            textFormat: Text.PlainText
+            color: Theme.mutedTextCaption
+            font.family: Theme.typography.sans
+            font.pixelSize: Theme.typography.body
+            wrapMode: Text.WordWrap
+        }
+
+        // Export feedback: transient success / persistent error (Design OS #5).
+        Text {
+            objectName: "exportFeedback"
+            Layout.fillWidth: true
+            visible: text.length > 0
+            text: screen.vm ? (screen.vm.exportError.length > 0 ? screen.vm.exportError : screen.vm.exportStatus) : ""
+            textFormat: Text.PlainText
+            color: (screen.vm && screen.vm.exportError.length > 0) ? Theme.error : Theme.text
+            font.family: Theme.typography.sans
+            font.pixelSize: Theme.typography.body
+            wrapMode: Text.WordWrap
+        }
+
+        FileDialog {
+            id: exportPdfDialog
+            fileMode: FileDialog.SaveFile
+            nameFilters: [qsTr("PDF document (*.pdf)")]
+            defaultSuffix: "pdf"
+            onAccepted: if (screen.vm) screen.vm.exportPdf(selectedFile)
+        }
+        FileDialog {
+            id: exportExcelDialog
+            fileMode: FileDialog.SaveFile
+            nameFilters: [qsTr("Excel workbook (*.xlsx)")]
+            defaultSuffix: "xlsx"
+            onAccepted: if (screen.vm) screen.vm.exportExcel(selectedFile)
+        }
+    }
+
+    // Export busy overlay — blocks input; announces progress (Design OS #7/a11y).
+    Rectangle {
+        objectName: "exportBusyOverlay"
+        anchors.fill: parent
+        visible: screen.vm ? screen.vm.exporting : false
+        color: Qt.alpha(Theme.appBackground, 0.7)
+        z: 100
+        Accessible.role: Accessible.Indicator
+        Accessible.name: qsTr("Exporting report")
+        MouseArea { anchors.fill: parent }   // swallow clicks
+        ColumnLayout {
+            anchors.centerIn: parent
+            spacing: Theme.spacing.md
+            BusyIndicator { running: parent.visible; Layout.alignment: Qt.AlignHCenter }
+            Text {
+                text: qsTr("Exporting…")
+                textFormat: Text.PlainText
+                color: Theme.text
+                font.family: Theme.typography.sans
+                font.pixelSize: Theme.typography.body
             }
         }
     }
