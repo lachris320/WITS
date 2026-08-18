@@ -57,6 +57,7 @@ private slots:
     void exportPdfEmptyRowsShowsNoDataError();
     void exportPdfInvalidUrlShowsError();
     void exportWhileExportingIsNoop();
+    void printReportEmptyRowsShowsNoDataError();
 };
 
 void TestReportingViewModel::buildFiltersDaySendsStringTypeAndRange()
@@ -584,6 +585,14 @@ void TestReportingViewModel::exportWhileExportingIsNoop()
     vm.exportExcel(QUrl::fromLocalFile(dir.filePath("b.xlsx")));   // must no-op while exporting
     QCOMPARE(vm.exportError(), before);
     QTRY_VERIFY(!vm.exporting());                               // first export drains
+}
+
+void TestReportingViewModel::printReportEmptyRowsShowsNoDataError()
+{
+    ReportingViewModel vm;   // no rows -> must not open a dialog
+    vm.printReport();
+    QVERIFY(vm.exportError().contains(QStringLiteral("No data")));
+    QVERIFY(!vm.exporting());
 }
 
 QTEST_MAIN(TestReportingViewModel)

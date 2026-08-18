@@ -5,6 +5,8 @@
 #include <QNetworkAccessManager>
 #include <QPageSize>
 #include <QPdfWriter>
+#include <QPrintDialog>
+#include <QPrinter>
 #include <QUrl>
 #include <algorithm>
 #include "appsettings.h"
@@ -459,6 +461,28 @@ void ReportingViewModel::exportPdf(const QUrl &fileUrl)
             setExportError(tr("Couldn't write %1 — choose a different location.").arg(QFileInfo(path).fileName()));
         setExporting(false);
     }, Qt::QueuedConnection);
+}
+
+void ReportingViewModel::printReport()
+{
+    if (m_exporting) return;
+    if (m_exportRows.isEmpty()) {
+        setExportError(tr("No data to export. Adjust the filters and generate a report with results."));
+        return;
+    }
+    // Opening the dialog is NOT "exporting" — the normal UI stays live.
+    QPrinter printer(QPrinter::HighResolution);
+    QPrintDialog dlg(&printer);
+    if (dlg.exec() != QDialog::Accepted)
+        return;   // cancelled -> no-op, no error, no busy state
+    setExportError(QString());
+    setExporting(true);   // now rendering begins
+    const bool ok = renderToDevice(&printer, printer.resolution());
+    if (ok)
+        setExportStatus(tr("Sent to printer"));
+    else
+        setExportError(tr("Couldn't print the report."));
+    setExporting(false);
 }
 
 void ReportingViewModel::exportExcel(const QUrl &fileUrl)

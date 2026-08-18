@@ -131,6 +131,7 @@ public:
     Q_INVOKABLE void retry();                     // Task 6
     Q_INVOKABLE void exportPdf(const QUrl &fileUrl);
     Q_INVOKABLE void exportExcel(const QUrl &fileUrl);
+    Q_INVOKABLE void printReport();
 
     // Public slots (network-free test seam) — wired to ReportController in Task 5/6.
     void onDepartmentsLoaded(const QStringList &departments);
