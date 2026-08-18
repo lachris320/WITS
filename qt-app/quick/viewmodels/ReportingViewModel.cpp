@@ -123,6 +123,28 @@ ReportingViewModel::Tiles ReportingViewModel::deriveTiles(const QJsonArray &data
     return t;
 }
 
+DateRange ReportingViewModel::semesterWindow(const QString &semester, int year)
+{
+    DateRange r;
+    if (year <= 0)
+        return r;   // invalid
+    const QString s = semester.toLower();
+    if (s.contains(QStringLiteral("first"))) {
+        r.start = QStringLiteral("%1-06-01").arg(year);
+        r.end   = QStringLiteral("%1-10-31").arg(year);
+        r.valid = true;
+    } else if (s.contains(QStringLiteral("second"))) {
+        r.start = QStringLiteral("%1-11-01").arg(year);
+        r.end   = QStringLiteral("%1-03-31").arg(year + 1);
+        r.valid = true;
+    } else if (s.contains(QStringLiteral("summer"))) {
+        r.start = QStringLiteral("%1-04-01").arg(year);
+        r.end   = QStringLiteral("%1-05-31").arg(year);
+        r.valid = true;
+    }
+    return r;   // unknown label -> valid stays false
+}
+
 bool ReportingViewModel::filtersComplete() const
 {
     // Department is OPTIONAL (empty = all departments; the backend treats an

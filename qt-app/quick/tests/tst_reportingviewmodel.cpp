@@ -39,6 +39,7 @@ private slots:
     void realFetchErrorNotAutoClearedByFilterChange();
     void buildFiltersAllowsEmptyDepartment();
     void normalizeExportRowsCoercesVisitsToNumber();
+    void semesterWindowMatchesServerRanges();
 };
 
 void TestReportingViewModel::buildFiltersDaySendsStringTypeAndRange()
@@ -387,6 +388,25 @@ void TestReportingViewModel::normalizeExportRowsCoercesVisitsToNumber()
     QCOMPARE(out.at(1).toObject().value("visits").toInt(), 8);
     QCOMPARE(out.at(0).toObject().value("course").toString(), QStringLiteral("BSIT"));
     QCOMPARE(ReportingViewModel::normalizeExportRows(QJsonArray()).size(), 0);
+}
+
+void TestReportingViewModel::semesterWindowMatchesServerRanges()
+{
+    DateRange first = ReportingViewModel::semesterWindow("First Semester", 2026);
+    QVERIFY(first.valid);
+    QCOMPARE(first.start, QStringLiteral("2026-06-01"));
+    QCOMPARE(first.end,   QStringLiteral("2026-10-31"));
+
+    DateRange second = ReportingViewModel::semesterWindow("Second Semester", 2026);
+    QCOMPARE(second.start, QStringLiteral("2026-11-01"));
+    QCOMPARE(second.end,   QStringLiteral("2027-03-31"));   // crosses the year
+
+    DateRange summer = ReportingViewModel::semesterWindow("Summer", 2026);
+    QCOMPARE(summer.start, QStringLiteral("2026-04-01"));
+    QCOMPARE(summer.end,   QStringLiteral("2026-05-31"));
+
+    QVERIFY(!ReportingViewModel::semesterWindow("", 2026).valid);
+    QVERIFY(!ReportingViewModel::semesterWindow("First Semester", 0).valid);
 }
 
 QTEST_MAIN(TestReportingViewModel)

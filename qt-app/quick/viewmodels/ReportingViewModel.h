@@ -10,6 +10,7 @@
 #include <qqml.h>                 // QML_ELEMENT — AdminScreen instantiates this type
 #include "BarsModel.h"
 #include "ReportRowsModel.h"
+#include "reportdata.h"            // DateRange — return type of semesterWindow()
 
 class QNetworkAccessManager;
 class ReportController;
@@ -58,6 +59,8 @@ public:
     struct Tiles { int totalVisits = 0; int studentsShown = 0; QString topCourse; };
     static Tiles deriveTiles(const QJsonArray &data);                             // Task 3
     static QJsonArray normalizeExportRows(const QJsonArray &data);   // visits string -> number
+    // Display-only Period for a semester, matching get_report_data.php's server windows.
+    static DateRange semesterWindow(const QString &semester, int year);
 
     QStringList departments() const { return m_departments; }
     QStringList courses() const { return m_courses; }
