@@ -1061,9 +1061,16 @@ function printReport() { printCount++ }
 
 The screen reads emptiness via `screen.vm.rows.count`, and the stub's `rows` is `reportRowsStub` — a real `ListModel` (`tst_qml_admin.qml:2505`) whose `count` is **read-only**. Do NOT add or assign a `count` property to it and do NOT introduce a `rowsCount` prop the screen never binds. Drive the empty case with `reportRowsStub.clear()` and restore it by re-appending the two original `ListElement`s (the preview/table tests need `rows` to stay a real model, so it can't be swapped for a plain `QtObject`).
 
-Add these test functions to the `ReportingScreen` `TestCase` (raise the fixture height in Step 3 so the bar is laid out and hit-testable):
+Add these test functions to the `ReportingScreen` `TestCase` (raise the fixture height in Step 3 so the bar is laid out and hit-testable). First add a `cleanup()` that always restores the shared `reportRowsStub` to its two original rows, so a failing assertion in the empty-state test can't leave the model empty for later tests in the case:
 
 ```qml
+function cleanup() {
+    if (reportRowsStub.count === 0) {
+        reportRowsStub.append({ name: "Maria Santos", course: "BSCE", year: "3", visits: 42 });
+        reportRowsStub.append({ name: "Jose Cruz", course: "BSIT", year: "1", visits: 7 });
+    }
+}
+
 function test_exportButtonsDisabledWhenCannotExport() {
     reportingStub.canExport = false;
     var pdf = findChild(reporting, "exportPdfButton");
@@ -1095,9 +1102,8 @@ function test_emptyStateShownWhenResultHasNoRows() {
     var empty = findChild(reporting, "exportEmptyState");
     verify(empty);
     verify(empty.visible);
-    // Restore the two original rows for the other tests in this TestCase.
-    reportRowsStub.append({ name: "Maria Santos", course: "BSCE", year: "3", visits: 42 });
-    reportRowsStub.append({ name: "Jose Cruz", course: "BSIT", year: "1", visits: 7 });
+    // Restoration happens in cleanup() below, so a failed assert can't leave
+    // the model empty for later (alphabetically-ordered) tests.
 }
 
 function test_paletteComboHasAccessibleNameAndWrites() {
