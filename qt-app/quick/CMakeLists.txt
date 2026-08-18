@@ -139,6 +139,7 @@ target_link_libraries(WITSQuick PRIVATE
     witsquickmodule
     witsquickmoduleplugin
     witsquickmoduleplugin_init
+    Qt${QT_VERSION_MAJOR}::Widgets
 )
 set_target_properties(WITSQuick PROPERTIES WIN32_EXECUTABLE TRUE)
 
