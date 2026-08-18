@@ -21,6 +21,12 @@ class QChart;
 class ReportRenderer
 {
 public:
+    // Scales a legacy ~96-DPI pixel literal to the paged device's `resolution`,
+    // so a layout tuned at 96 DPI keeps the same physical proportions at any DPI
+    // (QPdfWriter defaults to 1200). Fonts are point-sized and scale on their
+    // own; this is for the raw device-pixel advances/rects that do not.
+    static int scaledPx(double basePx, int resolution);
+
     // Pure aggregation helpers (factored out of the chart makers).
     static QMap<QString, int>           aggregateVisitsByCourse(const QJsonArray &data);
     static QMap<QString, QMap<int, int>> aggregateVisitsByCourseHour(const QJsonArray &data,

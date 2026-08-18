@@ -32,6 +32,15 @@
 //   QT_LOGGING_RULES="wits.report.render.debug=true"
 Q_LOGGING_CATEGORY(lcReportRender, "wits.report.render", QtInfoMsg)
 
+// Scales a legacy ~96-DPI pixel literal to the paged device's resolution.
+// paintReport's vertical advances/rects were raw device-pixel literals tuned
+// for ~96 DPI; on a QPdfWriter (1200 DPI default) they no longer clear the
+// point-sized glyph boxes, so rows overlapped. Scaling by resolution/96 keeps
+// the original 96-DPI proportions at any DPI.
+int ReportRenderer::scaledPx(double basePx, int resolution) {
+    return qRound(basePx * resolution / 96.0);
+}
+
 // Factored out of make{Bar,Pie}ChartImage's aggregation loop (legacy cpp:125-131 / 193-199).
 QMap<QString, int> ReportRenderer::aggregateVisitsByCourse(const QJsonArray &data) {
     QMap<QString, int> courseCounts;
@@ -276,6 +285,11 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
         return clean;
     };
 
+    // Scales a legacy ~96-DPI pixel literal to this device's resolution, so every
+    // vertical advance/rect below keeps its original 96-DPI proportion at any DPI
+    // (QPdfWriter defaults to 1200; raw literals overlapped there — see scaledPx).
+    auto vs = [&](double px) { return ReportRenderer::scaledPx(px, resolution); };
+
     QRectF pageRect = device->pageLayout().paintRectPixels(resolution);
     int pageWidth  = pageRect.width();
     int pageHeight = pageRect.height();
@@ -294,15 +308,15 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
         painter.setPen(Qt::black);
 
         // Left side: system-generated text
-        painter.drawText(QRect(margin, pageHeight - margin - 20,
-                               usableWidth, 20),
+        painter.drawText(QRect(margin, pageHeight - margin - vs(20),
+                               usableWidth, vs(20)),
                          Qt::AlignLeft | Qt::AlignVCenter,
                          "This is a system generated report. LOAMS.2 (Library Occupancy and Attendance Monitoring System), WITS 2016.");
 
         // Right side: page number
         QString footerText = QString("Page %1").arg(pageNum);
-        painter.drawText(QRect(margin, pageHeight - margin - 20,
-                               usableWidth, 20),
+        painter.drawText(QRect(margin, pageHeight - margin - vs(20),
+                               usableWidth, vs(20)),
                          Qt::AlignRight | Qt::AlignVCenter, footerText);
     };
 
@@ -329,28 +343,28 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
             }
         }
 
-        int textLeft = margin + logoSize + 15;
-        int textWidth = usableWidth - logoSize - 15;
+        int textLeft = margin + logoSize + vs(15);
+        int textWidth = usableWidth - logoSize - vs(15);
 
         painter.setFont(QFont("Times New Roman", 16, QFont::Bold));
-        painter.drawText(QRect(textLeft, y, textWidth, 30),
+        painter.drawText(QRect(textLeft, y, textWidth, vs(30)),
                          Qt::AlignLeft | Qt::AlignVCenter, safeText(schoolName));
 
         painter.setFont(QFont("Times New Roman", 11));
-        painter.drawText(QRect(textLeft, y + 25, textWidth, 30),
+        painter.drawText(QRect(textLeft, y + vs(25), textWidth, vs(30)),
                          Qt::AlignLeft | Qt::AlignVCenter, safeText(address));
 
         QString dateStr = QDate::currentDate().toString("dddd, MMMM d, yyyy");
         QString timeStr = QTime::currentTime().toString("hh:mm:ss AP");
         painter.setFont(QFont("Arial", 9));
-        painter.drawText(QRect(margin, y, usableWidth, 20), Qt::AlignRight, dateStr);
-        painter.drawText(QRect(margin, y + 15, usableWidth, 20), Qt::AlignRight, timeStr);
+        painter.drawText(QRect(margin, y, usableWidth, vs(20)), Qt::AlignRight, dateStr);
+        painter.drawText(QRect(margin, y + vs(15), usableWidth, vs(20)), Qt::AlignRight, timeStr);
 
         // Line under header
-        y += logoSize + 20;
+        y += logoSize + vs(20);
         painter.setPen(Qt::black);
         painter.drawLine(margin, y, pageWidth - margin, y);
-        y += 30;  // spacing after header
+        y += vs(30);  // spacing after header
     };
     drawHeader(y);
 
@@ -363,8 +377,8 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
                               .arg(safeText(filters["start"].toString()))
                               .arg(safeText(filters["end"].toString()))
                               .arg(safeText(filters["schoolYear"].toString()));
-    painter.drawText(QRect(margin, y, usableWidth, 30), Qt::AlignLeft, filtersLine);
-    y += 40;
+    painter.drawText(QRect(margin, y, usableWidth, vs(30)), Qt::AlignLeft, filtersLine);
+    y += vs(40);
 
     // ===== TABLE =====
 
@@ -378,8 +392,15 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
     int col7 = margin + (usableWidth * 0.85);            // Year Level
     int col8 = margin + (usableWidth * 0.95);            // Visits
 
+    // Row rhythm: pin the row font, then floor the per-row advance at the glyph
+    // box (height + a little leading) so variable-length data never overlaps even
+    // after the DPI scaling above — this is the guard against the original bug.
+    painter.setFont(QFont("Arial", 10));
+    const QFontMetrics fm = painter.fontMetrics();
+    const int rowPitch = qMax(vs(20), fm.height() + vs(4));
+
     // --- Draw header row ---
-    painter.fillRect(QRect(margin, y - 15, usableWidth, 20), palette.headerBg);
+    painter.fillRect(QRect(margin, y - vs(15), usableWidth, vs(20)), palette.headerBg);
     painter.setPen(palette.headerText);
 
     painter.drawText(col1, y, "School ID");
@@ -391,28 +412,28 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
     painter.drawText(col7, y, "Year Level");
     painter.drawText(col8, y, "Visits");
 
-    y += 25;
+    y += vs(25);
     painter.setPen(Qt::black);
     painter.drawLine(margin, y, pageWidth - margin, y);
-    y += 20;
+    y += vs(20);
 
     int rowIndex = 0;
     for (auto v : data) {
         QJsonObject row = v.toObject();
 
-        QRect rowRect(margin, y - 15, usableWidth, 20);
+        // Fill band tiles exactly at rowPitch so bands abut without gaps/overlap.
+        QRect rowRect(margin, y - fm.ascent(), usableWidth, rowPitch);
         painter.fillRect(rowRect, (rowIndex % 2 == 0) ? palette.rowEvenBg : palette.rowOddBg);
 
         painter.setPen(palette.rowText);
-        QFontMetrics fm = painter.fontMetrics();
 
-        QString schoolId   = fm.elidedText(safeText(row["school_id"].toString()), Qt::ElideRight, col2 - col1 - 5);
-        QString name       = fm.elidedText(safeText(row["name"].toString()), Qt::ElideRight, col3 - col2 - 5);
-        QString gender     = fm.elidedText(safeText(row["gender"].toString()), Qt::ElideRight, col4 - col3 - 5);
-        QString status     = fm.elidedText(safeText(row["status"].toString()), Qt::ElideRight, col5 - col4 - 5);
-        QString course     = fm.elidedText(safeText(row["course"].toString()), Qt::ElideRight, col6 - col5 - 5);
-        QString department = fm.elidedText(safeText(row["department"].toString()), Qt::ElideRight, col7 - col6 - 5);
-        QString yearLevel  = fm.elidedText(safeText(row["year_level"].toString()), Qt::ElideRight, col8 - col7 - 5);
+        QString schoolId   = fm.elidedText(safeText(row["school_id"].toString()), Qt::ElideRight, col2 - col1 - vs(5));
+        QString name       = fm.elidedText(safeText(row["name"].toString()), Qt::ElideRight, col3 - col2 - vs(5));
+        QString gender     = fm.elidedText(safeText(row["gender"].toString()), Qt::ElideRight, col4 - col3 - vs(5));
+        QString status     = fm.elidedText(safeText(row["status"].toString()), Qt::ElideRight, col5 - col4 - vs(5));
+        QString course     = fm.elidedText(safeText(row["course"].toString()), Qt::ElideRight, col6 - col5 - vs(5));
+        QString department = fm.elidedText(safeText(row["department"].toString()), Qt::ElideRight, col7 - col6 - vs(5));
+        QString yearLevel  = fm.elidedText(safeText(row["year_level"].toString()), Qt::ElideRight, col8 - col7 - vs(5));
 
         painter.drawText(col1, y, schoolId);
         painter.drawText(col2, y, name);
@@ -423,10 +444,10 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
         painter.drawText(col7, y, yearLevel);
         painter.drawText(col8, y, QString::number(row["visits"].toInt()));
 
-        y += 20;
+        y += rowPitch;
         rowIndex++;
 
-        if (y > usableHeight - 200) {
+        if (y > usableHeight - vs(200)) {
             drawFooter(currentPage);
             device->newPage();
             currentPage++;
@@ -450,7 +471,7 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
         qCDebug(lcReportRender) << "New page created for chart (" << label << "), page:" << currentPage;
 
         // Compute area for chart (leave space for footer)
-        const int bottomReserve = 60;
+        const int bottomReserve = vs(60);
         QRect targetArea(margin, y, usableWidth, pageHeight - y - margin - bottomReserve);
 
         // Scale preserving aspect ratio
@@ -501,24 +522,24 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
     device->newPage();
     currentPage++;
 
-    y = margin + 100;
+    y = margin + vs(100);
     drawHeader(y);
 
     painter.setFont(QFont("Arial", 11, QFont::Bold));
     painter.setPen(Qt::black);
-    painter.drawText(QRect(margin, y, pageWidth - 2*margin, 25),
+    painter.drawText(QRect(margin, y, pageWidth - 2*margin, vs(25)),
                      Qt::AlignCenter, QString("Prepared by: %1").arg(safeText(librarian)));
-    y += 25;
+    y += vs(25);
 
     painter.setFont(QFont("Arial", 10));
-    painter.drawText(QRect(margin, y, pageWidth - 2*margin, 20),
+    painter.drawText(QRect(margin, y, pageWidth - 2*margin, vs(20)),
                      Qt::AlignCenter, safeText(position));
-    y += 40;
+    y += vs(40);
 
-    int sigWidth = 240;
+    int sigWidth = vs(240);
     int sigX = (pageWidth - sigWidth) / 2;
     painter.drawLine(sigX, y, sigX + sigWidth, y);
-    painter.drawText(QRect(sigX, y + 5, sigWidth, 20), Qt::AlignCenter, "(Signature)");
+    painter.drawText(QRect(sigX, y + vs(5), sigWidth, vs(20)), Qt::AlignCenter, "(Signature)");
     drawFooter(currentPage);
 
     return true;
