@@ -125,7 +125,7 @@ Item {
         message: "This cannot be undone."; confirmText: "Delete"
         requireTypedConfirmation: true; confirmationWord: "DELETE"
     }
-    LComboBox { id: cb; model: ["CE", "IT", "BA"]; placeholder: "Select Department" }
+    LComboBox { id: cb; model: ["CE", "IT", "BA"]; placeholder: "Select Department"; accessibleName: "Department selector" }
     LStatTile  { id: st; label: "L"; value: "1" }
     ListModel {
         id: barsFixture
@@ -1189,6 +1189,9 @@ Item {
         }
         function test_modelDrivesOptionCount() {
             compare(cb.count, 3);
+        }
+        function test_comboBoxExposesAccessibleName() {
+            compare(cb.accessibleName, "Department selector");
         }
     }
 
