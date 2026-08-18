@@ -97,6 +97,17 @@ QList<BarsModel::Bar> ReportingViewModel::aggregateVisitsByCourse(const QJsonArr
     return bars;
 }
 
+QJsonArray ReportingViewModel::normalizeExportRows(const QJsonArray &data)
+{
+    QJsonArray out;
+    for (const QJsonValue &v : data) {
+        QJsonObject o = v.toObject();
+        o["visits"] = reportVisits(o);   // robust string-or-number -> int
+        out.append(o);
+    }
+    return out;
+}
+
 ReportingViewModel::Tiles ReportingViewModel::deriveTiles(const QJsonArray &data)
 {
     Tiles t;

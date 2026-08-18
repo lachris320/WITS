@@ -38,6 +38,7 @@ private slots:
     void validationMessageClearsWhenFiltersComplete();
     void realFetchErrorNotAutoClearedByFilterChange();
     void buildFiltersAllowsEmptyDepartment();
+    void normalizeExportRowsCoercesVisitsToNumber();
 };
 
 void TestReportingViewModel::buildFiltersDaySendsStringTypeAndRange()
@@ -371,6 +372,21 @@ void TestReportingViewModel::buildFiltersAllowsEmptyDepartment()
         "", "", 0, QDate(2026, 8, 14), 0, 0, "", 0, QDate(), QDate());
     QCOMPARE(f.value("department").toString(), QString());   // empty = all departments
     QVERIFY(f.contains("department"));
+}
+
+void TestReportingViewModel::normalizeExportRowsCoercesVisitsToNumber()
+{
+    const QJsonArray in = QJsonDocument::fromJson(R"([
+        {"name":"Ana","course":"BSIT","visits":"5","year_level":"3"},
+        {"name":"Ben","course":"BSCE","visits":8}
+    ])").array();
+    const QJsonArray out = ReportingViewModel::normalizeExportRows(in);
+    QCOMPARE(out.size(), 2);
+    QVERIFY(out.at(0).toObject().value("visits").isDouble());
+    QCOMPARE(out.at(0).toObject().value("visits").toInt(), 5);
+    QCOMPARE(out.at(1).toObject().value("visits").toInt(), 8);
+    QCOMPARE(out.at(0).toObject().value("course").toString(), QStringLiteral("BSIT"));
+    QCOMPARE(ReportingViewModel::normalizeExportRows(QJsonArray()).size(), 0);
 }
 
 QTEST_MAIN(TestReportingViewModel)

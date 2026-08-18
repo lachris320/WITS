@@ -57,6 +57,7 @@ public:
     static QList<BarsModel::Bar> aggregateVisitsByCourse(const QJsonArray &data); // Task 3
     struct Tiles { int totalVisits = 0; int studentsShown = 0; QString topCourse; };
     static Tiles deriveTiles(const QJsonArray &data);                             // Task 3
+    static QJsonArray normalizeExportRows(const QJsonArray &data);   // visits string -> number
 
     QStringList departments() const { return m_departments; }
     QStringList courses() const { return m_courses; }
