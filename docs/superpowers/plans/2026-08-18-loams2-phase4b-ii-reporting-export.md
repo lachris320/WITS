@@ -278,6 +278,8 @@ git commit -m "feat(reporting): semesterWindow derives display Period from serve
 
 `paintReport`/`writeReportToXlsx` read `department, course, start, end, schoolYear, chartType`. Build exactly those, mirroring `buildFilters`' input shape plus `chartType`.
 
+> **Intentional refinement of the spec (§4.2).** The spec sketched a 6-arg form `(department, course, start, end, schoolYear, chartType)`. This plan uses the 11-arg form (the raw duration inputs + `chartType`) instead, so the date/semester math stays **inside** the pure, unit-tested static rather than being computed in `renderToDevice`. Same output keys; better testability. Not scope drift.
+
 **Files:**
 - Modify: `qt-app/quick/viewmodels/ReportingViewModel.h`
 - Modify: `qt-app/quick/viewmodels/ReportingViewModel.cpp`
@@ -416,7 +418,8 @@ Adds the QML-facing export state and stores the normalized rows in `applyResult`
 - Produces (new members / API):
   - Props: `palettes` (CONSTANT `{"Default","Blue","Green","Red"}`), `palette` (R/W, default `"Default"`), `chartTypes` (CONSTANT `{"Bar","Pie"}`), `chartType` (R/W, default `"Bar"`), `exporting` (r/o), `canExport` (r/o), `exportStatus` (r/o), `exportError` (r/o).
   - `Q_INVOKABLE void setPalette(const QString&)`, `void setChartType(const QString&)`.
-  - `bool canExport() const` = `m_hasResult && !m_loading && !m_exporting && m_rows.count() > 0`.
+  - `bool canExport() const` = `m_hasResult && !m_loading && !m_exporting && m_errorText.isEmpty() && m_rows.count() > 0`. The `m_errorText.isEmpty()` term ties export to a clean, viewable result (mirrors the screen's `showPreview = hasResult && !isError`), so a **failed refetch** — which leaves `m_hasResult`/`m_rows` populated but shows an error banner — correctly disables export (Design OS #1: export equals what you're viewing).
+  - `m_exportRows` is **cleared at fetch start** (`setLoading(true)`), so a stale prior result can never be exported after a failed refetch (spec §4.2: "cleared when a new fetch starts and on error"; the start-clear covers both, since an error never repopulates it).
   - Private setters `setExporting/setExportStatus/setExportError`; member `QJsonArray m_exportRows`.
   - Signals `paletteChanged/chartTypeChanged/exportingChanged/canExportChanged/exportStatusChanged/exportErrorChanged`.
 
@@ -462,9 +465,30 @@ void TestReportingViewModel::applyResultStoresNormalizedExportRows()
     vm.onReportDataReady(data);
     QVERIFY(vm.canExport());   // rows stored + hasResult
 }
+
+void TestReportingViewModel::failedRefetchDisablesExportAndClearsRows()
+{
+    ReportingViewModel vm;
+    vm.onReportDataReady(QJsonDocument::fromJson(
+        R"([{"name":"Ana","course":"BSIT","visits":"5"}])").array());
+    QVERIFY(vm.canExport());                 // a clean result
+
+    // Change filters, then fire a new fetch that fails.
+    vm.setDurationType(0);
+    vm.setDay(QStringLiteral("2026-08-14")); // filtersComplete
+    vm.generateReport();                     // setLoading(true): clears m_exportRows, loading
+    QVERIFY(!vm.canExport());                // gated while loading
+    vm.onReportError(QStringLiteral("Server error"), false);   // loading=false, errorText set
+    QVERIFY(!vm.canExport());                // errorText non-empty AND rows cleared
+
+    // Export must refuse — no stale prior result.
+    QTemporaryDir dir;
+    vm.exportPdf(QUrl::fromLocalFile(dir.filePath("stale.pdf")));
+    QVERIFY(vm.exportError().contains(QStringLiteral("No data")));
+}
 ```
 
-(Add `#include <QSignalSpy>` at the top if not present. Declare the three slots.)
+(Add `#include <QSignalSpy>`, `#include <QTemporaryDir>`, `#include <QUrl>` at the top if not present. Declare the four slots, incl. `failedRefetchDisablesExportAndClearsRows`.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -534,7 +558,8 @@ In `ReportingViewModel.cpp`, implement:
 ```cpp
 bool ReportingViewModel::canExport() const
 {
-    return m_hasResult && !m_loading && !m_exporting && m_rows.count() > 0;
+    return m_hasResult && !m_loading && !m_exporting
+           && m_errorText.isEmpty() && m_rows.count() > 0;
 }
 void ReportingViewModel::setPalette(const QString &p)
 {
@@ -561,7 +586,31 @@ void ReportingViewModel::setExportError(const QString &e)
 }
 ```
 
-Then wire `canExportChanged` into the existing state transitions. In `setLoading(...)` add `emit canExportChanged();` after `emit loadingChanged();`. In `applyResult(...)` store the normalized rows and signal export availability — change the body to:
+Then wire `canExportChanged` into the existing state transitions:
+
+- In `setLoading(bool v)`: after `emit loadingChanged();` add `emit canExportChanged();`, and **clear the export rows when a fetch starts** so a stale result can't survive a failed refetch:
+  ```cpp
+  void ReportingViewModel::setLoading(bool v)
+  {
+      if (m_loading == v) return;
+      m_loading = v;
+      if (v) m_exportRows = QJsonArray();   // new fetch starting -> drop the previous export rows
+      emit loadingChanged();
+      emit canGenerateChanged();   // loading gates canGenerate
+      emit canExportChanged();     // loading (and cleared rows) gate canExport
+  }
+  ```
+- In `setError(const QString &e)`: after `emit errorTextChanged();` add `emit canExportChanged();` (an error banner disables export via the `m_errorText.isEmpty()` term). Change its body to:
+  ```cpp
+  void ReportingViewModel::setError(const QString &e)
+  {
+      if (m_errorText == e) return;
+      m_errorText = e;
+      emit errorTextChanged();
+      emit canExportChanged();
+  }
+  ```
+- In `applyResult(...)` store the normalized rows and signal export availability — change the body to:
 
 ```cpp
 void ReportingViewModel::applyResult(const QJsonArray &data)
@@ -1000,7 +1049,6 @@ property bool canExport: true
 property bool exporting: false
 property string exportStatus: ""
 property string exportError: ""
-property int rowsCount: 2
 property int exportPdfCount: 0
 property int exportExcelCount: 0
 property int printCount: 0
@@ -1011,7 +1059,7 @@ function exportExcel(u) { exportExcelCount++ }
 function printReport() { printCount++ }
 ```
 
-Because the real `rows` is a model with a `count`, and the stub's `rows` is `reportRowsStub`, expose the count the screen reads via `screen.vm.rows.count`. Ensure `reportRowsStub` has a `count` property (add `property int count: 2` to `reportRowsStub` if absent).
+The screen reads emptiness via `screen.vm.rows.count`, and the stub's `rows` is `reportRowsStub` — a real `ListModel` (`tst_qml_admin.qml:2505`) whose `count` is **read-only**. Do NOT add or assign a `count` property to it and do NOT introduce a `rowsCount` prop the screen never binds. Drive the empty case with `reportRowsStub.clear()` and restore it by re-appending the two original `ListElement`s (the preview/table tests need `rows` to stay a real model, so it can't be swapped for a plain `QtObject`).
 
 Add these test functions to the `ReportingScreen` `TestCase` (raise the fixture height in Step 3 so the bar is laid out and hit-testable):
 
@@ -1043,13 +1091,13 @@ function test_busyOverlayVisibleWhileExporting() {
 
 function test_emptyStateShownWhenResultHasNoRows() {
     reportingStub.hasResult = true;
-    reportingStub.rowsCount = 0;
-    reportRowsStub.count = 0;
+    reportRowsStub.clear();                 // count -> 0 (read-only: mutate the model, not the prop)
     var empty = findChild(reporting, "exportEmptyState");
     verify(empty);
     verify(empty.visible);
-    reportRowsStub.count = 2;   // restore
-    reportingStub.rowsCount = 2;
+    // Restore the two original rows for the other tests in this TestCase.
+    reportRowsStub.append({ name: "Maria Santos", course: "BSCE", year: "3", visits: 42 });
+    reportRowsStub.append({ name: "Jose Cruz", course: "BSIT", year: "1", visits: 7 });
 }
 
 function test_paletteComboHasAccessibleNameAndWrites() {
@@ -1120,11 +1168,13 @@ Rectangle {
 
         Item { Layout.fillWidth: true }   // spacer
 
+        // Design OS §4.5: disabled controls expose WHY via Accessible.description.
         LButton {
             objectName: "exportPdfButton"
             text: qsTr("Export PDF")
             accessibleName: qsTr("Export PDF")
             enabled: screen.canExport
+            Accessible.description: screen.canExport ? "" : qsTr("Generate a report with results to enable export")
             onClicked: exportPdfDialog.open()
         }
         LButton {
@@ -1133,6 +1183,7 @@ Rectangle {
             accessibleName: qsTr("Export Excel")
             variant: "Outline"
             enabled: screen.canExport
+            Accessible.description: screen.canExport ? "" : qsTr("Generate a report with results to enable export")
             onClicked: exportExcelDialog.open()
         }
         LButton {
@@ -1141,6 +1192,7 @@ Rectangle {
             accessibleName: qsTr("Print report")
             variant: "Outline"
             enabled: screen.canExport
+            Accessible.description: screen.canExport ? "" : qsTr("Generate a report with results to enable export")
             onClicked: if (screen.vm) screen.vm.printReport()
         }
     }
@@ -1226,6 +1278,8 @@ In `tst_qml_admin.qml`, bump the two reporting fixtures so the export bar lays o
 ReportingScreen { id: reporting; x: 0; y: 7300; width: 1100; height: 1000; vm: reportingStub }
 ReportingScreen { id: vmlessReporting; x: 2000; y: 7300; width: 1100; height: 1000 }
 ```
+
+Also update the band-map comment near the top of the file (`tst_qml_admin.qml:13-15`): the reporting band is now `7300..8300` (was `7300..8100`) — reporting is the last band, so nothing sits below it, but keep the comment accurate.
 
 Run: `cmake --build C:/b/loams-4b --target tst_qml_admin` then `ctest --test-dir C:/b/loams-4b -R tst_qml_admin --output-on-failure`
 Expected: PASS.
