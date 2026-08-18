@@ -480,15 +480,12 @@ void TestReportingViewModel::failedRefetchDisablesExportAndClearsRows()
     QVERIFY(!vm.canExport());                // gated while loading
     vm.onReportError(QStringLiteral("Server error"), false);   // loading=false, errorText set
     QVERIFY(!vm.canExport());                // errorText non-empty AND rows cleared
-
-    // Export must refuse — no stale prior result.
-    QTemporaryDir dir;
-    vm.exportPdf(QUrl::fromLocalFile(dir.filePath("stale.pdf")));
-    QVERIFY(vm.exportError().contains(QStringLiteral("No data")));
+    // (Task 6 adds the complementary assertion that exportPdf then hits the
+    // "No data" guard — exportPdf does not exist yet in Task 5.)
 }
 ```
 
-(Add `#include <QSignalSpy>`, `#include <QTemporaryDir>`, `#include <QUrl>` at the top if not present. Declare the four slots, incl. `failedRefetchDisablesExportAndClearsRows`.)
+(Add `#include <QSignalSpy>` at the top if not present. `QTemporaryDir`/`QUrl` are added in Task 6 with the export methods — do NOT add them here. Declare the four new slots, incl. `failedRefetchDisablesExportAndClearsRows`.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
