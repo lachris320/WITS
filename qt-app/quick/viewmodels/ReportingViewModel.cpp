@@ -145,6 +145,46 @@ DateRange ReportingViewModel::semesterWindow(const QString &semester, int year)
     return r;   // unknown label -> valid stays false
 }
 
+QJsonObject ReportingViewModel::buildExportFilters(
+    const QString &department, const QString &course, int durationType,
+    const QDate &day, int month, int monthYear,
+    const QString &semester, int semYear,
+    const QDate &customStart, const QDate &customEnd,
+    const QString &chartType)
+{
+    QJsonObject f;
+    f["department"] = department.isEmpty() ? QStringLiteral("All Departments") : department;
+    f["course"]     = course.isEmpty()     ? QStringLiteral("All Courses")     : course;
+    f["chartType"]  = chartType;
+
+    DateRange r;
+    QString schoolYear;
+    switch (durationType) {
+    case 0:  // Day
+        r = ReportController::computeDateRange(0, day, 0, 0, QString(), 0, QDate(), QDate());
+        schoolYear = QString::number(day.year());
+        break;
+    case 1:  // Month
+        r = ReportController::computeDateRange(1, QDate(), month, monthYear, QString(), 0, QDate(), QDate());
+        schoolYear = QString::number(monthYear);
+        break;
+    case 2:  // Semester — display range from the server-matched window
+        r = semesterWindow(semester, semYear);
+        schoolYear = QString::number(semYear);
+        break;
+    case 3:  // Custom
+        r = ReportController::computeDateRange(3, QDate(), 0, 0, QString(), 0, customStart, customEnd);
+        schoolYear = QString::number(customStart.year());
+        break;
+    default:
+        break;
+    }
+    f["start"]      = r.valid ? r.start : QString();
+    f["end"]        = r.valid ? r.end   : QString();
+    f["schoolYear"] = schoolYear;
+    return f;
+}
+
 bool ReportingViewModel::filtersComplete() const
 {
     // Department is OPTIONAL (empty = all departments; the backend treats an

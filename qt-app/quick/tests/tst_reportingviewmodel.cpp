@@ -40,6 +40,9 @@ private slots:
     void buildFiltersAllowsEmptyDepartment();
     void normalizeExportRowsCoercesVisitsToNumber();
     void semesterWindowMatchesServerRanges();
+    void buildExportFiltersDayHasRangeAndLabels();
+    void buildExportFiltersSemesterUsesServerWindow();
+    void buildExportFiltersMonthSchoolYear();
 };
 
 void TestReportingViewModel::buildFiltersDaySendsStringTypeAndRange()
@@ -407,6 +410,39 @@ void TestReportingViewModel::semesterWindowMatchesServerRanges()
 
     QVERIFY(!ReportingViewModel::semesterWindow("", 2026).valid);
     QVERIFY(!ReportingViewModel::semesterWindow("First Semester", 0).valid);
+}
+
+void TestReportingViewModel::buildExportFiltersDayHasRangeAndLabels()
+{
+    const QJsonObject f = ReportingViewModel::buildExportFilters(
+        "", "", 0, QDate(2026, 8, 14), 0, 0, "", 0, QDate(), QDate(), "Bar");
+    QCOMPARE(f.value("department").toString(), QStringLiteral("All Departments"));
+    QCOMPARE(f.value("course").toString(),     QStringLiteral("All Courses"));
+    QCOMPARE(f.value("start").toString(),      QStringLiteral("2026-08-14"));
+    QCOMPARE(f.value("end").toString(),        QStringLiteral("2026-08-14"));
+    QCOMPARE(f.value("schoolYear").toString(), QStringLiteral("2026"));
+    QCOMPARE(f.value("chartType").toString(),  QStringLiteral("Bar"));
+}
+
+void TestReportingViewModel::buildExportFiltersSemesterUsesServerWindow()
+{
+    const QJsonObject f = ReportingViewModel::buildExportFilters(
+        "CE", "BSCE", 2, QDate(), 0, 0, "Second Semester", 2026, QDate(), QDate(), "Pie");
+    QCOMPARE(f.value("department").toString(), QStringLiteral("CE"));
+    QCOMPARE(f.value("course").toString(),     QStringLiteral("BSCE"));
+    QCOMPARE(f.value("start").toString(),      QStringLiteral("2026-11-01"));
+    QCOMPARE(f.value("end").toString(),        QStringLiteral("2027-03-31"));
+    QCOMPARE(f.value("schoolYear").toString(), QStringLiteral("2026"));
+    QCOMPARE(f.value("chartType").toString(),  QStringLiteral("Pie"));
+}
+
+void TestReportingViewModel::buildExportFiltersMonthSchoolYear()
+{
+    const QJsonObject f = ReportingViewModel::buildExportFilters(
+        "IT", "", 1, QDate(), 2, 2025, "", 0, QDate(), QDate(), "Bar");
+    QCOMPARE(f.value("start").toString(),      QStringLiteral("2025-02-01"));
+    QCOMPARE(f.value("end").toString(),        QStringLiteral("2025-02-28"));
+    QCOMPARE(f.value("schoolYear").toString(), QStringLiteral("2025"));
 }
 
 QTEST_MAIN(TestReportingViewModel)

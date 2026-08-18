@@ -61,6 +61,14 @@ public:
     static QJsonArray normalizeExportRows(const QJsonArray &data);   // visits string -> number
     // Display-only Period for a semester, matching get_report_data.php's server windows.
     static DateRange semesterWindow(const QString &semester, int year);
+    // Builds the JSON keys the export renderer (paintReport/writeReportToXlsx) reads:
+    // department, course, start, end, schoolYear, chartType.
+    static QJsonObject buildExportFilters(
+        const QString &department, const QString &course, int durationType,
+        const QDate &day, int month, int monthYear,
+        const QString &semester, int semYear,
+        const QDate &customStart, const QDate &customEnd,
+        const QString &chartType);
 
     QStringList departments() const { return m_departments; }
     QStringList courses() const { return m_courses; }
