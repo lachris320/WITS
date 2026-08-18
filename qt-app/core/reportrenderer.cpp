@@ -15,7 +15,9 @@
 #include <QFont>
 #include <QFontMetrics>
 #include <QGraphicsLayout>
+#include <QGuiApplication>
 #include <QLoggingCategory>
+#include <QScreen>
 #include <QMarginsF>
 #include <QPagedPaintDevice>
 #include <QPainter>
@@ -73,17 +75,39 @@ QMap<QString, QMap<int, int>> ReportRenderer::aggregateVisitsByCourseHour(
     return courseTimeCounts;
 }
 
-// Chart raster size keyed off usableWidth (not a fixed pixel literal) — see header.
-// square → 1:1 (pie); otherwise 5:3 landscape (bar/line). Both scale with usableWidth
-// at any DPI, so the aspect ratio never degenerates into the old ~15:1 sliver.
+// The chart raster size the QChartView is rendered at. A QChartView is a QWidget
+// the window system clamps to the physical screen, so rendering at print
+// resolution (~9000px) made the chart lay out in a corner with giant fonts.
+// Render at a modest size that FITS THE ACTUAL SCREEN (so the widget is never
+// clamped), and let paintReport scale the raster up to fill the page. square →
+// 1:1 (pie); otherwise ~16:10 landscape (bar/line). Chart fonts (see the makers)
+// are sized to this height, so they read correctly once scaled onto the page.
 QSize ReportRenderer::chartImageSize(int usableWidth, bool square) {
-    return square ? QSize(usableWidth, usableWidth)
-                  : QSize(usableWidth, qRound(usableWidth * 0.6));
+    Q_UNUSED(usableWidth);
+    QSize base = square ? QSize(1000, 1000) : QSize(1600, 1000);
+    // Shrink (keeping aspect) to fit the available screen, so a narrow display
+    // (e.g. a 1366-wide laptop or a kiosk) can't clamp the QChartView.
+    if (const QScreen *scr = QGuiApplication::primaryScreen()) {
+        const QSize avail = scr->availableSize() * 0.85;
+        if (avail.width() >= 320 && avail.height() >= 240
+            && (base.width() > avail.width() || base.height() > avail.height())) {
+            base.scale(avail, Qt::KeepAspectRatio);
+        }
+    }
+    return base;
 }
 
 // Shared render tail of the three chart makers: paint a configured QChart into
-// an ARGB32 QImage of the requested size. A local QChartView owns `chart` and
-// deletes it when this returns — same ownership as the inline versions it replaces.
+// an ARGB32 QImage of the requested size, via a local QChartView that owns `chart`
+// and deletes it when this returns.
+//
+// IMPORTANT: `size` must stay MODEST (screen-sized, not print-sized). A QChartView
+// is a QWidget and the window system clamps a widget to the physical screen, so
+// rendering it directly at print resolution (~9000px) made the chart lay out at
+// ~screen size in the top-left with huge fonts and a blank remainder. chartImageSize
+// therefore returns a screen-safe size and paintReport scales the raster up to fill
+// the page. (Rendering via a QGraphicsScene instead avoids the clamp but does not
+// lay the bars out — it produced a solid block — so QChartView is the right tool.)
 QImage ReportRenderer::renderChartToImage(QChart *chart, QSize size) {
     QImage chartImage(size, QImage::Format_ARGB32);
     chartImage.fill(Qt::white);
@@ -110,20 +134,21 @@ QImage ReportRenderer::makeBarChartImage(const QJsonArray &data, QSize size, con
     QFont titleFont("Arial");  titleFont.setPixelSize(qMax(10, qRound(h * 0.032)));  titleFont.setBold(true);
     QFont labelFont("Arial");  labelFont.setPixelSize(qMax(8,  qRound(h * 0.024)));
 
-    //color set
-    QBarSeries *series = new QBarSeries();
+    // One bar per course, spread across the category axis: a SINGLE QBarSet
+    // holding every course's value (one category each). The legacy build used a
+    // separate one-value barset per course, so all bars piled into category 0 and
+    // the rest of the chart width sat empty. One set + N categories fills the width.
+    QBarSet *set = new QBarSet("Visits");
     QStringList categories;
-    QVector<QColor> colors = { palette.rowEvenBg, palette.rowOddBg, palette.headerBg };
-
-    int colorIndex = 0;
     for (auto it = courseCounts.begin(); it != courseCounts.end(); ++it) {
-        QBarSet *set = new QBarSet(it.key());
         *set << it.value();
-        set->setBrush(palette.chartColors[colorIndex % palette.chartColors.size()]);
-        series->append(set);
         categories << it.key();
-        colorIndex++;
     }
+    set->setBrush(palette.chartColors.isEmpty() ? QBrush(palette.headerBg)
+                                                : QBrush(palette.chartColors.first()));
+
+    QBarSeries *series = new QBarSeries();
+    series->append(set);
 
     // Create chart
     QChart *chart = new QChart();
@@ -144,8 +169,9 @@ QImage ReportRenderer::makeBarChartImage(const QJsonArray &data, QSize size, con
     chart->addAxis(axisY, Qt::AlignLeft);
     series->attachAxis(axisY);
 
-    chart->legend()->setVisible(true);
-    chart->legend()->setFont(labelFont);
+    // Single series → the x-axis course labels identify the bars; a legend would
+    // just repeat "Visits", so hide it and give the chart the full width.
+    chart->legend()->setVisible(false);
 
     // ✅ Remove margins and force chart to fill
     chart->setMargins(QMargins(0, 0, 0, 0));

@@ -139,12 +139,18 @@ void TstReportRenderer::makeLineChartImage_nonNullAtSize() {
 // shrank to a half-inch band. chartImageSize keys the height off usableWidth so the
 // aspect ratio stays sane (5:3 landscape / square) at any DPI — no fixed 600.
 void TstReportRenderer::chartImageSize_scalesWithWidthNotFixedHeight() {
-    QCOMPARE(ReportRenderer::chartImageSize(1000, false), QSize(1000, 600));
-    QCOMPARE(ReportRenderer::chartImageSize(9000, false), QSize(9000, 5400)); // NOT a fixed 600 -> no 15:1 sliver
-    QCOMPARE(ReportRenderer::chartImageSize(800, true), QSize(800, 800));
-    // aspect stays sane (landscape < 2:1) at high res:
-    QSize s = ReportRenderer::chartImageSize(9000, false);
-    QVERIFY(double(s.width()) / s.height() < 2.0);
+    // Screen-adaptive: a QChartView is a QWidget clamped to the physical screen,
+    // so the render size fits the available screen (never exceeds the base) and is
+    // upscaled to the page later. usableWidth is ignored. Assert invariants that
+    // hold regardless of the machine the test runs on.
+    const QSize bar = ReportRenderer::chartImageSize(9000, false);
+    const QSize pie = ReportRenderer::chartImageSize(9000, true);
+    QVERIFY(!bar.isEmpty() && !pie.isEmpty());
+    QVERIFY(bar.width() <= 1600 && bar.height() <= 1000);   // never exceeds the screen-safe base
+    QVERIFY(pie.width() == pie.height());                   // pie is square
+    const double aspect = double(bar.width()) / bar.height();
+    QVERIFY(aspect > 1.2 && aspect < 2.0);                  // sane landscape aspect, no sliver
+    QCOMPARE(ReportRenderer::chartImageSize(500, false), bar); // ignores usableWidth
 }
 
 // The overlap fix scales every legacy ~96-DPI pixel literal by resolution/96.
