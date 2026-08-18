@@ -22,6 +22,7 @@ private slots:
     void makeBarChartImage_nonNullAtSize();
     void makePieChartImage_nonNullAtSize();
     void makeLineChartImage_nonNullAtSize();
+    void chartImageSize_scalesWithWidthNotFixedHeight();
     void scaledPx_scalesFrom96DpiBaseline();
     void rowAdvanceClearsFontHeightAtDefaultPdfDpi();
     void paintReport_writesPdf();
@@ -131,6 +132,19 @@ void TstReportRenderer::makeLineChartImage_nonNullAtSize() {
     const QImage img = ReportRenderer::makeLineChartImage(sampleVisits(), QSize(400, 300), pal, 7, 21);
     QVERIFY(!img.isNull());
     QCOMPARE(img.size(), QSize(400, 300));
+}
+
+// The sliver bug: chart heights were a fixed 600px literal while usableWidth is
+// device-scaled (~9008px at 1200 DPI), yielding a ~15:1 strip that KeepAspectRatio
+// shrank to a half-inch band. chartImageSize keys the height off usableWidth so the
+// aspect ratio stays sane (5:3 landscape / square) at any DPI — no fixed 600.
+void TstReportRenderer::chartImageSize_scalesWithWidthNotFixedHeight() {
+    QCOMPARE(ReportRenderer::chartImageSize(1000, false), QSize(1000, 600));
+    QCOMPARE(ReportRenderer::chartImageSize(9000, false), QSize(9000, 5400)); // NOT a fixed 600 -> no 15:1 sliver
+    QCOMPARE(ReportRenderer::chartImageSize(800, true), QSize(800, 800));
+    // aspect stays sane (landscape < 2:1) at high res:
+    QSize s = ReportRenderer::chartImageSize(9000, false);
+    QVERIFY(double(s.width()) / s.height() < 2.0);
 }
 
 // The overlap fix scales every legacy ~96-DPI pixel literal by resolution/96.

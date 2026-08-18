@@ -73,6 +73,14 @@ QMap<QString, QMap<int, int>> ReportRenderer::aggregateVisitsByCourseHour(
     return courseTimeCounts;
 }
 
+// Chart raster size keyed off usableWidth (not a fixed pixel literal) — see header.
+// square → 1:1 (pie); otherwise 5:3 landscape (bar/line). Both scale with usableWidth
+// at any DPI, so the aspect ratio never degenerates into the old ~15:1 sliver.
+QSize ReportRenderer::chartImageSize(int usableWidth, bool square) {
+    return square ? QSize(usableWidth, usableWidth)
+                  : QSize(usableWidth, qRound(usableWidth * 0.6));
+}
+
 // Shared render tail of the three chart makers: paint a configured QChart into
 // an ARGB32 QImage of the requested size. A local QChartView owns `chart` and
 // deletes it when this returns — same ownership as the inline versions it replaces.
@@ -80,14 +88,12 @@ QImage ReportRenderer::renderChartToImage(QChart *chart, QSize size) {
     QImage chartImage(size, QImage::Format_ARGB32);
     chartImage.fill(Qt::white);
     QPainter painter(&chartImage);
-
     QChartView view(chart);
     view.setRenderHint(QPainter::Antialiasing);
     view.resize(size);
     view.show();
     view.chart()->resize(size);
     view.render(&painter);
-
     return chartImage;
 }
 
@@ -97,6 +103,12 @@ QImage ReportRenderer::renderChartToImage(QChart *chart, QSize size) {
 QImage ReportRenderer::makeBarChartImage(const QJsonArray &data, QSize size, const ReportPalette &palette) {
     // Aggregate visits by course
     QMap<QString, int> courseCounts = aggregateVisitsByCourse(data);
+
+    // Fonts are sized to the image height (not fixed points) so labels stay
+    // legible after this large raster is scaled down onto the page.
+    const int h = size.height();
+    QFont titleFont("Arial");  titleFont.setPixelSize(qMax(10, qRound(h * 0.032)));  titleFont.setBold(true);
+    QFont labelFont("Arial");  labelFont.setPixelSize(qMax(8,  qRound(h * 0.024)));
 
     //color set
     QBarSeries *series = new QBarSeries();
@@ -117,22 +129,23 @@ QImage ReportRenderer::makeBarChartImage(const QJsonArray &data, QSize size, con
     QChart *chart = new QChart();
     chart->addSeries(series);
     chart->setTitle("Library Visits by Course");
-    chart->setTitleFont(QFont("Arial", 16, QFont::Bold));
+    chart->setTitleFont(titleFont);
 
     QBarCategoryAxis *axisX = new QBarCategoryAxis();
     axisX->append(categories);
-    axisX->setLabelsFont(QFont("Arial", 12));
+    axisX->setLabelsFont(labelFont);
     chart->addAxis(axisX, Qt::AlignBottom);
     series->attachAxis(axisX);
 
     QValueAxis *axisY = new QValueAxis();
     axisY->setTitleText("Number of Visits");
-    axisY->setLabelsFont(QFont("Arial", 12));
+    axisY->setLabelsFont(labelFont);
+    axisY->setTitleFont(labelFont);
     chart->addAxis(axisY, Qt::AlignLeft);
     series->attachAxis(axisY);
 
     chart->legend()->setVisible(true);
-    chart->legend()->setFont(QFont("Arial", 12));
+    chart->legend()->setFont(labelFont);
 
     // ✅ Remove margins and force chart to fill
     chart->setMargins(QMargins(0, 0, 0, 0));
@@ -150,6 +163,12 @@ QImage ReportRenderer::makePieChartImage(const QJsonArray &data, QSize size, con
     // Aggregate visits by course
     QMap<QString, int> courseCounts = aggregateVisitsByCourse(data);
 
+    // Fonts are sized to the image height (not fixed points) so labels stay
+    // legible after this large raster is scaled down onto the page.
+    const int h = size.height();
+    QFont titleFont("Arial");  titleFont.setPixelSize(qMax(10, qRound(h * 0.032)));  titleFont.setBold(true);
+    QFont labelFont("Arial");  labelFont.setPixelSize(qMax(8,  qRound(h * 0.024)));
+
     // Create pie series
     QPieSeries *series = new QPieSeries();
     QVector<QColor> colors = { palette.rowEvenBg, palette.rowOddBg, palette.headerBg };
@@ -159,7 +178,7 @@ QImage ReportRenderer::makePieChartImage(const QJsonArray &data, QSize size, con
         slice->setLabel(QString("%1: %2").arg(it.key()).arg(it.value()));
         slice->setLabelVisible(true);
         slice->setBrush(palette.chartColors[colorIndex % palette.chartColors.size()]);
-        slice->setLabelFont(QFont("Arial", 14, QFont::Bold)); // ✅ bigger font
+        slice->setLabelFont(labelFont);
         colorIndex++;
     }
 
@@ -167,9 +186,9 @@ QImage ReportRenderer::makePieChartImage(const QJsonArray &data, QSize size, con
     QChart *chart = new QChart();
     chart->addSeries(series);
     chart->setTitle("Library Visits by Course");
-    chart->setTitleFont(QFont("Arial", 16, QFont::Bold));
+    chart->setTitleFont(titleFont);
     chart->legend()->setVisible(true);
-    chart->legend()->setFont(QFont("Arial", 12));
+    chart->legend()->setFont(labelFont);
     chart->legend()->setAlignment(Qt::AlignRight);
 
     // ✅ Remove extra margins so chart fills the image
@@ -193,6 +212,12 @@ QImage ReportRenderer::makeLineChartImage(const QJsonArray &data, QSize size, co
     QMap<QString, QMap<int, int>> courseTimeCounts =
         aggregateVisitsByCourseHour(data, openHour, closeHour);
 
+    // Fonts are sized to the image height (not fixed points) so labels stay
+    // legible after this large raster is scaled down onto the page.
+    const int h = size.height();
+    QFont titleFont("Arial");  titleFont.setPixelSize(qMax(10, qRound(h * 0.032)));  titleFont.setBold(true);
+    QFont labelFont("Arial");  labelFont.setPixelSize(qMax(8,  qRound(h * 0.024)));
+
     int globalMax = 0;
     for (auto it = courseTimeCounts.begin(); it != courseTimeCounts.end(); ++it)
         for (int count : it.value())
@@ -201,7 +226,7 @@ QImage ReportRenderer::makeLineChartImage(const QJsonArray &data, QSize size, co
 
     QChart *chart = new QChart();
     chart->setTitle("Library Peak Hours by Course");
-    chart->setTitleFont(QFont("Arial", 16, QFont::Bold));
+    chart->setTitleFont(titleFont);
 
     // One line series per course
     QVector<QColor> colors = { palette.rowEvenBg, palette.rowOddBg, palette.headerBg };
@@ -226,13 +251,15 @@ QImage ReportRenderer::makeLineChartImage(const QJsonArray &data, QSize size, co
     axisX->setRange(openHour, closeHour);  // ✅ restrict to library hours
     axisX->setTickCount(closeHour - openHour + 1);
     axisX->setLabelFormat("%d:00");   // shows "7:00", "8:00", etc.
-    axisX->setLabelsFont(QFont("Arial", 10));
+    axisX->setLabelsFont(labelFont);
+    axisX->setTitleFont(labelFont);
     chart->addAxis(axisX, Qt::AlignBottom);
 
     // Y axis = number of students (auto-scale)
     QValueAxis *axisY = new QValueAxis();
     axisY->setTitleText("Number of Students");
-    axisY->setLabelsFont(QFont("Arial", 10));
+    axisY->setLabelsFont(labelFont);
+    axisY->setTitleFont(labelFont);
     axisY->setRange(0, globalMax + 1);
     axisY->setTickCount(globalMax + 2);
     chart->addAxis(axisY, Qt::AlignLeft);
@@ -244,7 +271,7 @@ QImage ReportRenderer::makeLineChartImage(const QJsonArray &data, QSize size, co
     }
 
     chart->legend()->setVisible(true);
-    chart->legend()->setFont(QFont("Arial", 12));
+    chart->legend()->setFont(labelFont);
 
     // ✅ Keep your centered & unclipped layout
     chart->setMargins(QMargins(0, 0, 0, 0));
@@ -494,23 +521,24 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
 
     QString chartChoice = filters["chartType"].toString();
 
-    // request chart images sized to the full usable area (so the chart is rendered at that resolution)
-    // Before calling chart generation functions, calculate appropriate sizes
-
+    // Chart raster sizes key off usableWidth via chartImageSize (bar/line = 5:3
+    // landscape, pie = square) so they scale with the page at any DPI — no fixed
+    // pixel height that would degenerate into a sliver. The chart makers size their
+    // fonts to the raster so labels stay legible once drawn onto the high-DPI page.
     if (chartChoice.contains("All", Qt::CaseInsensitive)) {
-        QSize barSize(usableWidth, 600);  // Wide rectangle for bar charts
-        QSize pieSize(700, 700);          // Square for pie charts
-        QSize lineSize(usableWidth, 600); // Wide rectangle for line charts
+        QSize barSize  = chartImageSize(usableWidth, false); // Wide rectangle for bar charts
+        QSize pieSize  = chartImageSize(usableWidth, true);  // Square for pie charts
+        QSize lineSize = chartImageSize(usableWidth, false); // Wide rectangle for line charts
 
         drawFullscreenChart("Bar Chart",  makeBarChartImage(data, barSize, palette));
         drawFullscreenChart("Pie Chart",  makePieChartImage(data, pieSize, palette));
         drawFullscreenChart("Line Chart", makeLineChartImage(data, lineSize, palette, info.openHour, info.closeHour));
     } else if (chartChoice.contains("Pie", Qt::CaseInsensitive)) {
-        QSize pieSize(700, 700);  // Square dimensions
+        QSize pieSize = chartImageSize(usableWidth, true);  // Square dimensions
         drawFullscreenChart("Pie Chart", makePieChartImage(data, pieSize, palette));
     } else {
         // For bar and line charts, use rectangular size
-        QSize rectSize(usableWidth, 600);
+        QSize rectSize = chartImageSize(usableWidth, false);
         if (chartChoice.contains("Bar", Qt::CaseInsensitive)) {
             drawFullscreenChart("Bar Chart", makeBarChartImage(data, rectSize, palette));
         } else if (chartChoice.contains("Line", Qt::CaseInsensitive)) {

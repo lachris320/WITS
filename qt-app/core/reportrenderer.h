@@ -32,6 +32,12 @@ public:
     static QMap<QString, QMap<int, int>> aggregateVisitsByCourseHour(const QJsonArray &data,
                                                                      int openHour, int closeHour);
 
+    // Chart raster size keyed off usableWidth (not a fixed pixel literal), so the
+    // aspect ratio stays sane at any DPI. Bar/Line pass square=false → 5:3 landscape;
+    // Pie passes square=true → square. Fixes the fixed-600px "sliver" bug where a
+    // device-scaled width against a constant height produced a ~15:1 strip.
+    static QSize chartImageSize(int usableWidth, bool square);
+
     static QImage makeBarChartImage(const QJsonArray &data, QSize size,
                                     const ReportPalette &palette);
     static QImage makePieChartImage(const QJsonArray &data, QSize size,
