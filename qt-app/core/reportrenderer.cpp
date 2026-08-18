@@ -453,6 +453,9 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
             currentPage++;
             y = margin;
             drawHeader(y);
+            // drawHeader leaves the font at Arial 9; restore the row font so
+            // continuation-page rows draw at the same Arial 10 that fm measures.
+            painter.setFont(QFont("Arial", 10));
         }
     }
 
