@@ -345,18 +345,22 @@ void ReportingViewModel::setLoading(bool v)
 {
     if (m_loading == v) return;
     m_loading = v;
+    if (v) m_exportRows = QJsonArray();   // new fetch starting -> drop the previous export rows
     emit loadingChanged();
     emit canGenerateChanged();   // loading gates canGenerate
+    emit canExportChanged();     // loading (and cleared rows) gate canExport
 }
 void ReportingViewModel::setError(const QString &e)
 {
     if (m_errorText == e) return;
     m_errorText = e;
     emit errorTextChanged();
+    emit canExportChanged();
 }
 void ReportingViewModel::applyResult(const QJsonArray &data)
 {
     m_rows.setRows(data);
+    m_exportRows = normalizeExportRows(data);   // reused by export (numeric visits, all 8 cols)
     m_courseBars.setBars(aggregateVisitsByCourse(data));
     const Tiles t = deriveTiles(data);
     m_totalVisits = t.totalVisits;
@@ -366,4 +370,34 @@ void ReportingViewModel::applyResult(const QJsonArray &data)
     m_validationError = false;
     setError(QString());
     emit resultChanged();
+    emit canExportChanged();
+}
+
+bool ReportingViewModel::canExport() const
+{
+    return m_hasResult && !m_loading && !m_exporting
+           && m_errorText.isEmpty() && m_rows.count() > 0;
+}
+void ReportingViewModel::setPalette(const QString &p)
+{
+    if (m_palette == p) return;
+    m_palette = p; emit paletteChanged();
+}
+void ReportingViewModel::setChartType(const QString &c)
+{
+    if (m_chartType == c) return;
+    m_chartType = c; emit chartTypeChanged();
+}
+void ReportingViewModel::setExporting(bool v)
+{
+    if (m_exporting == v) return;
+    m_exporting = v; emit exportingChanged(); emit canExportChanged();
+}
+void ReportingViewModel::setExportStatus(const QString &s)
+{
+    m_exportStatus = s; emit exportStatusChanged();
+}
+void ReportingViewModel::setExportError(const QString &e)
+{
+    m_exportError = e; emit exportErrorChanged();
 }

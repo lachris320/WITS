@@ -45,6 +45,14 @@ class ReportingViewModel : public QObject
     Q_PROPERTY(int totalVisits READ totalVisits NOTIFY resultChanged)
     Q_PROPERTY(int studentsShown READ studentsShown NOTIFY resultChanged)
     Q_PROPERTY(QString topCourse READ topCourse NOTIFY resultChanged)
+    Q_PROPERTY(QStringList palettes READ palettes CONSTANT)
+    Q_PROPERTY(QString palette READ palette WRITE setPalette NOTIFY paletteChanged)
+    Q_PROPERTY(QStringList chartTypes READ chartTypes CONSTANT)
+    Q_PROPERTY(QString chartType READ chartType WRITE setChartType NOTIFY chartTypeChanged)
+    Q_PROPERTY(bool exporting READ exporting NOTIFY exportingChanged)
+    Q_PROPERTY(bool canExport READ canExport NOTIFY canExportChanged)
+    Q_PROPERTY(QString exportStatus READ exportStatus NOTIFY exportStatusChanged)
+    Q_PROPERTY(QString exportError READ exportError NOTIFY exportErrorChanged)
 public:
     explicit ReportingViewModel(QObject *parent = nullptr);
 
@@ -93,6 +101,18 @@ public:
     int totalVisits() const { return m_totalVisits; }
     int studentsShown() const { return m_studentsShown; }
     QString topCourse() const { return m_topCourse; }
+    QStringList palettes() const { return { QStringLiteral("Default"), QStringLiteral("Blue"),
+                                            QStringLiteral("Green"), QStringLiteral("Red") }; }
+    QString palette() const { return m_palette; }
+    QStringList chartTypes() const { return { QStringLiteral("Bar"), QStringLiteral("Pie") }; }
+    QString chartType() const { return m_chartType; }
+    bool exporting() const { return m_exporting; }
+    bool canExport() const;
+    QString exportStatus() const { return m_exportStatus; }
+    QString exportError() const { return m_exportError; }
+
+    Q_INVOKABLE void setPalette(const QString &p);
+    Q_INVOKABLE void setChartType(const QString &c);
 
     Q_INVOKABLE void loadDepartments();          // bootstrap: departments + years (Task 5)
     Q_INVOKABLE void setDepartment(const QString &department);   // Task 5
@@ -134,11 +154,20 @@ signals:
     void loadingChanged();
     void errorTextChanged();
     void resultChanged();
+    void paletteChanged();
+    void chartTypeChanged();
+    void exportingChanged();
+    void canExportChanged();
+    void exportStatusChanged();
+    void exportErrorChanged();
 
 private:
     void setLoading(bool v);
     void setError(const QString &e);
     void applyResult(const QJsonArray &data);    // Task 6
+    void setExporting(bool v);
+    void setExportStatus(const QString &s);
+    void setExportError(const QString &e);
     static QDate parseDate(const QString &s) { return QDate::fromString(s, QStringLiteral("yyyy-MM-dd")); }
 
     QNetworkAccessManager *m_nam = nullptr;
@@ -159,6 +188,13 @@ private:
     bool m_hasResult = false;
     int m_totalVisits = 0, m_studentsShown = 0;
     QString m_topCourse = QStringLiteral("—");
+
+    QString m_palette = QStringLiteral("Default");
+    QString m_chartType = QStringLiteral("Bar");
+    bool m_exporting = false;
+    QString m_exportStatus;
+    QString m_exportError;
+    QJsonArray m_exportRows;
 };
 
 #endif // REPORTINGVIEWMODEL_H

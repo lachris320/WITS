@@ -2,6 +2,7 @@
 #include <QDate>
 #include <QJsonObject>
 #include <QJsonDocument>
+#include <QSignalSpy>
 #include "ReportingViewModel.h"
 
 class TestReportingViewModel : public QObject
@@ -43,6 +44,10 @@ private slots:
     void buildExportFiltersDayHasRangeAndLabels();
     void buildExportFiltersSemesterUsesServerWindow();
     void buildExportFiltersMonthSchoolYear();
+    void canExportTruthTable();
+    void paletteAndChartTypeSettersEmit();
+    void applyResultStoresNormalizedExportRows();
+    void failedRefetchDisablesExportAndClearsRows();
 };
 
 void TestReportingViewModel::buildFiltersDaySendsStringTypeAndRange()
@@ -443,6 +448,62 @@ void TestReportingViewModel::buildExportFiltersMonthSchoolYear()
     QCOMPARE(f.value("start").toString(),      QStringLiteral("2025-02-01"));
     QCOMPARE(f.value("end").toString(),        QStringLiteral("2025-02-28"));
     QCOMPARE(f.value("schoolYear").toString(), QStringLiteral("2025"));
+}
+
+void TestReportingViewModel::canExportTruthTable()
+{
+    ReportingViewModel vm;
+    QVERIFY(!vm.canExport());                       // no result yet
+    const QJsonArray data = QJsonDocument::fromJson(
+        R"([{"name":"Ana","course":"BSIT","visits":"5"}])").array();
+    vm.onReportDataReady(data);                     // hasResult + rows>0, not loading/exporting
+    QVERIFY(vm.canExport());
+    vm.onReportDataReady(QJsonArray());             // hasResult true but zero rows
+    QVERIFY(!vm.canExport());
+}
+
+void TestReportingViewModel::paletteAndChartTypeSettersEmit()
+{
+    ReportingViewModel vm;
+    QCOMPARE(vm.palette(), QStringLiteral("Default"));
+    QCOMPARE(vm.chartType(), QStringLiteral("Bar"));
+    QSignalSpy pSpy(&vm, &ReportingViewModel::paletteChanged);
+    QSignalSpy cSpy(&vm, &ReportingViewModel::chartTypeChanged);
+    vm.setPalette("Blue");
+    vm.setChartType("Pie");
+    QCOMPARE(vm.palette(), QStringLiteral("Blue"));
+    QCOMPARE(vm.chartType(), QStringLiteral("Pie"));
+    QCOMPARE(pSpy.count(), 1);
+    QCOMPARE(cSpy.count(), 1);
+    QCOMPARE(vm.palettes().size(), 4);
+    QCOMPARE(vm.chartTypes().size(), 2);
+}
+
+void TestReportingViewModel::applyResultStoresNormalizedExportRows()
+{
+    ReportingViewModel vm;
+    const QJsonArray data = QJsonDocument::fromJson(
+        R"([{"name":"Ana","course":"BSIT","visits":"5"}])").array();
+    vm.onReportDataReady(data);
+    QVERIFY(vm.canExport());   // rows stored + hasResult
+}
+
+void TestReportingViewModel::failedRefetchDisablesExportAndClearsRows()
+{
+    ReportingViewModel vm;
+    vm.onReportDataReady(QJsonDocument::fromJson(
+        R"([{"name":"Ana","course":"BSIT","visits":"5"}])").array());
+    QVERIFY(vm.canExport());                 // a clean result
+
+    // Change filters, then fire a new fetch that fails.
+    vm.setDurationType(0);
+    vm.setDay(QStringLiteral("2026-08-14")); // filtersComplete
+    vm.generateReport();                     // setLoading(true): clears m_exportRows, loading
+    QVERIFY(!vm.canExport());                // gated while loading
+    vm.onReportError(QStringLiteral("Server error"), false);   // loading=false, errorText set
+    QVERIFY(!vm.canExport());                // errorText non-empty AND rows cleared
+    // (Task 6 adds the complementary assertion that exportPdf then hits the
+    // "No data" guard — exportPdf does not exist yet in Task 5.)
 }
 
 QTEST_MAIN(TestReportingViewModel)
