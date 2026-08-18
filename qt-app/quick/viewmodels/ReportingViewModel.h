@@ -175,6 +175,12 @@ private:
     void setExportError(const QString &e);
     ReportHeaderInfo headerInfo() const;
     bool renderToDevice(QPagedPaintDevice *dev, int resolution);
+    // Shared preamble for the file exports: false (with exportError set) if an export is
+    // in flight, there are no rows, or the URL is not a local file; on success sets *outPath,
+    // clears exportError, and flips exporting on.
+    bool beginFileExport(const QUrl &fileUrl, QString *outPath);
+    // The export filters for the current VM state (keys read by ReportRenderer).
+    QJsonObject currentExportFilters() const;
     static QDate parseDate(const QString &s) { return QDate::fromString(s, QStringLiteral("yyyy-MM-dd")); }
 
     QNetworkAccessManager *m_nam = nullptr;

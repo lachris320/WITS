@@ -9,6 +9,8 @@ import LOAMS
 // by an explicit Generate button. Takes `property var vm` (a ReportingViewModel
 // or a plain-QML stub in QuickTests). No Component.onCompleted fetch — the
 // initial bootstrap is issued by AdminScreen's Loader.onLoaded gate.
+// Also hosts the 4b-ii export bar (palette + chart-type pickers, PDF/Excel/Print
+// actions) alongside the preview.
 Rectangle {
     id: screen
     property var vm

@@ -427,29 +427,43 @@ ReportHeaderInfo ReportingViewModel::headerInfo() const
 
 bool ReportingViewModel::renderToDevice(QPagedPaintDevice *dev, int resolution)
 {
-    const QJsonObject filters = buildExportFilters(
-        m_department, m_course, m_durationType,
-        parseDate(m_day), m_month, m_monthYear,
-        m_semester, m_semYear, parseDate(m_customStart), parseDate(m_customEnd),
-        m_chartType);
+    const QJsonObject filters = currentExportFilters();
     const ReportPalette pal = ReportController::getPalette(m_palette);
     return ReportRenderer::paintReport(dev, resolution, m_exportRows, filters, pal, headerInfo());
 }
 
-void ReportingViewModel::exportPdf(const QUrl &fileUrl)
+bool ReportingViewModel::beginFileExport(const QUrl &fileUrl, QString *outPath)
 {
-    if (m_exporting) return;
+    if (m_exporting)
+        return false;
     if (m_exportRows.isEmpty()) {
         setExportError(tr("No data to export. Adjust the filters and generate a report with results."));
-        return;
+        return false;
     }
     const QString path = fileUrl.toLocalFile();
     if (path.isEmpty()) {
         setExportError(tr("Couldn't export — choose a local file location."));
-        return;
+        return false;
     }
     setExportError(QString());
     setExporting(true);
+    *outPath = path;
+    return true;
+}
+
+QJsonObject ReportingViewModel::currentExportFilters() const
+{
+    return buildExportFilters(m_department, m_course, m_durationType,
+        parseDate(m_day), m_month, m_monthYear,
+        m_semester, m_semYear, parseDate(m_customStart), parseDate(m_customEnd),
+        m_chartType);
+}
+
+void ReportingViewModel::exportPdf(const QUrl &fileUrl)
+{
+    QString path;
+    if (!beginFileExport(fileUrl, &path))
+        return;
     // Defer one turn so the busy overlay paints before the blocking render.
     QMetaObject::invokeMethod(this, [this, path]() {
         QPdfWriter writer(path);
@@ -487,26 +501,12 @@ void ReportingViewModel::printReport()
 
 void ReportingViewModel::exportExcel(const QUrl &fileUrl)
 {
-    if (m_exporting) return;
-    if (m_exportRows.isEmpty()) {
-        setExportError(tr("No data to export. Adjust the filters and generate a report with results."));
+    QString path;
+    if (!beginFileExport(fileUrl, &path))
         return;
-    }
-    const QString path = fileUrl.toLocalFile();
-    if (path.isEmpty()) {
-        setExportError(tr("Couldn't export — choose a local file location."));
-        return;
-    }
-    setExportError(QString());
-    setExporting(true);
     QMetaObject::invokeMethod(this, [this, path]() {
         QXlsx::Document doc;
-        const QJsonObject filters = buildExportFilters(
-            m_department, m_course, m_durationType,
-            parseDate(m_day), m_month, m_monthYear,
-            m_semester, m_semYear, parseDate(m_customStart), parseDate(m_customEnd),
-            m_chartType);
-        const bool ok = ReportRenderer::writeReportToXlsx(doc, m_exportRows, filters, headerInfo())
+        const bool ok = ReportRenderer::writeReportToXlsx(doc, m_exportRows, currentExportFilters(), headerInfo())
                         && doc.saveAs(path);
         if (ok)
             setExportStatus(tr("Saved %1").arg(QFileInfo(path).fileName()));

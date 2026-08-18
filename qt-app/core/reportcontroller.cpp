@@ -165,6 +165,11 @@ DateRange ReportController::computeDateRange(int durationType,
         break;
     }
     case 2: { // Semester
+        // NOTE (Phase 4b-ii): these calendar-half bounds are NOT used for reporting.
+        // Report filters send raw year+semester and the server ranges the data;
+        // the displayed Period comes from ReportingViewModel::semesterWindow(), which
+        // matches get_report_data.php's Philippine-calendar windows. Reconcile with
+        // semesterWindow() before wiring this branch to semester reporting.
         if (semester.contains("1")) {
             range.start = QString("%1-01-01").arg(semYear);
             range.end   = QString("%1-06-30").arg(semYear);
