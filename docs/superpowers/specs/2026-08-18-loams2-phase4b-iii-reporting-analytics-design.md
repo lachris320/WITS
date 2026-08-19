@@ -94,6 +94,8 @@ static ReportAnalytics ReportAnalytics::compute(const QJsonArray &normalizedRows
 
 `rows` is retained ONLY for the optional detailed roster (drawn iff `includeRoster`); every KPI/ranking value comes from `analytics`. The ViewModel computes `ReportAnalytics` once from `m_exportRows` and hands the same struct to the QML models and to these two functions — the renderer performs zero aggregation. Existing callers (`ReportingViewModel::renderToDevice` and the export paths) are updated to the new arity.
 
+**Slice boundary (see §13):** this renderer signature change and the passing-to-renderer half land in **4b-iii-b**. **4b-iii-a** only computes `ReportAnalytics` and wires the QML models — the renderer keeps its current 4b-ii signature until slice b. (Slice b also adds `reportanalytics.cpp/.h` to the `tst_reportrenderer` CMake `SOURCES`, since that target compiles `reportrenderer.cpp` directly without linking `witscore`.)
+
 ## 4. KPIs (the "How much?" band)
 
 Four tiles, in order:
