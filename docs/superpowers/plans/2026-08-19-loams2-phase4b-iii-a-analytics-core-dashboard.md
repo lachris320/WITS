@@ -28,12 +28,13 @@
 ## File Structure
 
 - **Create** `qt-app/core/reportanalytics.h` / `.cpp` — value types (`ReportKpis`, `RankingEntry`, `ReportAnalytics`) + `static ReportAnalytics compute(const QJsonArray&, int topN=10)`.
+- **Modify** `qt-app/core/CMakeLists.txt` — add `reportanalytics.h reportanalytics.cpp` (bare, un-prefixed) to the `witscore` `add_library(...)` list, next to `reportrenderer.h reportrenderer.cpp` (line ~36). **This is where `witscore` is defined — NOT `qt-app/CMakeLists.txt`.** Without it, `witsquickmodule` and `tst_reportingviewmodel` fail to *link* (`undefined reference to ReportAnalytics::compute`).
 - **Create** `qt-app/tests/tst_reportanalytics.cpp` — pure-core unit tests; register in `qt-app/tests/CMakeLists.txt` via `wits_add_qttest`.
 - **Create** `qt-app/quick/models/RankingModel.h` / `.cpp` — `QAbstractListModel` for a ranking table.
 - **Modify** `qt-app/quick/viewmodels/ReportingViewModel.h` / `.cpp` — new KPI `Q_PROPERTY`s + three `RankingModel` members; compute `ReportAnalytics` in `applyResult`.
 - **Modify** `qt-app/quick/tests/tst_reportingviewmodel.cpp` — VM analytics tests.
-- **Modify** `qt-app/quick/qml/admin/ReportingScreen.qml` — 4-tile KPI band + three ranking tables + "View full roster" toggle.
-- **Modify** `qt-app/quick/tests/tst_qml_admin.qml` — dashboard QuickTests (extend the reportingStub).
+- **Modify** `qt-app/quick/qml/admin/ReportingScreen.qml` — 4-tile KPI band (with a zero-row "No report data" state) + three ranking tables + "View full roster" toggle.
+- **Modify** `qt-app/quick/tests/tst_qml_admin.qml` — dashboard QuickTests (extend the reportingStub; the reporting fixtures are statically instantiated — see Task 5).
 - **Modify** `qt-app/quick/CMakeLists.txt` — add `models/RankingModel.{h,cpp}` to the QML module sources.
 
 ---
@@ -478,7 +479,11 @@ In `qt-app/quick/CMakeLists.txt`, add to the `witsquickmodule` source list (next
         models/RankingModel.cpp
         models/RankingModel.h
 ```
-Also ensure the `witscore`-side `core/reportanalytics.cpp/.h` is compiled into `witscore` — add it to the `witscore` target's sources in `qt-app/CMakeLists.txt` (next to `core/reportrenderer.cpp`).
+Also compile the aggregator into `witscore`. `witscore` is defined in **`qt-app/core/CMakeLists.txt`** (`add_library(witscore STATIC …)`, line ~19), and its entries are **bare / un-prefixed**. Add to that `add_library` list, next to `reportrenderer.h reportrenderer.cpp` (line ~36):
+```cmake
+    reportanalytics.h reportanalytics.cpp
+```
+> NOT `qt-app/CMakeLists.txt`, and NOT `core/reportanalytics.cpp`. Both `witsquickmodule` and `tst_reportingviewmodel` link `witscore`, so this is the single place the symbol must live. Skipping it produces a link error, not a compile error — the header alone won't flag it.
 
 - [ ] **Step 4: Build — verify it compiles into the module**
 
@@ -488,7 +493,7 @@ Expected: builds clean (no test yet — behavior verified in Task 4).
 - [ ] **Step 5: Commit**
 
 ```bash
-git add qt-app/quick/models/RankingModel.h qt-app/quick/models/RankingModel.cpp qt-app/quick/CMakeLists.txt qt-app/CMakeLists.txt
+git add qt-app/quick/models/RankingModel.h qt-app/quick/models/RankingModel.cpp qt-app/quick/CMakeLists.txt qt-app/core/CMakeLists.txt
 git commit -m "feat(reporting): RankingModel for the analytics ranking tables"
 ```
 
@@ -606,24 +611,64 @@ git commit -m "feat(reporting): VM exposes KPI properties + ranking models"
 
 - [ ] **Step 1: Add failing QuickTests (extend the reportingStub + assertions)**
 
-In `qt-app/quick/tests/tst_qml_admin.qml`, extend the existing `reportingStub` with the new members and add a test. Give the stub `property int uniqueVisitors: 2`, `property real avgVisitsPerVisitor: 4.0`, `property string topDepartment: "CCS"`, `property int topDepartmentVisits: 8`, and three `ListModel` stubs `topStudents`/`topCourses`/`topDepartments` each with a `count` and a couple of rows `{ rank:1, label:"Ana", sublabel:"BSIT", visits:5, percent:62.5 }`. Then:
+The reporting fixtures are **statically instantiated**, not created per-test. In `tst_qml_admin.qml` the existing seam is `ReportingScreen { id: reporting; x:0; y:7300; width:1100; height:1000; vm: reportingStub }` (line ~2571) plus a vm-less `vmlessReporting` (line ~2574); tests drive it via `findChild(reporting, "objectName")` inside the `TestCase { name: "ReportingScreen" }` block. There is **no** `createTemporaryObject`/`reportingComponent`/`testRoot` — do NOT introduce them.
+
+First, extend the existing `reportingStub` (the `QtObject` at line ~2515) with the new VM surface — scalar KPI props + three ranking models (plain `ListModel`s with role-named rows; `ListModel` already has a `count`):
+```qml
+        property int uniqueVisitors: 2
+        property real avgVisitsPerVisitor: 4.0
+        property string topDepartment: "CCS"
+        property int topDepartmentVisits: 8
+        property var topStudents: topStudentsStub
+        property var topCourses: topCoursesStub
+        property var topDepartments: topDepartmentsStub
+```
+Add the three backing models next to `reportRowsStub` (line ~2505):
+```qml
+    ListModel { id: topStudentsStub
+        ListElement { rank: 1; label: "Ana"; sublabel: "BSIT"; visits: 5; percent: 62.5 }
+        ListElement { rank: 2; label: "Ben"; sublabel: "BSCS"; visits: 3; percent: 37.5 }
+    }
+    ListModel { id: topCoursesStub
+        ListElement { rank: 1; label: "BSIT"; sublabel: ""; visits: 5; percent: 62.5 }
+        ListElement { rank: 2; label: "BSCS"; sublabel: ""; visits: 3; percent: 37.5 }
+    }
+    ListModel { id: topDepartmentsStub
+        ListElement { rank: 1; label: "CCS"; sublabel: ""; visits: 8; percent: 100.0 }
+    }
+```
+Then add a test to the `TestCase { name: "ReportingScreen" }` block. `init()` re-populates `reportRowsStub` when empty, so rows start non-empty:
 ```qml
 function test_dashboard_showsKpisAndRankings() {
-    var screen = createTemporaryObject(reportingComponent, testRoot, { vm: reportingStub });
-    verify(screen);
-    var uniqueTile = findChild(screen, "uniqueVisitorsTile");
+    reportingStub.hasResult = true;
+    var uniqueTile = findChild(reporting, "uniqueVisitorsTile");
     verify(uniqueTile, "unique-visitors KPI tile exists");
-    var deptTile = findChild(screen, "topDepartmentTile");
+    var deptTile = findChild(reporting, "topDepartmentTile");
     verify(deptTile, "top-department KPI tile exists");
-    var studentsTable = findChild(screen, "topStudentsTable");
+    var studentsTable = findChild(reporting, "topStudentsTable");
     verify(studentsTable, "top-students ranking table exists");
-    var rosterToggle = findChild(screen, "viewRosterToggle");
+    var rosterToggle = findChild(reporting, "viewRosterToggle");
     verify(rosterToggle, "view-full-roster toggle exists");
-    var roster = findChild(screen, "reportTable");
+    var roster = findChild(reporting, "reportTable");
     compare(roster.visible, false, "full roster starts collapsed");
 }
+
+function test_dashboard_kpiBandCollapsesOnEmptyResult() {
+    // Spec §6: a generated-but-empty result shows ONE "No report data" state,
+    // not four zeroed tiles. Mutate the model to count 0 (read-only prop).
+    reportingStub.hasResult = true;
+    reportRowsStub.clear();
+    var band = findChild(reporting, "kpiBand");
+    var emptyState = findChild(reporting, "kpiEmptyState");
+    verify(emptyState, "KPI empty-state element exists");
+    compare(band.visible, false, "the 4-tile band hides on 0 rows");
+    compare(emptyState.visible, true, "the single 'No report data' state shows");
+    // restore for later tests
+    reportRowsStub.append({ name: "Maria Santos", course: "BSCE", year: "3", visits: 42 });
+    reportRowsStub.append({ name: "Jose Cruz", course: "BSIT", year: "1", visits: 7 });
+}
 ```
-> Follow the existing tst_qml_admin conventions (component id, `testRoot`, `findChild` by `objectName`, the y-band/height rules noted in project memory for new QuickTest fixtures).
+> Follow the existing conventions: static `reporting` instance, `findChild(reporting, objectName)`, the y-band (`y:7300`) / height rules noted in project memory for QuickTest fixtures. `ListElement` values must be literals (no bindings) — that's why the stub rows are inline.
 
 - [ ] **Step 2: Run — verify RED**
 
@@ -632,22 +677,29 @@ Expected: FAIL — the new objectNames don't exist yet.
 
 - [ ] **Step 3: Restructure the preview into the dashboard grid**
 
-In `ReportingScreen.qml`, inside the preview `ColumnLayout` (currently the 3-tile row + chart + table, lines ~185-240):
-1. Replace the 3-tile `RowLayout` with a **4-tile KPI band** (all `Layout.fillWidth: true`):
-   - `totalVisitsTile` — label `TOTAL VISITS`, value `String(vm.totalVisits)`.
-   - `uniqueVisitorsTile` — label `UNIQUE VISITORS`, value `String(vm.uniqueVisitors)`.
-   - `avgVisitsTile` — label `AVG. VISITS / VISITOR`, value `vm ? vm.avgVisitsPerVisitor.toFixed(1) : "0"`.
-   - `topDepartmentTile` — label `TOP DEPARTMENT`, value `vm.topDepartment`, **caption** `vm ? (String(vm.topDepartmentVisits) + " visits") : ""` (LStatTile has a `caption` slot — name primary, visits supporting).
-2. Keep the existing `LCard`/`LBarChart` (Top Courses) directly under the KPI band (glanceable, high on screen).
-3. Add a **rankings row** — a `RowLayout` (or `GridLayout`) of three ranking tables, each an `LTable` (or a compact repeater) bound to the VM ranking models, with `objectName` `topStudentsTable` / `topCoursesTable` / `topDepartmentsTable`. Students table columns: rank, name (`label`), course (`sublabel`), visits; courses/departments: rank, name (`label`), visits, `percent` (format `percent.toFixed(0) + "%"`). Header text literal `"Top 10 Students/Courses/Departments"`. All row text `Text.PlainText`; all colors `Theme.*`.
-   - Each ranking table must render an **empty-state** when its model `count === 0` (e.g. `LTable.emptyStateText: qsTr("No data available.")`), per spec §6.
-4. Demote the existing full-roster `LTable` (`objectName: "reportTable"`) behind a toggle: add an `LButton`/switch `objectName: "viewRosterToggle"` (text `qsTr("View full roster")`), and bind `reportTable.visible` to a local `property bool showRoster: false` flipped by the toggle. Roster starts collapsed.
-> Grid geometry is tunable; the **hierarchy is fixed** (spec §7): KPI band → chart → rankings → roster toggle. Use `Theme.spacing.*`, no raw sizes beyond existing patterns.
+In `ReportingScreen.qml`, inside the preview `ColumnLayout` (the 3-tile row + chart + table, lines ~189-243). The preview is gated by `showPreview` (`vm.hasResult && !isError`, line 21), which is **true even for a generated-but-empty result** — so the KPI band needs its own zero-row branch (see step 1 below). Add a local `readonly property bool hasRows: vm && vm.rows && vm.rows.count > 0` on the screen root to drive it.
+
+1. Replace the 3-tile `RowLayout` with a **KPI section** that has two mutually-exclusive states (spec §6):
+   - A `RowLayout { objectName: "kpiBand"; visible: screen.hasRows; Layout.fillWidth: true }` holding **four** `LStatTile`s (all `Layout.fillWidth: true`). **Every value binding keeps the `screen.vm ? … : "…"` guard** the existing tiles use (line 199/205/211) — the `vmlessReporting` fixture renders with no vm:
+     - `totalVisitsTile` — label `TOTAL VISITS`, value `screen.vm ? String(screen.vm.totalVisits) : "0"`.
+     - `uniqueVisitorsTile` — label `UNIQUE VISITORS`, value `screen.vm ? String(screen.vm.uniqueVisitors) : "0"`.
+     - `avgVisitsTile` — label `AVG. VISITS / VISITOR`, value `screen.vm ? screen.vm.avgVisitsPerVisitor.toFixed(1) : "0"`.
+     - `topDepartmentTile` — label `TOP DEPARTMENT`, value `screen.vm ? screen.vm.topDepartment : "—"`, **caption** `screen.vm ? (String(screen.vm.topDepartmentVisits) + " visits") : ""` (LStatTile has a `caption` slot — name primary, visits supporting).
+   - A single empty-state element `objectName: "kpiEmptyState"; visible: !screen.hasRows` — an `LCard`/`Label` reading `qsTr("No report data")` (NOT four "0"/"—" tiles). This is the §6 "No report data" KPI state.
+2. Keep the existing `LCard`/`LBarChart` (Top Courses) directly under the KPI section (glanceable, high on screen). Leave its existing visibility as-is.
+3. Add a **rankings row** — a `RowLayout` (or `GridLayout`) of three ranking tables with `objectName` `topStudentsTable` / `topCoursesTable` / `topDepartmentsTable`, bound to `screen.vm.topStudents` / `topCourses` / `topDepartments`.
+   > **Do NOT use `LTable` for these.** `LTable` renders the **raw** role value per cell (`LTable.qml:278`) with no per-cell formatter and no table-title property — so `percent.toFixed(0) + "%"` and the `"Top 10 …"` headings can't come from `LTable`, and a bare `62.5` would render. Build each ranking table as a small **`ColumnLayout` + `Repeater`** (`model: screen.vm ? screen.vm.topStudents : null`) over the model's roles, exactly how the delegate can format the percent string and show a literal heading.
+   - Students table columns: rank, name (`label`), course (`sublabel`), visits. Courses/departments: rank, name (`label`), visits, and percent rendered as `percent.toFixed(0) + "%"`.
+   - Each table has a literal heading `Text { text: qsTr("Top 10 Students") }` (resp. Courses / Departments).
+   - **Empty-state per table:** when `count === 0`, show `Text { text: qsTr("No data available.") }` instead of the rows (spec §6). Since these tables only appear once `hasRows` is true, the per-table empty-state covers a ranking that is legitimately empty within a non-empty result.
+   - All row text is `Text { textFormat: Text.PlainText }`; all colors `Theme.*` (ZERO raw hex; opacity via `Qt.alpha(Theme.<token>, a)`).
+4. Demote the existing full-roster `LTable` (`objectName: "reportTable"`) behind a toggle: add an `LButton`/switch `objectName: "viewRosterToggle"` (text `qsTr("View full roster")`), and bind `reportTable.visible` to a local `property bool showRoster: false` flipped by the toggle. Roster starts collapsed (matches the Step-1 assertion `roster.visible === false`).
+> Grid geometry is tunable; the **hierarchy is fixed** (spec §7): KPI section → chart → rankings → roster toggle. Use `Theme.spacing.*`, no raw sizes beyond existing patterns.
 
 - [ ] **Step 4: Run — verify GREEN (and full suite)**
 
 Run: `cmake --build C:/b/loams-4biii` then `ctest --test-dir C:/b/loams-4biii --output-on-failure`
-Expected: PASS — the new QuickTest passes and all prior tests stay green (target ~46/46).
+Expected: PASS — the new QuickTests pass and all prior tests stay green. Only **one** new ctest target is added (`tst_reportanalytics`); the VM and QuickTest cases live inside existing targets, so the suite goes **42 → 43** ctest targets (not a per-case count).
 
 - [ ] **Step 5: Commit**
 
@@ -666,6 +718,6 @@ git commit -m "feat(reporting): analytics-first dashboard + full-roster toggle"
 
 ## Self-Review notes (author)
 
-- **Spec coverage:** §3 value types + aggregation-by-key (T1/T2), §4 KPIs (T1), §5 rankings + tie-break + % (T2), §6 empty-states — core `(Unspecified)`/hasData (T1) + QML empty-state text (T5), §7 dashboard + scalar `Q_PROPERTY`s + PlainText (T4/T5), roster toggle §9-screen-half (T5). Export halves of §8/§9 are **deferred to 4b-iii-b** by design.
+- **Spec coverage:** §3 value types + aggregation-by-key (T1/T2), §4 KPIs (T1), §5 rankings + tie-break + % (T2), §6 empty-states — core `(Unspecified)`/hasData (T1) + KPI-band "No report data" collapse on 0 rows + per-table "No data available." (T5), §7 dashboard + scalar `Q_PROPERTY`s + PlainText (T4/T5), roster toggle §9-screen-half (T5). Export halves of §8/§9 are **deferred to 4b-iii-b** by design.
 - **Types consistent** across tasks: `ReportAnalytics`/`RankingEntry` (T1) → `RankingModel::setEntries` (T3) → VM `topStudents()` etc. (T4) → QML `objectName`s (T5).
 - **No renderer touch** — honors the slice boundary.
