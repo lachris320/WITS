@@ -20,6 +20,8 @@ Rectangle {
     readonly property bool isError: vm ? vm.errorText.length > 0 : false
     readonly property bool showPreview: vm ? (vm.hasResult && !screen.isError) : false
     readonly property bool canExport: vm ? vm.canExport : false
+    readonly property bool hasRows: vm && vm.rows && vm.rows.count > 0
+    property bool showRoster: false
 
     ColumnLayout {
         anchors.fill: parent
@@ -189,9 +191,12 @@ Rectangle {
             visible: screen.showPreview
             opacity: screen.isLoading ? 0.4 : 1.0
 
+            // KPI band — four tiles when there are rows...
             RowLayout {
+                objectName: "kpiBand"
                 Layout.fillWidth: true
                 spacing: Theme.spacing.lg
+                visible: screen.hasRows
                 LStatTile {
                     objectName: "totalVisitsTile"
                     Layout.fillWidth: true
@@ -199,16 +204,38 @@ Rectangle {
                     value: screen.vm ? String(screen.vm.totalVisits) : "0"
                 }
                 LStatTile {
-                    objectName: "studentsShownTile"
+                    objectName: "uniqueVisitorsTile"
                     Layout.fillWidth: true
-                    label: qsTr("STUDENTS")
-                    value: screen.vm ? String(screen.vm.studentsShown) : "0"
+                    label: qsTr("UNIQUE VISITORS")
+                    value: screen.vm ? String(screen.vm.uniqueVisitors) : "0"
                 }
                 LStatTile {
-                    objectName: "topCourseTile"
+                    objectName: "avgVisitsTile"
                     Layout.fillWidth: true
-                    label: qsTr("TOP COURSE")
-                    value: screen.vm ? screen.vm.topCourse : "—"
+                    label: qsTr("AVG. VISITS / VISITOR")
+                    value: screen.vm ? screen.vm.avgVisitsPerVisitor.toFixed(1) : "0"
+                }
+                LStatTile {
+                    objectName: "topDepartmentTile"
+                    Layout.fillWidth: true
+                    label: qsTr("TOP DEPARTMENT")
+                    value: screen.vm ? screen.vm.topDepartment : "—"
+                    caption: screen.vm ? (String(screen.vm.topDepartmentVisits) + qsTr(" visits")) : ""
+                }
+            }
+            // ...and a single "No report data" state when the result is empty.
+            LCard {
+                objectName: "kpiEmptyState"
+                Layout.fillWidth: true
+                Layout.preferredHeight: 96
+                visible: !screen.hasRows
+                Text {
+                    anchors.centerIn: parent
+                    text: qsTr("No report data")
+                    textFormat: Text.PlainText
+                    color: Theme.mutedTextCaption
+                    font.family: Theme.typography.sans
+                    font.pixelSize: Theme.typography.body
                 }
             }
 
@@ -224,10 +251,114 @@ Rectangle {
                 }
             }
 
+            // Top-10 rankings — Students / Courses / Departments.
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Theme.spacing.lg
+
+                ColumnLayout {
+                    objectName: "topStudentsTable"
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignTop
+                    spacing: Theme.spacing.xs
+                    Text {
+                        text: qsTr("Top 10 Students"); textFormat: Text.PlainText
+                        color: Theme.text; font.family: Theme.typography.sans
+                        font.pixelSize: Theme.typography.cardTitle; font.bold: true
+                    }
+                    Text {
+                        visible: !screen.vm || !screen.vm.topStudents || screen.vm.topStudents.count === 0
+                        text: qsTr("No data available."); textFormat: Text.PlainText
+                        color: Theme.mutedTextCaption
+                        font.family: Theme.typography.sans
+                        font.pixelSize: Theme.typography.body
+                    }
+                    Repeater {
+                        model: screen.vm ? screen.vm.topStudents : null
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Theme.spacing.sm
+                            Text { text: rank + "."; textFormat: Text.PlainText; color: Theme.text }
+                            Text { text: label; textFormat: Text.PlainText; color: Theme.text; Layout.fillWidth: true }
+                            Text { text: sublabel; textFormat: Text.PlainText; color: Theme.mutedTextCaption }
+                            Text { text: String(visits); textFormat: Text.PlainText; color: Theme.text }
+                        }
+                    }
+                }
+
+                ColumnLayout {
+                    objectName: "topCoursesTable"
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignTop
+                    spacing: Theme.spacing.xs
+                    Text {
+                        text: qsTr("Top 10 Courses"); textFormat: Text.PlainText
+                        color: Theme.text; font.family: Theme.typography.sans
+                        font.pixelSize: Theme.typography.cardTitle; font.bold: true
+                    }
+                    Text {
+                        visible: !screen.vm || !screen.vm.topCourses || screen.vm.topCourses.count === 0
+                        text: qsTr("No data available."); textFormat: Text.PlainText
+                        color: Theme.mutedTextCaption
+                        font.family: Theme.typography.sans
+                        font.pixelSize: Theme.typography.body
+                    }
+                    Repeater {
+                        model: screen.vm ? screen.vm.topCourses : null
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Theme.spacing.sm
+                            Text { text: rank + "."; textFormat: Text.PlainText; color: Theme.text }
+                            Text { text: label; textFormat: Text.PlainText; color: Theme.text; Layout.fillWidth: true }
+                            Text { text: String(visits); textFormat: Text.PlainText; color: Theme.text }
+                            Text { text: percent.toFixed(0) + "%"; textFormat: Text.PlainText; color: Theme.mutedTextCaption }
+                        }
+                    }
+                }
+
+                ColumnLayout {
+                    objectName: "topDepartmentsTable"
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignTop
+                    spacing: Theme.spacing.xs
+                    Text {
+                        text: qsTr("Top 10 Departments"); textFormat: Text.PlainText
+                        color: Theme.text; font.family: Theme.typography.sans
+                        font.pixelSize: Theme.typography.cardTitle; font.bold: true
+                    }
+                    Text {
+                        visible: !screen.vm || !screen.vm.topDepartments || screen.vm.topDepartments.count === 0
+                        text: qsTr("No data available."); textFormat: Text.PlainText
+                        color: Theme.mutedTextCaption
+                        font.family: Theme.typography.sans
+                        font.pixelSize: Theme.typography.body
+                    }
+                    Repeater {
+                        model: screen.vm ? screen.vm.topDepartments : null
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: Theme.spacing.sm
+                            Text { text: rank + "."; textFormat: Text.PlainText; color: Theme.text }
+                            Text { text: label; textFormat: Text.PlainText; color: Theme.text; Layout.fillWidth: true }
+                            Text { text: String(visits); textFormat: Text.PlainText; color: Theme.text }
+                            Text { text: percent.toFixed(0) + "%"; textFormat: Text.PlainText; color: Theme.mutedTextCaption }
+                        }
+                    }
+                }
+            }
+
+            LButton {
+                objectName: "viewRosterToggle"
+                text: qsTr("View full roster")
+                variant: "Outline"
+                onClicked: screen.showRoster = !screen.showRoster
+            }
+
             LTable {
                 objectName: "reportTable"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                visible: screen.showRoster
                 columns: [
                     { key: "name",   title: qsTr("Name"),   weight: 3 },
                     { key: "course", title: qsTr("Course"), weight: 2 },
