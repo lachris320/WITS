@@ -81,9 +81,18 @@ struct ReportAnalytics {
 static ReportAnalytics ReportAnalytics::compute(const QJsonArray &normalizedRows, int topN = 10);
 ```
 
-Rows are the **already-normalized** rows (4b-ii's `normalizeExportRows` coerces `visits` string→number); `compute` assumes numeric `visits`.
+**Input contract (loud).** `compute` requires **already-normalized** rows — numeric `visits`. 4b-ii's `normalizeExportRows` is the normalizer; `reportVisits()` lives in `quick/models/ReportRowsModel.h`, which **core cannot include**, so `compute` does NOT re-parse — passing a raw-string `visits` is a **caller error**. A unit test pins this contract (a raw-string-`visits` row is treated as 0 / ignored), and callers always pass `m_exportRows` (already normalized in `applyResult`).
 
 **Aggregation is by key, not by row.** Students group on `school_id`, courses on `course`, departments on `department`, each **summing `visits`** across the group. So `uniqueVisitors` = number of distinct `school_id` groups, and a student appearing in more than one row is counted once with their visits summed. This makes every aggregate robust to row multiplicity rather than assuming exactly one row per student.
+
+### Renderer consumes the struct — new export signatures (enforces "no re-derivation")
+
+`paintReport` and `writeReportToXlsx` gain the computed struct + the roster flag as parameters, so the renderer never re-aggregates (§3):
+
+- `paintReport(QPagedPaintDevice*, int resolution, const QJsonArray &rows, const QJsonObject &filters, const ReportPalette&, const ReportHeaderInfo&, const ReportAnalytics &analytics, bool includeRoster)`
+- `writeReportToXlsx(QXlsx::Document&, const QJsonArray &rows, const QJsonObject &filters, const ReportHeaderInfo&, const ReportAnalytics &analytics, bool includeRoster)`
+
+`rows` is retained ONLY for the optional detailed roster (drawn iff `includeRoster`); every KPI/ranking value comes from `analytics`. The ViewModel computes `ReportAnalytics` once from `m_exportRows` and hands the same struct to the QML models and to these two functions — the renderer performs zero aggregation. Existing callers (`ReportingViewModel::renderToDevice` and the export paths) are updated to the new arity.
 
 ## 4. KPIs (the "How much?" band)
 
@@ -129,6 +138,7 @@ Every analytical component defines a meaningful state. **Never render empty tabl
 | **Ranking < N** | n/a | Show the entries that exist; header still "Top 10 …" |
 
 - Blank/whitespace `course`/`department`/`name` values normalize to **"(Unspecified)"** inside `compute` so downstream never sees empty labels.
+- The **Top Department** KPI may legitimately resolve to **"(Unspecified)"** when the busiest bucket is blank-department rows (real exports contain such rows) — that is an **acceptable display**, not an error state; the tile shows "(Unspecified)" + its visit count like any other.
 - The whole analytics section only appears once a report is generated (`hasResult`); a generated-but-empty result is the "No report data" case above.
 
 ## 7. On-screen — analytics-first dashboard (layout B)
@@ -154,8 +164,8 @@ Extends the merged 4b-i preview in `ReportingScreen.qml`. Hierarchy (fixed; grid
 - The **ranked bar chart is placed high on screen** (right after KPIs) — it is glanceable there. *(In the export it is demoted; see §8.)*
 - **Full roster** is **collapsed/demoted** behind a **"View full roster"** toggle (the existing `ReportRowsModel` table). No pagination.
 - A separate **"Include detailed roster in export"** checkbox lives with the export controls (see §9).
-- QML consumes: KPIs via VM `Q_PROPERTY`s (or a small `kpis` gadget), three ranking tables via new `RankingModel : QAbstractListModel` (one instance per ranking, or a reusable type), and the existing `BarsModel`/`ReportRowsModel`. All fed from the one `ReportAnalytics` struct.
-- **Theming:** all visual tokens via `Theme.qml`; zero raw hex; server/name-derived text uses `Text.PlainText` (cleartext HTTP).
+- QML consumes: KPIs via **scalar VM `Q_PROPERTY`s** (`totalVisits`/`uniqueVisitors`/`avgVisitsPerVisitor`/`topDepartment`/`topDepartmentVisits` — **NOT a `Q_GADGET`**, to keep the ViewModel the only QML-facing C++ per the MVVM rule), three ranking tables via a new `RankingModel : QAbstractListModel` (one instance per ranking, or a reusable type), and the existing `BarsModel`/`ReportRowsModel`. All fed from the one `ReportAnalytics` struct.
+- **Theming:** all visual tokens via `Theme.qml`; zero raw hex; server/name-derived text — **including the new ranking-row delegates (student names, course/department labels)** — uses `Text.PlainText` (cleartext HTTP).
 
 ## 8. Export — PDF and Excel
 
@@ -174,6 +184,8 @@ Visualization: the chart(s)               (existing bar/pie — DEMOTED to suppo
 Detailed roster                           (existing table — ONLY when the export checkbox is on)
 ```
 The chart is **supporting visualization, not an equal-priority section** — it moves *below* the rankings in the document (unlike the screen, where it sits high).
+
+**This is a structural reorder of `paintReport`, not a light prepend.** Today the paint body runs header→filters→**roster**→charts→prepared-by; the new order moves the roster to the **end** (and makes it optional), inserts net-new KPI-band and three ranking `QPainter` layouts, and the DPI-scaled roster page-break logic (`if (y > usableHeight - vs(200))`, `reportrenderer.cpp`) must be **re-verified** against the new section order. The plan budgets for this as a rewrite of the paint body, not a small insertion.
 
 ### Excel (`writeReportToXlsx`) — multi-sheet
 - **"Summary"** sheet — KPIs + the three rankings.
@@ -225,9 +237,13 @@ The export checkbox **does not follow** the screen toggle. An administrator may 
 | Empty states | Explicitly designed (§6), not left to QML |
 | Time analytics | Deferred (backend-dependent) |
 | Backend | No change in 4b-iii |
-| Implementation | **Only after PR #41 merges** |
+| Implementation | Two slices: **4b-iii-a** (core aggregator + on-screen dashboard), **4b-iii-b** (export analytics). PR #41 already merged. |
 
-## 13. Sequencing
+## 13. Sequencing — two slices (mirrors 4b's i/ii)
 
-1. **Now:** this spec (brainstorm complete). Hold the commit until the 4b-iii branch exists.
-2. **After PR #41 merges:** create the 4b-iii worktree/branch off updated `master`; commit this spec as its opening commit; run `/claude-review` in **design-spec mode**; then `superpowers:writing-plans` → TDD build → `/claude-review` → `create-pr`.
+This bundles a new core aggregator + tests, a `RankingModel`, VM wiring, a QML dashboard restructure + QuickTests, a PDF paint-body rewrite, and Excel multi-sheet — too much for one reviewable PR. The freeze table mandates the **design**, not one PR, so deliver in two slices:
+
+- **4b-iii-a — Core analytics + on-screen dashboard:** `reportanalytics.{h,cpp}` (`compute` + value types) with unit tests; `RankingModel`; the ViewModel KPI `Q_PROPERTY`s + ranking models fed from `ReportAnalytics`; the `ReportingScreen.qml` dashboard grid (§7) + "View full roster" toggle + QuickTests. **No renderer changes** — ships a smarter screen on its own.
+- **4b-iii-b — Export analytics:** the new `paintReport`/`writeReportToXlsx` signatures (§3), the PDF structural reorder (§8: KPI → rankings → demoted chart → optional roster, page-break re-verify), Excel multi-sheet (Summary + optional Roster, §8), the "Include detailed roster in export" checkbox (§9), OFFSCREEN export tests, and the **mandatory `WITSQuick.exe` export smoke** (§10).
+
+Each slice runs its own `superpowers:writing-plans` → subagent-driven TDD build → `/claude-review` → `create-pr`. "When?"/time analytics stays a later slice (**4b-iv**, backend-dependent).
