@@ -12,6 +12,10 @@ private slots:
     void kpis_oneStudent();
     void kpis_blankDepartmentBucketsUnspecified();
     void kpis_rawStringVisitsIsCallerError();
+    void ranks_coursesDescendingWithPercent();
+    void ranks_alphabeticalTieBreak();
+    void ranks_topNCapAndFewerThanN();
+    void ranks_studentsCarryCourseSublabel();
 
 private:
     // Synthetic rows only. `visits` is numeric (already normalized).
@@ -67,6 +71,52 @@ void TstReportAnalytics::kpis_rawStringVisitsIsCallerError() {
                     {"department","CCS"},{"visits","5"}};  // STRING, not int
     const ReportAnalytics a = ReportAnalytics::compute(QJsonArray{ bad });
     QCOMPARE(a.kpis.totalVisits, 0);
+}
+
+void TstReportAnalytics::ranks_coursesDescendingWithPercent() {
+    const QJsonArray rows{
+        row("1","Ana","BSIT","CCS",6), row("2","Ben","BSCS","CCS",3),
+        row("3","Cara","BSIT","CCS",1),  // BSIT total 7, BSCS 3, total 10
+    };
+    const ReportAnalytics a = ReportAnalytics::compute(rows);
+    QCOMPARE(a.topCourses.size(), 2);
+    QCOMPARE(a.topCourses[0].label, QStringLiteral("BSIT"));
+    QCOMPARE(a.topCourses[0].rank, 1);
+    QCOMPARE(a.topCourses[0].visits, 7);
+    QCOMPARE(a.topCourses[0].percentOfTotal, 70.0);
+    QCOMPARE(a.topCourses[1].label, QStringLiteral("BSCS"));
+    QCOMPARE(a.topCourses[1].rank, 2);
+}
+
+void TstReportAnalytics::ranks_alphabeticalTieBreak() {
+    // Equal visits -> alphabetical by label, deterministic.
+    const QJsonArray rows{
+        row("1","Ana","Zeta","D",5), row("2","Ben","Alpha","D",5),
+    };
+    const ReportAnalytics a = ReportAnalytics::compute(rows);
+    QCOMPARE(a.topCourses[0].label, QStringLiteral("Alpha"));
+    QCOMPARE(a.topCourses[1].label, QStringLiteral("Zeta"));
+}
+
+void TstReportAnalytics::ranks_topNCapAndFewerThanN() {
+    QJsonArray rows;
+    for (int i = 0; i < 12; ++i)
+        rows.append(row(QString::number(i), QStringLiteral("S%1").arg(i),
+                        QStringLiteral("C%1").arg(i), "D", i + 1));
+    const ReportAnalytics a = ReportAnalytics::compute(rows, 10);
+    QCOMPARE(a.topStudents.size(), 10);                 // capped at N
+    QCOMPARE(a.topStudents.first().visits, 12);         // highest first
+    QCOMPARE(a.topStudents.first().rank, 1);
+    const ReportAnalytics few = ReportAnalytics::compute(
+        QJsonArray{ row("1","Ana","BSIT","D",3) }, 10);
+    QCOMPARE(few.topStudents.size(), 1);                // fewer than N -> show what exists
+}
+
+void TstReportAnalytics::ranks_studentsCarryCourseSublabel() {
+    const ReportAnalytics a = ReportAnalytics::compute(
+        QJsonArray{ row("1","Ana Cruz","BSIT","CCS",4) });
+    QCOMPARE(a.topStudents.first().label, QStringLiteral("Ana Cruz"));
+    QCOMPARE(a.topStudents.first().sublabel, QStringLiteral("BSIT"));
 }
 
 QTEST_APPLESS_MAIN(TstReportAnalytics)
