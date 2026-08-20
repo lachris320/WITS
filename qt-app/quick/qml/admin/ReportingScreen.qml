@@ -23,10 +23,21 @@ Rectangle {
     readonly property bool hasRows: vm && vm.rows && vm.rows.count > 0
     property bool showRoster: false
 
-    ColumnLayout {
+    Flickable {
+        id: reportFlick
+        objectName: "reportScroll"
         anchors.fill: parent
         anchors.margins: Theme.spacing.xxl
-        spacing: Theme.spacing.lg
+        contentWidth: width
+        contentHeight: reportContent.implicitHeight
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+        ColumnLayout {
+            id: reportContent
+            width: reportFlick.width
+            spacing: Theme.spacing.lg
 
         // --- Filter card (self-sizing Rectangle: LCard has a fixed
         // implicitHeight of 96 and does NOT grow to fit slotted content, so
@@ -186,7 +197,6 @@ Rectangle {
         // --- Preview (stat tiles + chart + table) ---
         ColumnLayout {
             Layout.fillWidth: true
-            Layout.fillHeight: true
             spacing: Theme.spacing.lg
             visible: screen.showPreview
             opacity: screen.isLoading ? 0.4 : 1.0
@@ -357,7 +367,7 @@ Rectangle {
             LTable {
                 objectName: "reportTable"
                 Layout.fillWidth: true
-                Layout.fillHeight: true
+                Layout.preferredHeight: 320
                 visible: screen.showRoster
                 columns: [
                     { key: "name",   title: qsTr("Name"),   weight: 3 },
@@ -476,6 +486,7 @@ Rectangle {
             nameFilters: [qsTr("Excel workbook (*.xlsx)")]
             defaultSuffix: "xlsx"
             onAccepted: if (screen.vm) screen.vm.exportExcel(selectedFile)
+        }
         }
     }
 

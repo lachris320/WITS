@@ -2733,6 +2733,17 @@ Item {
             reportRowsStub.append({ name: "Maria Santos", course: "BSCE", year: "3", visits: 42 });
             reportRowsStub.append({ name: "Jose Cruz", course: "BSIT", year: "1", visits: 7 });
         }
+
+        function test_reporting_screen_is_scrollable() {
+            // Regression: the screen must be a Flickable so the export bar is reachable
+            // when the dashboard content is taller than the viewport.
+            var scroll = findChild(reporting, "reportScroll");
+            verify(scroll, "reporting body is wrapped in a scrollable Flickable");
+            verify(scroll.contentHeight !== undefined, "Flickable exposes contentHeight");
+            // the export controls must live INSIDE the scrollable content, so they scroll into view
+            var pdf = findChild(scroll, "exportPdfButton");
+            verify(pdf, "export PDF button is inside the scroll content");
+        }
     }
 
     Component { id: signalSpy; SignalSpy {} }
