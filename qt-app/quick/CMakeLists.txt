@@ -93,6 +93,8 @@ qt_add_qml_module(witsquickmodule
         models/SearchResultsModel.h models/SearchResultsModel.cpp
         models/StudentsTableModel.cpp models/StudentsTableModel.h
         models/ReportRowsModel.h models/ReportRowsModel.cpp
+        models/RankingModel.cpp
+        models/RankingModel.h
         viewmodels/SearchViewModel.h viewmodels/SearchViewModel.cpp
         viewmodels/DatabaseViewModel.cpp viewmodels/DatabaseViewModel.h
         viewmodels/SettingsViewModel.h viewmodels/SettingsViewModel.cpp

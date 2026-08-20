@@ -10,6 +10,7 @@
 #include <QUrl>
 #include <algorithm>
 #include "appsettings.h"
+#include "reportanalytics.h"
 #include "reportcontroller.h"
 #include "reportdata.h"
 #include "reportrenderer.h"
@@ -375,6 +376,14 @@ void ReportingViewModel::applyResult(const QJsonArray &data)
     m_totalVisits = t.totalVisits;
     m_studentsShown = t.studentsShown;
     m_topCourse = t.topCourse;
+    const ReportAnalytics an = ReportAnalytics::compute(m_exportRows);
+    m_uniqueVisitors = an.kpis.uniqueVisitors;
+    m_avgVisitsPerVisitor = an.kpis.avgVisitsPerVisitor;
+    m_topDepartment = an.kpis.hasData ? an.kpis.topDepartment : QStringLiteral("—");
+    m_topDepartmentVisits = an.kpis.topDepartmentVisits;
+    m_topStudents.setEntries(an.topStudents);
+    m_topCourses.setEntries(an.topCourses);
+    m_topDepartments.setEntries(an.topDepartments);
     m_hasResult = true;
     m_validationError = false;
     setError(QString());

@@ -10,6 +10,7 @@
 #include <QUrl>
 #include <qqml.h>                 // QML_ELEMENT — AdminScreen instantiates this type
 #include "BarsModel.h"
+#include "RankingModel.h"
 #include "ReportRowsModel.h"
 #include "reportdata.h"            // DateRange — return type of semesterWindow()
 
@@ -47,6 +48,13 @@ class ReportingViewModel : public QObject
     Q_PROPERTY(int totalVisits READ totalVisits NOTIFY resultChanged)
     Q_PROPERTY(int studentsShown READ studentsShown NOTIFY resultChanged)
     Q_PROPERTY(QString topCourse READ topCourse NOTIFY resultChanged)
+    Q_PROPERTY(int uniqueVisitors READ uniqueVisitors NOTIFY resultChanged)
+    Q_PROPERTY(double avgVisitsPerVisitor READ avgVisitsPerVisitor NOTIFY resultChanged)
+    Q_PROPERTY(QString topDepartment READ topDepartment NOTIFY resultChanged)
+    Q_PROPERTY(int topDepartmentVisits READ topDepartmentVisits NOTIFY resultChanged)
+    Q_PROPERTY(RankingModel *topStudents READ topStudents CONSTANT)
+    Q_PROPERTY(RankingModel *topCourses READ topCourses CONSTANT)
+    Q_PROPERTY(RankingModel *topDepartments READ topDepartments CONSTANT)
     Q_PROPERTY(QStringList palettes READ palettes CONSTANT)
     Q_PROPERTY(QString palette READ palette WRITE setPalette NOTIFY paletteChanged)
     Q_PROPERTY(QStringList chartTypes READ chartTypes CONSTANT)
@@ -103,6 +111,13 @@ public:
     int totalVisits() const { return m_totalVisits; }
     int studentsShown() const { return m_studentsShown; }
     QString topCourse() const { return m_topCourse; }
+    int uniqueVisitors() const { return m_uniqueVisitors; }
+    double avgVisitsPerVisitor() const { return m_avgVisitsPerVisitor; }
+    QString topDepartment() const { return m_topDepartment; }
+    int topDepartmentVisits() const { return m_topDepartmentVisits; }
+    RankingModel *topStudents() { return &m_topStudents; }
+    RankingModel *topCourses() { return &m_topCourses; }
+    RankingModel *topDepartments() { return &m_topDepartments; }
     QStringList palettes() const { return { QStringLiteral("Default"), QStringLiteral("Blue"),
                                             QStringLiteral("Green"), QStringLiteral("Red") }; }
     QString palette() const { return m_palette; }
@@ -201,6 +216,11 @@ private:
     bool m_hasResult = false;
     int m_totalVisits = 0, m_studentsShown = 0;
     QString m_topCourse = QStringLiteral("—");
+    int m_uniqueVisitors = 0;
+    double m_avgVisitsPerVisitor = 0.0;
+    QString m_topDepartment = QStringLiteral("—");
+    int m_topDepartmentVisits = 0;
+    RankingModel m_topStudents, m_topCourses, m_topDepartments;
 
     QString m_palette = QStringLiteral("Default");
     QString m_chartType = QStringLiteral("Bar");

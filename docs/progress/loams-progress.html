@@ -187,7 +187,7 @@
     <p class="eyebrow">Modernization Programme · Qt Widgets → Qt Quick</p>
     <h1>LOAMS <span class="v">2.0</span> — build progress</h1>
     <p class="lede">A parallel rebuild of the library attendance &amp; monitoring system onto a shared <span class="mono">witscore</span> C++ core with a QML front-end. Seven roadmap phases; the first four are shipped.</p>
-    <span class="statusline"><span class="dot"></span> Active: Phase 4 · Admin Part 2 — latest merge <span class="mono">PR&nbsp;#38</span></span>
+    <span class="statusline"><span class="dot"></span> Active: Phase 4 · Admin Part 2 — latest merge <span class="mono">PR&nbsp;#41</span></span>
   </header>
 
   <section class="metrics" aria-label="Programme metrics">
@@ -198,18 +198,18 @@
     </div>
     <div class="stat">
       <p class="k">Pull requests merged</p>
-      <div class="v tnum">21</div>
-      <p class="sub"><span class="mono">#17</span> <span class="arrow">→</span> <span class="mono">#38</span> to <span class="mono">master</span></p>
+      <div class="v tnum">24</div>
+      <p class="sub"><span class="mono">#17</span> <span class="arrow">→</span> <span class="mono">#41</span> to <span class="mono">master</span></p>
     </div>
     <div class="stat">
       <p class="k">Test suite (ctest)</p>
-      <div class="v tnum">39 <small class="mono">targets</small></div>
+      <div class="v tnum">42 <small class="mono">targets</small></div>
       <canvas class="spark" id="spark" width="320" height="76" aria-hidden="true"></canvas>
     </div>
     <div class="stat">
       <p class="k">Latest slice</p>
-      <div class="v" style="font-size:19px;line-height:1.15;font-weight:750">Department deactivate + delete</div>
-      <p class="sub"><span class="mono">4a.2c</span> · merged <span class="mono tnum">2026-08-11</span></p>
+      <div class="v" style="font-size:19px;line-height:1.15;font-weight:750">Reporting export — PDF · Excel · Print</div>
+      <p class="sub"><span class="mono">4b-ii</span> · merged <span class="mono tnum">2026-08-18</span></p>
     </div>
   </section>
 
@@ -281,7 +281,7 @@
           <h2 class="ptitle">Admin Part 2 — Database · Reporting · Settings</h2>
           <span class="chip active">In progress</span>
         </div>
-        <p class="psummary">The heaviest phase, split into independent tracks. Settings and the brand-token engine are done; the Database track is mid-build; Reporting and photo display are queued.</p>
+        <p class="psummary">The heaviest phase, split into independent tracks. Settings, brand tokens, the Database track (CRUD + Excel/ZIP import) and Reporting (preview + export) are all shipped; analytics and photo display remain.</p>
 
         <div class="tracks">
           <p class="tracks-cap">Tracks</p>
@@ -298,10 +298,10 @@
             <span class="ts done">#26–29</span>
           </div>
 
-          <div class="track" data-s="active">
+          <div class="track" data-s="done">
             <span class="tk">4a</span>
-            <span class="tl">Database + Import <small>— CRUD over the student table</small></span>
-            <span class="ts active">Active</span>
+            <span class="tl">Database + Import <small>— CRUD over the student table, Excel/ZIP import</small></span>
+            <span class="ts done">#30–39</span>
           </div>
 
           <div class="ladder" aria-label="Database sub-slices">
@@ -313,13 +313,19 @@
             <div class="slice done"><span class="sk">4a.2b-iii</span><span class="sl">Bulk edit + change preview</span><span class="ss">#36 ✓</span></div>
             <div class="slice done"><span class="sk">4a.2b-iv</span><span class="sl">Register student + photo</span><span class="ss">#37 ✓</span></div>
             <div class="slice done"><span class="sk">4a.2c</span><span class="sl">Department deactivate + delete</span><span class="ss">#38 ✓</span></div>
-            <div class="slice planned"><span class="sk">4a.3</span><span class="sl">Excel / ZIP import</span><span class="ss">next</span></div>
+            <div class="slice done"><span class="sk">4a.3</span><span class="sl">Excel / ZIP import <small>— breaking backend</small></span><span class="ss">#39 ✓</span></div>
           </div>
 
-          <div class="track" data-s="planned">
+          <div class="track" data-s="active">
             <span class="tk">4b</span>
-            <span class="tl">Reporting <small>— charts, ranges, exports (runs parallel)</small></span>
-            <span class="ts planned">Planned</span>
+            <span class="tl">Reporting <small>— filters, native preview, exports</small></span>
+            <span class="ts active">Active</span>
+          </div>
+
+          <div class="ladder" aria-label="Reporting sub-slices">
+            <div class="slice done"><span class="sk">4b-i</span><span class="sl">Filters + native preview <small>(table · ranked bar · tiles)</small></span><span class="ss">#40 ✓</span></div>
+            <div class="slice done"><span class="sk">4b-ii</span><span class="sl">Export — PDF / Excel / Print <small>(+ overlap &amp; chart fixes)</small></span><span class="ss">#41 ✓</span></div>
+            <div class="slice planned"><span class="sk">4b-iii</span><span class="sl">Analytics — KPI band &amp; rankings</span><span class="ss">next</span></div>
           </div>
 
           <div class="track" data-s="planned">
@@ -359,7 +365,7 @@
 
   <footer>
     <span>LOAMS 2.0 · <span class="mono">github.com/lachris320/WITS</span></span>
-    <span class="mono">Snapshot 2026-08-11 · master @ b846823</span>
+    <span class="mono">Snapshot 2026-08-19 · master @ 323f466</span>
   </footer>
 </div>
 
@@ -367,7 +373,7 @@
   (function(){
     var c = document.getElementById('spark');
     if(!c) return;
-    var pts = [12,17,23,32,36,39];   // ctest target growth, Phase 1 → now
+    var pts = [12,17,23,32,36,39,42];   // ctest target growth, Phase 1 → now
     function draw(){
       var css = getComputedStyle(document.documentElement);
       var line = css.getPropertyValue('--brand').trim() || '#7E1A15';

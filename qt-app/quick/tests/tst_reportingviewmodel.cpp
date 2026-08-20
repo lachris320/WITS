@@ -35,6 +35,7 @@ private slots:
     void setDepartmentClearsCourse();
     void onReportDataReadyPopulatesPreview();
     void onReportDataReadyEmptyIsSuccessNotError();
+    void analytics_populatedFromResult();
     void onReportErrorSetsErrorClearsLoading();
     void generateWhileLoadingIsNoop();
     void generateReportWithoutDepartmentShowsValidationMessage();
@@ -302,6 +303,27 @@ void TestReportingViewModel::onReportDataReadyEmptyIsSuccessNotError()
     QCOMPARE(vm.totalVisits(), 0);
     QCOMPARE(vm.topCourse(), QStringLiteral("—"));
     QVERIFY(vm.errorText().isEmpty());   // empty result is NOT an error
+}
+
+void TestReportingViewModel::analytics_populatedFromResult()
+{
+    ReportingViewModel vm;
+    QJsonArray rows{
+        QJsonObject{{"school_id","1"},{"name","Ana"},{"course","BSIT"},
+                    {"department","CCS"},{"year_level","1"},{"visits",5}},
+        QJsonObject{{"school_id","2"},{"name","Ben"},{"course","BSCS"},
+                    {"department","CCS"},{"year_level","1"},{"visits",3}},
+    };
+    vm.onReportDataReady(rows);                       // same seam the controller signal uses
+
+    QCOMPARE(vm.uniqueVisitors(), 2);
+    QCOMPARE(vm.avgVisitsPerVisitor(), 4.0);
+    QCOMPARE(vm.topDepartment(), QStringLiteral("CCS"));
+    QCOMPARE(vm.topDepartmentVisits(), 8);
+    QVERIFY(vm.topStudents() != nullptr);
+    QCOMPARE(vm.topStudents()->count(), 2);
+    QCOMPARE(vm.topCourses()->count(), 2);
+    QCOMPARE(vm.topDepartments()->count(), 1);        // single dept CCS
 }
 
 void TestReportingViewModel::onReportErrorSetsErrorClearsLoading()

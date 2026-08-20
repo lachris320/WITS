@@ -2511,6 +2511,17 @@ Item {
         ListElement { label: "BSCE"; value: 42 }
         ListElement { label: "BSIT"; value: 7 }
     }
+    ListModel { id: topStudentsStub
+        ListElement { rank: 1; label: "Ana"; sublabel: "BSIT"; visits: 5; percent: 62.5 }
+        ListElement { rank: 2; label: "Ben"; sublabel: "BSCS"; visits: 3; percent: 37.5 }
+    }
+    ListModel { id: topCoursesStub
+        ListElement { rank: 1; label: "BSIT"; sublabel: ""; visits: 5; percent: 62.5 }
+        ListElement { rank: 2; label: "BSCS"; sublabel: ""; visits: 3; percent: 37.5 }
+    }
+    ListModel { id: topDepartmentsStub
+        ListElement { rank: 1; label: "CCS"; sublabel: ""; visits: 8; percent: 100.0 }
+    }
     QtObject {
         id: reportingStub
         property var departments: ["CE", "IT"]
@@ -2536,6 +2547,13 @@ Item {
         property int totalVisits: 49
         property int studentsShown: 2
         property string topCourse: "BSCE"
+        property int uniqueVisitors: 2
+        property real avgVisitsPerVisitor: 4.0
+        property string topDepartment: "CCS"
+        property int topDepartmentVisits: 8
+        property var topStudents: topStudentsStub
+        property var topCourses: topCoursesStub
+        property var topDepartments: topDepartmentsStub
         property int generateCount: 0
         property int loadDepartmentsCount: 0
         property var palettes: ["Default", "Blue", "Green", "Red"]
@@ -2685,6 +2703,57 @@ Item {
             verify(fb.visible);
             verify(fb.text.indexOf("Couldn't write") >= 0);
             reportingStub.exportError = "";
+        }
+
+        function test_dashboard_showsKpisAndRankings() {
+            reportingStub.hasResult = true;
+            var uniqueTile = findChild(reporting, "uniqueVisitorsTile");
+            verify(uniqueTile, "unique-visitors KPI tile exists");
+            var deptTile = findChild(reporting, "topDepartmentTile");
+            verify(deptTile, "top-department KPI tile exists");
+            var studentsTable = findChild(reporting, "topStudentsTable");
+            verify(studentsTable, "top-students ranking table exists");
+            var rosterToggle = findChild(reporting, "viewRosterToggle");
+            verify(rosterToggle, "view-full-roster toggle exists");
+            var roster = findChild(reporting, "reportTable");
+            compare(roster.visible, false, "full roster starts collapsed");
+        }
+
+        function test_dashboard_kpiBandCollapsesOnEmptyResult() {
+            // Spec §6: a generated-but-empty result shows ONE "No report data"
+            // state, not four zeroed tiles.
+            reportingStub.hasResult = true;
+            reportRowsStub.clear();                 // count -> 0
+            var band = findChild(reporting, "kpiBand");
+            var emptyState = findChild(reporting, "kpiEmptyState");
+            verify(emptyState, "KPI empty-state element exists");
+            compare(band.visible, false, "the 4-tile band hides on 0 rows");
+            compare(emptyState.visible, true, "the single 'No report data' state shows");
+            // Spec §6/§7: the whole analytics scaffolding collapses too — not
+            // just the KPI band — so an empty result shows ONE state, period.
+            var chartCard = findChild(reporting, "reportChartCard");
+            var rankingsRow = findChild(reporting, "rankingsRow");
+            var rosterToggle = findChild(reporting, "viewRosterToggle");
+            verify(chartCard, "chart card exists");
+            verify(rankingsRow, "rankings row exists");
+            verify(rosterToggle, "roster toggle exists");
+            compare(chartCard.visible, false, "chart card hides on 0 rows");
+            compare(rankingsRow.visible, false, "ranking tables hide on 0 rows");
+            compare(rosterToggle.visible, false, "roster toggle hides on 0 rows");
+            // restore for later tests (mirrors init())
+            reportRowsStub.append({ name: "Maria Santos", course: "BSCE", year: "3", visits: 42 });
+            reportRowsStub.append({ name: "Jose Cruz", course: "BSIT", year: "1", visits: 7 });
+        }
+
+        function test_reporting_screen_is_scrollable() {
+            // Regression: the screen must be a Flickable so the export bar is reachable
+            // when the dashboard content is taller than the viewport.
+            var scroll = findChild(reporting, "reportScroll");
+            verify(scroll, "reporting body is wrapped in a scrollable Flickable");
+            verify(scroll.contentHeight !== undefined, "Flickable exposes contentHeight");
+            // the export controls must live INSIDE the scrollable content, so they scroll into view
+            var pdf = findChild(scroll, "exportPdfButton");
+            verify(pdf, "export PDF button is inside the scroll content");
         }
     }
 

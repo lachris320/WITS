@@ -251,3 +251,11 @@ wits_add_qttest(tst_csvutil
         ${CMAKE_SOURCE_DIR}/core/csvutil.cpp
         ${CMAKE_SOURCE_DIR}/core/csvutil.h
     INCLUDES ${CMAKE_SOURCE_DIR}/core)
+
+# --- Reporting analytics aggregator (pure core, no offscreen) ---
+wits_add_qttest(tst_reportanalytics
+    SOURCES
+        tst_reportanalytics.cpp
+        ${CMAKE_SOURCE_DIR}/core/reportanalytics.cpp
+        ${CMAKE_SOURCE_DIR}/core/reportanalytics.h
+    INCLUDES ${CMAKE_SOURCE_DIR}/core)
