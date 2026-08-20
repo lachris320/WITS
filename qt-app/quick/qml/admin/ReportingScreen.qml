@@ -250,8 +250,10 @@ Rectangle {
             }
 
             LCard {
+                objectName: "reportChartCard"
                 Layout.fillWidth: true
                 Layout.preferredHeight: 220
+                visible: screen.hasRows
                 LBarChart {
                     objectName: "reportBarChart"
                     anchors.fill: parent
@@ -263,8 +265,10 @@ Rectangle {
 
             // Top-10 rankings — Students / Courses / Departments.
             RowLayout {
+                objectName: "rankingsRow"
                 Layout.fillWidth: true
                 spacing: Theme.spacing.lg
+                visible: screen.hasRows
 
                 ColumnLayout {
                     objectName: "topStudentsTable"
@@ -361,6 +365,7 @@ Rectangle {
                 objectName: "viewRosterToggle"
                 text: qsTr("View full roster")
                 variant: "Outline"
+                visible: screen.hasRows
                 onClicked: screen.showRoster = !screen.showRoster
             }
 

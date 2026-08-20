@@ -2729,6 +2729,17 @@ Item {
             verify(emptyState, "KPI empty-state element exists");
             compare(band.visible, false, "the 4-tile band hides on 0 rows");
             compare(emptyState.visible, true, "the single 'No report data' state shows");
+            // Spec §6/§7: the whole analytics scaffolding collapses too — not
+            // just the KPI band — so an empty result shows ONE state, period.
+            var chartCard = findChild(reporting, "reportChartCard");
+            var rankingsRow = findChild(reporting, "rankingsRow");
+            var rosterToggle = findChild(reporting, "viewRosterToggle");
+            verify(chartCard, "chart card exists");
+            verify(rankingsRow, "rankings row exists");
+            verify(rosterToggle, "roster toggle exists");
+            compare(chartCard.visible, false, "chart card hides on 0 rows");
+            compare(rankingsRow.visible, false, "ranking tables hide on 0 rows");
+            compare(rosterToggle.visible, false, "roster toggle hides on 0 rows");
             // restore for later tests (mirrors init())
             reportRowsStub.append({ name: "Maria Santos", course: "BSCE", year: "3", visits: 42 });
             reportRowsStub.append({ name: "Jose Cruz", course: "BSIT", year: "1", visits: 7 });
