@@ -406,6 +406,12 @@ void ReportingViewModel::setChartType(const QString &c)
     if (m_chartType == c) return;
     m_chartType = c; emit chartTypeChanged();
 }
+void ReportingViewModel::setIncludeRosterInExport(bool v)
+{
+    if (m_includeRosterInExport == v) return;
+    m_includeRosterInExport = v;
+    emit includeRosterInExportChanged();
+}
 void ReportingViewModel::setExporting(bool v)
 {
     if (m_exporting == v) return;

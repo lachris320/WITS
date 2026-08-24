@@ -63,6 +63,8 @@ class ReportingViewModel : public QObject
     Q_PROPERTY(bool canExport READ canExport NOTIFY canExportChanged)
     Q_PROPERTY(QString exportStatus READ exportStatus NOTIFY exportStatusChanged)
     Q_PROPERTY(QString exportError READ exportError NOTIFY exportErrorChanged)
+    Q_PROPERTY(bool includeRosterInExport READ includeRosterInExport
+               WRITE setIncludeRosterInExport NOTIFY includeRosterInExportChanged)
 public:
     explicit ReportingViewModel(QObject *parent = nullptr);
 
@@ -127,9 +129,11 @@ public:
     bool canExport() const;
     QString exportStatus() const { return m_exportStatus; }
     QString exportError() const { return m_exportError; }
+    bool includeRosterInExport() const { return m_includeRosterInExport; }
 
     Q_INVOKABLE void setPalette(const QString &p);
     Q_INVOKABLE void setChartType(const QString &c);
+    Q_INVOKABLE void setIncludeRosterInExport(bool v);
 
     Q_INVOKABLE void loadDepartments();          // bootstrap: departments + years (Task 5)
     Q_INVOKABLE void setDepartment(const QString &department);   // Task 5
@@ -180,6 +184,7 @@ signals:
     void canExportChanged();
     void exportStatusChanged();
     void exportErrorChanged();
+    void includeRosterInExportChanged();
 
 private:
     void setLoading(bool v);
@@ -228,6 +233,7 @@ private:
     QString m_exportStatus;
     QString m_exportError;
     QJsonArray m_exportRows;
+    bool m_includeRosterInExport = false;   // spec §9: export roster is opt-in, default OFF
 };
 
 #endif // REPORTINGVIEWMODEL_H

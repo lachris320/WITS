@@ -59,6 +59,8 @@ private slots:
     void exportPdfInvalidUrlShowsError();
     void exportWhileExportingIsNoop();
     void printReportEmptyRowsShowsNoDataError();
+    void includeRosterInExport_defaultsFalse();
+    void setIncludeRosterInExport_togglesAndSignals();
 };
 
 void TestReportingViewModel::buildFiltersDaySendsStringTypeAndRange()
@@ -615,6 +617,24 @@ void TestReportingViewModel::printReportEmptyRowsShowsNoDataError()
     vm.printReport();
     QVERIFY(vm.exportError().contains(QStringLiteral("No data")));
     QVERIFY(!vm.exporting());
+}
+
+void TestReportingViewModel::includeRosterInExport_defaultsFalse() {
+    ReportingViewModel vm;
+    QCOMPARE(vm.includeRosterInExport(), false);   // spec §9: default OFF
+}
+
+void TestReportingViewModel::setIncludeRosterInExport_togglesAndSignals() {
+    ReportingViewModel vm;
+    QSignalSpy spy(&vm, &ReportingViewModel::includeRosterInExportChanged);
+    vm.setIncludeRosterInExport(true);
+    QCOMPARE(vm.includeRosterInExport(), true);
+    QCOMPARE(spy.count(), 1);
+    vm.setIncludeRosterInExport(true);   // no-op on unchanged value
+    QCOMPARE(spy.count(), 1);
+    vm.setIncludeRosterInExport(false);
+    QCOMPARE(vm.includeRosterInExport(), false);
+    QCOMPARE(spy.count(), 2);
 }
 
 QTEST_MAIN(TestReportingViewModel)
