@@ -391,63 +391,76 @@ Rectangle {
             visible: screen.vm ? (screen.vm.hasResult && screen.vm.rows && screen.vm.rows.count > 0) : false
             color: Theme.card; radius: Theme.radius.card
             border.width: 2; border.color: Theme.border
-            implicitHeight: exportRow.implicitHeight + Theme.spacing.xl * 2
+            implicitHeight: exportCol.implicitHeight + Theme.spacing.xl * 2
 
-            RowLayout {
-                id: exportRow
+            ColumnLayout {
+                id: exportCol
                 anchors.fill: parent
                 anchors.margins: Theme.spacing.xl
                 spacing: Theme.spacing.md
 
-                LComboBox {
-                    id: paletteCombo
-                    objectName: "paletteCombo"
-                    accessibleName: qsTr("Report palette")
-                    Layout.preferredWidth: 150
-                    model: screen.vm ? screen.vm.palettes : []
-                    placeholder: qsTr("Palette")
-                    currentValue: screen.vm ? screen.vm.palette : "Default"
-                    onSelected: function(v) { if (screen.vm) screen.vm.setPalette(v); }
-                }
-                LComboBox {
-                    id: chartTypeCombo
-                    objectName: "chartTypeCombo"
-                    accessibleName: qsTr("Chart type")
-                    Layout.preferredWidth: 150
-                    model: screen.vm ? screen.vm.chartTypes : []
-                    placeholder: qsTr("Chart")
-                    currentValue: screen.vm ? screen.vm.chartType : "Bar"
-                    onSelected: function(v) { if (screen.vm) screen.vm.setChartType(v); }
+                LCheckbox {
+                    objectName: "includeRosterCheck"
+                    label: qsTr("Include detailed roster in export")
+                    checked: screen.vm ? screen.vm.includeRosterInExport : false
+                    onToggled: function(c) { if (screen.vm) screen.vm.setIncludeRosterInExport(c); }
                 }
 
-                Item { Layout.fillWidth: true }   // spacer
+                RowLayout {
+                    id: exportRow
+                    Layout.fillWidth: true
+                    spacing: Theme.spacing.md
 
-                // Design OS §4.5: disabled controls expose WHY via Accessible.description.
-                LButton {
-                    objectName: "exportPdfButton"
-                    text: qsTr("Export PDF")
-                    accessibleName: qsTr("Export PDF")
-                    enabled: screen.canExport
-                    Accessible.description: screen.canExport ? "" : qsTr("Generate a report with results to enable export")
-                    onClicked: exportPdfDialog.open()
-                }
-                LButton {
-                    objectName: "exportExcelButton"
-                    text: qsTr("Export Excel")
-                    accessibleName: qsTr("Export Excel")
-                    variant: "Outline"
-                    enabled: screen.canExport
-                    Accessible.description: screen.canExport ? "" : qsTr("Generate a report with results to enable export")
-                    onClicked: exportExcelDialog.open()
-                }
-                LButton {
-                    objectName: "printButton"
-                    text: qsTr("Print")
-                    accessibleName: qsTr("Print report")
-                    variant: "Outline"
-                    enabled: screen.canExport
-                    Accessible.description: screen.canExport ? "" : qsTr("Generate a report with results to enable export")
-                    onClicked: if (screen.vm) screen.vm.printReport()
+                    LComboBox {
+                        id: paletteCombo
+                        objectName: "paletteCombo"
+                        accessibleName: qsTr("Report palette")
+                        Layout.preferredWidth: 150
+                        model: screen.vm ? screen.vm.palettes : []
+                        placeholder: qsTr("Palette")
+                        currentValue: screen.vm ? screen.vm.palette : "Default"
+                        onSelected: function(v) { if (screen.vm) screen.vm.setPalette(v); }
+                    }
+                    LComboBox {
+                        id: chartTypeCombo
+                        objectName: "chartTypeCombo"
+                        accessibleName: qsTr("Chart type")
+                        Layout.preferredWidth: 150
+                        model: screen.vm ? screen.vm.chartTypes : []
+                        placeholder: qsTr("Chart")
+                        currentValue: screen.vm ? screen.vm.chartType : "Bar"
+                        onSelected: function(v) { if (screen.vm) screen.vm.setChartType(v); }
+                    }
+
+                    Item { Layout.fillWidth: true }   // spacer
+
+                    // Design OS §4.5: disabled controls expose WHY via Accessible.description.
+                    LButton {
+                        objectName: "exportPdfButton"
+                        text: qsTr("Export PDF")
+                        accessibleName: qsTr("Export PDF")
+                        enabled: screen.canExport
+                        Accessible.description: screen.canExport ? "" : qsTr("Generate a report with results to enable export")
+                        onClicked: exportPdfDialog.open()
+                    }
+                    LButton {
+                        objectName: "exportExcelButton"
+                        text: qsTr("Export Excel")
+                        accessibleName: qsTr("Export Excel")
+                        variant: "Outline"
+                        enabled: screen.canExport
+                        Accessible.description: screen.canExport ? "" : qsTr("Generate a report with results to enable export")
+                        onClicked: exportExcelDialog.open()
+                    }
+                    LButton {
+                        objectName: "printButton"
+                        text: qsTr("Print")
+                        accessibleName: qsTr("Print report")
+                        variant: "Outline"
+                        enabled: screen.canExport
+                        Accessible.description: screen.canExport ? "" : qsTr("Generate a report with results to enable export")
+                        onClicked: if (screen.vm) screen.vm.printReport()
+                    }
                 }
             }
         }

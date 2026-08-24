@@ -12,10 +12,10 @@ Item {
     // Geometry ledger (x 0 column):   dash 0..760 | search 760..1460 |
     //   logs 1460..2160 | settings 2160..3760 | database 3800..4500
     //   | editDialog 4500..5200 | bulkEdit 5200..5900 | registerDialog 5900..6600
-    //   | importDialog 6600..7300 | reporting 7300..8300.
+    //   | importDialog 6600..7300 | reporting 7300..8420.
     // Parked no-vm column (x 2000): vmlessSearch 0..700 |
     //   vmlessLogs 760..1460 | vmlessSettings 1560..2260.
-    width: 1100; height: 8300
+    width: 1100; height: 8420
 
     // --- Dashboard stub VM ---
     // maxValue is declared on the stubs because the screen binds
@@ -2560,6 +2560,9 @@ Item {
         property string palette: "Default"
         property var chartTypes: ["Bar", "Pie"]
         property string chartType: "Bar"
+        property bool includeRosterInExport: false
+        property int setIncludeRosterCount: 0
+        function setIncludeRosterInExport(v) { includeRosterInExport = v; setIncludeRosterCount++ }
         property bool canExport: true
         property bool exporting: false
         property string exportStatus: ""
@@ -2586,7 +2589,7 @@ Item {
         function generateReport() { generateCount++ }
         function retry() { generateCount++ }
     }
-    ReportingScreen { id: reporting; x: 0; y: 7300; width: 1100; height: 1000; vm: reportingStub }
+    ReportingScreen { id: reporting; x: 0; y: 7300; width: 1100; height: 1120; vm: reportingStub }
 
     // A vm-less instance to cover the `vm ? ... : ...` fallback path.
     ReportingScreen { id: vmlessReporting; x: 2000; y: 7300; width: 1100; height: 1000 }
@@ -2598,6 +2601,9 @@ Item {
             reportingStub.loading = false;
             reportingStub.durationType = 0;
             reportingStub.hasResult = true;
+            reportingStub.includeRosterInExport = false;
+            var rosterChk = findChild(reporting, "includeRosterCheck");
+            if (rosterChk) rosterChk.checked = false;
         }
 
         function cleanup() {
@@ -2703,6 +2709,31 @@ Item {
             verify(fb.visible);
             verify(fb.text.indexOf("Couldn't write") >= 0);
             reportingStub.exportError = "";
+        }
+
+        function test_includeRosterCheckboxDefaultsUncheckedAndWritesVm() {
+            reportingStub.includeRosterInExport = false;
+            var chk = findChild(reporting, "includeRosterCheck");
+            verify(chk, "include-roster checkbox exists");
+            compare(chk.checked, false, "defaults to unchecked (spec §9 default OFF)");
+            var before = reportingStub.setIncludeRosterCount;
+            mouseClick(chk);
+            compare(reportingStub.setIncludeRosterCount, before + 1);
+            compare(reportingStub.includeRosterInExport, true);
+            reportingStub.includeRosterInExport = false;
+        }
+
+        function test_includeRosterIsIndependentOfScreenRosterToggle() {
+            // Spec §9: the export checkbox and the on-screen "View full roster"
+            // toggle are independent — neither follows the other.
+            reportingStub.includeRosterInExport = false;
+            reporting.showRoster = false;
+            var toggle = findChild(reporting, "viewRosterToggle");
+            mouseClick(toggle);                       // expand the on-screen roster
+            compare(reporting.showRoster, true);
+            compare(reportingStub.includeRosterInExport, false,
+                    "screen toggle must NOT flip the export flag");
+            reporting.showRoster = false;
         }
 
         function test_dashboard_showsKpisAndRankings() {
