@@ -34,6 +34,27 @@
 //   QT_LOGGING_RULES="wits.report.render.debug=true"
 Q_LOGGING_CATEGORY(lcReportRender, "wits.report.render", QtInfoMsg)
 
+namespace {
+// Guards writeReportToXlsx's Excel cells against formula/CSV injection. The
+// vendored QXlsx::Worksheet::write() treats any string starting with '='
+// as a live FORMULA (and Excel itself treats a leading + - @ or a leading
+// tab/CR the same way once opened), so network-derived text (a student
+// name, course, or department pulled from the backend) could smuggle a
+// formula (e.g. =HYPERLINK(...) or a DDE payload) that the librarian's
+// Excel evaluates on open. Prefixing a single apostrophe is the standard
+// Excel text-escape: it forces the cell to render as literal text.
+QString sanitizeXlsxText(const QString &s) {
+    if (s.isEmpty())
+        return s;
+    const QChar lead = s.at(0);
+    if (lead == QLatin1Char('=') || lead == QLatin1Char('+') || lead == QLatin1Char('-')
+        || lead == QLatin1Char('@') || lead == QLatin1Char('\t') || lead == QLatin1Char('\r')) {
+        return QLatin1Char('\'') + s;
+    }
+    return s;
+}
+} // namespace
+
 // Scales a legacy ~96-DPI pixel literal to the paged device's resolution.
 // paintReport's vertical advances/rects were raw device-pixel literals tuned
 // for ~96 DPI; on a QPdfWriter (1200 DPI default) they no longer clear the
@@ -760,7 +781,8 @@ bool ReportRenderer::writeReportToXlsx(QXlsx::Document &xlsx,
     xlsx.write(row, 1, QStringLiteral("Avg. Visits / Visitor"));
     xlsx.write(row++, 2, QString::number(analytics.kpis.avgVisitsPerVisitor, 'f', 1));
     xlsx.write(row, 1, QStringLiteral("Top Department"));
-    xlsx.write(row, 2, analytics.kpis.hasData ? analytics.kpis.topDepartment : QStringLiteral("—"));
+    xlsx.write(row, 2, analytics.kpis.hasData ? sanitizeXlsxText(analytics.kpis.topDepartment)
+                                               : QStringLiteral("—"));
     xlsx.write(row++, 3, analytics.kpis.topDepartmentVisits);
     row += 1;
 
@@ -774,8 +796,8 @@ bool ReportRenderer::writeReportToXlsx(QXlsx::Document &xlsx,
         for (const RankingEntry &e : entries) {
             int c = 1;
             xlsx.write(row, c++, e.rank);
-            xlsx.write(row, c++, e.label);
-            if (withSublabel) xlsx.write(row, c++, e.sublabel);
+            xlsx.write(row, c++, sanitizeXlsxText(e.label));
+            if (withSublabel) xlsx.write(row, c++, sanitizeXlsxText(e.sublabel));
             xlsx.write(row, c++, e.visits);
             if (withPercent) xlsx.write(row, c++, QString::number(e.percentOfTotal, 'f', 1) + "%");
             row++;
@@ -810,9 +832,10 @@ bool ReportRenderer::writeReportToXlsx(QXlsx::Document &xlsx,
         for (const auto &val : rows) {
             const QJsonObject obj = val.toObject();
             const QStringList rowData = {
-                obj["school_id"].toString(), obj["name"].toString(), obj["gender"].toString(),
-                obj["course"].toString(), obj["year_level"].toString(), obj["department"].toString(),
-                obj["status"].toString(), QString::number(obj["visits"].toInt())
+                sanitizeXlsxText(obj["school_id"].toString()), sanitizeXlsxText(obj["name"].toString()),
+                sanitizeXlsxText(obj["gender"].toString()), sanitizeXlsxText(obj["course"].toString()),
+                sanitizeXlsxText(obj["year_level"].toString()), sanitizeXlsxText(obj["department"].toString()),
+                sanitizeXlsxText(obj["status"].toString()), QString::number(obj["visits"].toInt())
             };
             for (int c = 0; c < rowData.size(); ++c)
                 xlsx.write(rr, c + 1, rowData[c], (rr % 2 == 0) ? evenFmt : oddFmt);

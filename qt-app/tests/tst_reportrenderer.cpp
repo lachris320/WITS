@@ -33,6 +33,7 @@ private slots:
     void writeReportToXlsx_rosterOnSeparateSheetWhenIncluded();
     void paintReport_writesPdfWithAndWithoutRoster();
     void paintReport_writesAnalyticsPdfAtHighDpi();
+    void writeReportToXlsx_sanitizesFormulaLeadingNames();
 
 private:
     static QJsonArray sampleVisits() {
@@ -336,6 +337,54 @@ void TstReportRenderer::paintReport_writesAnalyticsPdfAtHighDpi() {
             QVERIFY(QFileInfo(path).size() > 0);
         }
     }
+}
+
+// Regression test for a claude-review finding: the vendored QXlsx
+// Worksheet::write() treats any string starting with '=' as a live FORMULA,
+// so a network-derived student name like =HYPERLINK("http://evil","x") would
+// be written (and evaluated by Excel on open) as a formula rather than text
+// (Excel formula/CSV injection). writeReportToXlsx must prefix such values
+// with a literal apostrophe so they render as inert text.
+void TstReportRenderer::writeReportToXlsx_sanitizesFormulaLeadingNames() {
+    const QString payload = QStringLiteral("=HYPERLINK(\"http://evil\",\"x\")");
+    QJsonArray rows{
+        QJsonObject{
+            {"school_id", "2023-00009"}, {"name", payload},
+            {"gender", "Male"}, {"status", "Regular"},
+            {"course", "BSIT"}, {"department", "College of Computing Studies"},
+            {"year_level", "1st Year"}, {"visits", 1}
+        },
+        QJsonObject{
+            {"school_id", "2023-00010"}, {"name", "Test Student One"},
+            {"gender", "Female"}, {"status", "Regular"},
+            {"course", "BSCS"}, {"department", "College of Computing Studies"},
+            {"year_level", "1st Year"}, {"visits", 1}
+        },
+    };
+    ReportAnalytics analytics = ReportAnalytics::compute(rows);
+
+    QXlsx::Document xlsx;
+    QVERIFY(ReportRenderer::writeReportToXlsx(
+        xlsx, rows, sampleFilters(), sampleHeaderInfo(), analytics, true));
+
+    QVERIFY(xlsx.selectSheet("Detailed Roster"));
+
+    bool foundSanitizedPayload = false;
+    bool foundUnchangedNormalName = false;
+    for (int r = 1; r <= 20; ++r) {
+        for (int c = 1; c <= 8; ++c) {
+            const QString cell = xlsx.read(r, c).toString();
+            if (cell == QLatin1Char('\'') + payload) {
+                QVERIFY(cell.startsWith(QLatin1Char('\'')));
+                foundSanitizedPayload = true;
+            }
+            // The raw, unescaped payload must never appear as a stored cell value.
+            QVERIFY(cell != payload);
+            if (cell == "Test Student One") foundUnchangedNormalName = true;
+        }
+    }
+    QVERIFY(foundSanitizedPayload);
+    QVERIFY(foundUnchangedNormalName);
 }
 
 QTEST_MAIN(TstReportRenderer)
