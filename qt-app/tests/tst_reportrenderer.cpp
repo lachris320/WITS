@@ -32,6 +32,7 @@ private slots:
     void writeReportToXlsx_summarySheetHasKpisAndRankings();
     void writeReportToXlsx_rosterOnSeparateSheetWhenIncluded();
     void paintReport_writesPdfWithAndWithoutRoster();
+    void paintReport_writesAnalyticsPdfAtHighDpi();
 
 private:
     static QJsonArray sampleVisits() {
@@ -310,6 +311,30 @@ void TstReportRenderer::paintReport_writesPdfWithAndWithoutRoster() {
                 sampleHeaderInfo(), sampleAnalytics(), includeRoster));
         }
         QVERIFY(QFileInfo(path).size() > 0);
+    }
+}
+
+void TstReportRenderer::paintReport_writesAnalyticsPdfAtHighDpi() {
+    // Exercise the chart + roster combination explicitly — sampleFilters() sets
+    // no "chartType", so a chart is only drawn when we add one. The chart+roster
+    // path is exactly where the "roster overprints the last chart page" bug lives:
+    // the roster MUST open its own page unconditionally (Task 4, item 6).
+    QJsonObject filtersWithChart = sampleFilters();
+    filtersWithChart["chartType"] = "Bar";
+    for (int resolution : { 300, 1200 }) {
+        for (bool includeRoster : { false, true }) {
+            QTemporaryDir dir;
+            QVERIFY(dir.isValid());
+            const QString path = dir.filePath("analytics.pdf");
+            {
+                QPdfWriter pdf(path);
+                pdf.setResolution(resolution);
+                QVERIFY(ReportRenderer::paintReport(
+                    &pdf, resolution, sampleRows(), filtersWithChart, samplePalette(),
+                    sampleHeaderInfo(), sampleAnalytics(), includeRoster));
+            }
+            QVERIFY(QFileInfo(path).size() > 0);
+        }
     }
 }
 

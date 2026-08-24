@@ -326,8 +326,6 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
         return false;
     }
 
-    Q_UNUSED(analytics);   // consumed by the KPI/ranking layouts in Task 4
-
     auto finalize = qScopeGuard([&]() {
         if (painter.isActive()) {
             painter.end();
@@ -424,6 +422,19 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
     };
     drawHeader(y);
 
+    // Advances to a fresh page when the next block would overflow the usable
+    // area. Declared after drawFooter/drawHeader so both captured lambdas exist.
+    auto newPageIfNeeded = [&](int needed) {
+        if (y > usableHeight - vs(needed)) {
+            drawFooter(currentPage);
+            device->newPage();
+            currentPage++;
+            y = margin;
+            drawHeader(y);
+            painter.setFont(QFont("Arial", 10));
+        }
+    };
+
 
     // ===== FILTERS =====
     painter.setFont(QFont("Arial", 10));
@@ -436,87 +447,63 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
     painter.drawText(QRect(margin, y, usableWidth, vs(30)), Qt::AlignLeft, filtersLine);
     y += vs(40);
 
-    // ===== TABLE ===== (gated: the per-student roster is opt-in — spec §9)
-    if (includeRoster) {
-
-    // --- Define column widths (8 columns total) ---
-    int col1 = margin;                                   // School ID
-    int col2 = margin + (usableWidth * 0.12);            // Name
-    int col3 = margin + (usableWidth * 0.32);            // Gender
-    int col4 = margin + (usableWidth * 0.42);            // Status
-    int col5 = margin + (usableWidth * 0.55);            // Course
-    int col6 = margin + (usableWidth * 0.70);            // Department
-    int col7 = margin + (usableWidth * 0.85);            // Year Level
-    int col8 = margin + (usableWidth * 0.95);            // Visits
-
-    // Row rhythm: pin the row font, then floor the per-row advance at the glyph
-    // box (height + a little leading) so variable-length data never overlaps even
-    // after the DPI scaling above — this is the guard against the original bug.
-    painter.setFont(QFont("Arial", 10));
-    const QFontMetrics fm = painter.fontMetrics();
-    const int rowPitch = qMax(vs(20), fm.height() + vs(4));
-
-    // --- Draw header row ---
-    painter.fillRect(QRect(margin, y - vs(15), usableWidth, vs(20)), palette.headerBg);
-    painter.setPen(palette.headerText);
-
-    painter.drawText(col1, y, "School ID");
-    painter.drawText(col2, y, "Name");
-    painter.drawText(col3, y, "Gender");
-    painter.drawText(col4, y, "Status");
-    painter.drawText(col5, y, "Course");
-    painter.drawText(col6, y, "Department");
-    painter.drawText(col7, y, "Year Level");
-    painter.drawText(col8, y, "Visits");
-
-    y += vs(25);
+    // ===== KPI SUMMARY (spec §8: after context, before rankings) =====
+    painter.setFont(QFont("Arial", 13, QFont::Bold));
     painter.setPen(Qt::black);
-    painter.drawLine(margin, y, pageWidth - margin, y);
-    y += vs(20);
+    painter.drawText(QRect(margin, y, usableWidth, vs(24)), Qt::AlignLeft, "Summary");
+    y += vs(30);
+    painter.setFont(QFont("Arial", 11));
+    auto kpiLine = [&](const QString &label, const QString &value) {
+        painter.drawText(QRect(margin, y, usableWidth, vs(22)), Qt::AlignLeft,
+                         QString("%1: %2").arg(label, value));
+        y += vs(24);
+    };
+    kpiLine("Total Visits", QString::number(analytics.kpis.totalVisits));
+    kpiLine("Unique Visitors", QString::number(analytics.kpis.uniqueVisitors));
+    kpiLine("Avg. Visits / Visitor", QString::number(analytics.kpis.avgVisitsPerVisitor, 'f', 1));
+    kpiLine("Top Department",
+            QString("%1 (%2 visits)")
+                .arg(analytics.kpis.hasData ? analytics.kpis.topDepartment : QStringLiteral("—"))
+                .arg(analytics.kpis.topDepartmentVisits));
+    y += vs(16);
 
-    int rowIndex = 0;
-    for (auto v : data) {
-        QJsonObject row = v.toObject();
-
-        // Fill band tiles exactly at rowPitch so bands abut without gaps/overlap.
-        QRect rowRect(margin, y - fm.ascent(), usableWidth, rowPitch);
-        painter.fillRect(rowRect, (rowIndex % 2 == 0) ? palette.rowEvenBg : palette.rowOddBg);
-
-        painter.setPen(palette.rowText);
-
-        QString schoolId   = fm.elidedText(safeText(row["school_id"].toString()), Qt::ElideRight, col2 - col1 - vs(5));
-        QString name       = fm.elidedText(safeText(row["name"].toString()), Qt::ElideRight, col3 - col2 - vs(5));
-        QString gender     = fm.elidedText(safeText(row["gender"].toString()), Qt::ElideRight, col4 - col3 - vs(5));
-        QString status     = fm.elidedText(safeText(row["status"].toString()), Qt::ElideRight, col5 - col4 - vs(5));
-        QString course     = fm.elidedText(safeText(row["course"].toString()), Qt::ElideRight, col6 - col5 - vs(5));
-        QString department = fm.elidedText(safeText(row["department"].toString()), Qt::ElideRight, col7 - col6 - vs(5));
-        QString yearLevel  = fm.elidedText(safeText(row["year_level"].toString()), Qt::ElideRight, col8 - col7 - vs(5));
-
-        painter.drawText(col1, y, schoolId);
-        painter.drawText(col2, y, name);
-        painter.drawText(col3, y, gender);
-        painter.drawText(col4, y, status);
-        painter.drawText(col5, y, course);
-        painter.drawText(col6, y, department);
-        painter.drawText(col7, y, yearLevel);
-        painter.drawText(col8, y, QString::number(row["visits"].toInt()));
-
-        y += rowPitch;
-        rowIndex++;
-
-        if (y > usableHeight - vs(200)) {
-            drawFooter(currentPage);
-            device->newPage();
-            currentPage++;
-            y = margin;
-            drawHeader(y);
-            // drawHeader leaves the font at Arial 9; restore the row font so
-            // continuation-page rows draw at the same Arial 10 that fm measures.
-            painter.setFont(QFont("Arial", 10));
+    // ===== RANKINGS (spec §8) =====
+    auto drawRanking = [&](const QString &heading, const QList<RankingEntry> &entries,
+                           bool withSublabel, bool withPercent) {
+        newPageIfNeeded(220);
+        painter.setFont(QFont("Arial", 12, QFont::Bold));
+        painter.setPen(Qt::black);
+        painter.drawText(QRect(margin, y, usableWidth, vs(22)), Qt::AlignLeft, heading);
+        y += vs(28);
+        painter.setFont(QFont("Arial", 10));
+        const QFontMetrics rfm = painter.fontMetrics();
+        const int pitch = qMax(vs(20), rfm.height() + vs(4));
+        int idx = 0;
+        for (const RankingEntry &e : entries) {
+            newPageIfNeeded(80);
+            const int cRank = margin;
+            const int cLabel = margin + int(usableWidth * 0.10);
+            const int cSub = margin + int(usableWidth * 0.55);
+            const int cVisits = margin + int(usableWidth * 0.78);
+            const int cPct = margin + int(usableWidth * 0.90);
+            painter.fillRect(QRect(margin, y - rfm.ascent(), usableWidth, pitch),
+                             (idx % 2 == 0) ? palette.rowEvenBg : palette.rowOddBg);
+            painter.setPen(palette.rowText);
+            painter.drawText(cRank, y, QString::number(e.rank));
+            painter.drawText(cLabel, y, rfm.elidedText(e.label, Qt::ElideRight, cSub - cLabel - vs(5)));
+            if (withSublabel)
+                painter.drawText(cSub, y, rfm.elidedText(e.sublabel, Qt::ElideRight, cVisits - cSub - vs(5)));
+            painter.drawText(cVisits, y, QString::number(e.visits));
+            if (withPercent)
+                painter.drawText(cPct, y, QString::number(e.percentOfTotal, 'f', 1) + "%");
+            y += pitch;
+            idx++;
         }
-    }
-
-    } // if (includeRoster)
+        y += vs(16);
+    };
+    drawRanking("Top 10 Students", analytics.topStudents, true, false);
+    drawRanking("Top 10 Courses", analytics.topCourses, false, true);
+    drawRanking("Top 10 Departments", analytics.topDepartments, false, true);
 
     // ===== CHARTS: each chart placed on its own page and scaled to fill almost whole page =====
     auto drawFullscreenChart = [&](const QString &label, const QImage &img) {
@@ -580,6 +567,103 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
 
     // Footer on the last page with current page number
     drawFooter(currentPage);
+
+    // ===== DETAILED ROSTER ===== (gated: the per-student roster is opt-in — spec §9)
+    // MUST open its own page unconditionally: drawFullscreenChart resets the outer
+    // `y` back near the top of the last chart page, so newPageIfNeeded would be a
+    // no-op here and the roster would overprint the chart image. The last content
+    // page was already footed just above, so page forward directly.
+    if (includeRoster) {
+        device->newPage();
+        currentPage++;
+        y = margin;
+        drawHeader(y);
+
+        painter.setFont(QFont("Arial", 12, QFont::Bold));
+        painter.setPen(Qt::black);
+        painter.drawText(QRect(margin, y, usableWidth, vs(22)), Qt::AlignLeft, "Detailed Roster");
+        y += vs(30);
+
+        // --- Define column widths (8 columns total) ---
+        int col1 = margin;                                   // School ID
+        int col2 = margin + (usableWidth * 0.12);            // Name
+        int col3 = margin + (usableWidth * 0.32);            // Gender
+        int col4 = margin + (usableWidth * 0.42);            // Status
+        int col5 = margin + (usableWidth * 0.55);            // Course
+        int col6 = margin + (usableWidth * 0.70);            // Department
+        int col7 = margin + (usableWidth * 0.85);            // Year Level
+        int col8 = margin + (usableWidth * 0.95);            // Visits
+
+        // Row rhythm: pin the row font, then floor the per-row advance at the glyph
+        // box (height + a little leading) so variable-length data never overlaps even
+        // after the DPI scaling above — this is the guard against the original bug.
+        painter.setFont(QFont("Arial", 10));
+        const QFontMetrics fm = painter.fontMetrics();
+        const int rowPitch = qMax(vs(20), fm.height() + vs(4));
+
+        // --- Draw header row ---
+        painter.fillRect(QRect(margin, y - vs(15), usableWidth, vs(20)), palette.headerBg);
+        painter.setPen(palette.headerText);
+
+        painter.drawText(col1, y, "School ID");
+        painter.drawText(col2, y, "Name");
+        painter.drawText(col3, y, "Gender");
+        painter.drawText(col4, y, "Status");
+        painter.drawText(col5, y, "Course");
+        painter.drawText(col6, y, "Department");
+        painter.drawText(col7, y, "Year Level");
+        painter.drawText(col8, y, "Visits");
+
+        y += vs(25);
+        painter.setPen(Qt::black);
+        painter.drawLine(margin, y, pageWidth - margin, y);
+        y += vs(20);
+
+        int rowIndex = 0;
+        for (auto v : data) {
+            QJsonObject row = v.toObject();
+
+            // Fill band tiles exactly at rowPitch so bands abut without gaps/overlap.
+            QRect rowRect(margin, y - fm.ascent(), usableWidth, rowPitch);
+            painter.fillRect(rowRect, (rowIndex % 2 == 0) ? palette.rowEvenBg : palette.rowOddBg);
+
+            painter.setPen(palette.rowText);
+
+            QString schoolId   = fm.elidedText(safeText(row["school_id"].toString()), Qt::ElideRight, col2 - col1 - vs(5));
+            QString name       = fm.elidedText(safeText(row["name"].toString()), Qt::ElideRight, col3 - col2 - vs(5));
+            QString gender     = fm.elidedText(safeText(row["gender"].toString()), Qt::ElideRight, col4 - col3 - vs(5));
+            QString status     = fm.elidedText(safeText(row["status"].toString()), Qt::ElideRight, col5 - col4 - vs(5));
+            QString course     = fm.elidedText(safeText(row["course"].toString()), Qt::ElideRight, col6 - col5 - vs(5));
+            QString department = fm.elidedText(safeText(row["department"].toString()), Qt::ElideRight, col7 - col6 - vs(5));
+            QString yearLevel  = fm.elidedText(safeText(row["year_level"].toString()), Qt::ElideRight, col8 - col7 - vs(5));
+
+            painter.drawText(col1, y, schoolId);
+            painter.drawText(col2, y, name);
+            painter.drawText(col3, y, gender);
+            painter.drawText(col4, y, status);
+            painter.drawText(col5, y, course);
+            painter.drawText(col6, y, department);
+            painter.drawText(col7, y, yearLevel);
+            painter.drawText(col8, y, QString::number(row["visits"].toInt()));
+
+            y += rowPitch;
+            rowIndex++;
+
+            if (y > usableHeight - vs(200)) {
+                drawFooter(currentPage);
+                device->newPage();
+                currentPage++;
+                y = margin;
+                drawHeader(y);
+                // drawHeader leaves the font at Arial 9; restore the row font so
+                // continuation-page rows draw at the same Arial 10 that fm measures.
+                painter.setFont(QFont("Arial", 10));
+            }
+        }
+
+        // Foot the roster's LAST page — the prepared-by section opens a fresh page next.
+        drawFooter(currentPage);
+    } // if (includeRoster)
 
     // ===== PREPARED BY =====
     device->newPage();
