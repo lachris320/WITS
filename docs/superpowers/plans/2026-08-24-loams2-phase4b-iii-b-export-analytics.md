@@ -145,12 +145,14 @@ git commit -m "feat(reporting): VM includeRosterInExport flag (default off) for 
 **Files:**
 - Modify: `qt-app/core/reportrenderer.h`
 - Modify: `qt-app/core/reportrenderer.cpp`
-- Modify: `qt-app/quick/viewmodels/ReportingViewModel.cpp` (the two call sites)
+- Modify: `qt-app/quick/viewmodels/ReportingViewModel.h` (add the `#include` + `m_analytics` member)
+- Modify: `qt-app/quick/viewmodels/ReportingViewModel.cpp` (cache `m_analytics` in `applyResult`; the two call sites)
 - Modify: `qt-app/tests/tst_reportrenderer.cpp`
 - Modify: `qt-app/tests/CMakeLists.txt`
 
 **Interfaces:**
 - Consumes: `struct ReportAnalytics` from `reportanalytics.h` (4b-iii-a).
+- Produces: `ReportAnalytics m_analytics` cached on the VM by `applyResult`, reused by both export paths.
 - Produces: new signatures —
   - `static bool paintReport(QPagedPaintDevice*, int resolution, const QJsonArray &data, const QJsonObject &filters, const ReportPalette&, const ReportHeaderInfo&, const ReportAnalytics &analytics, bool includeRoster)`
   - `static bool writeReportToXlsx(QXlsx::Document&, const QJsonArray &rows, const QJsonObject &filters, const ReportHeaderInfo&, const ReportAnalytics &analytics, bool includeRoster)`
@@ -164,25 +166,39 @@ In `qt-app/tests/tst_reportrenderer.cpp`, add `#include "reportanalytics.h"` nea
         return ReportAnalytics::compute(sampleRows());   // visits already numeric
     }
 ```
-Add two slots + bodies:
+Add a cross-sheet scan helper beside the other `private:` statics (it scans EVERY sheet, so the same test stays valid after Task 3 moves the roster onto a "Detailed Roster" sheet — no rewrite needed in Task 3):
 ```cpp
-void writeReportToXlsx_rosterSheetPresentOnlyWhenIncluded();
+    static bool xlsxContainsAcrossSheets(QXlsx::Document &xlsx, const QString &needle) {
+        const QStringList names = xlsx.sheetNames();
+        for (const QString &n : names) {
+            xlsx.selectSheet(n);
+            for (int r = 1; r <= 40; ++r)
+                for (int c = 1; c <= 8; ++c)
+                    if (xlsx.read(r, c).toString() == needle) return true;
+        }
+        return false;
+    }
+```
+Add two slots + bodies. The Excel test asserts roster ROW presence/absence (not a sheet name — the "Detailed Roster" sheet is created in Task 3):
+```cpp
+void writeReportToXlsx_rosterRowsPresentOnlyWhenIncluded();
 void paintReport_writesPdfWithAndWithoutRoster();
 ```
 
 ```cpp
-void TstReportRenderer::writeReportToXlsx_rosterSheetPresentOnlyWhenIncluded() {
-    {   // includeRoster = false -> no "Detailed Roster" sheet
+void TstReportRenderer::writeReportToXlsx_rosterRowsPresentOnlyWhenIncluded() {
+    {   // includeRoster = false -> per-student roster rows absent everywhere
         QXlsx::Document xlsx;
         QVERIFY(ReportRenderer::writeReportToXlsx(
             xlsx, sampleRows(), sampleFilters(), sampleHeaderInfo(), sampleAnalytics(), false));
-        QVERIFY(!xlsx.sheetNames().contains("Detailed Roster"));
+        QVERIFY(!xlsxContainsAcrossSheets(xlsx, "2023-00001"));
     }
-    {   // includeRoster = true -> "Detailed Roster" sheet present
+    {   // includeRoster = true -> the roster rows are present (single sheet now; a
+        //  "Detailed Roster" sheet after Task 3 — the cross-sheet scan covers both)
         QXlsx::Document xlsx;
         QVERIFY(ReportRenderer::writeReportToXlsx(
             xlsx, sampleRows(), sampleFilters(), sampleHeaderInfo(), sampleAnalytics(), true));
-        QVERIFY(xlsx.sheetNames().contains("Detailed Roster"));
+        QVERIFY(xlsxContainsAcrossSheets(xlsx, "2023-00001"));
     }
 }
 
@@ -250,7 +266,32 @@ Update the `writeReportToXlsx` definition signature (lines 611–615) to match t
 ```
 Gate the roster rows: wrap the `// ===== TABLE ROWS =====` loop (the `for (const auto &val : rows) { ... }` block, lines 675–692) in `if (includeRoster) { ... }`. (The header/filters/table-headers and footer stay unconditional for this task; Task 3 restructures into sheets.)
 
-- [ ] **Step 5: Update the VM call sites to pass the analytics + flag**
+- [ ] **Step 5: Cache the computed analytics on the VM (spec §3: compute once, hand the same struct to QML models AND the renderer)**
+
+`applyResult` already calls `ReportAnalytics::compute(m_exportRows)` once (into the local `an`) to fill the KPI members + ranking models, then discards it. Store it in a member so the export path reuses it instead of recomputing.
+
+In `ReportingViewModel.h`, add the include beside the other core includes (after `#include "reportdata.h"`, line 15):
+```cpp
+#include "reportanalytics.h"   // ReportAnalytics — cached from applyResult, reused by the export path
+```
+Add the member beside `m_exportRows` (~line 230):
+```cpp
+    ReportAnalytics m_analytics;   // computed once in applyResult; reused by the export renderer
+```
+In `ReportingViewModel.cpp`, `applyResult` (~line 379), change the local `an` to assign the member instead:
+```cpp
+    m_analytics = ReportAnalytics::compute(m_exportRows);
+    m_uniqueVisitors = m_analytics.kpis.uniqueVisitors;
+    m_avgVisitsPerVisitor = m_analytics.kpis.avgVisitsPerVisitor;
+    m_topDepartment = m_analytics.kpis.hasData ? m_analytics.kpis.topDepartment : QStringLiteral("—");
+    m_topDepartmentVisits = m_analytics.kpis.topDepartmentVisits;
+    m_topStudents.setEntries(m_analytics.topStudents);
+    m_topCourses.setEntries(m_analytics.topCourses);
+    m_topDepartments.setEntries(m_analytics.topDepartments);
+```
+(`setLoading(true)` already resets `m_exportRows` on a new fetch; `m_analytics` is a stale-but-harmless copy until the next `applyResult` — and `canExport` already gates export on `m_hasResult && !m_loading`, so a stale `m_analytics` is never exported.)
+
+- [ ] **Step 6: Update the VM call sites to pass the cached analytics + flag**
 
 In `qt-app/quick/viewmodels/ReportingViewModel.cpp` (`reportanalytics.h` is already included, line 13):
 
@@ -261,9 +302,7 @@ bool ReportingViewModel::renderToDevice(QPagedPaintDevice *dev, int resolution)
     const QJsonObject filters = currentExportFilters();
     const ReportPalette pal = ReportController::getPalette(m_palette);
     return ReportRenderer::paintReport(dev, resolution, m_exportRows, filters, pal,
-                                       headerInfo(),
-                                       ReportAnalytics::compute(m_exportRows),
-                                       m_includeRosterInExport);
+                                       headerInfo(), m_analytics, m_includeRosterInExport);
 }
 ```
 
@@ -271,11 +310,11 @@ bool ReportingViewModel::renderToDevice(QPagedPaintDevice *dev, int resolution)
 ```cpp
         const bool ok = ReportRenderer::writeReportToXlsx(
                             doc, m_exportRows, currentExportFilters(), headerInfo(),
-                            ReportAnalytics::compute(m_exportRows), m_includeRosterInExport)
+                            m_analytics, m_includeRosterInExport)
                         && doc.saveAs(path);
 ```
 
-- [ ] **Step 6: Add reportanalytics to the tst_reportrenderer CMake sources**
+- [ ] **Step 7: Add reportanalytics to the tst_reportrenderer CMake sources**
 
 In `qt-app/tests/CMakeLists.txt`, in the `qt_add_executable(tst_reportrenderer ...)` block (lines 155–160), add the two files after `reportrenderer.h`:
 ```cmake
@@ -290,7 +329,7 @@ qt_add_executable(tst_reportrenderer
 ```
 (The target already has `${CMAKE_SOURCE_DIR}/core` on its include path — no include-dir change needed.)
 
-- [ ] **Step 7: Reconfigure, build, and run the tests to verify they pass**
+- [ ] **Step 8: Reconfigure, build, and run the tests to verify they pass**
 
 Run:
 ```
@@ -300,15 +339,15 @@ ctest --test-dir C:/b/loams-4biiib -R "tst_reportrenderer|tst_reportingviewmodel
 ```
 Expected: PASS. (CMakeLists changed → reconfigure is required.)
 
-- [ ] **Step 8: Run the full suite to confirm no regressions**
+- [ ] **Step 9: Run the full suite to confirm no regressions**
 
 Run: `ctest --test-dir C:/b/loams-4biiib --output-on-failure`
 Expected: all green (same count as baseline).
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 10: Commit**
 
 ```bash
-git add qt-app/core/reportrenderer.h qt-app/core/reportrenderer.cpp qt-app/quick/viewmodels/ReportingViewModel.cpp qt-app/tests/tst_reportrenderer.cpp qt-app/tests/CMakeLists.txt
+git add qt-app/core/reportrenderer.h qt-app/core/reportrenderer.cpp qt-app/quick/viewmodels/ReportingViewModel.h qt-app/quick/viewmodels/ReportingViewModel.cpp qt-app/tests/tst_reportrenderer.cpp qt-app/tests/CMakeLists.txt
 git commit -m "feat(reporting): thread ReportAnalytics + includeRoster into export renderer; roster now conditional"
 ```
 
@@ -544,6 +583,12 @@ void paintReport_writesAnalyticsPdfAtHighDpi();
 ```
 ```cpp
 void TstReportRenderer::paintReport_writesAnalyticsPdfAtHighDpi() {
+    // Exercise the chart + roster combination explicitly — sampleFilters() sets
+    // no "chartType", so a chart is only drawn when we add one. The chart+roster
+    // path is exactly where the "roster overprints the last chart page" bug lives:
+    // the roster MUST open its own page unconditionally (Task 4, item 6).
+    QJsonObject filtersWithChart = sampleFilters();
+    filtersWithChart["chartType"] = "Bar";
     for (int resolution : { 300, 1200 }) {
         for (bool includeRoster : { false, true }) {
             QTemporaryDir dir;
@@ -553,7 +598,7 @@ void TstReportRenderer::paintReport_writesAnalyticsPdfAtHighDpi() {
                 QPdfWriter pdf(path);
                 pdf.setResolution(resolution);
                 QVERIFY(ReportRenderer::paintReport(
-                    &pdf, resolution, sampleRows(), sampleFilters(), samplePalette(),
+                    &pdf, resolution, sampleRows(), filtersWithChart, samplePalette(),
                     sampleHeaderInfo(), sampleAnalytics(), includeRoster));
             }
             QVERIFY(QFileInfo(path).size() > 0);
@@ -561,7 +606,7 @@ void TstReportRenderer::paintReport_writesAnalyticsPdfAtHighDpi() {
     }
 }
 ```
-(`paintReport_writesPdfWithAndWithoutRoster` from Task 2 continues to guard the roster-flag paths at 300 DPI; this adds the 1200-DPI paths.)
+(`paintReport_writesPdfWithAndWithoutRoster` from Task 2 continues to guard the roster-flag paths with the no-chart filters at 300 DPI; this adds the 1200-DPI paths AND the chart-present paths. PDF text can't be read back through QtTest, so the chart+roster overprint is ultimately a **manual release-gate check — Task 6, Step 4**; these assertions guard against a crash / `false` return / empty file on that path.)
 
 - [ ] **Step 2: Run the test to verify it fails / passes-trivially**
 
@@ -654,21 +699,30 @@ In `qt-app/core/reportrenderer.cpp`, `paintReport`:
     drawRanking("Top 10 Departments", analytics.topDepartments, false, true);
 ```
 
-6. **Roster demoted + optional.** Keep the `if (includeRoster) { ... }`-gated roster table from Task 2, but MOVE it to run AFTER the charts block (see next), i.e. relocate the whole `// ===== TABLE =====` block to just before `// ===== PREPARED BY =====`. Precede it with `newPageIfNeeded(0);` (force the roster to start on a clean region — it internally handles its own multi-page breaks via the existing `if (y > usableHeight - vs(200))`), and add a "Detailed Roster" heading:
+6. **Roster demoted + optional — MUST start a fresh page unconditionally (not `newPageIfNeeded`).** Keep the `if (includeRoster) { ... }`-gated roster table from Task 2, but MOVE it to run AFTER the charts block (see item 7) and after the existing `drawFooter(currentPage);` that closes the last chart page (`reportrenderer.cpp:576`), i.e. relocate the whole `// ===== TABLE =====` block to just before `// ===== PREPARED BY =====`.
+
+   **Do NOT precede it with `newPageIfNeeded(...)`.** `newPageIfNeeded` only breaks when `y > usableHeight - vs(needed)`, but `drawFullscreenChart` ends by resetting the OUTER `y` back near the top (`y = margin; drawHeader(y);`, then it *shadows* `y` with a local for image centring — `reportrenderer.cpp:538`). So on entry to the roster block `y` is near the top of the last chart page, `newPageIfNeeded` is a no-op, and the roster would **overprint the chart image**. The roster block must therefore open its own page unconditionally, exactly like `drawFullscreenChart` does, and must foot its own last page before the prepared-by section's `device->newPage()` claims a new one:
 ```cpp
     if (includeRoster) {
-        newPageIfNeeded(300);
+        device->newPage();          // unconditional — the last content page was already footed at :576
+        currentPage++;
+        y = margin;
+        drawHeader(y);              // advances the outer y past the header
         painter.setFont(QFont("Arial", 12, QFont::Bold));
         painter.setPen(Qt::black);
         painter.drawText(QRect(margin, y, usableWidth, vs(22)), Qt::AlignLeft, "Detailed Roster");
         y += vs(30);
-        // ... the existing column-setup + header-row + row loop from Task 2, unchanged ...
+        painter.setFont(QFont("Arial", 10));   // the row font fm measures against
+        // ... the existing column-setup + header-row + row loop from Task 2, unchanged.
+        //     Its inline page-break (`if (y > usableHeight - vs(200))`) still handles
+        //     a roster longer than one page — that logic is unchanged and correct here.
+        drawFooter(currentPage);   // foot the roster's LAST page (prepared-by opens a fresh page next)
     }
 ```
 
-7. **Charts demoted below rankings.** The existing charts block (lines 515–573: `drawFullscreenChart` lambda + the `chartChoice` branching) already runs on its own new page(s). Leave it as-is in place — since KPI + rankings now precede it and the roster now follows it, the document order becomes context → KPI → rankings → chart → roster → prepared-by. Confirm the ordering by reading the body top-to-bottom after the edit.
+7. **Charts demoted below rankings.** The existing charts block (`reportrenderer.cpp:515–573`: the `drawFullscreenChart` lambda + the `chartChoice` branching) already runs on its own new page(s). Leave it as-is in place — since KPI + rankings now precede it and the roster now follows it, the document order becomes context → KPI → rankings → chart → optional roster → prepared-by. The unconditional `drawFooter(currentPage);` at `reportrenderer.cpp:576` still fires immediately after the charts block and closes the last chart page (or, when no chart is drawn, the rankings page) — keep it. Confirm the ordering by reading the body top-to-bottom after the edit.
 
-8. Leave the `// ===== PREPARED BY =====` block last, unchanged.
+8. Leave the `// ===== PREPARED BY =====` block last, unchanged (its leading `device->newPage()` opens the final page; the roster's trailing `drawFooter` from item 6 has already closed the roster's last page).
 
 - [ ] **Step 4: Build and run the renderer tests**
 
@@ -705,13 +759,27 @@ git commit -m "feat(reporting): PDF export reorder — KPI summary + rankings, c
 
 - [ ] **Step 1: Write the failing QuickTests**
 
-In `qt-app/quick/tests/tst_qml_admin.qml`, extend `reportingStub` (after `chartType`, ~line 2562) with the flag + setter + counter:
+In `qt-app/quick/tests/tst_qml_admin.qml`:
+
+**(a) Grow the reporting fixture band** so the taller export bar (now a checkbox row + the controls row) still renders inside the clickable viewport — the screen wraps its body in a clipping Flickable (`reportScroll`), and `mouseClick`/`findChild` hit-testing fails on a control scrolled out of the rendered band (a documented gotcha in this file). The `reporting` instance is currently `height: 1000` in the band `y 7300..8300`; bump it and the host so the whole export bar fits:
+- Change the `reporting` instance (~line 2589) `height: 1000` → `height: 1120`.
+- Change the host root `height: 8300` (~line 18) → `height: 8420`, and update the geometry-ledger comment (`reporting 7300..8300` → `reporting 7300..8420`). `vmlessReporting` stays at `x: 2000` (a different column) so nothing overlaps.
+
+**(b) Extend `reportingStub`** (after `chartType`, ~line 2562) with the flag + setter + counter:
 ```qml
         property bool includeRosterInExport: false
         property int setIncludeRosterCount: 0
         function setIncludeRosterInExport(v) { includeRosterInExport = v; setIncludeRosterCount++ }
 ```
-Add to the `ReportingScreen` `TestCase` (after `test_exportErrorPersistsAsFeedback`, ~line 2707):
+
+**(c) Reset the checkbox in the reporting `TestCase` `init()`** (~line 2596). `LCheckbox`'s `MouseArea` does `root.checked = !root.checked` internally (`LCheckbox.qml:55`), which **severs** the `checked: vm.includeRosterInExport` binding after the first click — so a click in one test leaves the box checked for the next (tests run alphabetically). Reset both the stub flag and the box for order-independence:
+```qml
+            reportingStub.includeRosterInExport = false;
+            var rosterChk = findChild(reporting, "includeRosterCheck");
+            if (rosterChk) rosterChk.checked = false;
+```
+
+**(d) Add the tests** to the `ReportingScreen` `TestCase` (after `test_exportErrorPersistsAsFeedback`, ~line 2707):
 ```qml
         function test_includeRosterCheckboxDefaultsUncheckedAndWritesVm() {
             reportingStub.includeRosterInExport = false;
