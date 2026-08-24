@@ -8,6 +8,7 @@
 #include <QTemporaryDir>
 #include <QFileInfo>
 
+#include "reportanalytics.h"
 #include "reportrenderer.h"
 #include "xlsxdocument.h"
 
@@ -27,6 +28,8 @@ private slots:
     void rowAdvanceClearsFontHeightAtDefaultPdfDpi();
     void paintReport_writesPdf();
     void writeReportToXlsx_populatesCells();
+    void writeReportToXlsx_rosterRowsPresentOnlyWhenIncluded();
+    void paintReport_writesPdfWithAndWithoutRoster();
 
 private:
     static QJsonArray sampleVisits() {
@@ -54,6 +57,21 @@ private:
                 {"year_level", "1st Year"}, {"visits", 5}
             },
         };
+    }
+
+    static ReportAnalytics sampleAnalytics() {
+        return ReportAnalytics::compute(sampleRows());   // visits already numeric
+    }
+
+    static bool xlsxContainsAcrossSheets(QXlsx::Document &xlsx, const QString &needle) {
+        const QStringList names = xlsx.sheetNames();
+        for (const QString &n : names) {
+            xlsx.selectSheet(n);
+            for (int r = 1; r <= 40; ++r)
+                for (int c = 1; c <= 8; ++c)
+                    if (xlsx.read(r, c).toString() == needle) return true;
+        }
+        return false;
     }
 
     static QJsonObject sampleFilters() {
@@ -190,7 +208,8 @@ void TstReportRenderer::paintReport_writesPdf() {
         QPdfWriter pdf(path);
         pdf.setResolution(300);
         const bool ok = ReportRenderer::paintReport(&pdf, 300, sampleRows(), sampleFilters(),
-                                                     samplePalette(), sampleHeaderInfo());
+                                                     samplePalette(), sampleHeaderInfo(),
+                                                     sampleAnalytics(), true);
         QVERIFY(ok);
     } // QPdfWriter flushes/finalizes the file on destruction.
 
@@ -200,7 +219,7 @@ void TstReportRenderer::paintReport_writesPdf() {
 void TstReportRenderer::writeReportToXlsx_populatesCells() {
     QXlsx::Document xlsx;
     const bool ok = ReportRenderer::writeReportToXlsx(xlsx, sampleRows(), sampleFilters(),
-                                                       sampleHeaderInfo());
+                                                       sampleHeaderInfo(), sampleAnalytics(), true);
     QVERIFY(ok);
 
     // Title cell (row 1, col 1) holds the school name.
@@ -219,6 +238,38 @@ void TstReportRenderer::writeReportToXlsx_populatesCells() {
     }
     QVERIFY(foundSchoolId);
     QVERIFY(foundName);
+}
+
+void TstReportRenderer::writeReportToXlsx_rosterRowsPresentOnlyWhenIncluded() {
+    {   // includeRoster = false -> per-student roster rows absent everywhere
+        QXlsx::Document xlsx;
+        QVERIFY(ReportRenderer::writeReportToXlsx(
+            xlsx, sampleRows(), sampleFilters(), sampleHeaderInfo(), sampleAnalytics(), false));
+        QVERIFY(!xlsxContainsAcrossSheets(xlsx, "2023-00001"));
+    }
+    {   // includeRoster = true -> the roster rows are present (single sheet now; a
+        //  "Detailed Roster" sheet after Task 3 — the cross-sheet scan covers both)
+        QXlsx::Document xlsx;
+        QVERIFY(ReportRenderer::writeReportToXlsx(
+            xlsx, sampleRows(), sampleFilters(), sampleHeaderInfo(), sampleAnalytics(), true));
+        QVERIFY(xlsxContainsAcrossSheets(xlsx, "2023-00001"));
+    }
+}
+
+void TstReportRenderer::paintReport_writesPdfWithAndWithoutRoster() {
+    for (bool includeRoster : { false, true }) {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath("report.pdf");
+        {
+            QPdfWriter pdf(path);
+            pdf.setResolution(300);
+            QVERIFY(ReportRenderer::paintReport(
+                &pdf, 300, sampleRows(), sampleFilters(), samplePalette(),
+                sampleHeaderInfo(), sampleAnalytics(), includeRoster));
+        }
+        QVERIFY(QFileInfo(path).size() > 0);
+    }
 }
 
 QTEST_MAIN(TstReportRenderer)

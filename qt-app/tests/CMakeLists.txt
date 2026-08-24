@@ -156,6 +156,8 @@ qt_add_executable(tst_reportrenderer
     tst_reportrenderer.cpp
     ${CMAKE_SOURCE_DIR}/core/reportrenderer.cpp
     ${CMAKE_SOURCE_DIR}/core/reportrenderer.h
+    ${CMAKE_SOURCE_DIR}/core/reportanalytics.cpp
+    ${CMAKE_SOURCE_DIR}/core/reportanalytics.h
     ${CMAKE_SOURCE_DIR}/core/reportdata.h
 )
 set_target_properties(tst_reportrenderer PROPERTIES WIN32_EXECUTABLE FALSE)

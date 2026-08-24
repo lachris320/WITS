@@ -560,6 +560,7 @@ void TestReportingViewModel::exportPdfWritesFile()
 void TestReportingViewModel::exportExcelWritesReadableCell()
 {
     ReportingViewModel vm;
+    vm.setIncludeRosterInExport(true);   // roster is opt-in (spec §9); this test reads a roster cell
     vm.onReportDataReady(QJsonDocument::fromJson(
         R"([{"school_id":"1","name":"Ana","gender":"F","status":"Regular",
              "course":"BSIT","department":"IT","year_level":"3","visits":"5"}])").array());

@@ -12,6 +12,7 @@
 #include "BarsModel.h"
 #include "RankingModel.h"
 #include "ReportRowsModel.h"
+#include "reportanalytics.h"   // ReportAnalytics — cached from applyResult, reused by the export path
 #include "reportdata.h"            // DateRange — return type of semesterWindow()
 
 class QNetworkAccessManager;
@@ -233,6 +234,7 @@ private:
     QString m_exportStatus;
     QString m_exportError;
     QJsonArray m_exportRows;
+    ReportAnalytics m_analytics;   // computed once in applyResult; reused by the export renderer
     bool m_includeRosterInExport = false;   // spec §9: export roster is opt-in, default OFF
 };
 

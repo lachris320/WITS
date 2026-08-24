@@ -318,12 +318,15 @@ QImage ReportRenderer::makeLineChartImage(const QJsonArray &data, QSize size, co
 bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
                                  const QJsonArray &data, const QJsonObject &filters,
                                  const ReportPalette &palette,
-                                 const ReportHeaderInfo &info)
+                                 const ReportHeaderInfo &info,
+                                 const ReportAnalytics &analytics, bool includeRoster)
 {
     QPainter painter;
     if (!painter.begin(device)) {
         return false;
     }
+
+    Q_UNUSED(analytics);   // consumed by the KPI/ranking layouts in Task 4
 
     auto finalize = qScopeGuard([&]() {
         if (painter.isActive()) {
@@ -433,7 +436,8 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
     painter.drawText(QRect(margin, y, usableWidth, vs(30)), Qt::AlignLeft, filtersLine);
     y += vs(40);
 
-    // ===== TABLE =====
+    // ===== TABLE ===== (gated: the per-student roster is opt-in — spec §9)
+    if (includeRoster) {
 
     // --- Define column widths (8 columns total) ---
     int col1 = margin;                                   // School ID
@@ -511,6 +515,8 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
             painter.setFont(QFont("Arial", 10));
         }
     }
+
+    } // if (includeRoster)
 
     // ===== CHARTS: each chart placed on its own page and scaled to fill almost whole page =====
     auto drawFullscreenChart = [&](const QString &label, const QImage &img) {
@@ -611,8 +617,11 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
 bool ReportRenderer::writeReportToXlsx(QXlsx::Document &xlsx,
                                        const QJsonArray &rows,
                                        const QJsonObject &filters,
-                                       const ReportHeaderInfo &info)
+                                       const ReportHeaderInfo &info,
+                                       const ReportAnalytics &analytics, bool includeRoster)
 {
+    Q_UNUSED(analytics);   // consumed by the Summary sheet in Task 3
+
     // ===== HEADER =====
     QString schoolName = info.schoolName;
     QString address    = info.address;
@@ -667,28 +676,30 @@ bool ReportRenderer::writeReportToXlsx(QXlsx::Document &xlsx,
     //xlsx.currentWorksheet()->freezePane(QXlsx::CellRange(row + 1, 1, row + 1, 1));
     row++;
 
-    // ===== TABLE ROWS =====
-    QXlsx::Format evenFmt, oddFmt;
-    evenFmt.setPatternBackgroundColor(QColor("#F9F9F9"));
-    oddFmt.setPatternBackgroundColor(QColor("#FFFFFF"));
+    // ===== TABLE ROWS ===== (gated: the per-student roster is opt-in — spec §9)
+    if (includeRoster) {
+        QXlsx::Format evenFmt, oddFmt;
+        evenFmt.setPatternBackgroundColor(QColor("#F9F9F9"));
+        oddFmt.setPatternBackgroundColor(QColor("#FFFFFF"));
 
-    for (const auto &val : rows) {
-        QJsonObject obj = val.toObject();
-        QStringList rowData = {
-            obj["school_id"].toString(),
-            obj["name"].toString(),
-            obj["gender"].toString(),
-            obj["course"].toString(),
-            obj["year_level"].toString(),
-            obj["department"].toString(),
-            obj["status"].toString(),
-            QString::number(obj["visits"].toInt())
-        };
+        for (const auto &val : rows) {
+            QJsonObject obj = val.toObject();
+            QStringList rowData = {
+                obj["school_id"].toString(),
+                obj["name"].toString(),
+                obj["gender"].toString(),
+                obj["course"].toString(),
+                obj["year_level"].toString(),
+                obj["department"].toString(),
+                obj["status"].toString(),
+                QString::number(obj["visits"].toInt())
+            };
 
-        for (int c = 0; c < rowData.size(); ++c) {
-            xlsx.write(row, c + 1, rowData[c], (row % 2 == 0) ? evenFmt : oddFmt);
+            for (int c = 0; c < rowData.size(); ++c) {
+                xlsx.write(row, c + 1, rowData[c], (row % 2 == 0) ? evenFmt : oddFmt);
+            }
+            row++;
         }
-        row++;
     }
 
     // Auto-fit columns (simulate by setting width based on text length)
