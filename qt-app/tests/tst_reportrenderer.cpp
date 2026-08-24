@@ -29,6 +29,8 @@ private slots:
     void paintReport_writesPdf();
     void writeReportToXlsx_populatesCells();
     void writeReportToXlsx_rosterRowsPresentOnlyWhenIncluded();
+    void writeReportToXlsx_summarySheetHasKpisAndRankings();
+    void writeReportToXlsx_rosterOnSeparateSheetWhenIncluded();
     void paintReport_writesPdfWithAndWithoutRoster();
 
 private:
@@ -223,7 +225,8 @@ void TstReportRenderer::writeReportToXlsx_populatesCells() {
     QVERIFY(ok);
 
     // Title cell (row 1, col 1) holds the school name.
-    QCOMPARE(xlsx.read(1, 1).toString(), sampleHeaderInfo().schoolName);
+    QCOMPARE(xlsx.read(1, 1).toString(), sampleHeaderInfo().schoolName);   // Summary title
+    QVERIFY(xlsx.selectSheet("Detailed Roster"));
 
     // Smoke-check that real data rows landed: scan a small range below the
     // table header for one of our synthetic school IDs / names.
@@ -254,6 +257,44 @@ void TstReportRenderer::writeReportToXlsx_rosterRowsPresentOnlyWhenIncluded() {
             xlsx, sampleRows(), sampleFilters(), sampleHeaderInfo(), sampleAnalytics(), true));
         QVERIFY(xlsxContainsAcrossSheets(xlsx, "2023-00001"));
     }
+}
+
+void TstReportRenderer::writeReportToXlsx_summarySheetHasKpisAndRankings() {
+    QXlsx::Document xlsx;
+    QVERIFY(ReportRenderer::writeReportToXlsx(
+        xlsx, sampleRows(), sampleFilters(), sampleHeaderInfo(), sampleAnalytics(), false));
+
+    QVERIFY(xlsx.sheetNames().contains("Summary"));
+    QVERIFY(xlsx.selectSheet("Summary"));
+
+    // The Summary sheet carries KPI labels and at least one ranking heading.
+    // sampleRows(): BSIT=3 + BSCS=5 -> total 8 visits, 2 unique students.
+    bool foundTotalLabel = false, foundTotalValue = false, foundRankingHeading = false;
+    for (int r = 1; r <= 60; ++r) {
+        for (int c = 1; c <= 8; ++c) {
+            const QString cell = xlsx.read(r, c).toString();
+            if (cell.contains("Total Visits", Qt::CaseInsensitive)) foundTotalLabel = true;
+            if (cell == "8") foundTotalValue = true;
+            if (cell.contains("Top 10 Students", Qt::CaseInsensitive)) foundRankingHeading = true;
+        }
+    }
+    QVERIFY(foundTotalLabel);
+    QVERIFY(foundTotalValue);
+    QVERIFY(foundRankingHeading);
+}
+
+void TstReportRenderer::writeReportToXlsx_rosterOnSeparateSheetWhenIncluded() {
+    QXlsx::Document xlsx;
+    QVERIFY(ReportRenderer::writeReportToXlsx(
+        xlsx, sampleRows(), sampleFilters(), sampleHeaderInfo(), sampleAnalytics(), true));
+
+    QVERIFY(xlsx.sheetNames().contains("Detailed Roster"));
+    QVERIFY(xlsx.selectSheet("Detailed Roster"));
+    bool foundSchoolId = false;
+    for (int r = 1; r <= 20; ++r)
+        for (int c = 1; c <= 8; ++c)
+            if (xlsx.read(r, c).toString() == "2023-00001") foundSchoolId = true;
+    QVERIFY(foundSchoolId);
 }
 
 void TstReportRenderer::paintReport_writesPdfWithAndWithoutRoster() {

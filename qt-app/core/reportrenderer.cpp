@@ -618,15 +618,10 @@ bool ReportRenderer::writeReportToXlsx(QXlsx::Document &xlsx,
                                        const QJsonArray &rows,
                                        const QJsonObject &filters,
                                        const ReportHeaderInfo &info,
-                                       const ReportAnalytics &analytics, bool includeRoster)
+                                       const ReportAnalytics &analytics,
+                                       bool includeRoster)
 {
-    Q_UNUSED(analytics);   // consumed by the Summary sheet in Task 3
-
-    // ===== HEADER =====
-    QString schoolName = info.schoolName;
-    QString address    = info.address;
-    QString librarian  = info.librarian;
-    QString position   = info.position;
+    const int colCount = 8;
 
     QXlsx::Format titleFmt;
     titleFmt.setFontBold(true);
@@ -637,88 +632,112 @@ bool ReportRenderer::writeReportToXlsx(QXlsx::Document &xlsx,
     subTitleFmt.setFontSize(11);
     subTitleFmt.setHorizontalAlignment(QXlsx::Format::AlignHCenter);
 
-    int row = 1;
-    int colCount = 8; // ID, Name, Gender, Course, Year Level, Department, Status, Visits
-
-    xlsx.mergeCells(QXlsx::CellRange(row, 1, row, colCount), titleFmt);
-    xlsx.write(row++, 1, schoolName, titleFmt);
-
-    xlsx.mergeCells(QXlsx::CellRange(row, 1, row, colCount), subTitleFmt);
-    xlsx.write(row++, 1, address, subTitleFmt);
-
-    xlsx.mergeCells(QXlsx::CellRange(row, 1, row, colCount), subTitleFmt);
-    xlsx.write(row++, 1, QString("Library Report - %1 to %2")
-                             .arg(filters["start"].toString(), filters["end"].toString()), subTitleFmt);
-    row += 1;
-
-    // ===== FILTERS =====
-    xlsx.write(row++, 1, QString("Department: %1 | Course: %2 | School Year: %3")
-                             .arg(filters["department"].toString(),
-                                  filters["course"].toString(),
-                                  filters["schoolYear"].toString()));
-
-    row += 1;
-
-    // ===== TABLE HEADERS =====
-    QStringList headers = {"School ID", "Name", "Gender", "Course",
-                           "Year Level", "Department", "Status", "Visits"};
+    QXlsx::Format sectionFmt;
+    sectionFmt.setFontBold(true);
+    sectionFmt.setFontSize(12);
 
     QXlsx::Format hdrFmt;
     hdrFmt.setFontBold(true);
     hdrFmt.setPatternBackgroundColor(QColor("#D6EAF8"));
     hdrFmt.setHorizontalAlignment(QXlsx::Format::AlignHCenter);
 
-    for (int c = 0; c < headers.size(); ++c) {
-        xlsx.write(row, c + 1, headers[c], hdrFmt);
-    }
+    // ===== SHEET 1: SUMMARY (renamed from the default sheet) =====
+    // QXlsx::Document::sheetNames() reads the workbook's sheet-name list directly
+    // and does NOT trigger the lazy "Sheet1" creation that only happens inside
+    // Workbook::activeSheet() (see xlsxworkbook.cpp). On a brand-new Document,
+    // sheetNames() is therefore still empty here; currentSheet() forces that
+    // lazy creation so sheetNames().first() below is never called on an empty list.
+    xlsx.currentSheet();
+    xlsx.renameSheet(xlsx.sheetNames().first(), QStringLiteral("Summary"));
+    xlsx.selectSheet(QStringLiteral("Summary"));
 
-    // Freeze the header row
-    //xlsx.currentWorksheet()->freezePane(QXlsx::CellRange(row + 1, 1, row + 1, 1));
-    row++;
+    int row = 1;
+    xlsx.mergeCells(QXlsx::CellRange(row, 1, row, colCount), titleFmt);
+    xlsx.write(row++, 1, info.schoolName, titleFmt);
+    xlsx.mergeCells(QXlsx::CellRange(row, 1, row, colCount), subTitleFmt);
+    xlsx.write(row++, 1, info.address, subTitleFmt);
+    xlsx.mergeCells(QXlsx::CellRange(row, 1, row, colCount), subTitleFmt);
+    xlsx.write(row++, 1, QString("Library Report - %1 to %2")
+                             .arg(filters["start"].toString(), filters["end"].toString()), subTitleFmt);
+    row += 1;
 
-    // ===== TABLE ROWS ===== (gated: the per-student roster is opt-in — spec §9)
+    xlsx.write(row++, 1, QString("Department: %1 | Course: %2 | School Year: %3")
+                             .arg(filters["department"].toString(),
+                                  filters["course"].toString(),
+                                  filters["schoolYear"].toString()));
+    row += 1;
+
+    // --- KPI block (label | value pairs) ---
+    xlsx.write(row++, 1, QStringLiteral("Summary"), sectionFmt);
+    xlsx.write(row, 1, QStringLiteral("Total Visits"));
+    xlsx.write(row++, 2, analytics.kpis.totalVisits);
+    xlsx.write(row, 1, QStringLiteral("Unique Visitors"));
+    xlsx.write(row++, 2, analytics.kpis.uniqueVisitors);
+    xlsx.write(row, 1, QStringLiteral("Avg. Visits / Visitor"));
+    xlsx.write(row++, 2, QString::number(analytics.kpis.avgVisitsPerVisitor, 'f', 1));
+    xlsx.write(row, 1, QStringLiteral("Top Department"));
+    xlsx.write(row, 2, analytics.kpis.hasData ? analytics.kpis.topDepartment : QStringLiteral("—"));
+    xlsx.write(row++, 3, analytics.kpis.topDepartmentVisits);
+    row += 1;
+
+    // --- Ranking tables ---
+    auto writeRanking = [&](const QString &heading, const QStringList &headers,
+                            const QList<RankingEntry> &entries, bool withSublabel, bool withPercent) {
+        xlsx.write(row++, 1, heading, sectionFmt);
+        for (int c = 0; c < headers.size(); ++c)
+            xlsx.write(row, c + 1, headers[c], hdrFmt);
+        row++;
+        for (const RankingEntry &e : entries) {
+            int c = 1;
+            xlsx.write(row, c++, e.rank);
+            xlsx.write(row, c++, e.label);
+            if (withSublabel) xlsx.write(row, c++, e.sublabel);
+            xlsx.write(row, c++, e.visits);
+            if (withPercent) xlsx.write(row, c++, QString::number(e.percentOfTotal, 'f', 1) + "%");
+            row++;
+        }
+        row += 1;
+    };
+    writeRanking(QStringLiteral("Top 10 Students"),
+                 { "Rank", "Name", "Course", "Visits" }, analytics.topStudents, true, false);
+    writeRanking(QStringLiteral("Top 10 Courses"),
+                 { "Rank", "Course", "Visits", "% of Total" }, analytics.topCourses, false, true);
+    writeRanking(QStringLiteral("Top 10 Departments"),
+                 { "Rank", "Department", "Visits", "% of Total" }, analytics.topDepartments, false, true);
+
+    xlsx.write(row++, 1,
+               "This is a system-generated report. LOAMS.2 (Library Occupancy and Attendance Monitoring System), WITS 2016.");
+    row += 1;
+    xlsx.write(row++, 1, QString("Prepared by: %1").arg(info.librarian));
+    xlsx.write(row++, 1, info.position);
+
+    // ===== SHEET 2: DETAILED ROSTER (only when requested) =====
     if (includeRoster) {
+        xlsx.addSheet(QStringLiteral("Detailed Roster"));   // becomes current
+        int rr = 1;
+        const QStringList headers = {"School ID", "Name", "Gender", "Course",
+                                     "Year Level", "Department", "Status", "Visits"};
+        for (int c = 0; c < headers.size(); ++c)
+            xlsx.write(rr, c + 1, headers[c], hdrFmt);
+        rr++;
         QXlsx::Format evenFmt, oddFmt;
         evenFmt.setPatternBackgroundColor(QColor("#F9F9F9"));
         oddFmt.setPatternBackgroundColor(QColor("#FFFFFF"));
-
         for (const auto &val : rows) {
-            QJsonObject obj = val.toObject();
-            QStringList rowData = {
-                obj["school_id"].toString(),
-                obj["name"].toString(),
-                obj["gender"].toString(),
-                obj["course"].toString(),
-                obj["year_level"].toString(),
-                obj["department"].toString(),
-                obj["status"].toString(),
-                QString::number(obj["visits"].toInt())
+            const QJsonObject obj = val.toObject();
+            const QStringList rowData = {
+                obj["school_id"].toString(), obj["name"].toString(), obj["gender"].toString(),
+                obj["course"].toString(), obj["year_level"].toString(), obj["department"].toString(),
+                obj["status"].toString(), QString::number(obj["visits"].toInt())
             };
-
-            for (int c = 0; c < rowData.size(); ++c) {
-                xlsx.write(row, c + 1, rowData[c], (row % 2 == 0) ? evenFmt : oddFmt);
-            }
-            row++;
+            for (int c = 0; c < rowData.size(); ++c)
+                xlsx.write(rr, c + 1, rowData[c], (rr % 2 == 0) ? evenFmt : oddFmt);
+            rr++;
         }
+        for (int c = 0; c < headers.size(); ++c)
+            xlsx.setColumnWidth(c + 1, headers[c].length() + 5);
+        xlsx.selectSheet(QStringLiteral("Summary"));   // leave Summary active
     }
-
-    // Auto-fit columns (simulate by setting width based on text length)
-    for (int c = 0; c < headers.size(); ++c) {
-        xlsx.setColumnWidth(c + 1, headers[c].length() + 5);
-    }
-
-    // ===== FOOTER =====
-    row += 2;
-    xlsx.mergeCells(QXlsx::CellRange(row, 1, row, colCount));
-    xlsx.write(row++, 1,
-               "This is a system-generated report. LOAMS.2 (Library Occupancy and Attendance Monitoring System), WITS 2016.");
-
-    row += 2;
-    xlsx.mergeCells(QXlsx::CellRange(row, 1, row, colCount));
-    xlsx.write(row++, 1, QString("Prepared by: %1").arg(librarian));
-
-    xlsx.mergeCells(QXlsx::CellRange(row, 1, row, colCount));
-    xlsx.write(row++, 1, position);
 
     return true;
 }
