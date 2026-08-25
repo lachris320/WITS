@@ -8,6 +8,7 @@
 #include <QTemporaryDir>
 #include <QFileInfo>
 
+#include "reportanalytics.h"
 #include "reportrenderer.h"
 #include "xlsxdocument.h"
 
@@ -27,6 +28,12 @@ private slots:
     void rowAdvanceClearsFontHeightAtDefaultPdfDpi();
     void paintReport_writesPdf();
     void writeReportToXlsx_populatesCells();
+    void writeReportToXlsx_rosterRowsPresentOnlyWhenIncluded();
+    void writeReportToXlsx_summarySheetHasKpisAndRankings();
+    void writeReportToXlsx_rosterOnSeparateSheetWhenIncluded();
+    void paintReport_writesPdfWithAndWithoutRoster();
+    void paintReport_writesAnalyticsPdfAtHighDpi();
+    void writeReportToXlsx_sanitizesFormulaLeadingNames();
 
 private:
     static QJsonArray sampleVisits() {
@@ -54,6 +61,21 @@ private:
                 {"year_level", "1st Year"}, {"visits", 5}
             },
         };
+    }
+
+    static ReportAnalytics sampleAnalytics() {
+        return ReportAnalytics::compute(sampleRows());   // visits already numeric
+    }
+
+    static bool xlsxContainsAcrossSheets(QXlsx::Document &xlsx, const QString &needle) {
+        const QStringList names = xlsx.sheetNames();
+        for (const QString &n : names) {
+            xlsx.selectSheet(n);
+            for (int r = 1; r <= 40; ++r)
+                for (int c = 1; c <= 8; ++c)
+                    if (xlsx.read(r, c).toString() == needle) return true;
+        }
+        return false;
     }
 
     static QJsonObject sampleFilters() {
@@ -190,7 +212,8 @@ void TstReportRenderer::paintReport_writesPdf() {
         QPdfWriter pdf(path);
         pdf.setResolution(300);
         const bool ok = ReportRenderer::paintReport(&pdf, 300, sampleRows(), sampleFilters(),
-                                                     samplePalette(), sampleHeaderInfo());
+                                                     samplePalette(), sampleHeaderInfo(),
+                                                     sampleAnalytics(), true);
         QVERIFY(ok);
     } // QPdfWriter flushes/finalizes the file on destruction.
 
@@ -200,11 +223,12 @@ void TstReportRenderer::paintReport_writesPdf() {
 void TstReportRenderer::writeReportToXlsx_populatesCells() {
     QXlsx::Document xlsx;
     const bool ok = ReportRenderer::writeReportToXlsx(xlsx, sampleRows(), sampleFilters(),
-                                                       sampleHeaderInfo());
+                                                       sampleHeaderInfo(), sampleAnalytics(), true);
     QVERIFY(ok);
 
     // Title cell (row 1, col 1) holds the school name.
-    QCOMPARE(xlsx.read(1, 1).toString(), sampleHeaderInfo().schoolName);
+    QCOMPARE(xlsx.read(1, 1).toString(), sampleHeaderInfo().schoolName);   // Summary title
+    QVERIFY(xlsx.selectSheet("Detailed Roster"));
 
     // Smoke-check that real data rows landed: scan a small range below the
     // table header for one of our synthetic school IDs / names.
@@ -219,6 +243,148 @@ void TstReportRenderer::writeReportToXlsx_populatesCells() {
     }
     QVERIFY(foundSchoolId);
     QVERIFY(foundName);
+}
+
+void TstReportRenderer::writeReportToXlsx_rosterRowsPresentOnlyWhenIncluded() {
+    {   // includeRoster = false -> per-student roster rows absent everywhere
+        QXlsx::Document xlsx;
+        QVERIFY(ReportRenderer::writeReportToXlsx(
+            xlsx, sampleRows(), sampleFilters(), sampleHeaderInfo(), sampleAnalytics(), false));
+        QVERIFY(!xlsxContainsAcrossSheets(xlsx, "2023-00001"));
+    }
+    {   // includeRoster = true -> the roster rows are present (single sheet now; a
+        //  "Detailed Roster" sheet after Task 3 — the cross-sheet scan covers both)
+        QXlsx::Document xlsx;
+        QVERIFY(ReportRenderer::writeReportToXlsx(
+            xlsx, sampleRows(), sampleFilters(), sampleHeaderInfo(), sampleAnalytics(), true));
+        QVERIFY(xlsxContainsAcrossSheets(xlsx, "2023-00001"));
+    }
+}
+
+void TstReportRenderer::writeReportToXlsx_summarySheetHasKpisAndRankings() {
+    QXlsx::Document xlsx;
+    QVERIFY(ReportRenderer::writeReportToXlsx(
+        xlsx, sampleRows(), sampleFilters(), sampleHeaderInfo(), sampleAnalytics(), false));
+
+    QVERIFY(xlsx.sheetNames().contains("Summary"));
+    QVERIFY(xlsx.selectSheet("Summary"));
+
+    // The Summary sheet carries KPI labels and at least one ranking heading.
+    // sampleRows(): BSIT=3 + BSCS=5 -> total 8 visits, 2 unique students.
+    bool foundTotalLabel = false, foundTotalValue = false, foundRankingHeading = false;
+    for (int r = 1; r <= 60; ++r) {
+        for (int c = 1; c <= 8; ++c) {
+            const QString cell = xlsx.read(r, c).toString();
+            if (cell.contains("Total Visits", Qt::CaseInsensitive)) foundTotalLabel = true;
+            if (cell == "8") foundTotalValue = true;
+            if (cell.contains("Top 10 Students", Qt::CaseInsensitive)) foundRankingHeading = true;
+        }
+    }
+    QVERIFY(foundTotalLabel);
+    QVERIFY(foundTotalValue);
+    QVERIFY(foundRankingHeading);
+}
+
+void TstReportRenderer::writeReportToXlsx_rosterOnSeparateSheetWhenIncluded() {
+    QXlsx::Document xlsx;
+    QVERIFY(ReportRenderer::writeReportToXlsx(
+        xlsx, sampleRows(), sampleFilters(), sampleHeaderInfo(), sampleAnalytics(), true));
+
+    QVERIFY(xlsx.sheetNames().contains("Detailed Roster"));
+    QVERIFY(xlsx.selectSheet("Detailed Roster"));
+    bool foundSchoolId = false;
+    for (int r = 1; r <= 20; ++r)
+        for (int c = 1; c <= 8; ++c)
+            if (xlsx.read(r, c).toString() == "2023-00001") foundSchoolId = true;
+    QVERIFY(foundSchoolId);
+}
+
+void TstReportRenderer::paintReport_writesPdfWithAndWithoutRoster() {
+    for (bool includeRoster : { false, true }) {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString path = dir.filePath("report.pdf");
+        {
+            QPdfWriter pdf(path);
+            pdf.setResolution(300);
+            QVERIFY(ReportRenderer::paintReport(
+                &pdf, 300, sampleRows(), sampleFilters(), samplePalette(),
+                sampleHeaderInfo(), sampleAnalytics(), includeRoster));
+        }
+        QVERIFY(QFileInfo(path).size() > 0);
+    }
+}
+
+void TstReportRenderer::paintReport_writesAnalyticsPdfAtHighDpi() {
+    // Exercise the chart + roster combination explicitly — sampleFilters() sets
+    // no "chartType", so a chart is only drawn when we add one. The chart+roster
+    // path is exactly where the "roster overprints the last chart page" bug lives:
+    // the roster MUST open its own page unconditionally (Task 4, item 6).
+    QJsonObject filtersWithChart = sampleFilters();
+    filtersWithChart["chartType"] = "Bar";
+    for (int resolution : { 300, 1200 }) {
+        for (bool includeRoster : { false, true }) {
+            QTemporaryDir dir;
+            QVERIFY(dir.isValid());
+            const QString path = dir.filePath("analytics.pdf");
+            {
+                QPdfWriter pdf(path);
+                pdf.setResolution(resolution);
+                QVERIFY(ReportRenderer::paintReport(
+                    &pdf, resolution, sampleRows(), filtersWithChart, samplePalette(),
+                    sampleHeaderInfo(), sampleAnalytics(), includeRoster));
+            }
+            QVERIFY(QFileInfo(path).size() > 0);
+        }
+    }
+}
+
+// Regression test for a claude-review finding: the vendored QXlsx
+// Worksheet::write() treats any string starting with '=' as a live FORMULA,
+// so a network-derived student name like =HYPERLINK("http://evil","x") would
+// be written (and evaluated by Excel on open) as a formula rather than text
+// (Excel formula/CSV injection). writeReportToXlsx must prefix such values
+// with a literal apostrophe so they render as inert text.
+void TstReportRenderer::writeReportToXlsx_sanitizesFormulaLeadingNames() {
+    const QString payload = QStringLiteral("=HYPERLINK(\"http://evil\",\"x\")");
+    QJsonArray rows{
+        QJsonObject{
+            {"school_id", "2023-00009"}, {"name", payload},
+            {"gender", "Male"}, {"status", "Regular"},
+            {"course", "BSIT"}, {"department", "College of Computing Studies"},
+            {"year_level", "1st Year"}, {"visits", 1}
+        },
+        QJsonObject{
+            {"school_id", "2023-00010"}, {"name", "Test Student One"},
+            {"gender", "Female"}, {"status", "Regular"},
+            {"course", "BSCS"}, {"department", "College of Computing Studies"},
+            {"year_level", "1st Year"}, {"visits", 1}
+        },
+    };
+    ReportAnalytics analytics = ReportAnalytics::compute(rows);
+
+    QXlsx::Document xlsx;
+    QVERIFY(ReportRenderer::writeReportToXlsx(
+        xlsx, rows, sampleFilters(), sampleHeaderInfo(), analytics, true));
+
+    QVERIFY(xlsx.selectSheet("Detailed Roster"));
+
+    bool foundSanitizedPayload = false;
+    bool foundUnchangedNormalName = false;
+    for (int r = 1; r <= 20; ++r) {
+        for (int c = 1; c <= 8; ++c) {
+            const QString cell = xlsx.read(r, c).toString();
+            if (cell == QLatin1Char('\'') + payload) {
+                QVERIFY(cell.startsWith(QLatin1Char('\'')));
+                foundSanitizedPayload = true;
+            }
+            // The raw, unescaped payload must never appear as a stored cell value.
+            QVERIFY(cell != payload);
+            if (cell == "Test Student One") foundUnchangedNormalName = true;
+        }
+    }
+    QVERIFY(foundSanitizedPayload);
+    QVERIFY(foundUnchangedNormalName);
 }
 
 QTEST_MAIN(TstReportRenderer)

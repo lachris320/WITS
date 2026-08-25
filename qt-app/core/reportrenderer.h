@@ -8,6 +8,7 @@
 #include <QSize>
 #include <QString>
 
+#include "reportanalytics.h"   // ReportAnalytics — passed in; renderer never re-aggregates
 #include "reportdata.h"
 #include "xlsxdocument.h"   // QXlsx::Document
 
@@ -49,12 +50,14 @@ public:
     static bool paintReport(QPagedPaintDevice *device, int resolution,
                             const QJsonArray &data, const QJsonObject &filters,
                             const ReportPalette &palette,
-                            const ReportHeaderInfo &info);
+                            const ReportHeaderInfo &info,
+                            const ReportAnalytics &analytics, bool includeRoster);
 
     static bool writeReportToXlsx(QXlsx::Document &xlsx,
                                   const QJsonArray &rows,
                                   const QJsonObject &filters,
-                                  const ReportHeaderInfo &info);
+                                  const ReportHeaderInfo &info,
+                                  const ReportAnalytics &analytics, bool includeRoster);
 
 private:
     // Renders a configured chart into an ARGB32 image of `size` (shared tail of the chart makers).

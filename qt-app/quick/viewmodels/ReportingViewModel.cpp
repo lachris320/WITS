@@ -376,14 +376,14 @@ void ReportingViewModel::applyResult(const QJsonArray &data)
     m_totalVisits = t.totalVisits;
     m_studentsShown = t.studentsShown;
     m_topCourse = t.topCourse;
-    const ReportAnalytics an = ReportAnalytics::compute(m_exportRows);
-    m_uniqueVisitors = an.kpis.uniqueVisitors;
-    m_avgVisitsPerVisitor = an.kpis.avgVisitsPerVisitor;
-    m_topDepartment = an.kpis.hasData ? an.kpis.topDepartment : QStringLiteral("—");
-    m_topDepartmentVisits = an.kpis.topDepartmentVisits;
-    m_topStudents.setEntries(an.topStudents);
-    m_topCourses.setEntries(an.topCourses);
-    m_topDepartments.setEntries(an.topDepartments);
+    m_analytics = ReportAnalytics::compute(m_exportRows);
+    m_uniqueVisitors = m_analytics.kpis.uniqueVisitors;
+    m_avgVisitsPerVisitor = m_analytics.kpis.avgVisitsPerVisitor;
+    m_topDepartment = m_analytics.kpis.hasData ? m_analytics.kpis.topDepartment : QStringLiteral("—");
+    m_topDepartmentVisits = m_analytics.kpis.topDepartmentVisits;
+    m_topStudents.setEntries(m_analytics.topStudents);
+    m_topCourses.setEntries(m_analytics.topCourses);
+    m_topDepartments.setEntries(m_analytics.topDepartments);
     m_hasResult = true;
     m_validationError = false;
     setError(QString());
@@ -405,6 +405,12 @@ void ReportingViewModel::setChartType(const QString &c)
 {
     if (m_chartType == c) return;
     m_chartType = c; emit chartTypeChanged();
+}
+void ReportingViewModel::setIncludeRosterInExport(bool v)
+{
+    if (m_includeRosterInExport == v) return;
+    m_includeRosterInExport = v;
+    emit includeRosterInExportChanged();
 }
 void ReportingViewModel::setExporting(bool v)
 {
@@ -438,7 +444,8 @@ bool ReportingViewModel::renderToDevice(QPagedPaintDevice *dev, int resolution)
 {
     const QJsonObject filters = currentExportFilters();
     const ReportPalette pal = ReportController::getPalette(m_palette);
-    return ReportRenderer::paintReport(dev, resolution, m_exportRows, filters, pal, headerInfo());
+    return ReportRenderer::paintReport(dev, resolution, m_exportRows, filters, pal,
+                                       headerInfo(), m_analytics, m_includeRosterInExport);
 }
 
 bool ReportingViewModel::beginFileExport(const QUrl &fileUrl, QString *outPath)
@@ -515,7 +522,9 @@ void ReportingViewModel::exportExcel(const QUrl &fileUrl)
         return;
     QMetaObject::invokeMethod(this, [this, path]() {
         QXlsx::Document doc;
-        const bool ok = ReportRenderer::writeReportToXlsx(doc, m_exportRows, currentExportFilters(), headerInfo())
+        const bool ok = ReportRenderer::writeReportToXlsx(
+                            doc, m_exportRows, currentExportFilters(), headerInfo(),
+                            m_analytics, m_includeRosterInExport)
                         && doc.saveAs(path);
         if (ok)
             setExportStatus(tr("Saved %1").arg(QFileInfo(path).fileName()));

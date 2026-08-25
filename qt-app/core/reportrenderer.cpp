@@ -34,6 +34,27 @@
 //   QT_LOGGING_RULES="wits.report.render.debug=true"
 Q_LOGGING_CATEGORY(lcReportRender, "wits.report.render", QtInfoMsg)
 
+namespace {
+// Guards writeReportToXlsx's Excel cells against formula/CSV injection. The
+// vendored QXlsx::Worksheet::write() treats any string starting with '='
+// as a live FORMULA (and Excel itself treats a leading + - @ or a leading
+// tab/CR the same way once opened), so network-derived text (a student
+// name, course, or department pulled from the backend) could smuggle a
+// formula (e.g. =HYPERLINK(...) or a DDE payload) that the librarian's
+// Excel evaluates on open. Prefixing a single apostrophe is the standard
+// Excel text-escape: it forces the cell to render as literal text.
+QString sanitizeXlsxText(const QString &s) {
+    if (s.isEmpty())
+        return s;
+    const QChar lead = s.at(0);
+    if (lead == QLatin1Char('=') || lead == QLatin1Char('+') || lead == QLatin1Char('-')
+        || lead == QLatin1Char('@') || lead == QLatin1Char('\t') || lead == QLatin1Char('\r')) {
+        return QLatin1Char('\'') + s;
+    }
+    return s;
+}
+} // namespace
+
 // Scales a legacy ~96-DPI pixel literal to the paged device's resolution.
 // paintReport's vertical advances/rects were raw device-pixel literals tuned
 // for ~96 DPI; on a QPdfWriter (1200 DPI default) they no longer clear the
@@ -318,7 +339,8 @@ QImage ReportRenderer::makeLineChartImage(const QJsonArray &data, QSize size, co
 bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
                                  const QJsonArray &data, const QJsonObject &filters,
                                  const ReportPalette &palette,
-                                 const ReportHeaderInfo &info)
+                                 const ReportHeaderInfo &info,
+                                 const ReportAnalytics &analytics, bool includeRoster)
 {
     QPainter painter;
     if (!painter.begin(device)) {
@@ -421,6 +443,19 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
     };
     drawHeader(y);
 
+    // Advances to a fresh page when the next block would overflow the usable
+    // area. Declared after drawFooter/drawHeader so both captured lambdas exist.
+    auto newPageIfNeeded = [&](int needed) {
+        if (y > usableHeight - vs(needed)) {
+            drawFooter(currentPage);
+            device->newPage();
+            currentPage++;
+            y = margin;
+            drawHeader(y);
+            painter.setFont(QFont("Arial", 10));
+        }
+    };
+
 
     // ===== FILTERS =====
     painter.setFont(QFont("Arial", 10));
@@ -433,84 +468,63 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
     painter.drawText(QRect(margin, y, usableWidth, vs(30)), Qt::AlignLeft, filtersLine);
     y += vs(40);
 
-    // ===== TABLE =====
-
-    // --- Define column widths (8 columns total) ---
-    int col1 = margin;                                   // School ID
-    int col2 = margin + (usableWidth * 0.12);            // Name
-    int col3 = margin + (usableWidth * 0.32);            // Gender
-    int col4 = margin + (usableWidth * 0.42);            // Status
-    int col5 = margin + (usableWidth * 0.55);            // Course
-    int col6 = margin + (usableWidth * 0.70);            // Department
-    int col7 = margin + (usableWidth * 0.85);            // Year Level
-    int col8 = margin + (usableWidth * 0.95);            // Visits
-
-    // Row rhythm: pin the row font, then floor the per-row advance at the glyph
-    // box (height + a little leading) so variable-length data never overlaps even
-    // after the DPI scaling above — this is the guard against the original bug.
-    painter.setFont(QFont("Arial", 10));
-    const QFontMetrics fm = painter.fontMetrics();
-    const int rowPitch = qMax(vs(20), fm.height() + vs(4));
-
-    // --- Draw header row ---
-    painter.fillRect(QRect(margin, y - vs(15), usableWidth, vs(20)), palette.headerBg);
-    painter.setPen(palette.headerText);
-
-    painter.drawText(col1, y, "School ID");
-    painter.drawText(col2, y, "Name");
-    painter.drawText(col3, y, "Gender");
-    painter.drawText(col4, y, "Status");
-    painter.drawText(col5, y, "Course");
-    painter.drawText(col6, y, "Department");
-    painter.drawText(col7, y, "Year Level");
-    painter.drawText(col8, y, "Visits");
-
-    y += vs(25);
+    // ===== KPI SUMMARY (spec §8: after context, before rankings) =====
+    painter.setFont(QFont("Arial", 13, QFont::Bold));
     painter.setPen(Qt::black);
-    painter.drawLine(margin, y, pageWidth - margin, y);
-    y += vs(20);
+    painter.drawText(QRect(margin, y, usableWidth, vs(24)), Qt::AlignLeft, "Summary");
+    y += vs(30);
+    painter.setFont(QFont("Arial", 11));
+    auto kpiLine = [&](const QString &label, const QString &value) {
+        painter.drawText(QRect(margin, y, usableWidth, vs(22)), Qt::AlignLeft,
+                         QString("%1: %2").arg(label, value));
+        y += vs(24);
+    };
+    kpiLine("Total Visits", QString::number(analytics.kpis.totalVisits));
+    kpiLine("Unique Visitors", QString::number(analytics.kpis.uniqueVisitors));
+    kpiLine("Avg. Visits / Visitor", QString::number(analytics.kpis.avgVisitsPerVisitor, 'f', 1));
+    kpiLine("Top Department",
+            QString("%1 (%2 visits)")
+                .arg(analytics.kpis.hasData ? safeText(analytics.kpis.topDepartment) : QStringLiteral("—"))
+                .arg(analytics.kpis.topDepartmentVisits));
+    y += vs(16);
 
-    int rowIndex = 0;
-    for (auto v : data) {
-        QJsonObject row = v.toObject();
-
-        // Fill band tiles exactly at rowPitch so bands abut without gaps/overlap.
-        QRect rowRect(margin, y - fm.ascent(), usableWidth, rowPitch);
-        painter.fillRect(rowRect, (rowIndex % 2 == 0) ? palette.rowEvenBg : palette.rowOddBg);
-
-        painter.setPen(palette.rowText);
-
-        QString schoolId   = fm.elidedText(safeText(row["school_id"].toString()), Qt::ElideRight, col2 - col1 - vs(5));
-        QString name       = fm.elidedText(safeText(row["name"].toString()), Qt::ElideRight, col3 - col2 - vs(5));
-        QString gender     = fm.elidedText(safeText(row["gender"].toString()), Qt::ElideRight, col4 - col3 - vs(5));
-        QString status     = fm.elidedText(safeText(row["status"].toString()), Qt::ElideRight, col5 - col4 - vs(5));
-        QString course     = fm.elidedText(safeText(row["course"].toString()), Qt::ElideRight, col6 - col5 - vs(5));
-        QString department = fm.elidedText(safeText(row["department"].toString()), Qt::ElideRight, col7 - col6 - vs(5));
-        QString yearLevel  = fm.elidedText(safeText(row["year_level"].toString()), Qt::ElideRight, col8 - col7 - vs(5));
-
-        painter.drawText(col1, y, schoolId);
-        painter.drawText(col2, y, name);
-        painter.drawText(col3, y, gender);
-        painter.drawText(col4, y, status);
-        painter.drawText(col5, y, course);
-        painter.drawText(col6, y, department);
-        painter.drawText(col7, y, yearLevel);
-        painter.drawText(col8, y, QString::number(row["visits"].toInt()));
-
-        y += rowPitch;
-        rowIndex++;
-
-        if (y > usableHeight - vs(200)) {
-            drawFooter(currentPage);
-            device->newPage();
-            currentPage++;
-            y = margin;
-            drawHeader(y);
-            // drawHeader leaves the font at Arial 9; restore the row font so
-            // continuation-page rows draw at the same Arial 10 that fm measures.
-            painter.setFont(QFont("Arial", 10));
+    // ===== RANKINGS (spec §8) =====
+    auto drawRanking = [&](const QString &heading, const QList<RankingEntry> &entries,
+                           bool withSublabel, bool withPercent) {
+        newPageIfNeeded(220);
+        painter.setFont(QFont("Arial", 12, QFont::Bold));
+        painter.setPen(Qt::black);
+        painter.drawText(QRect(margin, y, usableWidth, vs(22)), Qt::AlignLeft, heading);
+        y += vs(28);
+        painter.setFont(QFont("Arial", 10));
+        const QFontMetrics rfm = painter.fontMetrics();
+        const int pitch = qMax(vs(20), rfm.height() + vs(4));
+        int idx = 0;
+        for (const RankingEntry &e : entries) {
+            newPageIfNeeded(80);
+            const int cRank = margin;
+            const int cLabel = margin + int(usableWidth * 0.10);
+            const int cSub = margin + int(usableWidth * 0.55);
+            const int cVisits = margin + int(usableWidth * 0.78);
+            const int cPct = margin + int(usableWidth * 0.90);
+            painter.fillRect(QRect(margin, y - rfm.ascent(), usableWidth, pitch),
+                             (idx % 2 == 0) ? palette.rowEvenBg : palette.rowOddBg);
+            painter.setPen(palette.rowText);
+            painter.drawText(cRank, y, QString::number(e.rank));
+            painter.drawText(cLabel, y, rfm.elidedText(safeText(e.label), Qt::ElideRight, cSub - cLabel - vs(5)));
+            if (withSublabel)
+                painter.drawText(cSub, y, rfm.elidedText(safeText(e.sublabel), Qt::ElideRight, cVisits - cSub - vs(5)));
+            painter.drawText(cVisits, y, QString::number(e.visits));
+            if (withPercent)
+                painter.drawText(cPct, y, QString::number(e.percentOfTotal, 'f', 1) + "%");
+            y += pitch;
+            idx++;
         }
-    }
+        y += vs(16);
+    };
+    drawRanking("Top 10 Students", analytics.topStudents, true, false);
+    drawRanking("Top 10 Courses", analytics.topCourses, false, true);
+    drawRanking("Top 10 Departments", analytics.topDepartments, false, true);
 
     // ===== CHARTS: each chart placed on its own page and scaled to fill almost whole page =====
     auto drawFullscreenChart = [&](const QString &label, const QImage &img) {
@@ -575,6 +589,97 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
     // Footer on the last page with current page number
     drawFooter(currentPage);
 
+    // ===== DETAILED ROSTER ===== (gated: the per-student roster is opt-in — spec §9)
+    // MUST open its own page unconditionally: drawFullscreenChart resets the outer
+    // `y` back near the top of the last chart page, so newPageIfNeeded would be a
+    // no-op here and the roster would overprint the chart image. The last content
+    // page was already footed just above, so page forward directly.
+    if (includeRoster) {
+        device->newPage();
+        currentPage++;
+        y = margin;
+        drawHeader(y);
+
+        painter.setFont(QFont("Arial", 12, QFont::Bold));
+        painter.setPen(Qt::black);
+        painter.drawText(QRect(margin, y, usableWidth, vs(22)), Qt::AlignLeft, "Detailed Roster");
+        y += vs(30);
+
+        // --- Define column widths (8 columns total) ---
+        int col1 = margin;                                   // School ID
+        int col2 = margin + (usableWidth * 0.12);            // Name
+        int col3 = margin + (usableWidth * 0.32);            // Gender
+        int col4 = margin + (usableWidth * 0.42);            // Status
+        int col5 = margin + (usableWidth * 0.55);            // Course
+        int col6 = margin + (usableWidth * 0.70);            // Department
+        int col7 = margin + (usableWidth * 0.85);            // Year Level
+        int col8 = margin + (usableWidth * 0.95);            // Visits
+
+        // Row rhythm: pin the row font, then floor the per-row advance at the glyph
+        // box (height + a little leading) so variable-length data never overlaps even
+        // after the DPI scaling above — this is the guard against the original bug.
+        painter.setFont(QFont("Arial", 10));
+        const QFontMetrics fm = painter.fontMetrics();
+        const int rowPitch = qMax(vs(20), fm.height() + vs(4));
+
+        // --- Draw header row ---
+        painter.fillRect(QRect(margin, y - vs(15), usableWidth, vs(20)), palette.headerBg);
+        painter.setPen(palette.headerText);
+
+        painter.drawText(col1, y, "School ID");
+        painter.drawText(col2, y, "Name");
+        painter.drawText(col3, y, "Gender");
+        painter.drawText(col4, y, "Status");
+        painter.drawText(col5, y, "Course");
+        painter.drawText(col6, y, "Department");
+        painter.drawText(col7, y, "Year Level");
+        painter.drawText(col8, y, "Visits");
+
+        y += vs(25);
+        painter.setPen(Qt::black);
+        painter.drawLine(margin, y, pageWidth - margin, y);
+        y += vs(20);
+
+        int rowIndex = 0;
+        for (auto v : data) {
+            QJsonObject row = v.toObject();
+
+            // Fill band tiles exactly at rowPitch so bands abut without gaps/overlap.
+            QRect rowRect(margin, y - fm.ascent(), usableWidth, rowPitch);
+            painter.fillRect(rowRect, (rowIndex % 2 == 0) ? palette.rowEvenBg : palette.rowOddBg);
+
+            painter.setPen(palette.rowText);
+
+            QString schoolId   = fm.elidedText(safeText(row["school_id"].toString()), Qt::ElideRight, col2 - col1 - vs(5));
+            QString name       = fm.elidedText(safeText(row["name"].toString()), Qt::ElideRight, col3 - col2 - vs(5));
+            QString gender     = fm.elidedText(safeText(row["gender"].toString()), Qt::ElideRight, col4 - col3 - vs(5));
+            QString status     = fm.elidedText(safeText(row["status"].toString()), Qt::ElideRight, col5 - col4 - vs(5));
+            QString course     = fm.elidedText(safeText(row["course"].toString()), Qt::ElideRight, col6 - col5 - vs(5));
+            QString department = fm.elidedText(safeText(row["department"].toString()), Qt::ElideRight, col7 - col6 - vs(5));
+            QString yearLevel  = fm.elidedText(safeText(row["year_level"].toString()), Qt::ElideRight, col8 - col7 - vs(5));
+
+            painter.drawText(col1, y, schoolId);
+            painter.drawText(col2, y, name);
+            painter.drawText(col3, y, gender);
+            painter.drawText(col4, y, status);
+            painter.drawText(col5, y, course);
+            painter.drawText(col6, y, department);
+            painter.drawText(col7, y, yearLevel);
+            painter.drawText(col8, y, QString::number(row["visits"].toInt()));
+
+            y += rowPitch;
+            rowIndex++;
+
+            // newPageIfNeeded already restores the Arial 10 row font after
+            // drawHeader leaves it at Arial 9, so continuation-page rows draw
+            // at the same font that fm measures.
+            newPageIfNeeded(200);
+        }
+
+        // Foot the roster's LAST page — the prepared-by section opens a fresh page next.
+        drawFooter(currentPage);
+    } // if (includeRoster)
+
     // ===== PREPARED BY =====
     device->newPage();
     currentPage++;
@@ -611,13 +716,11 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
 bool ReportRenderer::writeReportToXlsx(QXlsx::Document &xlsx,
                                        const QJsonArray &rows,
                                        const QJsonObject &filters,
-                                       const ReportHeaderInfo &info)
+                                       const ReportHeaderInfo &info,
+                                       const ReportAnalytics &analytics,
+                                       bool includeRoster)
 {
-    // ===== HEADER =====
-    QString schoolName = info.schoolName;
-    QString address    = info.address;
-    QString librarian  = info.librarian;
-    QString position   = info.position;
+    const int colCount = 8;
 
     QXlsx::Format titleFmt;
     titleFmt.setFontBold(true);
@@ -628,86 +731,114 @@ bool ReportRenderer::writeReportToXlsx(QXlsx::Document &xlsx,
     subTitleFmt.setFontSize(11);
     subTitleFmt.setHorizontalAlignment(QXlsx::Format::AlignHCenter);
 
-    int row = 1;
-    int colCount = 8; // ID, Name, Gender, Course, Year Level, Department, Status, Visits
-
-    xlsx.mergeCells(QXlsx::CellRange(row, 1, row, colCount), titleFmt);
-    xlsx.write(row++, 1, schoolName, titleFmt);
-
-    xlsx.mergeCells(QXlsx::CellRange(row, 1, row, colCount), subTitleFmt);
-    xlsx.write(row++, 1, address, subTitleFmt);
-
-    xlsx.mergeCells(QXlsx::CellRange(row, 1, row, colCount), subTitleFmt);
-    xlsx.write(row++, 1, QString("Library Report - %1 to %2")
-                             .arg(filters["start"].toString(), filters["end"].toString()), subTitleFmt);
-    row += 1;
-
-    // ===== FILTERS =====
-    xlsx.write(row++, 1, QString("Department: %1 | Course: %2 | School Year: %3")
-                             .arg(filters["department"].toString(),
-                                  filters["course"].toString(),
-                                  filters["schoolYear"].toString()));
-
-    row += 1;
-
-    // ===== TABLE HEADERS =====
-    QStringList headers = {"School ID", "Name", "Gender", "Course",
-                           "Year Level", "Department", "Status", "Visits"};
+    QXlsx::Format sectionFmt;
+    sectionFmt.setFontBold(true);
+    sectionFmt.setFontSize(12);
 
     QXlsx::Format hdrFmt;
     hdrFmt.setFontBold(true);
     hdrFmt.setPatternBackgroundColor(QColor("#D6EAF8"));
     hdrFmt.setHorizontalAlignment(QXlsx::Format::AlignHCenter);
 
-    for (int c = 0; c < headers.size(); ++c) {
-        xlsx.write(row, c + 1, headers[c], hdrFmt);
-    }
+    // ===== SHEET 1: SUMMARY (renamed from the default sheet) =====
+    // QXlsx::Document::sheetNames() reads the workbook's sheet-name list directly
+    // and does NOT trigger the lazy "Sheet1" creation that only happens inside
+    // Workbook::activeSheet() (see xlsxworkbook.cpp). On a brand-new Document,
+    // sheetNames() is therefore still empty here; currentSheet() forces that
+    // lazy creation so sheetNames().first() below is never called on an empty list.
+    xlsx.currentSheet();
+    xlsx.renameSheet(xlsx.sheetNames().first(), QStringLiteral("Summary"));
+    xlsx.selectSheet(QStringLiteral("Summary"));
 
-    // Freeze the header row
-    //xlsx.currentWorksheet()->freezePane(QXlsx::CellRange(row + 1, 1, row + 1, 1));
-    row++;
+    int row = 1;
+    xlsx.mergeCells(QXlsx::CellRange(row, 1, row, colCount), titleFmt);
+    xlsx.write(row++, 1, info.schoolName, titleFmt);
+    xlsx.mergeCells(QXlsx::CellRange(row, 1, row, colCount), subTitleFmt);
+    xlsx.write(row++, 1, info.address, subTitleFmt);
+    xlsx.mergeCells(QXlsx::CellRange(row, 1, row, colCount), subTitleFmt);
+    xlsx.write(row++, 1, QString("Library Report - %1 to %2")
+                             .arg(filters["start"].toString(), filters["end"].toString()), subTitleFmt);
+    row += 1;
 
-    // ===== TABLE ROWS =====
-    QXlsx::Format evenFmt, oddFmt;
-    evenFmt.setPatternBackgroundColor(QColor("#F9F9F9"));
-    oddFmt.setPatternBackgroundColor(QColor("#FFFFFF"));
+    xlsx.write(row++, 1, QString("Department: %1 | Course: %2 | School Year: %3")
+                             .arg(filters["department"].toString(),
+                                  filters["course"].toString(),
+                                  filters["schoolYear"].toString()));
+    row += 1;
 
-    for (const auto &val : rows) {
-        QJsonObject obj = val.toObject();
-        QStringList rowData = {
-            obj["school_id"].toString(),
-            obj["name"].toString(),
-            obj["gender"].toString(),
-            obj["course"].toString(),
-            obj["year_level"].toString(),
-            obj["department"].toString(),
-            obj["status"].toString(),
-            QString::number(obj["visits"].toInt())
-        };
+    // --- KPI block (label | value pairs) ---
+    xlsx.write(row++, 1, QStringLiteral("Summary"), sectionFmt);
+    xlsx.write(row, 1, QStringLiteral("Total Visits"));
+    xlsx.write(row++, 2, analytics.kpis.totalVisits);
+    xlsx.write(row, 1, QStringLiteral("Unique Visitors"));
+    xlsx.write(row++, 2, analytics.kpis.uniqueVisitors);
+    xlsx.write(row, 1, QStringLiteral("Avg. Visits / Visitor"));
+    xlsx.write(row++, 2, QString::number(analytics.kpis.avgVisitsPerVisitor, 'f', 1));
+    xlsx.write(row, 1, QStringLiteral("Top Department"));
+    xlsx.write(row, 2, analytics.kpis.hasData ? sanitizeXlsxText(analytics.kpis.topDepartment)
+                                               : QStringLiteral("—"));
+    xlsx.write(row++, 3, analytics.kpis.topDepartmentVisits);
+    row += 1;
 
-        for (int c = 0; c < rowData.size(); ++c) {
-            xlsx.write(row, c + 1, rowData[c], (row % 2 == 0) ? evenFmt : oddFmt);
-        }
+    // --- Ranking tables ---
+    auto writeRanking = [&](const QString &heading, const QStringList &headers,
+                            const QList<RankingEntry> &entries, bool withSublabel, bool withPercent) {
+        xlsx.write(row++, 1, heading, sectionFmt);
+        for (int c = 0; c < headers.size(); ++c)
+            xlsx.write(row, c + 1, headers[c], hdrFmt);
         row++;
-    }
+        for (const RankingEntry &e : entries) {
+            int c = 1;
+            xlsx.write(row, c++, e.rank);
+            xlsx.write(row, c++, sanitizeXlsxText(e.label));
+            if (withSublabel) xlsx.write(row, c++, sanitizeXlsxText(e.sublabel));
+            xlsx.write(row, c++, e.visits);
+            if (withPercent) xlsx.write(row, c++, QString::number(e.percentOfTotal, 'f', 1) + "%");
+            row++;
+        }
+        row += 1;
+    };
+    writeRanking(QStringLiteral("Top 10 Students"),
+                 { "Rank", "Name", "Course", "Visits" }, analytics.topStudents, true, false);
+    writeRanking(QStringLiteral("Top 10 Courses"),
+                 { "Rank", "Course", "Visits", "% of Total" }, analytics.topCourses, false, true);
+    writeRanking(QStringLiteral("Top 10 Departments"),
+                 { "Rank", "Department", "Visits", "% of Total" }, analytics.topDepartments, false, true);
 
-    // Auto-fit columns (simulate by setting width based on text length)
-    for (int c = 0; c < headers.size(); ++c) {
-        xlsx.setColumnWidth(c + 1, headers[c].length() + 5);
-    }
-
-    // ===== FOOTER =====
-    row += 2;
-    xlsx.mergeCells(QXlsx::CellRange(row, 1, row, colCount));
     xlsx.write(row++, 1,
                "This is a system-generated report. LOAMS.2 (Library Occupancy and Attendance Monitoring System), WITS 2016.");
+    row += 1;
+    xlsx.write(row++, 1, QString("Prepared by: %1").arg(info.librarian));
+    xlsx.write(row++, 1, info.position);
 
-    row += 2;
-    xlsx.mergeCells(QXlsx::CellRange(row, 1, row, colCount));
-    xlsx.write(row++, 1, QString("Prepared by: %1").arg(librarian));
-
-    xlsx.mergeCells(QXlsx::CellRange(row, 1, row, colCount));
-    xlsx.write(row++, 1, position);
+    // ===== SHEET 2: DETAILED ROSTER (only when requested) =====
+    if (includeRoster) {
+        xlsx.addSheet(QStringLiteral("Detailed Roster"));   // becomes current
+        int rr = 1;
+        const QStringList headers = {"School ID", "Name", "Gender", "Course",
+                                     "Year Level", "Department", "Status", "Visits"};
+        for (int c = 0; c < headers.size(); ++c)
+            xlsx.write(rr, c + 1, headers[c], hdrFmt);
+        rr++;
+        QXlsx::Format evenFmt, oddFmt;
+        evenFmt.setPatternBackgroundColor(QColor("#F9F9F9"));
+        oddFmt.setPatternBackgroundColor(QColor("#FFFFFF"));
+        for (const auto &val : rows) {
+            const QJsonObject obj = val.toObject();
+            const QStringList rowData = {
+                sanitizeXlsxText(obj["school_id"].toString()), sanitizeXlsxText(obj["name"].toString()),
+                sanitizeXlsxText(obj["gender"].toString()), sanitizeXlsxText(obj["course"].toString()),
+                sanitizeXlsxText(obj["year_level"].toString()), sanitizeXlsxText(obj["department"].toString()),
+                sanitizeXlsxText(obj["status"].toString()), QString::number(obj["visits"].toInt())
+            };
+            for (int c = 0; c < rowData.size(); ++c)
+                xlsx.write(rr, c + 1, rowData[c], (rr % 2 == 0) ? evenFmt : oddFmt);
+            rr++;
+        }
+        for (int c = 0; c < headers.size(); ++c)
+            xlsx.setColumnWidth(c + 1, headers[c].length() + 5);
+        xlsx.selectSheet(QStringLiteral("Summary"));   // leave Summary active
+    }
 
     return true;
 }
