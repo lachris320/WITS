@@ -39,6 +39,7 @@ A sibling of `get_report_data.php`, not a modification of it. `get_report_data.p
   - `durationType` of `day` / `custom` / `month` → `DATE(v.login_time) BETWEEN start AND end`.
   - `durationType` of `semester` → the server's existing Philippine academic-year windows: first/`"1"` = Jun 1–Oct 31; second/`"2"` = Nov 1–(year+1) Mar 31; `summer` = Apr 1–May 31. Requires `year > 0`.
   - All filter values are bound with `bind_param` (parameterized), matching `get_report_data.php`'s existing safety posture — no string-concatenated SQL.
+  - **Verbatim-reuse note (do NOT "fix" boundaries):** copy `get_report_data.php`'s duration WHERE clauses EXACTLY, including its asymmetry — `day`/`custom`/`month` use `DATE(v.login_time) BETWEEN start AND end`, while `semester` uses a raw `v.login_time BETWEEN '$year-06-01' AND '$year-10-31'` (a datetime column against a date-only bound, so visits after `00:00:00` on the final day are excluded). This truncation is intentional to preserve: matching the roster endpoint's boundaries verbatim guarantees the time endpoint's `byHour` totals reconcile with the roster totals for the same filters. Do NOT normalize the semester bound to a half-open datetime range — that would diverge the two endpoints.
 - **Join:** `library_visits v` INNER JOIN `students s` ON `s.school_id = v.student_id`, so the student-table department/course filters apply correctly and visits from since-deleted or unmatched student rows never appear. Base clause `WHERE 1=1` with the filter conditions appended conditionally, same pattern as `get_report_data.php`.
 - **Two aggregations, computed from the same filtered join:**
   - **byHour:** `GROUP BY HOUR(v.login_time)`. PHP densifies the sparse SQL result to a **24-element array**, index 0..23 (0 = midnight hour, 23 = 11 PM hour), any bucket with no matching rows = `0`.
@@ -80,13 +81,13 @@ ReportingScreen.qml — "When do students visit?" section
 
 - New method `fetchTimeAnalytics(const QJsonObject &filters)` — POSTs to `get_report_time_data.php`, mirroring the existing `fetchReportRows` request/response plumbing (same `QNetworkAccessManager` usage, same JSON-body construction from `filters`).
 - New signal `timeAnalyticsReady(QList<int> byHour, QList<int> byWeekday)`, emitted only on a validated success (see contract rule below).
-- Failures — network failure, non-success `status`, or a validation failure — reuse the **existing** error signal(s) that `fetchReportRows` already reports through (`reportError` / `loadError`, whichever `fetchReportRows` currently emits); no new error signal type is introduced for this request.
+- **New, dedicated failure signal `timeAnalyticsError(const QString &message)`** — emitted on any time-fetch network failure, non-success `status`, or contract-validation failure. This path is deliberately **DISJOINT** from the primary rows path. `fetchReportRows` emits `reportError(QString, bool)` (only the department/year/course loaders emit `loadError`), which the ViewModel routes through `onReportError → setError(m_errorText)`. A non-empty `m_errorText` sets `screen.isError`, which **hides the entire report preview** (`showPreview = hasResult && !isError`, ReportingScreen.qml:20–21) **and blocks export** (`canExport` requires `m_errorText.isEmpty()`, ReportingViewModel.cpp:397). Therefore the secondary time path MUST NOT reuse `reportError`/`onReportError`: doing so would blank the primary report and kill export on a mere time hiccup — the exact inversion §5.2 forbids. The dedicated `timeAnalyticsError` signal is handled by a dedicated VM slot (§5.1) that sets ONLY `m_timeError`, never `m_errorText`.
 - **Parse-boundary contract validation (loud, non-negotiable):** a response is only treated as valid if ALL of the following hold:
   - `status == "success"`.
   - `byHour` is present and has **exactly** 24 elements.
   - `byWeekday` is present and has **exactly** 7 elements.
   - Each count parses robustly as a non-negative integer, accepting either a JSON number or a numeric string (defensive against either encoding from PHP).
-  - Any violation — wrong length, missing field, non-numeric entry, `status == "error"` — is treated as an error: the error signal is emitted, `timeAnalyticsReady` is **never** emitted, and nothing malformed is ever handed to the aggregator.
+  - Any violation — wrong length, missing field, non-numeric entry, `status == "error"` — is treated as an error: the dedicated `timeAnalyticsError` signal is emitted, `timeAnalyticsReady` is **never** emitted, and nothing malformed is ever handed to the aggregator.
 
 ### 4.2 Core aggregator — `core/timeanalytics.{h,cpp}`
 
@@ -124,10 +125,14 @@ Explicitly **not** this function's job:
 
 ### 5.1 Parallel fetch, single-operation guard
 
-- On **Generate**, the ViewModel fires **both** `fetchReportRows` and `fetchTimeAnalytics` **in parallel** — they are two child requests belonging to **one** logical Generate operation, not two independent operations.
-- The single-in-flight guard protects **one Generate operation**, not one HTTP request. A second Generate call is a no-op while the current operation is still running (i.e. while either child request is outstanding).
-- Two internal flags track completion: `reportRowsSettled` and `timeAnalyticsSettled`, where **settled means success OR failure** — a flag flips to true the moment its request resolves either way, not only on success.
-- The operation **finalizes** (loading indicator off, `canGenerate` re-enabled) only when `reportRowsSettled && timeAnalyticsSettled` — i.e. only once both child requests have resolved, in either order.
+- On **Generate**, the ViewModel first **resets all When-section state** (see the reset rule below), then fires **both** `fetchReportRows` and `fetchTimeAnalytics` **in parallel** — two child requests of **one** logical Generate operation.
+- Two internal flags track completion: `reportRowsSettled` and `timeAnalyticsSettled`, where **settled = success OR failure** — each flips true the moment its request resolves either way, not only on success.
+- **Three distinct "busy" notions, deliberately decoupled** (the operation-level flag is NOT reused for the preview dim — see §6's loading note and ReportingScreen.qml:202):
+  - **Operation-in-flight** — a Generate has started and `!(reportRowsSettled && timeAnalyticsSettled)`. This is what the single-in-flight guard protects: a second Generate is a no-op while an operation is in flight, and `canGenerate` is false until BOTH settle.
+  - **Rows loading** (the existing `loading` / `isLoading`) — true while the rows request is outstanding, cleared the moment **rows** settle. Drives ONLY the main report preview's dim/opacity, so the report un-dims as soon as rows arrive even if the time fetch is still running (preserves today's behavior; §6).
+  - **Time loading** (`timeLoading`, new) — true while the time request is outstanding, cleared when **time** settles. Drives ONLY the "When?" section's own spinner.
+- **Dedicated slots:** `onTimeAnalyticsError(message)` sets `m_timeError` + `timeLoading = false` + `timeAnalyticsSettled = true`, and NEVER touches `m_errorText`. The success slot (on `timeAnalyticsReady`) runs `TimeAnalytics::compute`, populates `m_timeAnalytics`/models/captions, clears `m_timeError`, and likewise flips `timeAnalyticsSettled` / `timeLoading`.
+- **Reset-at-Generate-start (staleness guard):** at the start of every Generate, before the fetches fire, the ViewModel clears ALL When-section state — `m_timeAnalytics` (→ `hasData` false), `hasTimeData = false`, `busiestHourLabel`/`busiestDayLabel` (→ empty), `m_timeError` (→ empty), both bar models (→ empty), both settle flags (→ false), and `timeLoading = true`. Without this, a second Generate would show the *previous* run's "Busiest: 2–3 PM / Wednesday" captions or stale bars during the new in-flight fetch. (The current code does not reset `m_analytics`/`m_hasResult` on a new Generate — the prior report stays visible until fresh data lands, ReportingViewModel.cpp:354–362 — so this reset must be added explicitly for the When-section rather than assumed.)
 
 ### 5.2 Outcome state table — graceful degradation
 
@@ -148,21 +153,22 @@ Explicitly **not** this function's job:
 
 The ViewModel caches the computed `m_timeAnalytics` (a `TimeAnalytics`) and exposes, all with `NOTIFY`:
 
-- Two bar-chart data models feeding the peak-hours and busiest-days charts — reuse the existing `BarsModel` that `LBarChart` already consumes if its shape fits (24-entry and 7-entry series); if it does not fit cleanly, a lightweight equivalent model is acceptable. **This is called out explicitly as an implementation-time decision to confirm against the real `LBarChart`/`BarsModel` component** — the design commits to reuse-where-it-fits, not to inventing a new model type unconditionally.
+- Two `BarsModel` instances feed the peak-hours (24-entry) and busiest-days (7-entry) `LBarChart`s. `BarsModel` exposes `label` and `value` roles, and `LBarChart` renders a `Text` label under **every** bar bound to `model.label` (it has **no** interval-thinning logic of its own). Therefore **interval x-labels are data-driven**: the ViewModel sets `label = ""` on the off-interval hour buckets and the label string (e.g. `"12A"`, `"3A"`, `"6A"`…) only on hours 0/3/6/… — the "~every 3h" spacing in §6 is produced by the model, not the chart. (Validated against `LBarChart.qml` + `BarsModel` — reuse fits; no new model type is needed, so the earlier "if it fits" hedge is resolved.) Optionally set the chart's `highlightIndex` to `peakHour` / `peakWeekdayMonFirst` to visually mark the busiest bar — a free win.
 - `busiestHourLabel` (`QString`) — human-readable 12-hour range derived from `peakHour`, e.g. `"2–3 PM"`.
 - `busiestDayLabel` (`QString`) — full weekday name derived from `peakWeekdayMonFirst`, e.g. `"Wednesday"`.
 - `hasTimeData` (`bool`) — mirrors `TimeAnalytics::hasData`.
-- `timeError` (`QString`) — empty when the time fetch succeeded (or hasn't run yet); set to a user-facing message when the time fetch failed, per §5.2's degradation rule.
+- `timeError` (`QString`) — empty when the time fetch succeeded (or hasn't run yet); set to a user-facing message by `onTimeAnalyticsError` when the time fetch failed, per §5.2. Set independently of `m_errorText` — never through `setError`.
+- `timeLoading` (`bool`) — true while the time request is outstanding; drives ONLY the "When?" section spinner (§5.1), decoupled from the main preview's `loading`.
 
 **Formatting boundary:** all human-readable formatting — the 12-hour range string, the weekday name — happens in the ViewModel's presentation layer, never in `core/timeanalytics.cpp`. Core hands over indices (`peakHour`, `peakWeekdayMonFirst`); the ViewModel is the only place that knows how to turn `14` into `"2–3 PM"` or `2` into `"Wednesday"`.
 
 ## 6. UI — `ReportingScreen.qml`
 
 - A new **"When do students visit?"** section, built as an `LCard`, placed inside the scrollable body (the existing `reportScroll` `Flickable`), positioned **below** the existing KPI band, rankings, and course chart from 4b-iii. Like the rest of the analytics dashboard, it is gated on `hasResult`.
-- **Peak-hours chart:** a 24-bar `LBarChart`, one bar per hour (0..23), x-axis labels shown at roughly every-3-hour intervals to avoid label crowding. **All 24 bars are always shown** — the chart is never trimmed to "operating hours" or to only non-zero buckets; the dense 24-element series is rendered in full. Caption reads `"Busiest: 2–3 PM"` bound to `busiestHourLabel`.
+- **Peak-hours chart:** a 24-bar `LBarChart`, one bar per hour (0..23). **All 24 bars are always shown** — never trimmed to "operating hours" or to only non-zero buckets; the dense 24-element series is rendered in full. X-axis labels appear at ~every-3-hour intervals; per §5.4 this thinning is produced by the ViewModel blanking `model.label` on the off-interval buckets, **not** by any chart capability. The `"Busiest: 2–3 PM"` caption (bound to `busiestHourLabel`) is rendered **only inside the success+data state** (below) — never in the loading or empty state, where the peak indices are meaningless (they default to `0` → "12–1 AM"). Bind the captions inside that state's subtree, not merely hidden behind opacity.
 - **Busiest-days chart:** a 7-bar `LBarChart` in **Monday–Sunday** order (matching `weekdayMonFirst`/`peakWeekdayMonFirst`). Caption reads `"Busiest: Wednesday"` bound to `busiestDayLabel`.
 - **Section states** (independent of the rest of the report — the section's own state reflects only the time request's outcome):
-  - **Loading:** the section is dimmed / shows a spinner while the time-analytics request is in flight (rows may already have resolved and be rendering above it).
+  - **Loading:** while `timeLoading` is true the section shows its OWN spinner. This binds to `timeLoading` — **not** the operation-level busy flag and **not** the rows `loading`/opacity binding (ReportingScreen.qml:202) — so the main report (KPIs, rankings, roster) renders at full opacity as soon as **rows** settle, with only the "When?" section still spinning until the **time** fetch settles (§5.1). Binding the section to the operation-level flag would incorrectly keep the whole report dimmed until the slower request finished (a regression from today).
   - **Success + data:** both charts render with their captions.
   - **Success + all-zero (`hasTimeData == false`):** an empty state, `"No visit activity in this range"`, replaces the charts.
   - **Time-error (`timeError` set):** an inline `"Couldn't load visit times"` message replaces the charts, **while the rest of the report (KPIs, rankings, course chart) continues to render normally above it** — per §5.2, this failure is localized.
@@ -249,6 +255,10 @@ The ViewModel caches the computed `m_timeAnalytics` (a `TimeAnalytics`) and expo
 | Peak tie-break | Earliest/first bucket wins (hour and weekday alike), documented |
 | Formatting | 12-hour range / weekday name strings are ViewModel work, never core |
 | Fetch model | Rows + time fetched in parallel as one Generate operation; single-in-flight guard = one operation, not one request |
+| Error signals | Time path gets a DEDICATED `timeAnalyticsError` signal + VM slot setting only `m_timeError` — never the shared `reportError`/`m_errorText` (which hides the whole preview + blocks export) |
+| Loading model | Three decoupled notions: operation-in-flight (gates `canGenerate`, both-settle), rows `loading` (main preview dim, clears on rows settle), `timeLoading` (When-section spinner, clears on time settle) |
+| Reset-at-Generate | All When-section state (analytics, captions, `hasTimeData`, `timeError`, models, settle flags) cleared at Generate start to avoid stale captions on a re-run |
+| Chart labels | Interval x-labels are data-driven (VM blanks `model.label` off-interval); optional `highlightIndex` = peak bar |
 | Degradation | Rows failure is fatal to the whole operation; time failure is localized to the "When?" section only |
 | Export gating | `canExport` still gated on rows only — time-fetch outcome never blocks export |
 | On-screen placement | New "When?" `LCard` below KPIs/rankings/course chart, gated on `hasResult` |
