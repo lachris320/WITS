@@ -214,7 +214,7 @@ The ViewModel caches the computed `m_timeAnalytics` (a `TimeAnalytics`) and expo
   - Malformed/non-numeric entries → error signal fires.
   - String-encoded counts (e.g. `"12"` instead of `12`) parse correctly as the numeric-string-tolerant path, not as an error.
 - **`ReportingViewModel` test:**
-  - The Generate operation finalizes (loading off, `canGenerate` re-enabled) only when **both** `reportRowsSettled` and `timeAnalyticsSettled` are true, regardless of which settles first.
+  - The Generate operation finalizes — `canGenerate` re-enabled / operation-in-flight cleared — only when **both** `reportRowsSettled` and `timeAnalyticsSettled` are true, regardless of which settles first. (The rows `loading` flag clears earlier, at rows-settle, per §5.1's three-flag model — assert it independently of the both-settle gate.)
   - All four combinations from the §5.2 outcome table are exercised, with particular attention to the two graceful-degradation cases: rows-success/time-error (report renders, "When?" shows its inline error) and rows-error/time-success (primary error path fires, "When?" not shown).
   - Bar-chart models are populated correctly from a successful time fetch.
   - `busiestHourLabel` / `busiestDayLabel` produce the correct formatted strings for known peak indices.
