@@ -5,6 +5,7 @@
 #include <QDate>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QList>
 #include <QObject>
 #include <QString>
 #include <QStringList>
@@ -28,6 +29,12 @@ public:
                                              QJsonArray &outData,
                                              QString &outMessage); // get_report_data.php
     static QJsonArray   parsePreviewData(const QByteArray &raw);   // api.php/reports/data
+    // get_report_time_data.php: validates status + EXACT lengths (24/7) + numeric
+    // entries (number OR numeric string). false on any violation, arrays cleared.
+    static bool parseTimeAnalytics(const QByteArray &raw,
+                                   QList<int> &outByHour,
+                                   QList<int> &outByWeekday,
+                                   QString &outError);
 
     // Pure duration -> date-range math, extracted from collectReportFilters.
     // durationType: 0=day, 1=month, 2=semester, 3=custom (matches durationTypeBox).
@@ -44,6 +51,7 @@ public:
     void loadCourses(const QString &department); // GET get_courses.php?department=..&include_all=true
     void fetchReportRows(const QJsonObject &filters);  // POST get_report_data.php
     void fetchPreviewData(const QJsonObject &filters); // POST api.php/reports/data
+    void fetchTimeAnalytics(const QJsonObject &filters); // POST get_report_time_data.php
 
 signals:
     void departmentsLoaded(const QStringList &departments);
@@ -53,6 +61,8 @@ signals:
     void reportError(const QString &message, bool critical);
     void previewDataReady(const QJsonArray &data);
     void loadError(const QString &title, const QString &message, bool critical);
+    void timeAnalyticsReady(const QList<int> &byHour, const QList<int> &byWeekday);
+    void timeAnalyticsError(const QString &message);
 
 private:
     QNetworkAccessManager *m_nam;   // injected, not owned — adminWindow keeps ownership

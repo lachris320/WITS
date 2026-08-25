@@ -134,6 +134,82 @@ QJsonArray ReportController::parsePreviewData(const QByteArray &raw) {
     return obj["data"].toArray();
 }
 
+// Pure, unit-testable parse boundary for get_report_time_data.php (spec §4.1).
+// Valid ONLY if status=="success", byHour has EXACTLY 24 entries, byWeekday
+// EXACTLY 7, and every entry parses as a non-negative integer (JSON number OR
+// numeric string). Any violation -> false, arrays cleared, reason in outError.
+bool ReportController::parseTimeAnalytics(const QByteArray &raw,
+                                          QList<int> &outByHour,
+                                          QList<int> &outByWeekday,
+                                          QString &outError) {
+    outByHour.clear();
+    outByWeekday.clear();
+
+    const QJsonDocument doc = QJsonDocument::fromJson(raw);
+    if (!doc.isObject()) {
+        outError = QStringLiteral("Invalid response from server.");
+        return false;
+    }
+    const QJsonObject obj = doc.object();
+    if (obj.value("status").toString() != QStringLiteral("success")) {
+        const QString msg = obj.value("message").toString();
+        outError = msg.isEmpty() ? QStringLiteral("Couldn't load visit times.") : msg;
+        return false;
+    }
+    if (!obj.value("byHour").isArray() || !obj.value("byWeekday").isArray()) {
+        outError = QStringLiteral("Malformed time analytics response.");
+        return false;
+    }
+    const QJsonArray hourArr = obj.value("byHour").toArray();
+    const QJsonArray weekArr = obj.value("byWeekday").toArray();
+    if (hourArr.size() != 24 || weekArr.size() != 7) {
+        outError = QStringLiteral("Malformed time analytics response.");
+        return false;
+    }
+
+    // Robust non-negative-int coercion: JSON number OR numeric string.
+    auto asCount = [](const QJsonValue &v, int &out) -> bool {
+        if (v.isDouble()) {
+            const int i = int(v.toDouble());
+            if (i < 0) return false;
+            out = i;
+            return true;
+        }
+        if (v.isString()) {
+            bool ok = false;
+            const int i = v.toString().trimmed().toInt(&ok);
+            if (!ok || i < 0) return false;
+            out = i;
+            return true;
+        }
+        return false;
+    };
+
+    QList<int> hours; hours.reserve(24);
+    for (const QJsonValue &v : hourArr) {
+        int c = 0;
+        if (!asCount(v, c)) {
+            outError = QStringLiteral("Malformed time analytics response.");
+            return false;
+        }
+        hours.append(c);
+    }
+    QList<int> week; week.reserve(7);
+    for (const QJsonValue &v : weekArr) {
+        int c = 0;
+        if (!asCount(v, c)) {
+            outError = QStringLiteral("Malformed time analytics response.");
+            return false;
+        }
+        week.append(c);
+    }
+
+    outByHour = hours;
+    outByWeekday = week;
+    outError.clear();
+    return true;
+}
+
 // Pure date-range math extracted from adminWindow::collectReportFilters's
 // duration switch (adminwindow.cpp:1732-1802). Month is taken as 1..12
 // directly (the 0-based combobox-index adjustment stays in adminwindow.cpp).
@@ -307,6 +383,34 @@ void ReportController::fetchReportRows(const QJsonObject &filters) {
             emit reportDataReady(data);
             break;
         }
+    });
+}
+
+// Sibling of fetchReportRows for get_report_time_data.php (spec §4.1). Same
+// request plumbing (POST, application/json, JSON body from filters). On finish it
+// routes through the pure parseTimeAnalytics: success -> timeAnalyticsReady; any
+// failure -> the DEDICATED timeAnalyticsError. This path is deliberately DISJOINT
+// from reportError, which the VM routes to m_errorText (blanking the whole preview
+// + blocking export) — a time hiccup must never do that (spec §4.1/§5.2).
+void ReportController::fetchTimeAnalytics(const QJsonObject &filters) {
+    QUrl url = ApiConfig::endpoint("get_report_time_data.php");
+    QNetworkRequest request(url);
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    QNetworkReply *reply = m_nam->post(request, QJsonDocument(filters).toJson());
+    connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+        if (reply->error() != QNetworkReply::NoError) {
+            emit timeAnalyticsError(reply->errorString());
+            reply->deleteLater();
+            return;
+        }
+        const QByteArray resp = reply->readAll();
+        reply->deleteLater();
+        QList<int> byHour, byWeekday;
+        QString error;
+        if (parseTimeAnalytics(resp, byHour, byWeekday, error))
+            emit timeAnalyticsReady(byHour, byWeekday);
+        else
+            emit timeAnalyticsError(error);
     });
 }
 
