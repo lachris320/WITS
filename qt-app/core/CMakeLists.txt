@@ -35,6 +35,7 @@ add_library(witscore STATIC
     reportcontroller.h reportcontroller.cpp
     reportrenderer.h reportrenderer.cpp
     reportanalytics.h reportanalytics.cpp
+    timeanalytics.h timeanalytics.cpp
     brandcolormath.h
     brandthemedata.h
     brandtheme.h brandtheme.cpp
