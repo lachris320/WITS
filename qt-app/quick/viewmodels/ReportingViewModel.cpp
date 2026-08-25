@@ -111,6 +111,63 @@ QList<BarsModel::Bar> ReportingViewModel::aggregateVisitsByCourse(const QJsonArr
     return bars;
 }
 
+QList<BarsModel::Bar> ReportingViewModel::buildHourlyBars(const QList<int> &hourly)
+{
+    QList<BarsModel::Bar> bars;
+    if (hourly.size() != 24)
+        return bars;
+    bars.reserve(24);
+    for (int h = 0; h < 24; ++h) {
+        // Interval x-labels are DATA-DRIVEN (spec §5.4): only hours 0/3/6.. carry a
+        // label; the rest are blank so LBarChart (a Text under EVERY bar) shows
+        // ~every-3h ticks. The chart has no thinning logic of its own.
+        const QString label = (h % 3 == 0) ? hourTick(h) : QString();
+        bars.append({ label, double(hourly.at(h)) });
+    }
+    return bars;
+}
+
+QList<BarsModel::Bar> ReportingViewModel::buildWeekdayBars(const QList<int> &weekdayMonFirst)
+{
+    QList<BarsModel::Bar> bars;
+    if (weekdayMonFirst.size() != 7)
+        return bars;
+    static const char *const kShort[7] = { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
+    bars.reserve(7);
+    for (int d = 0; d < 7; ++d)
+        bars.append({ QString::fromLatin1(kShort[d]), double(weekdayMonFirst.at(d)) });
+    return bars;
+}
+
+QString ReportingViewModel::hourTick(int hour)
+{
+    const int h12 = (hour % 12 == 0) ? 12 : (hour % 12);
+    const QChar suffix = (hour < 12) ? QLatin1Char('A') : QLatin1Char('P');
+    return QStringLiteral("%1%2").arg(h12).arg(suffix);
+}
+
+QString ReportingViewModel::formatHourRange(int hour)
+{
+    const int startH = hour;
+    const int endH = (hour + 1) % 24;
+    const auto to12 = [](int h) { return (h % 12 == 0) ? 12 : (h % 12); };
+    const auto ampm = [](int h) { return h < 12 ? QStringLiteral("AM") : QStringLiteral("PM"); };
+    // Same meridiem -> one suffix ("2–3 PM"); otherwise annotate both ("11 PM–12 AM").
+    if (ampm(startH) == ampm(endH))
+        return QStringLiteral("%1–%2 %3").arg(to12(startH)).arg(to12(endH)).arg(ampm(startH));
+    return QStringLiteral("%1 %2–%3 %4")
+            .arg(to12(startH)).arg(ampm(startH)).arg(to12(endH)).arg(ampm(endH));
+}
+
+QString ReportingViewModel::weekdayName(int monFirstIndex)
+{
+    static const char *const kNames[7] = { "Monday", "Tuesday", "Wednesday",
+                                           "Thursday", "Friday", "Saturday", "Sunday" };
+    if (monFirstIndex < 0 || monFirstIndex >= 7)
+        return QString();
+    return QString::fromLatin1(kNames[monFirstIndex]);
+}
+
 QJsonArray ReportingViewModel::normalizeExportRows(const QJsonArray &data)
 {
     QJsonArray out;
@@ -310,9 +367,8 @@ void ReportingViewModel::generateReport()
     // Two child requests, ONE logical Generate operation.
     m_reportRowsSettled = false;
     m_timeAnalyticsSettled = false;
-    setLoading(true);                 // rows loading -> main preview dim
+    setLoading(true);                 // rows loading -> main preview dim; also emits canGenerateChanged()
     setTimeLoading(true);             // section spinner
-    emit canGenerateChanged();        // operation now in flight
 
     const QJsonObject filters = buildFilters(
         m_department, m_course, m_durationType,
@@ -376,11 +432,25 @@ void ReportingViewModel::onLoadError(const QString &/*title*/, const QString &me
 }
 void ReportingViewModel::onTimeAnalyticsReady(const QList<int> &byHour, const QList<int> &byWeekday)
 {
-    // Task 3: settle the flag + clear timeError so the operation can finalize.
-    // Full model/caption/hasTimeData population lands in Task 4.
-    Q_UNUSED(byHour);
-    Q_UNUSED(byWeekday);
+    m_timeAnalytics = TimeAnalytics::compute(byHour, byWeekday);
+
+    m_hourlyBars.setBars(buildHourlyBars(m_timeAnalytics.hourly));
+    m_weekdayBars.setBars(buildWeekdayBars(m_timeAnalytics.weekdayMonFirst));
+
+    m_hasTimeData = m_timeAnalytics.hasData;
+    emit hasTimeDataChanged();
+
+    // Captions ONLY when there is data — peak indices default to 0 ("12–1 AM" /
+    // "Monday") on an all-zero range and would mislead (spec §6).
+    m_busiestHourLabel = m_timeAnalytics.hasData ? formatHourRange(m_timeAnalytics.peakHour)
+                                                 : QString();
+    emit busiestHourLabelChanged();
+    m_busiestDayLabel = m_timeAnalytics.hasData ? weekdayName(m_timeAnalytics.peakWeekdayMonFirst)
+                                                : QString();
+    emit busiestDayLabelChanged();
+
     if (!m_timeError.isEmpty()) { m_timeError.clear(); emit timeErrorChanged(); }
+
     setTimeLoading(false);
     m_timeAnalyticsSettled = true;
     emit canGenerateChanged();

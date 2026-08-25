@@ -22,7 +22,10 @@ class ReportController;
 
 // Reporting screen VM (spec 4b-i). Wraps the witscore ReportController (no new
 // endpoint). Only QML-facing C++ for the reporting screen. Single-in-flight:
-// generateReport() is a no-op while loading; canGenerate is false while loading.
+// generateReport() is a no-op while operationInFlight() is true — i.e. while
+// EITHER the report-rows fetch or the time-analytics fetch is still pending;
+// canGenerate() stays false across that whole both-settle window, not just
+// while the primary rows fetch is loading.
 class ReportingViewModel : public QObject
 {
     Q_OBJECT
@@ -214,6 +217,13 @@ private:
     void setError(const QString &e);
     void setTimeLoading(bool v);
     void resetTimeSection();          // clears ALL When-section state at Generate start
+    // Presentation shaping for the "When?" section (formatting lives HERE, not in
+    // core — spec §5.4). Static + pure so they are directly unit-testable.
+    static QList<BarsModel::Bar> buildHourlyBars(const QList<int> &hourly);        // 24, label blanked off-3h
+    static QList<BarsModel::Bar> buildWeekdayBars(const QList<int> &weekdayMonFirst); // 7, Mon-first
+    static QString hourTick(int hour);          // 0..23 -> "12A","3A",...,"9P"
+    static QString formatHourRange(int hour);   // 14 -> "2–3 PM"
+    static QString weekdayName(int monFirstIndex); // 0..6 (Mon..Sun) -> "Monday".."Sunday"
     bool operationInFlight() const;   // true until BOTH children settle
     void applyResult(const QJsonArray &data);    // Task 6
     void setExporting(bool v);

@@ -69,6 +69,9 @@ private slots:
     void outcome_rowsErrorTimeSuccess_primaryErrorFires();
     void canExport_unaffectedByTimeOutcome();
     void resetAtGenerate_clearsStaleTimeState();
+    void timeModels_populatedWithLabelBlanking();
+    void captions_formattedForKnownPeaks();
+    void hasTimeData_falseOnAllZeroShowsEmptyState();
 
 private:
     static QList<int> denseHours() {          // valid 24-array, peak at 14 (2 PM)
@@ -769,6 +772,60 @@ void TestReportingViewModel::resetAtGenerate_clearsStaleTimeState() {
     QVERIFY(vm.timeError().isEmpty());   // cleared at Generate start (staleness guard)
     QVERIFY(!vm.hasTimeData());
     QVERIFY(vm.timeLoading());           // section spinning again
+}
+
+void TestReportingViewModel::timeModels_populatedWithLabelBlanking() {
+    ReportingViewModel vm;
+    vm.setDurationType(0);
+    vm.setDay("2026-08-14");
+    vm.generateReport();
+    vm.onReportDataReady(QJsonArray());
+    vm.onTimeAnalyticsReady(denseHours(), denseWeek());
+
+    QCOMPARE(vm.hourlyBars()->rowCount(), 24);
+    QCOMPARE(vm.weekdayBars()->rowCount(), 7);
+
+    // Interval x-labels: hours 0/3/6.. carry a label, off-interval hours are blank.
+    QCOMPARE(vm.hourlyBars()->data(vm.hourlyBars()->index(0, 0),
+             BarsModel::LabelRole).toString(), QStringLiteral("12A"));
+    QCOMPARE(vm.hourlyBars()->data(vm.hourlyBars()->index(3, 0),
+             BarsModel::LabelRole).toString(), QStringLiteral("3A"));
+    QVERIFY(vm.hourlyBars()->data(vm.hourlyBars()->index(1, 0),
+            BarsModel::LabelRole).toString().isEmpty());
+
+    // Weekday bars are Monday-first; value at Mon = denseWeek() Sun-first idx1 = 40.
+    QCOMPARE(vm.weekdayBars()->data(vm.weekdayBars()->index(0, 0),
+             BarsModel::LabelRole).toString(), QStringLiteral("Mon"));
+    QCOMPARE(vm.weekdayBars()->data(vm.weekdayBars()->index(6, 0),
+             BarsModel::LabelRole).toString(), QStringLiteral("Sun"));
+    QCOMPARE(vm.weekdayBars()->data(vm.weekdayBars()->index(0, 0),
+             BarsModel::ValueRole).toInt(), 40);
+}
+
+void TestReportingViewModel::captions_formattedForKnownPeaks() {
+    ReportingViewModel vm;
+    vm.setDurationType(0);
+    vm.setDay("2026-08-14");
+    vm.generateReport();
+    vm.onReportDataReady(QJsonArray());
+    vm.onTimeAnalyticsReady(denseHours(), denseWeek());   // peak hour 14, peak day Monday
+    QVERIFY(vm.hasTimeData());
+    QCOMPARE(vm.busiestHourLabel(), QStringLiteral("2–3 PM"));
+    QCOMPARE(vm.busiestDayLabel(), QStringLiteral("Monday"));
+}
+
+void TestReportingViewModel::hasTimeData_falseOnAllZeroShowsEmptyState() {
+    ReportingViewModel vm;
+    vm.setDurationType(0);
+    vm.setDay("2026-08-14");
+    vm.generateReport();
+    vm.onReportDataReady(QJsonArray());
+    vm.onTimeAnalyticsReady(zeros(24), zeros(7));
+    QVERIFY(!vm.hasTimeData());
+    QVERIFY(vm.busiestHourLabel().isEmpty());   // captions unused in the empty state
+    QVERIFY(vm.busiestDayLabel().isEmpty());
+    QCOMPARE(vm.hourlyBars()->rowCount(), 24);  // bars still dense (all zero)
+    QCOMPARE(vm.weekdayBars()->rowCount(), 7);
 }
 
 QTEST_MAIN(TestReportingViewModel)
