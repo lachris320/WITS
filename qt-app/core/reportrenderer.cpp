@@ -484,7 +484,7 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
     kpiLine("Avg. Visits / Visitor", QString::number(analytics.kpis.avgVisitsPerVisitor, 'f', 1));
     kpiLine("Top Department",
             QString("%1 (%2 visits)")
-                .arg(analytics.kpis.hasData ? analytics.kpis.topDepartment : QStringLiteral("—"))
+                .arg(analytics.kpis.hasData ? safeText(analytics.kpis.topDepartment) : QStringLiteral("—"))
                 .arg(analytics.kpis.topDepartmentVisits));
     y += vs(16);
 
@@ -511,9 +511,9 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
                              (idx % 2 == 0) ? palette.rowEvenBg : palette.rowOddBg);
             painter.setPen(palette.rowText);
             painter.drawText(cRank, y, QString::number(e.rank));
-            painter.drawText(cLabel, y, rfm.elidedText(e.label, Qt::ElideRight, cSub - cLabel - vs(5)));
+            painter.drawText(cLabel, y, rfm.elidedText(safeText(e.label), Qt::ElideRight, cSub - cLabel - vs(5)));
             if (withSublabel)
-                painter.drawText(cSub, y, rfm.elidedText(e.sublabel, Qt::ElideRight, cVisits - cSub - vs(5)));
+                painter.drawText(cSub, y, rfm.elidedText(safeText(e.sublabel), Qt::ElideRight, cVisits - cSub - vs(5)));
             painter.drawText(cVisits, y, QString::number(e.visits));
             if (withPercent)
                 painter.drawText(cPct, y, QString::number(e.percentOfTotal, 'f', 1) + "%");
@@ -670,16 +670,10 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
             y += rowPitch;
             rowIndex++;
 
-            if (y > usableHeight - vs(200)) {
-                drawFooter(currentPage);
-                device->newPage();
-                currentPage++;
-                y = margin;
-                drawHeader(y);
-                // drawHeader leaves the font at Arial 9; restore the row font so
-                // continuation-page rows draw at the same Arial 10 that fm measures.
-                painter.setFont(QFont("Arial", 10));
-            }
+            // newPageIfNeeded already restores the Arial 10 row font after
+            // drawHeader leaves it at Arial 9, so continuation-page rows draw
+            // at the same font that fm measures.
+            newPageIfNeeded(200);
         }
 
         // Foot the roster's LAST page — the prepared-by section opens a fresh page next.
