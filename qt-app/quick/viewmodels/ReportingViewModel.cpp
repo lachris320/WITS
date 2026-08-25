@@ -33,6 +33,10 @@ ReportingViewModel::ReportingViewModel(QObject *parent)
             this, &ReportingViewModel::onReportError);
     connect(m_controller, &ReportController::loadError,
             this, &ReportingViewModel::onLoadError);
+    connect(m_controller, &ReportController::timeAnalyticsReady,
+            this, &ReportingViewModel::onTimeAnalyticsReady);
+    connect(m_controller, &ReportController::timeAnalyticsError,
+            this, &ReportingViewModel::onTimeAnalyticsError);
 
     // Auto-clear the validation prompt the moment filters become complete —
     // every filter setter emits canGenerateChanged. A real fetch/bootstrap
@@ -211,9 +215,14 @@ bool ReportingViewModel::filtersComplete() const
     }
 }
 
+bool ReportingViewModel::operationInFlight() const
+{
+    return !(m_reportRowsSettled && m_timeAnalyticsSettled);
+}
+
 bool ReportingViewModel::canGenerate() const
 {
-    return filtersComplete() && !m_loading;
+    return filtersComplete() && !operationInFlight();
 }
 
 // --- Stubs filled by later tasks (present so the class links now) ---
@@ -284,7 +293,7 @@ void ReportingViewModel::setCustomEnd(const QString &v)
 }
 void ReportingViewModel::generateReport()
 {
-    if (m_loading)                // single-in-flight
+    if (operationInFlight())          // single-in-flight = ONE operation
         return;
     if (!filtersComplete()) {
         setError(QStringLiteral("Complete the selected duration before generating a report."));
@@ -293,12 +302,24 @@ void ReportingViewModel::generateReport()
     }
     m_validationError = false;
     setError(QString());
-    setLoading(true);
+
+    // Reset ALL When-section state BEFORE the fetches (staleness guard, spec §5.1):
+    // without this, a re-run would show the previous run's captions/bars in flight.
+    resetTimeSection();
+
+    // Two child requests, ONE logical Generate operation.
+    m_reportRowsSettled = false;
+    m_timeAnalyticsSettled = false;
+    setLoading(true);                 // rows loading -> main preview dim
+    setTimeLoading(true);             // section spinner
+    emit canGenerateChanged();        // operation now in flight
+
     const QJsonObject filters = buildFilters(
         m_department, m_course, m_durationType,
         parseDate(m_day), m_month, m_monthYear,
         m_semester, m_semYear, parseDate(m_customStart), parseDate(m_customEnd));
     m_controller->fetchReportRows(filters);
+    m_controller->fetchTimeAnalytics(filters);   // parallel, same filters
 }
 
 void ReportingViewModel::retry()
@@ -334,12 +355,14 @@ void ReportingViewModel::onCoursesLoaded(const QStringList &courses)
 }
 void ReportingViewModel::onReportDataReady(const QJsonArray &data)
 {
+    m_reportRowsSettled = true;
     setLoading(false);
     applyResult(data);
 }
 
 void ReportingViewModel::onReportError(const QString &message, bool /*critical*/)
 {
+    m_reportRowsSettled = true;
     setLoading(false);
     setError(message.isEmpty() ? QStringLiteral("Report failed. Please try again.") : message);
     m_validationError = false;   // a real fetch error, not a validation prompt
@@ -351,6 +374,30 @@ void ReportingViewModel::onLoadError(const QString &/*title*/, const QString &me
     setError(message.isEmpty() ? QStringLiteral("Failed to load filters. Please try again.") : message);
     m_validationError = false;   // a real bootstrap error, not a validation prompt
 }
+void ReportingViewModel::onTimeAnalyticsReady(const QList<int> &byHour, const QList<int> &byWeekday)
+{
+    // Task 3: settle the flag + clear timeError so the operation can finalize.
+    // Full model/caption/hasTimeData population lands in Task 4.
+    Q_UNUSED(byHour);
+    Q_UNUSED(byWeekday);
+    if (!m_timeError.isEmpty()) { m_timeError.clear(); emit timeErrorChanged(); }
+    setTimeLoading(false);
+    m_timeAnalyticsSettled = true;
+    emit canGenerateChanged();
+}
+
+void ReportingViewModel::onTimeAnalyticsError(const QString &message)
+{
+    // Localized failure (spec §5.2): set ONLY m_timeError; NEVER m_errorText,
+    // which would blank the whole preview + block export.
+    m_timeError = message.isEmpty() ? QStringLiteral("Couldn't load visit times.") : message;
+    emit timeErrorChanged();
+    if (m_hasTimeData) { m_hasTimeData = false; emit hasTimeDataChanged(); }
+    setTimeLoading(false);
+    m_timeAnalyticsSettled = true;
+    emit canGenerateChanged();
+}
+
 void ReportingViewModel::setLoading(bool v)
 {
     if (m_loading == v) return;
@@ -366,6 +413,22 @@ void ReportingViewModel::setError(const QString &e)
     m_errorText = e;
     emit errorTextChanged();
     emit canExportChanged();
+}
+void ReportingViewModel::setTimeLoading(bool v)
+{
+    if (m_timeLoading == v) return;
+    m_timeLoading = v;
+    emit timeLoadingChanged();
+}
+void ReportingViewModel::resetTimeSection()
+{
+    m_timeAnalytics = TimeAnalytics();
+    m_hourlyBars.setBars({});
+    m_weekdayBars.setBars({});
+    if (m_hasTimeData)              { m_hasTimeData = false;      emit hasTimeDataChanged(); }
+    if (!m_busiestHourLabel.isEmpty()) { m_busiestHourLabel.clear(); emit busiestHourLabelChanged(); }
+    if (!m_busiestDayLabel.isEmpty())  { m_busiestDayLabel.clear();  emit busiestDayLabelChanged(); }
+    if (!m_timeError.isEmpty())    { m_timeError.clear();        emit timeErrorChanged(); }
 }
 void ReportingViewModel::applyResult(const QJsonArray &data)
 {
