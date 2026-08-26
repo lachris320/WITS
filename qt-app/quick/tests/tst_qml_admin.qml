@@ -12,10 +12,10 @@ Item {
     // Geometry ledger (x 0 column):   dash 0..760 | search 760..1460 |
     //   logs 1460..2160 | settings 2160..3760 | database 3800..4500
     //   | editDialog 4500..5200 | bulkEdit 5200..5900 | registerDialog 5900..6600
-    //   | importDialog 6600..7300 | reporting 7300..8420.
+    //   | importDialog 6600..7300 | reporting 7300..8800.
     // Parked no-vm column (x 2000): vmlessSearch 0..700 |
     //   vmlessLogs 760..1460 | vmlessSettings 1560..2260.
-    width: 1100; height: 8420
+    width: 1100; height: 8800
 
     // --- Dashboard stub VM ---
     // maxValue is declared on the stubs because the screen binds
@@ -2501,7 +2501,7 @@ Item {
         }
     }
 
-    // --- Reporting stub VM + screen (band y 7300..8300) ---
+    // --- Reporting stub VM + screen (band y 7300..8800) ---
     ListModel { id: reportRowsStub
         ListElement { name: "Maria Santos"; course: "BSCE"; year: "3"; visits: 42 }
         ListElement { name: "Jose Cruz"; course: "BSIT"; year: "1"; visits: 7 }
@@ -2510,6 +2510,18 @@ Item {
         property real maxValue: 42
         ListElement { label: "BSCE"; value: 42 }
         ListElement { label: "BSIT"; value: 7 }
+    }
+    ListModel { id: whenHourlyStub
+        property real maxValue: 12
+        ListElement { label: "12A"; value: 0 }
+        ListElement { label: ""; value: 3 }
+        ListElement { label: "3A"; value: 12 }
+    }
+    ListModel { id: whenWeekdayStub
+        property real maxValue: 40
+        ListElement { label: "Mon"; value: 40 }
+        ListElement { label: "Tue"; value: 8 }
+        ListElement { label: "Sun"; value: 2 }
     }
     ListModel { id: topStudentsStub
         ListElement { rank: 1; label: "Ana"; sublabel: "BSIT"; visits: 5; percent: 62.5 }
@@ -2560,6 +2572,13 @@ Item {
         property string palette: "Default"
         property var chartTypes: ["Bar", "Pie"]
         property string chartType: "Bar"
+        property bool timeLoading: false
+        property string timeError: ""
+        property bool hasTimeData: true
+        property string busiestHourLabel: "2–3 PM"
+        property string busiestDayLabel: "Monday"
+        property var hourlyBars: whenHourlyStub
+        property var weekdayBars: whenWeekdayStub
         property bool includeRosterInExport: false
         property int setIncludeRosterCount: 0
         function setIncludeRosterInExport(v) { includeRosterInExport = v; setIncludeRosterCount++ }
@@ -2589,7 +2608,7 @@ Item {
         function generateReport() { generateCount++ }
         function retry() { generateCount++ }
     }
-    ReportingScreen { id: reporting; x: 0; y: 7300; width: 1100; height: 1120; vm: reportingStub }
+    ReportingScreen { id: reporting; x: 0; y: 7300; width: 1100; height: 1500; vm: reportingStub }
 
     // A vm-less instance to cover the `vm ? ... : ...` fallback path.
     ReportingScreen { id: vmlessReporting; x: 2000; y: 7300; width: 1100; height: 1000 }
@@ -2602,6 +2621,9 @@ Item {
             reportingStub.durationType = 0;
             reportingStub.hasResult = true;
             reportingStub.includeRosterInExport = false;
+            reportingStub.timeLoading = false;
+            reportingStub.timeError = "";
+            reportingStub.hasTimeData = true;
             var rosterChk = findChild(reporting, "includeRosterCheck");
             if (rosterChk) rosterChk.checked = false;
         }
@@ -2709,6 +2731,55 @@ Item {
             verify(fb.visible);
             verify(fb.text.indexOf("Couldn't write") >= 0);
             reportingStub.exportError = "";
+        }
+
+        function test_whenSection_rendersChartsWithData() {
+            reportingStub.hasResult = true;
+            reportingStub.timeLoading = false;
+            reportingStub.timeError = "";
+            reportingStub.hasTimeData = true;
+            var section = findChild(reporting, "whenSection");
+            verify(section, "when-section card exists");
+            verify(section.visible, "section visible with a non-empty result");
+            var data = findChild(reporting, "whenData");
+            verify(data.visible, "data subtree visible in success+data state");
+            verify(findChild(reporting, "hourlyChart"), "hourly chart exists");
+            verify(findChild(reporting, "weekdayChart"), "weekday chart exists");
+            var hourCap = findChild(reporting, "busiestHourCaption");
+            verify(hourCap.text.indexOf("2–3 PM") >= 0, "hour caption reflects busiestHourLabel");
+            var dayCap = findChild(reporting, "busiestDayCaption");
+            verify(dayCap.text.indexOf("Monday") >= 0, "day caption reflects busiestDayLabel");
+        }
+
+        function test_whenSection_emptyState() {
+            reportingStub.timeLoading = false;
+            reportingStub.timeError = "";
+            reportingStub.hasTimeData = false;
+            var empty = findChild(reporting, "whenEmpty");
+            verify(empty, "empty-state element exists");
+            verify(empty.visible, "empty state shows on success + all-zero");
+            verify(!findChild(reporting, "whenData").visible, "data subtree hidden in empty state");
+            reportingStub.hasTimeData = true;   // restore
+        }
+
+        function test_whenSection_inlineError() {
+            reportingStub.timeLoading = false;
+            reportingStub.timeError = "network down";
+            var err = findChild(reporting, "whenError");
+            verify(err, "inline error element exists");
+            verify(err.visible, "inline error shows when timeError set");
+            // Localized: the rest of the report stays visible above the section.
+            verify(findChild(reporting, "kpiBand").visible, "KPI band still visible during a time-only error");
+            reportingStub.timeError = "";   // restore
+        }
+
+        function test_whenSection_gatedOffOnEmptyResult() {
+            reportingStub.hasResult = true;
+            reportRowsStub.clear();          // 0 rows -> analytics scaffolding collapses
+            var section = findChild(reporting, "whenSection");
+            verify(section, "section element exists");
+            compare(section.visible, false, "when-section hidden on 0 rows (collapses with chart/rankings)");
+            // reportRowsStub is restored by cleanup()
         }
 
         function test_includeRosterCheckboxDefaultsUncheckedAndWritesVm() {

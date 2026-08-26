@@ -61,6 +61,33 @@ private slots:
     void printReportEmptyRowsShowsNoDataError();
     void includeRosterInExport_defaultsFalse();
     void setIncludeRosterInExport_togglesAndSignals();
+    void timeSection_propertyDefaults();
+    void generate_operationFinalizesOnlyWhenBothSettle();
+    void generate_operationFinalizesRegardlessOfSettleOrder();
+    void generate_rowsLoadingClearsAtRowsSettleIndependently();
+    void outcome_rowsSuccessTimeError_reportRendersTimeErrorLocalized();
+    void outcome_rowsErrorTimeSuccess_primaryErrorFires();
+    void canExport_unaffectedByTimeOutcome();
+    void resetAtGenerate_clearsStaleTimeState();
+    void timeModels_populatedWithLabelBlanking();
+    void captions_formattedForKnownPeaks();
+    void hasTimeData_falseOnAllZeroShowsEmptyState();
+
+private:
+    static QList<int> denseHours() {          // valid 24-array, peak at 14 (2 PM)
+        QList<int> v; v.reserve(24);
+        for (int i = 0; i < 24; ++i) v.append(0);
+        v[9] = 3; v[14] = 12;
+        return v;
+    }
+    static QList<int> denseWeek() {            // Sun-first; Monday busiest (idx1=40)
+        return QList<int>{2, 40, 8, 30, 8, 5, 1};
+    }
+    static QList<int> zeros(int n) {
+        QList<int> v; v.reserve(n);
+        for (int i = 0; i < n; ++i) v.append(0);
+        return v;
+    }
 };
 
 void TestReportingViewModel::buildFiltersDaySendsStringTypeAndRange()
@@ -343,14 +370,14 @@ void TestReportingViewModel::generateWhileLoadingIsNoop()
     vm.setDurationType(0);
     vm.setDay("2026-08-14");
     QVERIFY(vm.canGenerate());
-    vm.generateReport();                 // fires; sets loading true
+    vm.generateReport();                 // fires; operation in flight
     QVERIFY(vm.loading());
-    QVERIFY(!vm.canGenerate());          // gated while loading
-    // A second call while loading must not clear/replace state.
-    vm.generateReport();                 // no-op
+    QVERIFY(!vm.canGenerate());          // gated while the operation is in flight
+    vm.generateReport();                 // no-op while in flight
     QVERIFY(vm.loading());
-    // A result clears loading and re-enables generate.
+    // BOTH children must settle before the operation finalizes.
     vm.onReportDataReady(QJsonArray());
+    vm.onTimeAnalyticsReady(QList<int>{}, QList<int>{});
     QVERIFY(!vm.loading());
     QVERIFY(vm.canGenerate());
 }
@@ -636,6 +663,169 @@ void TestReportingViewModel::setIncludeRosterInExport_togglesAndSignals() {
     vm.setIncludeRosterInExport(false);
     QCOMPARE(vm.includeRosterInExport(), false);
     QCOMPARE(spy.count(), 2);
+}
+
+void TestReportingViewModel::timeSection_propertyDefaults() {
+    ReportingViewModel vm;
+    QVERIFY(vm.timeError().isEmpty());
+    QVERIFY(!vm.timeLoading());
+    QVERIFY(!vm.hasTimeData());
+    QVERIFY(vm.busiestHourLabel().isEmpty());
+    QVERIFY(vm.busiestDayLabel().isEmpty());
+    QVERIFY(vm.hourlyBars() != nullptr);
+    QVERIFY(vm.weekdayBars() != nullptr);
+    // Before any Generate, canGenerate depends on filters only (no operation pending).
+    vm.setDurationType(0);
+    vm.setDay("2026-08-14");
+    QVERIFY(vm.canGenerate());
+}
+
+void TestReportingViewModel::generate_operationFinalizesOnlyWhenBothSettle() {
+    ReportingViewModel vm;
+    vm.setDurationType(0);
+    vm.setDay("2026-08-14");
+    QVERIFY(vm.canGenerate());
+    vm.generateReport();
+    QVERIFY(!vm.canGenerate());                       // operation in flight
+    vm.onReportDataReady(QJsonArray());               // only rows settle
+    QVERIFY(!vm.canGenerate());                       // time still pending -> not finalized
+    vm.onTimeAnalyticsReady(denseHours(), denseWeek()); // time settles
+    QVERIFY(vm.canGenerate());                        // both settled -> finalized
+}
+
+void TestReportingViewModel::generate_operationFinalizesRegardlessOfSettleOrder() {
+    ReportingViewModel vm;
+    vm.setDurationType(0);
+    vm.setDay("2026-08-14");
+    vm.generateReport();
+    vm.onTimeAnalyticsError("x");                     // time settles FIRST
+    QVERIFY(!vm.canGenerate());                       // rows still pending
+    vm.onReportDataReady(QJsonArray());               // rows settle
+    QVERIFY(vm.canGenerate());
+}
+
+void TestReportingViewModel::generate_rowsLoadingClearsAtRowsSettleIndependently() {
+    ReportingViewModel vm;
+    vm.setDurationType(0);
+    vm.setDay("2026-08-14");
+    vm.generateReport();
+    QVERIFY(vm.loading());        // rows loading -> preview dim
+    QVERIFY(vm.timeLoading());    // section spinner
+    vm.onReportDataReady(QJsonArray());
+    QVERIFY(!vm.loading());       // preview un-dims at rows settle...
+    QVERIFY(vm.timeLoading());    // ...even though time is still running
+    vm.onTimeAnalyticsReady(denseHours(), denseWeek());
+    QVERIFY(!vm.timeLoading());
+}
+
+void TestReportingViewModel::outcome_rowsSuccessTimeError_reportRendersTimeErrorLocalized() {
+    ReportingViewModel vm;
+    vm.setDurationType(0);
+    vm.setDay("2026-08-14");
+    vm.generateReport();
+    vm.onReportDataReady(QJsonDocument::fromJson(
+        R"([{"school_id":"1","name":"Ana","course":"BSIT","department":"CCS","visits":5}])").array());
+    vm.onTimeAnalyticsError("network down");
+    QVERIFY(vm.hasResult());                 // primary report still rendered
+    QVERIFY(vm.errorText().isEmpty());       // NOT the fatal rows-error path
+    QVERIFY(vm.canExport());                 // export unaffected by the time failure
+    QCOMPARE(vm.timeError(), QStringLiteral("network down"));  // localized
+    QVERIFY(!vm.hasTimeData());
+}
+
+void TestReportingViewModel::outcome_rowsErrorTimeSuccess_primaryErrorFires() {
+    ReportingViewModel vm;
+    vm.setDurationType(0);
+    vm.setDay("2026-08-14");
+    vm.generateReport();
+    vm.onReportError("Server 500", false);              // primary fatal path
+    vm.onTimeAnalyticsReady(denseHours(), denseWeek()); // time succeeds anyway
+    QCOMPARE(vm.errorText(), QStringLiteral("Server 500"));  // primary error fires
+    QVERIFY(!vm.canExport());                           // rows error blocks export
+    QVERIFY(vm.timeError().isEmpty());                  // time path had no error
+    // (The "When?" section is gated on hasResult in QML — Task 5 — so it stays hidden here.)
+}
+
+void TestReportingViewModel::canExport_unaffectedByTimeOutcome() {
+    ReportingViewModel vm;
+    vm.setDurationType(0);
+    vm.setDay("2026-08-14");
+    vm.generateReport();
+    vm.onReportDataReady(QJsonDocument::fromJson(
+        R"([{"school_id":"1","name":"Ana","course":"BSIT","department":"CCS","visits":5}])").array());
+    QVERIFY(vm.canExport());
+    vm.onTimeAnalyticsError("boom");         // time error must not change canExport
+    QVERIFY(vm.canExport());
+}
+
+void TestReportingViewModel::resetAtGenerate_clearsStaleTimeState() {
+    ReportingViewModel vm;
+    vm.setDurationType(0);
+    vm.setDay("2026-08-14");
+    vm.generateReport();
+    vm.onReportDataReady(QJsonArray());
+    vm.onTimeAnalyticsError("stale error");
+    QCOMPARE(vm.timeError(), QStringLiteral("stale error"));
+    // A second Generate must clear ALL When-section state before the new fetch fires.
+    vm.setDay("2026-08-15");
+    vm.generateReport();
+    QVERIFY(vm.timeError().isEmpty());   // cleared at Generate start (staleness guard)
+    QVERIFY(!vm.hasTimeData());
+    QVERIFY(vm.timeLoading());           // section spinning again
+}
+
+void TestReportingViewModel::timeModels_populatedWithLabelBlanking() {
+    ReportingViewModel vm;
+    vm.setDurationType(0);
+    vm.setDay("2026-08-14");
+    vm.generateReport();
+    vm.onReportDataReady(QJsonArray());
+    vm.onTimeAnalyticsReady(denseHours(), denseWeek());
+
+    QCOMPARE(vm.hourlyBars()->rowCount(), 24);
+    QCOMPARE(vm.weekdayBars()->rowCount(), 7);
+
+    // Interval x-labels: hours 0/3/6.. carry a label, off-interval hours are blank.
+    QCOMPARE(vm.hourlyBars()->data(vm.hourlyBars()->index(0, 0),
+             BarsModel::LabelRole).toString(), QStringLiteral("12A"));
+    QCOMPARE(vm.hourlyBars()->data(vm.hourlyBars()->index(3, 0),
+             BarsModel::LabelRole).toString(), QStringLiteral("3A"));
+    QVERIFY(vm.hourlyBars()->data(vm.hourlyBars()->index(1, 0),
+            BarsModel::LabelRole).toString().isEmpty());
+
+    // Weekday bars are Monday-first; value at Mon = denseWeek() Sun-first idx1 = 40.
+    QCOMPARE(vm.weekdayBars()->data(vm.weekdayBars()->index(0, 0),
+             BarsModel::LabelRole).toString(), QStringLiteral("Mon"));
+    QCOMPARE(vm.weekdayBars()->data(vm.weekdayBars()->index(6, 0),
+             BarsModel::LabelRole).toString(), QStringLiteral("Sun"));
+    QCOMPARE(vm.weekdayBars()->data(vm.weekdayBars()->index(0, 0),
+             BarsModel::ValueRole).toInt(), 40);
+}
+
+void TestReportingViewModel::captions_formattedForKnownPeaks() {
+    ReportingViewModel vm;
+    vm.setDurationType(0);
+    vm.setDay("2026-08-14");
+    vm.generateReport();
+    vm.onReportDataReady(QJsonArray());
+    vm.onTimeAnalyticsReady(denseHours(), denseWeek());   // peak hour 14, peak day Monday
+    QVERIFY(vm.hasTimeData());
+    QCOMPARE(vm.busiestHourLabel(), QStringLiteral("2–3 PM"));
+    QCOMPARE(vm.busiestDayLabel(), QStringLiteral("Monday"));
+}
+
+void TestReportingViewModel::hasTimeData_falseOnAllZeroShowsEmptyState() {
+    ReportingViewModel vm;
+    vm.setDurationType(0);
+    vm.setDay("2026-08-14");
+    vm.generateReport();
+    vm.onReportDataReady(QJsonArray());
+    vm.onTimeAnalyticsReady(zeros(24), zeros(7));
+    QVERIFY(!vm.hasTimeData());
+    QVERIFY(vm.busiestHourLabel().isEmpty());   // captions unused in the empty state
+    QVERIFY(vm.busiestDayLabel().isEmpty());
+    QCOMPARE(vm.hourlyBars()->rowCount(), 24);  // bars still dense (all zero)
+    QCOMPARE(vm.weekdayBars()->rowCount(), 7);
 }
 
 QTEST_MAIN(TestReportingViewModel)

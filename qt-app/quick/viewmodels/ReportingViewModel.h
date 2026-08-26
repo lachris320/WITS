@@ -14,6 +14,7 @@
 #include "ReportRowsModel.h"
 #include "reportanalytics.h"   // ReportAnalytics — cached from applyResult, reused by the export path
 #include "reportdata.h"            // DateRange — return type of semesterWindow()
+#include "timeanalytics.h"        // TimeAnalytics — computed in applyResult's sibling path
 
 class QNetworkAccessManager;
 class QPagedPaintDevice;
@@ -21,7 +22,10 @@ class ReportController;
 
 // Reporting screen VM (spec 4b-i). Wraps the witscore ReportController (no new
 // endpoint). Only QML-facing C++ for the reporting screen. Single-in-flight:
-// generateReport() is a no-op while loading; canGenerate is false while loading.
+// generateReport() is a no-op while operationInFlight() is true — i.e. while
+// EITHER the report-rows fetch or the time-analytics fetch is still pending;
+// canGenerate() stays false across that whole both-settle window, not just
+// while the primary rows fetch is loading.
 class ReportingViewModel : public QObject
 {
     Q_OBJECT
@@ -66,6 +70,13 @@ class ReportingViewModel : public QObject
     Q_PROPERTY(QString exportError READ exportError NOTIFY exportErrorChanged)
     Q_PROPERTY(bool includeRosterInExport READ includeRosterInExport
                WRITE setIncludeRosterInExport NOTIFY includeRosterInExportChanged)
+    Q_PROPERTY(bool hasTimeData READ hasTimeData NOTIFY hasTimeDataChanged)
+    Q_PROPERTY(QString timeError READ timeError NOTIFY timeErrorChanged)
+    Q_PROPERTY(bool timeLoading READ timeLoading NOTIFY timeLoadingChanged)
+    Q_PROPERTY(QString busiestHourLabel READ busiestHourLabel NOTIFY busiestHourLabelChanged)
+    Q_PROPERTY(QString busiestDayLabel READ busiestDayLabel NOTIFY busiestDayLabelChanged)
+    Q_PROPERTY(BarsModel *hourlyBars READ hourlyBars CONSTANT)
+    Q_PROPERTY(BarsModel *weekdayBars READ weekdayBars CONSTANT)
 public:
     explicit ReportingViewModel(QObject *parent = nullptr);
 
@@ -131,6 +142,13 @@ public:
     QString exportStatus() const { return m_exportStatus; }
     QString exportError() const { return m_exportError; }
     bool includeRosterInExport() const { return m_includeRosterInExport; }
+    bool hasTimeData() const { return m_hasTimeData; }
+    QString timeError() const { return m_timeError; }
+    bool timeLoading() const { return m_timeLoading; }
+    QString busiestHourLabel() const { return m_busiestHourLabel; }
+    QString busiestDayLabel() const { return m_busiestDayLabel; }
+    BarsModel *hourlyBars() { return &m_hourlyBars; }
+    BarsModel *weekdayBars() { return &m_weekdayBars; }
 
     Q_INVOKABLE void setPalette(const QString &p);
     Q_INVOKABLE void setChartType(const QString &c);
@@ -160,6 +178,8 @@ public:
     void onReportDataReady(const QJsonArray &data);
     void onReportError(const QString &message, bool critical);
     void onLoadError(const QString &title, const QString &message, bool critical);
+    void onTimeAnalyticsReady(const QList<int> &byHour, const QList<int> &byWeekday);
+    void onTimeAnalyticsError(const QString &message);
 
 signals:
     void departmentsChanged();
@@ -186,10 +206,25 @@ signals:
     void exportStatusChanged();
     void exportErrorChanged();
     void includeRosterInExportChanged();
+    void hasTimeDataChanged();
+    void timeErrorChanged();
+    void timeLoadingChanged();
+    void busiestHourLabelChanged();
+    void busiestDayLabelChanged();
 
 private:
     void setLoading(bool v);
     void setError(const QString &e);
+    void setTimeLoading(bool v);
+    void resetTimeSection();          // clears ALL When-section state at Generate start
+    // Presentation shaping for the "When?" section (formatting lives HERE, not in
+    // core — spec §5.4). Static + pure so they are directly unit-testable.
+    static QList<BarsModel::Bar> buildHourlyBars(const QList<int> &hourly);        // 24, label blanked off-3h
+    static QList<BarsModel::Bar> buildWeekdayBars(const QList<int> &weekdayMonFirst); // 7, Mon-first
+    static QString hourTick(int hour);          // 0..23 -> "12A","3A",...,"9P"
+    static QString formatHourRange(int hour);   // 14 -> "2–3 PM"
+    static QString weekdayName(int monFirstIndex); // 0..6 (Mon..Sun) -> "Monday".."Sunday"
+    bool operationInFlight() const;   // true until BOTH children settle
     void applyResult(const QJsonArray &data);    // Task 6
     void setExporting(bool v);
     void setExportStatus(const QString &s);
@@ -236,6 +271,20 @@ private:
     QJsonArray m_exportRows;
     ReportAnalytics m_analytics;   // computed once in applyResult; reused by the export renderer
     bool m_includeRosterInExport = false;   // spec §9: export roster is opt-in, default OFF
+
+    BarsModel m_hourlyBars;
+    BarsModel m_weekdayBars;
+    TimeAnalytics m_timeAnalytics;
+    QString m_busiestHourLabel;
+    QString m_busiestDayLabel;
+    bool m_hasTimeData = false;
+    QString m_timeError;
+    bool m_timeLoading = false;
+    // Settle flags start TRUE = "no operation pending", so canGenerate works
+    // before the first Generate. generateReport() sets both false; each child
+    // flips its own true on settle (success OR failure).
+    bool m_reportRowsSettled = true;
+    bool m_timeAnalyticsSettled = true;
 };
 
 #endif // REPORTINGVIEWMODEL_H

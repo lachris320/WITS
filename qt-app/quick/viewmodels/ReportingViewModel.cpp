@@ -33,6 +33,10 @@ ReportingViewModel::ReportingViewModel(QObject *parent)
             this, &ReportingViewModel::onReportError);
     connect(m_controller, &ReportController::loadError,
             this, &ReportingViewModel::onLoadError);
+    connect(m_controller, &ReportController::timeAnalyticsReady,
+            this, &ReportingViewModel::onTimeAnalyticsReady);
+    connect(m_controller, &ReportController::timeAnalyticsError,
+            this, &ReportingViewModel::onTimeAnalyticsError);
 
     // Auto-clear the validation prompt the moment filters become complete —
     // every filter setter emits canGenerateChanged. A real fetch/bootstrap
@@ -105,6 +109,63 @@ QList<BarsModel::Bar> ReportingViewModel::aggregateVisitsByCourse(const QJsonArr
     std::stable_sort(bars.begin(), bars.end(),
                      [](const BarsModel::Bar &a, const BarsModel::Bar &b) { return a.value > b.value; });
     return bars;
+}
+
+QList<BarsModel::Bar> ReportingViewModel::buildHourlyBars(const QList<int> &hourly)
+{
+    QList<BarsModel::Bar> bars;
+    if (hourly.size() != 24)
+        return bars;
+    bars.reserve(24);
+    for (int h = 0; h < 24; ++h) {
+        // Interval x-labels are DATA-DRIVEN (spec §5.4): only hours 0/3/6.. carry a
+        // label; the rest are blank so LBarChart (a Text under EVERY bar) shows
+        // ~every-3h ticks. The chart has no thinning logic of its own.
+        const QString label = (h % 3 == 0) ? hourTick(h) : QString();
+        bars.append({ label, double(hourly.at(h)) });
+    }
+    return bars;
+}
+
+QList<BarsModel::Bar> ReportingViewModel::buildWeekdayBars(const QList<int> &weekdayMonFirst)
+{
+    QList<BarsModel::Bar> bars;
+    if (weekdayMonFirst.size() != 7)
+        return bars;
+    static const char *const kShort[7] = { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
+    bars.reserve(7);
+    for (int d = 0; d < 7; ++d)
+        bars.append({ QString::fromLatin1(kShort[d]), double(weekdayMonFirst.at(d)) });
+    return bars;
+}
+
+QString ReportingViewModel::hourTick(int hour)
+{
+    const int h12 = (hour % 12 == 0) ? 12 : (hour % 12);
+    const QChar suffix = (hour < 12) ? QLatin1Char('A') : QLatin1Char('P');
+    return QStringLiteral("%1%2").arg(h12).arg(suffix);
+}
+
+QString ReportingViewModel::formatHourRange(int hour)
+{
+    const int startH = hour;
+    const int endH = (hour + 1) % 24;
+    const auto to12 = [](int h) { return (h % 12 == 0) ? 12 : (h % 12); };
+    const auto ampm = [](int h) { return h < 12 ? QStringLiteral("AM") : QStringLiteral("PM"); };
+    // Same meridiem -> one suffix ("2–3 PM"); otherwise annotate both ("11 PM–12 AM").
+    if (ampm(startH) == ampm(endH))
+        return QStringLiteral("%1–%2 %3").arg(to12(startH)).arg(to12(endH)).arg(ampm(startH));
+    return QStringLiteral("%1 %2–%3 %4")
+            .arg(to12(startH)).arg(ampm(startH)).arg(to12(endH)).arg(ampm(endH));
+}
+
+QString ReportingViewModel::weekdayName(int monFirstIndex)
+{
+    static const char *const kNames[7] = { "Monday", "Tuesday", "Wednesday",
+                                           "Thursday", "Friday", "Saturday", "Sunday" };
+    if (monFirstIndex < 0 || monFirstIndex >= 7)
+        return QString();
+    return QString::fromLatin1(kNames[monFirstIndex]);
 }
 
 QJsonArray ReportingViewModel::normalizeExportRows(const QJsonArray &data)
@@ -211,9 +272,14 @@ bool ReportingViewModel::filtersComplete() const
     }
 }
 
+bool ReportingViewModel::operationInFlight() const
+{
+    return !(m_reportRowsSettled && m_timeAnalyticsSettled);
+}
+
 bool ReportingViewModel::canGenerate() const
 {
-    return filtersComplete() && !m_loading;
+    return filtersComplete() && !operationInFlight();
 }
 
 // --- Stubs filled by later tasks (present so the class links now) ---
@@ -284,7 +350,7 @@ void ReportingViewModel::setCustomEnd(const QString &v)
 }
 void ReportingViewModel::generateReport()
 {
-    if (m_loading)                // single-in-flight
+    if (operationInFlight())          // single-in-flight = ONE operation
         return;
     if (!filtersComplete()) {
         setError(QStringLiteral("Complete the selected duration before generating a report."));
@@ -293,12 +359,23 @@ void ReportingViewModel::generateReport()
     }
     m_validationError = false;
     setError(QString());
-    setLoading(true);
+
+    // Reset ALL When-section state BEFORE the fetches (staleness guard, spec §5.1):
+    // without this, a re-run would show the previous run's captions/bars in flight.
+    resetTimeSection();
+
+    // Two child requests, ONE logical Generate operation.
+    m_reportRowsSettled = false;
+    m_timeAnalyticsSettled = false;
+    setLoading(true);                 // rows loading -> main preview dim; also emits canGenerateChanged()
+    setTimeLoading(true);             // section spinner
+
     const QJsonObject filters = buildFilters(
         m_department, m_course, m_durationType,
         parseDate(m_day), m_month, m_monthYear,
         m_semester, m_semYear, parseDate(m_customStart), parseDate(m_customEnd));
     m_controller->fetchReportRows(filters);
+    m_controller->fetchTimeAnalytics(filters);   // parallel, same filters
 }
 
 void ReportingViewModel::retry()
@@ -334,12 +411,14 @@ void ReportingViewModel::onCoursesLoaded(const QStringList &courses)
 }
 void ReportingViewModel::onReportDataReady(const QJsonArray &data)
 {
+    m_reportRowsSettled = true;
     setLoading(false);
     applyResult(data);
 }
 
 void ReportingViewModel::onReportError(const QString &message, bool /*critical*/)
 {
+    m_reportRowsSettled = true;
     setLoading(false);
     setError(message.isEmpty() ? QStringLiteral("Report failed. Please try again.") : message);
     m_validationError = false;   // a real fetch error, not a validation prompt
@@ -351,6 +430,44 @@ void ReportingViewModel::onLoadError(const QString &/*title*/, const QString &me
     setError(message.isEmpty() ? QStringLiteral("Failed to load filters. Please try again.") : message);
     m_validationError = false;   // a real bootstrap error, not a validation prompt
 }
+void ReportingViewModel::onTimeAnalyticsReady(const QList<int> &byHour, const QList<int> &byWeekday)
+{
+    m_timeAnalytics = TimeAnalytics::compute(byHour, byWeekday);
+
+    m_hourlyBars.setBars(buildHourlyBars(m_timeAnalytics.hourly));
+    m_weekdayBars.setBars(buildWeekdayBars(m_timeAnalytics.weekdayMonFirst));
+
+    m_hasTimeData = m_timeAnalytics.hasData;
+    emit hasTimeDataChanged();
+
+    // Captions ONLY when there is data — peak indices default to 0 ("12–1 AM" /
+    // "Monday") on an all-zero range and would mislead (spec §6).
+    m_busiestHourLabel = m_timeAnalytics.hasData ? formatHourRange(m_timeAnalytics.peakHour)
+                                                 : QString();
+    emit busiestHourLabelChanged();
+    m_busiestDayLabel = m_timeAnalytics.hasData ? weekdayName(m_timeAnalytics.peakWeekdayMonFirst)
+                                                : QString();
+    emit busiestDayLabelChanged();
+
+    if (!m_timeError.isEmpty()) { m_timeError.clear(); emit timeErrorChanged(); }
+
+    setTimeLoading(false);
+    m_timeAnalyticsSettled = true;
+    emit canGenerateChanged();
+}
+
+void ReportingViewModel::onTimeAnalyticsError(const QString &message)
+{
+    // Localized failure (spec §5.2): set ONLY m_timeError; NEVER m_errorText,
+    // which would blank the whole preview + block export.
+    m_timeError = message.isEmpty() ? QStringLiteral("Couldn't load visit times.") : message;
+    emit timeErrorChanged();
+    if (m_hasTimeData) { m_hasTimeData = false; emit hasTimeDataChanged(); }
+    setTimeLoading(false);
+    m_timeAnalyticsSettled = true;
+    emit canGenerateChanged();
+}
+
 void ReportingViewModel::setLoading(bool v)
 {
     if (m_loading == v) return;
@@ -366,6 +483,22 @@ void ReportingViewModel::setError(const QString &e)
     m_errorText = e;
     emit errorTextChanged();
     emit canExportChanged();
+}
+void ReportingViewModel::setTimeLoading(bool v)
+{
+    if (m_timeLoading == v) return;
+    m_timeLoading = v;
+    emit timeLoadingChanged();
+}
+void ReportingViewModel::resetTimeSection()
+{
+    m_timeAnalytics = TimeAnalytics();
+    m_hourlyBars.setBars({});
+    m_weekdayBars.setBars({});
+    if (m_hasTimeData)              { m_hasTimeData = false;      emit hasTimeDataChanged(); }
+    if (!m_busiestHourLabel.isEmpty()) { m_busiestHourLabel.clear(); emit busiestHourLabelChanged(); }
+    if (!m_busiestDayLabel.isEmpty())  { m_busiestDayLabel.clear();  emit busiestDayLabelChanged(); }
+    if (!m_timeError.isEmpty())    { m_timeError.clear();        emit timeErrorChanged(); }
 }
 void ReportingViewModel::applyResult(const QJsonArray &data)
 {

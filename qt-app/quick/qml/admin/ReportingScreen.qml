@@ -361,6 +361,130 @@ Rectangle {
                 }
             }
 
+            // --- "When do students visit?" (spec 4b-iv-a §6) — below KPIs/
+            // rankings/course chart, gated with the rest of the analytics
+            // scaffolding on hasRows. Its OWN state (spinner / data / empty /
+            // inline error) reflects only the time request's outcome. ---
+            LCard {
+                objectName: "whenSection"
+                Layout.fillWidth: true
+                Layout.preferredHeight: 360
+                visible: screen.hasRows
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: Theme.spacing.md
+
+                    Text {
+                        text: qsTr("When do students visit?")
+                        textFormat: Text.PlainText
+                        color: Theme.text
+                        font.family: Theme.typography.sans
+                        font.pixelSize: Theme.typography.cardTitle
+                        font.bold: true
+                    }
+
+                    // Loading: the section's OWN spinner, bound to timeLoading —
+                    // NOT the operation flag and NOT the rows loading/opacity, so
+                    // the main report renders at full opacity as soon as rows
+                    // settle while only this section keeps spinning (spec §6).
+                    Item {
+                        objectName: "whenLoading"
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        visible: screen.vm ? screen.vm.timeLoading : false
+                        BusyIndicator { anchors.centerIn: parent; running: parent.visible }
+                    }
+
+                    // Inline time-error (localized — the rest of the report above
+                    // still renders, spec §5.2).
+                    Text {
+                        objectName: "whenError"
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        visible: screen.vm ? (!screen.vm.timeLoading && screen.vm.timeError.length > 0) : false
+                        text: qsTr("Couldn't load visit times")
+                        textFormat: Text.PlainText
+                        color: Theme.error
+                        font.family: Theme.typography.sans
+                        font.pixelSize: Theme.typography.body
+                        verticalAlignment: Text.AlignVCenter
+                    }
+
+                    // Success + all-zero: empty state.
+                    Text {
+                        objectName: "whenEmpty"
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        visible: screen.vm ? (!screen.vm.timeLoading
+                                              && screen.vm.timeError.length === 0
+                                              && !screen.vm.hasTimeData) : false
+                        text: qsTr("No visit activity in this range")
+                        textFormat: Text.PlainText
+                        color: Theme.mutedTextCaption
+                        font.family: Theme.typography.sans
+                        font.pixelSize: Theme.typography.body
+                        verticalAlignment: Text.AlignVCenter
+                    }
+
+                    // Success + data: both charts + captions. Captions live INSIDE
+                    // this subtree (not merely hidden by opacity), so the "Busiest:"
+                    // strings never render in the loading/empty/error states where
+                    // the peak indices are meaningless (spec §6).
+                    ColumnLayout {
+                        objectName: "whenData"
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        spacing: Theme.spacing.sm
+                        visible: screen.vm ? (!screen.vm.timeLoading
+                                              && screen.vm.timeError.length === 0
+                                              && screen.vm.hasTimeData) : false
+
+                        Text {
+                            text: qsTr("Peak hours"); textFormat: Text.PlainText
+                            color: Theme.mutedTextCaption; font.family: Theme.typography.sans
+                            font.pixelSize: Theme.typography.eyebrow
+                        }
+                        LBarChart {
+                            objectName: "hourlyChart"
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 90
+                            orientation: "Vertical"
+                            model: screen.vm ? screen.vm.hourlyBars : null
+                            maxValue: (screen.vm && screen.vm.hourlyBars) ? screen.vm.hourlyBars.maxValue : 100
+                        }
+                        Text {
+                            objectName: "busiestHourCaption"
+                            text: qsTr("Busiest: %1").arg(screen.vm ? screen.vm.busiestHourLabel : "")
+                            textFormat: Text.PlainText
+                            color: Theme.text; font.family: Theme.typography.sans
+                            font.pixelSize: Theme.typography.body
+                        }
+
+                        Text {
+                            text: qsTr("Busiest days"); textFormat: Text.PlainText
+                            color: Theme.mutedTextCaption; font.family: Theme.typography.sans
+                            font.pixelSize: Theme.typography.eyebrow
+                        }
+                        LBarChart {
+                            objectName: "weekdayChart"
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 90
+                            orientation: "Vertical"
+                            model: screen.vm ? screen.vm.weekdayBars : null
+                            maxValue: (screen.vm && screen.vm.weekdayBars) ? screen.vm.weekdayBars.maxValue : 100
+                        }
+                        Text {
+                            objectName: "busiestDayCaption"
+                            text: qsTr("Busiest: %1").arg(screen.vm ? screen.vm.busiestDayLabel : "")
+                            textFormat: Text.PlainText
+                            color: Theme.text; font.family: Theme.typography.sans
+                            font.pixelSize: Theme.typography.body
+                        }
+                    }
+                }
+            }
+
             LButton {
                 objectName: "viewRosterToggle"
                 text: qsTr("View full roster")

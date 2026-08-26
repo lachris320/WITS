@@ -2,6 +2,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QList>
 
 #include "reportcontroller.h"
 
@@ -29,6 +30,15 @@ private slots:
     void parsePreviewData_success_returnsArray();
     void parsePreviewData_error_returnsEmpty();
 
+    // ---- parseTimeAnalytics (get_report_time_data.php) ----
+    void parseTimeAnalytics_valid_fillsArrays();
+    void parseTimeAnalytics_wrongLengthHour_fails();
+    void parseTimeAnalytics_wrongLengthWeekday_fails();
+    void parseTimeAnalytics_missingField_fails();
+    void parseTimeAnalytics_nonNumeric_fails();
+    void parseTimeAnalytics_stringEncodedCounts_ok();
+    void parseTimeAnalytics_statusError_failsWithMessage();
+
     // ---- computeDateRange ----
     void computeDateRange_day_valid();
     void computeDateRange_day_invalid();
@@ -41,6 +51,14 @@ private slots:
 
 private:
     static QByteArray obj(const QJsonObject &o) {
+        return QJsonDocument(o).toJson(QJsonDocument::Compact);
+    }
+    static QJsonArray numArray(int n, int fill = 0) {
+        QJsonArray a; for (int i = 0; i < n; ++i) a.append(fill); return a;
+    }
+    static QByteArray timeObj(const QJsonArray &byHour, const QJsonArray &byWeekday,
+                              const QString &status = QStringLiteral("success")) {
+        QJsonObject o{{"status", status}, {"byHour", byHour}, {"byWeekday", byWeekday}};
         return QJsonDocument(o).toJson(QJsonDocument::Compact);
     }
 };
@@ -122,6 +140,65 @@ void TstReportController::parsePreviewData_success_returnsArray() {
 void TstReportController::parsePreviewData_error_returnsEmpty() {
     QJsonObject o{{"status", "error"}};
     QVERIFY(ReportController::parsePreviewData(obj(o)).isEmpty());
+}
+
+void TstReportController::parseTimeAnalytics_valid_fillsArrays() {
+    QJsonArray hours = numArray(24); hours[9] = 5; hours[14] = 12;
+    QJsonArray week  = numArray(7);  week[1] = 40;      // Monday (Sun-first idx 1)
+    QList<int> outH, outW; QString err;
+    QVERIFY(ReportController::parseTimeAnalytics(timeObj(hours, week), outH, outW, err));
+    QCOMPARE(outH.size(), 24);
+    QCOMPARE(outW.size(), 7);
+    QCOMPARE(outH.at(14), 12);
+    QCOMPARE(outW.at(1), 40);
+    QVERIFY(err.isEmpty());
+}
+
+void TstReportController::parseTimeAnalytics_wrongLengthHour_fails() {
+    QList<int> outH, outW; QString err;
+    QVERIFY(!ReportController::parseTimeAnalytics(
+        timeObj(numArray(23), numArray(7)), outH, outW, err));
+    QVERIFY(!err.isEmpty());
+    QVERIFY(outH.isEmpty());     // nothing malformed handed downstream
+    QVERIFY(outW.isEmpty());
+}
+
+void TstReportController::parseTimeAnalytics_wrongLengthWeekday_fails() {
+    QList<int> outH, outW; QString err;
+    QVERIFY(!ReportController::parseTimeAnalytics(
+        timeObj(numArray(24), numArray(8)), outH, outW, err));
+    QVERIFY(!err.isEmpty());
+}
+
+void TstReportController::parseTimeAnalytics_missingField_fails() {
+    QJsonObject o{{"status", "success"}, {"byHour", numArray(24)}};   // no byWeekday
+    QList<int> outH, outW; QString err;
+    QVERIFY(!ReportController::parseTimeAnalytics(
+        QJsonDocument(o).toJson(QJsonDocument::Compact), outH, outW, err));
+}
+
+void TstReportController::parseTimeAnalytics_nonNumeric_fails() {
+    QJsonArray hours = numArray(24); hours[3] = "abc";               // non-numeric string
+    QList<int> outH, outW; QString err;
+    QVERIFY(!ReportController::parseTimeAnalytics(
+        timeObj(hours, numArray(7)), outH, outW, err));
+}
+
+void TstReportController::parseTimeAnalytics_stringEncodedCounts_ok() {
+    QJsonArray hours = numArray(24); hours[5] = "8";                 // numeric STRING
+    QJsonArray week  = numArray(7);  week[2] = "15";
+    QList<int> outH, outW; QString err;
+    QVERIFY(ReportController::parseTimeAnalytics(timeObj(hours, week), outH, outW, err));
+    QCOMPARE(outH.at(5), 8);
+    QCOMPARE(outW.at(2), 15);
+}
+
+void TstReportController::parseTimeAnalytics_statusError_failsWithMessage() {
+    QJsonObject o{{"status", "error"}, {"message", "boom"}};
+    QList<int> outH, outW; QString err;
+    QVERIFY(!ReportController::parseTimeAnalytics(
+        QJsonDocument(o).toJson(QJsonDocument::Compact), outH, outW, err));
+    QCOMPARE(err, QStringLiteral("boom"));
 }
 
 void TstReportController::computeDateRange_day_valid() {

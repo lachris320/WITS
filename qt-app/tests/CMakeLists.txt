@@ -261,3 +261,11 @@ wits_add_qttest(tst_reportanalytics
         ${CMAKE_SOURCE_DIR}/core/reportanalytics.cpp
         ${CMAKE_SOURCE_DIR}/core/reportanalytics.h
     INCLUDES ${CMAKE_SOURCE_DIR}/core)
+
+# --- "When?" time-of-visit analytics (pure core, no offscreen) ---
+wits_add_qttest(tst_timeanalytics
+    SOURCES
+        tst_timeanalytics.cpp
+        ${CMAKE_SOURCE_DIR}/core/timeanalytics.cpp
+        ${CMAKE_SOURCE_DIR}/core/timeanalytics.h
+    INCLUDES ${CMAKE_SOURCE_DIR}/core)
