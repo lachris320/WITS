@@ -47,11 +47,22 @@ public:
                                      const ReportPalette &palette,
                                      int openHour, int closeHour);
 
+    // "When?" bar-chart makers (spec 4b-iv-b §8.2). Structurally identical to
+    // makeBarChartImage; sized from chartImageSize(usableWidth,false) and
+    // upscaled by drawFullscreenChart (NEVER an arbitrary/print size — the
+    // QChartView screen-clamp hazard, §8.3). Hourly shows an x-label only every
+    // 3rd category; weekday shows all 7 (Mon→Sun). Peak caption rides in the title.
+    static QImage makeHourlyBarChartImage(const ReportTimeExport &t, QSize size,
+                                          const ReportPalette &palette);
+    static QImage makeWeekdayBarChartImage(const ReportTimeExport &t, QSize size,
+                                           const ReportPalette &palette);
+
     static bool paintReport(QPagedPaintDevice *device, int resolution,
                             const QJsonArray &data, const QJsonObject &filters,
                             const ReportPalette &palette,
                             const ReportHeaderInfo &info,
-                            const ReportAnalytics &analytics, bool includeRoster);
+                            const ReportAnalytics &analytics, bool includeRoster,
+                            const ReportTimeExport &timeExport);
 
     static bool writeReportToXlsx(QXlsx::Document &xlsx,
                                   const QJsonArray &rows,

@@ -328,6 +328,103 @@ QImage ReportRenderer::makeLineChartImage(const QJsonArray &data, QSize size, co
     return renderChartToImage(chart, size);
 }
 
+// --- Hourly Bar Chart ("When?" — 24 bars, 3-hour x-labels) ---
+// Mirrors makeBarChartImage. The x-axis shows a label only on every 3rd
+// category (by POSITION); the maker never re-derives an hour string — it only
+// chooses which of the VM's finished labels to display (spec §5/§8.2). The peak
+// caption rides in the chart TITLE because drawFullscreenChart exposes no seam
+// to place a caption below the image (§8.4).
+QImage ReportRenderer::makeHourlyBarChartImage(const ReportTimeExport &t, QSize size,
+                                               const ReportPalette &palette) {
+    const int h = size.height();
+    QFont titleFont("Arial");  titleFont.setPixelSize(qMax(10, qRound(h * 0.032)));  titleFont.setBold(true);
+    QFont labelFont("Arial");  labelFont.setPixelSize(qMax(8,  qRound(h * 0.024)));
+
+    QBarSet *set = new QBarSet("Visits");
+    QStringList categories;
+    for (int i = 0; i < t.hourCounts.size(); ++i) {
+        *set << t.hourCounts.at(i);
+        categories << ((i % 3 == 0 && i < t.hourLabels.size()) ? t.hourLabels.at(i) : QString());
+    }
+    set->setBrush(palette.chartColors.isEmpty() ? QBrush(palette.headerBg)
+                                                : QBrush(palette.chartColors.first()));
+
+    QBarSeries *series = new QBarSeries();
+    series->append(set);
+
+    QChart *chart = new QChart();
+    chart->addSeries(series);
+    chart->setTitle(QStringLiteral("Peak Hour: %1").arg(t.busiestHourLabel));
+    chart->setTitleFont(titleFont);
+
+    QBarCategoryAxis *axisX = new QBarCategoryAxis();
+    axisX->append(categories);
+    axisX->setLabelsFont(labelFont);
+    chart->addAxis(axisX, Qt::AlignBottom);
+    series->attachAxis(axisX);
+
+    QValueAxis *axisY = new QValueAxis();
+    axisY->setTitleText("Number of Visits");
+    axisY->setLabelsFont(labelFont);
+    axisY->setTitleFont(labelFont);
+    chart->addAxis(axisY, Qt::AlignLeft);
+    series->attachAxis(axisY);
+
+    chart->legend()->setVisible(false);
+    chart->setMargins(QMargins(0, 0, 0, 0));
+    chart->layout()->setContentsMargins(0, 0, 0, 0);
+    chart->setBackgroundRoundness(0);
+
+    return renderChartToImage(chart, size);
+}
+
+// --- Weekday Bar Chart ("When?" — 7 bars, Mon→Sun) ---
+// Mirrors makeBarChartImage; the carrier's weekdayLabels are already Mon→Sun so
+// all 7 labels are shown. Peak caption rides in the chart TITLE (§8.4).
+QImage ReportRenderer::makeWeekdayBarChartImage(const ReportTimeExport &t, QSize size,
+                                                const ReportPalette &palette) {
+    const int h = size.height();
+    QFont titleFont("Arial");  titleFont.setPixelSize(qMax(10, qRound(h * 0.032)));  titleFont.setBold(true);
+    QFont labelFont("Arial");  labelFont.setPixelSize(qMax(8,  qRound(h * 0.024)));
+
+    QBarSet *set = new QBarSet("Visits");
+    QStringList categories;
+    for (int i = 0; i < t.weekdayCounts.size(); ++i) {
+        *set << t.weekdayCounts.at(i);
+        categories << (i < t.weekdayLabels.size() ? t.weekdayLabels.at(i) : QString());
+    }
+    set->setBrush(palette.chartColors.isEmpty() ? QBrush(palette.headerBg)
+                                                : QBrush(palette.chartColors.first()));
+
+    QBarSeries *series = new QBarSeries();
+    series->append(set);
+
+    QChart *chart = new QChart();
+    chart->addSeries(series);
+    chart->setTitle(QStringLiteral("Busiest Day: %1").arg(t.busiestDayLabel));
+    chart->setTitleFont(titleFont);
+
+    QBarCategoryAxis *axisX = new QBarCategoryAxis();
+    axisX->append(categories);
+    axisX->setLabelsFont(labelFont);
+    chart->addAxis(axisX, Qt::AlignBottom);
+    series->attachAxis(axisX);
+
+    QValueAxis *axisY = new QValueAxis();
+    axisY->setTitleText("Number of Visits");
+    axisY->setLabelsFont(labelFont);
+    axisY->setTitleFont(labelFont);
+    chart->addAxis(axisY, Qt::AlignLeft);
+    series->attachAxis(axisY);
+
+    chart->legend()->setVisible(false);
+    chart->setMargins(QMargins(0, 0, 0, 0));
+    chart->layout()->setContentsMargins(0, 0, 0, 0);
+    chart->setBackgroundRoundness(0);
+
+    return renderChartToImage(chart, size);
+}
+
 // Verbatim port of adminWindow::paintReport (legacy adminwindow.cpp:2018-2291), with:
 //  - the top-level QSettings librarian/position reads replaced by info.librarian/info.position
 //  - the drawHeader lambda's QSettings schoolName/address/logoPath reads replaced by
@@ -340,7 +437,8 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
                                  const QJsonArray &data, const QJsonObject &filters,
                                  const ReportPalette &palette,
                                  const ReportHeaderInfo &info,
-                                 const ReportAnalytics &analytics, bool includeRoster)
+                                 const ReportAnalytics &analytics, bool includeRoster,
+                                 const ReportTimeExport &timeExport)
 {
     QPainter painter;
     if (!painter.begin(device)) {
@@ -584,6 +682,49 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
         } else if (chartChoice.contains("Line", Qt::CaseInsensitive)) {
             drawFullscreenChart("Line Chart", makeLineChartImage(data, rectSize, palette, info.openHour, info.closeHour));
         }
+    }
+
+    // ===== WHEN? TIME ANALYTICS (spec 4b-iv-b §8.4) =====
+    // Inserted BEFORE the terminal drawFooter so that footer foots the LAST
+    // When? page. Placement note: drawFullscreenChart foots the PRIOR page at
+    // ENTRY (never its own page at exit) and declares a local `y` shadowing the
+    // outer one, exposing no seam for a caption — so the Data path's captions
+    // ride in each chart TITLE, and the Empty/Error note (which has no
+    // entry-foot of its own) must foot the current page itself before paging.
+    switch (timeExport.state) {
+    case TimeAnalyticsExportState::Disabled:
+        break;   // legacy WITS.exe parity — draw nothing, advance no page
+    case TimeAnalyticsExportState::Data: {
+        const QSize whenSize = chartImageSize(usableWidth, false);   // screen-safe; upscaled by drawFullscreenChart
+        drawFullscreenChart("Hourly Visits",
+                            makeHourlyBarChartImage(timeExport, whenSize, palette));
+        drawFullscreenChart("Visits by Day",
+                            makeWeekdayBarChartImage(timeExport, whenSize, palette));
+        break;
+    }
+    case TimeAnalyticsExportState::Empty:
+    case TimeAnalyticsExportState::Error: {
+        // The note can't share the last course-chart page (that page holds a
+        // chart image and the outer y sits near the header). Foot the current
+        // page FIRST, then open a fresh page and draw the note in normal y-flow.
+        drawFooter(currentPage);
+        device->newPage();
+        currentPage++;
+        y = margin;
+        drawHeader(y);
+        painter.setFont(QFont("Arial", 13, QFont::Bold));
+        painter.setPen(Qt::black);
+        painter.drawText(QRect(margin, y, usableWidth, vs(24)), Qt::AlignLeft,
+                         "When do students visit?");
+        y += vs(30);
+        painter.setFont(QFont("Arial", 11));
+        const QString note = (timeExport.state == TimeAnalyticsExportState::Error)
+                                 ? QStringLiteral("Visit-time data could not be loaded")
+                                 : QStringLiteral("No visit activity in this range");
+        painter.drawText(QRect(margin, y, usableWidth, vs(22)), Qt::AlignLeft, note);
+        y += vs(24);
+        break;
+    }
     }
 
     // Footer on the last page with current page number

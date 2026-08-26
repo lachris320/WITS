@@ -37,6 +37,8 @@ private slots:
     void writeReportToXlsx_timeBlock_dataStatePresent();
     void writeReportToXlsx_timeBlock_disabledStateAbsent();
     void writeReportToXlsx_timeBlock_emptyAndErrorNotesDiffer();
+    void makeHourlyBarChartImage_nonBlankAtScreenSafeSize();
+    void makeWeekdayBarChartImage_nonBlankAtScreenSafeSize();
 
 private:
     static QJsonArray sampleVisits() {
@@ -127,6 +129,14 @@ private:
         t.busiestHourLabel = QStringLiteral("2–3 PM");
         t.busiestDayLabel  = QStringLiteral("Monday");
         return t;
+    }
+
+    static bool imageHasNonWhitePixel(const QImage &img) {
+        const QImage rgb = img.convertToFormat(QImage::Format_ARGB32);
+        for (int y = 0; y < rgb.height(); ++y)
+            for (int x = 0; x < rgb.width(); ++x)
+                if (rgb.pixelColor(x, y) != QColor(Qt::white)) return true;
+        return false;
     }
 };
 
@@ -239,7 +249,7 @@ void TstReportRenderer::paintReport_writesPdf() {
         pdf.setResolution(300);
         const bool ok = ReportRenderer::paintReport(&pdf, 300, sampleRows(), sampleFilters(),
                                                      samplePalette(), sampleHeaderInfo(),
-                                                     sampleAnalytics(), true);
+                                                     sampleAnalytics(), true, ReportTimeExport{});
         QVERIFY(ok);
     } // QPdfWriter flushes/finalizes the file on destruction.
 
@@ -340,7 +350,7 @@ void TstReportRenderer::paintReport_writesPdfWithAndWithoutRoster() {
             pdf.setResolution(300);
             QVERIFY(ReportRenderer::paintReport(
                 &pdf, 300, sampleRows(), sampleFilters(), samplePalette(),
-                sampleHeaderInfo(), sampleAnalytics(), includeRoster));
+                sampleHeaderInfo(), sampleAnalytics(), includeRoster, ReportTimeExport{}));
         }
         QVERIFY(QFileInfo(path).size() > 0);
     }
@@ -363,7 +373,7 @@ void TstReportRenderer::paintReport_writesAnalyticsPdfAtHighDpi() {
                 pdf.setResolution(resolution);
                 QVERIFY(ReportRenderer::paintReport(
                     &pdf, resolution, sampleRows(), filtersWithChart, samplePalette(),
-                    sampleHeaderInfo(), sampleAnalytics(), includeRoster));
+                    sampleHeaderInfo(), sampleAnalytics(), includeRoster, ReportTimeExport{}));
             }
             QVERIFY(QFileInfo(path).size() > 0);
         }
@@ -486,6 +496,24 @@ void TstReportRenderer::writeReportToXlsx_timeBlock_emptyAndErrorNotesDiffer() {
         xr, sampleRows(), sampleFilters(), sampleHeaderInfo(), sampleAnalytics(), false, err));
     QVERIFY(findNote(xr, "Visit-time data could not be loaded"));
     QVERIFY(!findNote(xr, "No visit activity in this range"));
+}
+
+void TstReportRenderer::makeHourlyBarChartImage_nonBlankAtScreenSafeSize() {
+    const QSize sz = ReportRenderer::chartImageSize(9000, false);   // screen-safe size
+    const QImage img = ReportRenderer::makeHourlyBarChartImage(
+        sampleTimeExportData(), sz, samplePalette());
+    QVERIFY(!img.isNull());
+    QCOMPARE(img.size(), sz);                    // MUST render at the screen-safe size
+    QVERIFY(imageHasNonWhitePixel(img));         // real bars, not a blank raster
+}
+
+void TstReportRenderer::makeWeekdayBarChartImage_nonBlankAtScreenSafeSize() {
+    const QSize sz = ReportRenderer::chartImageSize(9000, false);
+    const QImage img = ReportRenderer::makeWeekdayBarChartImage(
+        sampleTimeExportData(), sz, samplePalette());
+    QVERIFY(!img.isNull());
+    QCOMPARE(img.size(), sz);
+    QVERIFY(imageHasNonWhitePixel(img));
 }
 
 QTEST_MAIN(TstReportRenderer)

@@ -630,7 +630,8 @@ bool ReportingViewModel::renderToDevice(QPagedPaintDevice *dev, int resolution)
     const QJsonObject filters = currentExportFilters();
     const ReportPalette pal = ReportController::getPalette(m_palette);
     return ReportRenderer::paintReport(dev, resolution, m_exportRows, filters, pal,
-                                       headerInfo(), m_analytics, m_includeRosterInExport);
+                                       headerInfo(), m_analytics, m_includeRosterInExport,
+                                       buildTimeExport());
 }
 
 bool ReportingViewModel::beginFileExport(const QUrl &fileUrl, QString *outPath)
