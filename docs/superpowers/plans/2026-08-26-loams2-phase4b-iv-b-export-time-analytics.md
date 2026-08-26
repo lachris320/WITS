@@ -61,6 +61,7 @@ ctest --test-dir C:\b\loams-4bivb --output-on-failure
 - **The screen-safe-size → `drawFullscreenChart`-upscale path is MANDATORY** for the two new chart makers. A `QChartView` is a `QWidget` the window system clamps to the physical screen; rendering it directly at print resolution (~9000 px) lays the chart out at ~screen size in a corner with giant fonts and a blank remainder — a corrupt export. Obtain the raster size from `chartImageSize(usableWidth, /*square=*/false)` and let `drawFullscreenChart` upscale it — NEVER an arbitrary or print-resolution size. This clamp is invisible to headless/offscreen tests, which is exactly why Task 4's manual smoke is a release gate. (Project memory: "QtChart export screen clamp".)
 - **Commit each task directly** with a Conventional Commit (scope `reporting` or `loams_api` as apt) via the `commit` skill. Do **NOT** `git add -A`. Project convention: **NO** Claude/Anthropic co-author trailer.
 - **Line numbers drift** — locate every edit by the surrounding quoted context, not by line number.
+- **Preserve the EN DASH literally.** `formatHourRange` emits ranges with U+2013 (`"2–3 PM"`, and thus `"Peak Hour: 2–3 PM"`) — every test literal and fixture string in this plan uses the en-dash, matching the already-green `captions_formattedForKnownPeaks`. Copy these strings verbatim; a hyphen-minus (`-`) substitution silently fails the T1/T2 assertions.
 
 ## Cross-task type / name consistency (use these EXACT names everywhere)
 
@@ -792,7 +793,7 @@ Adds the two screen-safe bar-chart makers, the trailing carrier parameter to `pa
    cmake --build C:\b\loams-4bivb --target tst_reportrenderer
    ```
 
-3. **Declare the makers + extend `paintReport` in the header.** In `reportrenderer.h`, find:
+3. **Declare the two makers in the header (leave `paintReport` UNTOUCHED for now).** In `reportrenderer.h`, find:
 
    ```cpp
        static QImage makeLineChartImage(const QJsonArray &data, QSize size,
@@ -815,26 +816,7 @@ Adds the two screen-safe bar-chart makers, the trailing carrier parameter to `pa
                                               const ReportPalette &palette);
    ```
 
-   Then find the `paintReport` declaration:
-
-   ```cpp
-       static bool paintReport(QPagedPaintDevice *device, int resolution,
-                               const QJsonArray &data, const QJsonObject &filters,
-                               const ReportPalette &palette,
-                               const ReportHeaderInfo &info,
-                               const ReportAnalytics &analytics, bool includeRoster);
-   ```
-
-   Replace with:
-
-   ```cpp
-       static bool paintReport(QPagedPaintDevice *device, int resolution,
-                               const QJsonArray &data, const QJsonObject &filters,
-                               const ReportPalette &palette,
-                               const ReportHeaderInfo &info,
-                               const ReportAnalytics &analytics, bool includeRoster,
-                               const ReportTimeExport &timeExport);
-   ```
+   **Do NOT change the `paintReport` declaration in this step.** Its signature change is deferred to step 6 so it lands TOGETHER with its `.cpp` definition change. If the header declared 9-arg `paintReport` now while the `.cpp` still defined the 8-arg version, `reportrenderer.cpp` would fail to compile at step 5's maker-test build (`out-of-line definition of 'paintReport' does not match any declaration`).
 
 4. **Implement the two makers.** In `reportrenderer.cpp`, insert both definitions immediately after `makeLineChartImage`'s closing brace (before the `paintReport` port comment block). Hourly maker:
 
@@ -950,7 +932,28 @@ Adds the two screen-safe bar-chart makers, the trailing carrier parameter to `pa
 
    Note: the existing `paintReport` test calls still pass 8 args to the (still-8-arg) `paintReport`, so the target still compiles here — the maker tests go green before the signature change. The `paintReport` signature change happens next (step 6) and breaks those calls, which step 8 fixes.
 
-6. **Extend the `paintReport` definition signature.** In `reportrenderer.cpp`, find the definition head:
+6. **Extend the `paintReport` signature — header declaration AND `.cpp` definition TOGETHER.** First, in `reportrenderer.h`, find the `paintReport` declaration:
+
+   ```cpp
+       static bool paintReport(QPagedPaintDevice *device, int resolution,
+                               const QJsonArray &data, const QJsonObject &filters,
+                               const ReportPalette &palette,
+                               const ReportHeaderInfo &info,
+                               const ReportAnalytics &analytics, bool includeRoster);
+   ```
+
+   Replace with:
+
+   ```cpp
+       static bool paintReport(QPagedPaintDevice *device, int resolution,
+                               const QJsonArray &data, const QJsonObject &filters,
+                               const ReportPalette &palette,
+                               const ReportHeaderInfo &info,
+                               const ReportAnalytics &analytics, bool includeRoster,
+                               const ReportTimeExport &timeExport);
+   ```
+
+   Then, in `reportrenderer.cpp`, find the definition head:
 
    ```cpp
    bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
@@ -972,6 +975,8 @@ Adds the two screen-safe bar-chart makers, the trailing carrier parameter to `pa
                                     const ReportTimeExport &timeExport)
    {
    ```
+
+   Change the header declaration and the `.cpp` definition in the SAME step so the class never has a 9-arg declaration without the matching definition (nor vice-versa). After this step, the existing 8-arg `paintReport` test calls no longer match and break the build — step 8 updates them.
 
 7. **Insert the PDF When-section BEFORE the terminal `drawFooter`.** In `paintReport`, find the end of the chart if/else block and the terminal footer:
 
