@@ -709,7 +709,7 @@ void ReportingViewModel::exportExcel(const QUrl &fileUrl)
         QXlsx::Document doc;
         const bool ok = ReportRenderer::writeReportToXlsx(
                             doc, m_exportRows, currentExportFilters(), headerInfo(),
-                            m_analytics, m_includeRosterInExport)
+                            m_analytics, m_includeRosterInExport, buildTimeExport())
                         && doc.saveAs(path);
         if (ok)
             setExportStatus(tr("Saved %1").arg(QFileInfo(path).fileName()));

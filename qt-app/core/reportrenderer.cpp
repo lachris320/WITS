@@ -718,7 +718,8 @@ bool ReportRenderer::writeReportToXlsx(QXlsx::Document &xlsx,
                                        const QJsonObject &filters,
                                        const ReportHeaderInfo &info,
                                        const ReportAnalytics &analytics,
-                                       bool includeRoster)
+                                       bool includeRoster,
+                                       const ReportTimeExport &timeExport)
 {
     const int colCount = 8;
 
@@ -804,6 +805,55 @@ bool ReportRenderer::writeReportToXlsx(QXlsx::Document &xlsx,
                  { "Rank", "Course", "Visits", "% of Total" }, analytics.topCourses, false, true);
     writeRanking(QStringLiteral("Top 10 Departments"),
                  { "Rank", "Department", "Visits", "% of Total" }, analytics.topDepartments, false, true);
+
+    // ===== WHEN? TIME ANALYTICS (spec 4b-iv-b §10) =====
+    // Side-by-side tables on the Summary sheet, below the rankings. Every
+    // label/caption/header cell runs through sanitizeXlsxText for a single
+    // uniform escaping path (count cells are integers, no sanitize needed).
+    switch (timeExport.state) {
+    case TimeAnalyticsExportState::Disabled:
+        break;   // legacy WITS.exe parity — write nothing
+    case TimeAnalyticsExportState::Error:
+    case TimeAnalyticsExportState::Empty: {
+        xlsx.write(row++, 1, sanitizeXlsxText(QStringLiteral("When do students visit?")), sectionFmt);
+        const QString note = (timeExport.state == TimeAnalyticsExportState::Error)
+                                 ? QStringLiteral("Visit-time data could not be loaded")
+                                 : QStringLiteral("No visit activity in this range");
+        xlsx.write(row++, 1, sanitizeXlsxText(note));
+        row += 1;
+        break;
+    }
+    case TimeAnalyticsExportState::Data: {
+        xlsx.write(row++, 1, sanitizeXlsxText(QStringLiteral("When do students visit?")), sectionFmt);
+
+        // Peak-label row: hourly caption in col 1, weekday caption a few cols over.
+        xlsx.write(row, 1, sanitizeXlsxText(QStringLiteral("Peak Hour: %1").arg(timeExport.busiestHourLabel)));
+        xlsx.write(row, 4, sanitizeXlsxText(QStringLiteral("Busiest Day: %1").arg(timeExport.busiestDayLabel)));
+        row++;
+
+        // Two tables SIDE-BY-SIDE sharing one header row: hourly (cols 1-2, 24
+        // rows) and weekday (cols 4-5, 7 rows). The single-cursor writeRanking
+        // lambda can't drive two columns, so address cells directly by baseRow.
+        const int baseRow = row;
+        xlsx.write(baseRow, 1, sanitizeXlsxText(QStringLiteral("Hour")),  hdrFmt);
+        xlsx.write(baseRow, 2, sanitizeXlsxText(QStringLiteral("Count")), hdrFmt);
+        xlsx.write(baseRow, 4, sanitizeXlsxText(QStringLiteral("Day")),   hdrFmt);
+        xlsx.write(baseRow, 5, sanitizeXlsxText(QStringLiteral("Count")), hdrFmt);
+        for (int i = 0; i < timeExport.hourLabels.size(); ++i) {
+            xlsx.write(baseRow + 1 + i, 1, sanitizeXlsxText(timeExport.hourLabels.at(i)));
+            xlsx.write(baseRow + 1 + i, 2, timeExport.hourCounts.at(i));
+        }
+        for (int i = 0; i < timeExport.weekdayLabels.size(); ++i) {
+            xlsx.write(baseRow + 1 + i, 4, sanitizeXlsxText(timeExport.weekdayLabels.at(i)));
+            xlsx.write(baseRow + 1 + i, 5, timeExport.weekdayCounts.at(i));
+        }
+        // Advance the cursor past the TALLER (24-row hourly) table so the
+        // system-generated footer that follows lands below the whole block.
+        row = baseRow + 1 + timeExport.hourCounts.size();
+        row += 1;
+        break;
+    }
+    }
 
     xlsx.write(row++, 1,
                "This is a system-generated report. LOAMS.2 (Library Occupancy and Attendance Monitoring System), WITS 2016.");

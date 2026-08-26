@@ -34,6 +34,9 @@ private slots:
     void paintReport_writesPdfWithAndWithoutRoster();
     void paintReport_writesAnalyticsPdfAtHighDpi();
     void writeReportToXlsx_sanitizesFormulaLeadingNames();
+    void writeReportToXlsx_timeBlock_dataStatePresent();
+    void writeReportToXlsx_timeBlock_disabledStateAbsent();
+    void writeReportToXlsx_timeBlock_emptyAndErrorNotesDiffer();
 
 private:
     static QJsonArray sampleVisits() {
@@ -101,6 +104,29 @@ private:
         return ReportPalette{
             QColor("#34495E"), Qt::white, QColor("#F4F6F7"), Qt::white, Qt::black,
             { QColor("#1f77b4"), QColor("#ff7f0e") }};
+    }
+
+    // A Data-state carrier with VM-formatted labels seeded directly (this core
+    // test does not link the ViewModel). Peak hour 14 -> "2–3 PM"; Monday busiest.
+    static ReportTimeExport sampleTimeExportData() {
+        ReportTimeExport t;
+        t.state = TimeAnalyticsExportState::Data;
+        static const char *const hourTicks[24] = {
+            "12A","1A","2A","3A","4A","5A","6A","7A","8A","9A","10A","11A",
+            "12P","1P","2P","3P","4P","5P","6P","7P","8P","9P","10P","11P" };
+        for (int h = 0; h < 24; ++h) {
+            t.hourLabels << QString::fromLatin1(hourTicks[h]);
+            t.hourCounts << (h == 14 ? 12 : (h == 9 ? 3 : 0));
+        }
+        static const char *const days[7] = { "Mon","Tue","Wed","Thu","Fri","Sat","Sun" };
+        const int dayCounts[7] = { 40, 8, 30, 8, 5, 1, 2 };
+        for (int d = 0; d < 7; ++d) {
+            t.weekdayLabels << QString::fromLatin1(days[d]);
+            t.weekdayCounts << dayCounts[d];
+        }
+        t.busiestHourLabel = QStringLiteral("2–3 PM");
+        t.busiestDayLabel  = QStringLiteral("Monday");
+        return t;
     }
 };
 
@@ -223,7 +249,8 @@ void TstReportRenderer::paintReport_writesPdf() {
 void TstReportRenderer::writeReportToXlsx_populatesCells() {
     QXlsx::Document xlsx;
     const bool ok = ReportRenderer::writeReportToXlsx(xlsx, sampleRows(), sampleFilters(),
-                                                       sampleHeaderInfo(), sampleAnalytics(), true);
+                                                       sampleHeaderInfo(), sampleAnalytics(), true,
+                                                       ReportTimeExport{});
     QVERIFY(ok);
 
     // Title cell (row 1, col 1) holds the school name.
@@ -249,14 +276,16 @@ void TstReportRenderer::writeReportToXlsx_rosterRowsPresentOnlyWhenIncluded() {
     {   // includeRoster = false -> per-student roster rows absent everywhere
         QXlsx::Document xlsx;
         QVERIFY(ReportRenderer::writeReportToXlsx(
-            xlsx, sampleRows(), sampleFilters(), sampleHeaderInfo(), sampleAnalytics(), false));
+            xlsx, sampleRows(), sampleFilters(), sampleHeaderInfo(), sampleAnalytics(), false,
+            ReportTimeExport{}));
         QVERIFY(!xlsxContainsAcrossSheets(xlsx, "2023-00001"));
     }
     {   // includeRoster = true -> the roster rows are present (single sheet now; a
         //  "Detailed Roster" sheet after Task 3 — the cross-sheet scan covers both)
         QXlsx::Document xlsx;
         QVERIFY(ReportRenderer::writeReportToXlsx(
-            xlsx, sampleRows(), sampleFilters(), sampleHeaderInfo(), sampleAnalytics(), true));
+            xlsx, sampleRows(), sampleFilters(), sampleHeaderInfo(), sampleAnalytics(), true,
+            ReportTimeExport{}));
         QVERIFY(xlsxContainsAcrossSheets(xlsx, "2023-00001"));
     }
 }
@@ -264,7 +293,8 @@ void TstReportRenderer::writeReportToXlsx_rosterRowsPresentOnlyWhenIncluded() {
 void TstReportRenderer::writeReportToXlsx_summarySheetHasKpisAndRankings() {
     QXlsx::Document xlsx;
     QVERIFY(ReportRenderer::writeReportToXlsx(
-        xlsx, sampleRows(), sampleFilters(), sampleHeaderInfo(), sampleAnalytics(), false));
+        xlsx, sampleRows(), sampleFilters(), sampleHeaderInfo(), sampleAnalytics(), false,
+        ReportTimeExport{}));
 
     QVERIFY(xlsx.sheetNames().contains("Summary"));
     QVERIFY(xlsx.selectSheet("Summary"));
@@ -288,7 +318,8 @@ void TstReportRenderer::writeReportToXlsx_summarySheetHasKpisAndRankings() {
 void TstReportRenderer::writeReportToXlsx_rosterOnSeparateSheetWhenIncluded() {
     QXlsx::Document xlsx;
     QVERIFY(ReportRenderer::writeReportToXlsx(
-        xlsx, sampleRows(), sampleFilters(), sampleHeaderInfo(), sampleAnalytics(), true));
+        xlsx, sampleRows(), sampleFilters(), sampleHeaderInfo(), sampleAnalytics(), true,
+        ReportTimeExport{}));
 
     QVERIFY(xlsx.sheetNames().contains("Detailed Roster"));
     QVERIFY(xlsx.selectSheet("Detailed Roster"));
@@ -365,7 +396,7 @@ void TstReportRenderer::writeReportToXlsx_sanitizesFormulaLeadingNames() {
 
     QXlsx::Document xlsx;
     QVERIFY(ReportRenderer::writeReportToXlsx(
-        xlsx, rows, sampleFilters(), sampleHeaderInfo(), analytics, true));
+        xlsx, rows, sampleFilters(), sampleHeaderInfo(), analytics, true, ReportTimeExport{}));
 
     QVERIFY(xlsx.selectSheet("Detailed Roster"));
 
@@ -385,6 +416,76 @@ void TstReportRenderer::writeReportToXlsx_sanitizesFormulaLeadingNames() {
     }
     QVERIFY(foundSanitizedPayload);
     QVERIFY(foundUnchangedNormalName);
+}
+
+void TstReportRenderer::writeReportToXlsx_timeBlock_dataStatePresent() {
+    QXlsx::Document xlsx;
+    QVERIFY(ReportRenderer::writeReportToXlsx(
+        xlsx, sampleRows(), sampleFilters(), sampleHeaderInfo(),
+        sampleAnalytics(), false, sampleTimeExportData()));
+    QVERIFY(xlsx.selectSheet("Summary"));
+
+    bool foundTitle = false, foundPeakHour = false, foundBusiestDay = false;
+    bool foundHourHdr = false, foundCountHdr = false, foundDayHdr = false;
+    bool foundHourCell = false, foundDayCell = false;
+    for (int r = 1; r <= 80; ++r) {
+        for (int c = 1; c <= 8; ++c) {
+            const QString cell = xlsx.read(r, c).toString();
+            if (cell == "When do students visit?") foundTitle = true;
+            if (cell == "Peak Hour: 2–3 PM") foundPeakHour = true;
+            if (cell == "Busiest Day: Monday") foundBusiestDay = true;
+            if (cell == "Hour") foundHourHdr = true;
+            if (cell == "Count") foundCountHdr = true;
+            if (cell == "Day") foundDayHdr = true;
+            if (cell == "2P") foundHourCell = true;    // hourLabels[14], hourly col
+            if (cell == "Mon") foundDayCell = true;    // weekdayLabels[0], weekday col
+        }
+    }
+    QVERIFY(foundTitle);
+    QVERIFY(foundPeakHour);
+    QVERIFY(foundBusiestDay);
+    QVERIFY(foundHourHdr);
+    QVERIFY(foundCountHdr);
+    QVERIFY(foundDayHdr);
+    QVERIFY(foundHourCell);
+    QVERIFY(foundDayCell);
+}
+
+void TstReportRenderer::writeReportToXlsx_timeBlock_disabledStateAbsent() {
+    QXlsx::Document xlsx;
+    QVERIFY(ReportRenderer::writeReportToXlsx(
+        xlsx, sampleRows(), sampleFilters(), sampleHeaderInfo(),
+        sampleAnalytics(), false, ReportTimeExport{}));   // default = Disabled
+    QVERIFY(xlsx.selectSheet("Summary"));
+    for (int r = 1; r <= 80; ++r)
+        for (int c = 1; c <= 8; ++c)
+            QVERIFY(xlsx.read(r, c).toString() != "When do students visit?");
+}
+
+void TstReportRenderer::writeReportToXlsx_timeBlock_emptyAndErrorNotesDiffer() {
+    ReportTimeExport empty;  empty.state = TimeAnalyticsExportState::Empty;
+    ReportTimeExport err;    err.state   = TimeAnalyticsExportState::Error;
+
+    auto findNote = [](QXlsx::Document &x, const QString &needle) {
+        x.selectSheet("Summary");
+        for (int r = 1; r <= 80; ++r)
+            for (int c = 1; c <= 8; ++c)
+                if (x.read(r, c).toString() == needle) return true;
+        return false;
+    };
+
+    QXlsx::Document xe;
+    QVERIFY(ReportRenderer::writeReportToXlsx(
+        xe, sampleRows(), sampleFilters(), sampleHeaderInfo(), sampleAnalytics(), false, empty));
+    QVERIFY(findNote(xe, "No visit activity in this range"));
+    QVERIFY(!findNote(xe, "Visit-time data could not be loaded"));
+    QVERIFY(!findNote(xe, "Hour"));   // no table headers in the Empty state
+
+    QXlsx::Document xr;
+    QVERIFY(ReportRenderer::writeReportToXlsx(
+        xr, sampleRows(), sampleFilters(), sampleHeaderInfo(), sampleAnalytics(), false, err));
+    QVERIFY(findNote(xr, "Visit-time data could not be loaded"));
+    QVERIFY(!findNote(xr, "No visit activity in this range"));
 }
 
 QTEST_MAIN(TstReportRenderer)

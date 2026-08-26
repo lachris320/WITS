@@ -57,7 +57,8 @@ public:
                                   const QJsonArray &rows,
                                   const QJsonObject &filters,
                                   const ReportHeaderInfo &info,
-                                  const ReportAnalytics &analytics, bool includeRoster);
+                                  const ReportAnalytics &analytics, bool includeRoster,
+                                  const ReportTimeExport &timeExport);
 
 private:
     // Renders a configured chart into an ARGB32 image of `size` (shared tail of the chart makers).

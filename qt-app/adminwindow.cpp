@@ -1771,7 +1771,7 @@ void adminWindow::exportReportToExcel(const QJsonArray &rows, const QJsonObject 
     ReportHeaderInfo info = collectHeaderInfo();
     // Legacy widgets export always showed the full roster; preserve that (includeRoster=true).
     m_reportRenderer.writeReportToXlsx(xlsx, rows, filters, info,
-                                       ReportAnalytics::compute(rows), true);
+                                       ReportAnalytics::compute(rows), true, ReportTimeExport{});
 
     if (!xlsx.saveAs(filePath)) {
         QMessageBox::critical(this, "Error", "Failed to save Excel file.");
