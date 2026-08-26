@@ -70,7 +70,7 @@ The layering rule is the same one 4b-iii/4b-iv-a enforce: **core is presentation
 
 ## 5. The carrier + state enum (core — `qt-app/core/reportdata.h`)
 
-Both types are added to `reportdata.h` (the same header that already holds `ReportHeaderInfo` and `ReportPalette`), so they compile into `witscore` and are visible to both the ViewModel and the renderer.
+Both types are added to `reportdata.h` (the same header that already holds `ReportHeaderInfo` and `ReportPalette`), so they compile into `witscore` and are visible to both the ViewModel and the renderer. `reportdata.h` today includes only `<QColor>/<QString>/<QVector>`, so add `<QStringList>` and `<QList>` for the new fields. It includes **no project headers**, so it stays a dependency-free leaf — no include cycle from the carrier living here.
 
 ```cpp
 // Presentation state of the exported "When?" block. Exactly FOUR states.
@@ -108,7 +108,7 @@ The single most important boundary in this slice. Getting it right is what keeps
 
 | Concern | Owner | Detail |
 |---|---|---|
-| Hour labels (24), weekday labels (7) | **ViewModel** | `hourTick(h)` for hours; the existing `"Mon".."Sun"` short-name array for weekdays — the SAME helpers 4b-iv-a already ships. |
+| Hour labels (24), weekday labels (7) | **ViewModel** | `hourTick(h)` for hours (a shipped static). Weekday short names ("Mon".."Sun") are currently a **function-local `static kShort[7]` inside `buildWeekdayBars`** (`ReportingViewModel.cpp:~135`), not a shipped helper — extract it into a small shared VM helper so `buildTimeExport` and `buildWeekdayBars` single-source it (rather than duplicating the array, which would violate this slice's own DRY intent). |
 | Hourly/weekday counts | **ViewModel** | Copied straight from `m_timeAnalytics.hourly` / `.weekdayMonFirst`. |
 | Peak VALUE strings | **ViewModel** | `busiestHourLabel = formatHourRange(peakHour)`; `busiestDayLabel = weekdayName(peakWeekdayMonFirst)` — reused from 4b-iv-a. |
 | `state` (Data / Empty / Error) | **ViewModel** | Computed from `m_timeError` + `m_timeAnalytics.hasData` (§7). |
@@ -189,9 +189,9 @@ static QImage makeWeekdayBarChartImage(const ReportTimeExport &t, QSize size,
 ```
 
 - Both are **structurally identical to `makeBarChartImage`**: a single `QBarSet` holding every bucket's count, one `QBarCategoryAxis` category per bucket, fonts sized to `size.height()` (so labels stay legible after upscaling), legend hidden, zero margins, then `return renderChartToImage(chart, size);`.
-- **Hourly maker:** 24 categories from `t.hourCounts` / `t.hourLabels`; the x-axis shows a label only on every 3rd category (index `% 3 == 0`) by blanking the others in the category list it hands the axis — this is the "3-hour interval" spacing, done by **position**, consuming (never re-deriving) the VM's labels. Chart title `"Peak Visiting Hours"`.
-- **Weekday maker:** 7 categories from `t.weekdayCounts` / `t.weekdayLabels`, already Mon→Sun. Chart title `"Busiest Days"`. All 7 labels shown.
-- Optionally set `highlightIndex`-equivalent brushing on the peak bar for a free visual cue, but this is not required for the slice to be correct.
+- **Hourly maker:** 24 categories from `t.hourCounts` / `t.hourLabels`; the x-axis shows a label only on every 3rd category (index `% 3 == 0`) by blanking the others in the category list it hands the axis — this is the "3-hour interval" spacing, done by **position**, consuming (never re-deriving) the VM's labels. Chart title composes the peak caption: `QChart::setTitle(QStringLiteral("Peak Visiting Hours — Busiest: %1").arg(t.busiestHourLabel))` — the fixed `"%1"` prose lives here in the renderer; only the VALUE comes from the VM.
+- **Weekday maker:** 7 categories from `t.weekdayCounts` / `t.weekdayLabels`, already Mon→Sun. Chart title composes the peak caption: `setTitle(QStringLiteral("Busiest Days — %1").arg(t.busiestDayLabel))`. All 7 labels shown.
+- **Why the caption rides in the title:** `drawFullscreenChart` draws only the image and exposes no seam to place a caption below it (§8.4), so folding the caption into the `QChart` title is the clean, low-risk way to keep the peak caption on the chart's own page without touching the shared helper. Optionally brush the peak bar for a free visual cue — not required for correctness.
 
 ### 8.3 Screen-safe-size → upscale safeguard (BINDING — do not deviate)
 
@@ -207,10 +207,13 @@ The "When?" analytics form **one logical section titled "When do students visit?
 
 This preserves the reporting hierarchy — **what happened → what ranked → what courses → when it happened → detailed records.**
 
-- **Insertion point:** immediately after the existing chart block's terminal `drawFooter(currentPage)` (current `reportrenderer.cpp:590`) and before the `if (includeRoster)` block (current line 597).
-- **Conceptual grouping only — no forced same-page:** the two charts are one *section* conceptually, but the renderer **must not** force both onto one physical page. Each is drawn via the existing `drawFullscreenChart` helper (which opens its own page, resets `y`, redraws the header, upscales to fill, and foots the page), so **natural page flow / `newPageIfNeeded` pagination decides layout** — identical to how the existing three charts already paginate. The hourly chart draws first, the weekday chart second; each carries its "Peak Hour: …" / "Busiest Day: …" caption on its own page.
-- **Captions:** the renderer wraps the carrier's peak VALUES: `"Peak Hour: %1"` with `t.busiestHourLabel`, `"Busiest Day: %1"` with `t.busiestDayLabel`. Drawn only in the `Data` state.
-- **Roster page-break invariant preserved:** the existing `if (includeRoster)` block already opens its own page unconditionally (because `drawFullscreenChart` leaves `y` near the top of the last chart page); inserting the When? charts before it — each of which also foots its own last page — keeps that invariant intact. The roster still starts on a fresh page.
+- **Insertion point:** insert the When? section **into** the chart flow, immediately **before** the existing terminal `drawFooter(currentPage)` (current `reportrenderer.cpp:590`), so that terminal footer foots the last When? page. **Not** *after* l.590 — that would leave the last When? page unfooted, because `drawFullscreenChart` foots the **prior** page at entry (l.536, before `newPage`), never its own page at exit.
+- **`drawFullscreenChart` reality (mechanism, corrected):** the helper (`reportrenderer.cpp:530`) foots the **prior** page at entry, opens a new page, redraws the header, and draws **only** the upscaled image — it declares a **local `y` (l.552) that shadows the outer `y`**, so it neither advances the outer `y` nor leaves a seam to draw text below the chart. The two charts are one *section* conceptually but the renderer **must not** force both onto one physical page; each lands on its own page via `drawFullscreenChart`, so **natural page flow decides layout** — identical to how the existing three charts paginate. Consequences per state:
+  - **`Data`:** call `drawFullscreenChart` twice — hourly, then weekday. The terminal `drawFooter` (l.590) foots the last one. The peak caption is **not** a separate text draw (there is no y-seam and the outer `y` is unusable) — it is composed by the renderer into the **chart title** inside each maker (§8.2), so it rides in the image. (Alternatively the plan may extend `drawFullscreenChart` to take an optional caption; baking it into the title is the lower-risk default that leaves the existing three charts untouched.)
+  - **`Empty` / `Error`:** the section is a single note, which **cannot** be drawn on the last course-chart page (that page holds a chart image and the outer `y` sits near the header). Open one new page (`device->newPage()` + `drawHeader(y)`) and draw the section title + the state note in the normal `y`-flow — the same own-page pattern the roster uses; the terminal `drawFooter` foots it.
+  - **`Disabled`:** draw nothing, advance no page.
+- **Captions (Data state):** the renderer composes the carrier's peak VALUES into each chart's title — `"Peak Hour: %1"` / `"Busiest Day: %1"` wrapping `t.busiestHourLabel` / `t.busiestDayLabel` (§8.2). The `"%1"` prose stays in the renderer.
+- **Roster page-break invariant preserved:** the terminal `drawFooter(currentPage)` still foots the last page (now the last When? page), and the `if (includeRoster)` block still opens its own page unconditionally — unchanged. The roster still starts on a fresh page.
 
 ## 9. Error / empty / disabled semantics — the renderer `switch`
 
@@ -240,6 +243,8 @@ Layout for the `Data` state (compact, comparison-friendly):
    - **"Visits by Day"** — header cells `"Day"` | `"Count"` (in `hdrFmt`), then 7 data rows (`weekdayLabels[d]`, `weekdayCounts[d]`) in an adjacent column group (e.g. columns 4–5), starting on the same header row as the hourly table so the two read across.
 
    The weekday table (7 rows) is shorter than the hourly table (24 rows); it simply ends higher — the hourly table's row cursor governs where the block ends.
+
+   **Cursor mechanics:** the two side-by-side tables cannot both go through the existing single-`row`-incrementing `writeRanking` lambda. Capture a `baseRow` for the shared header line, then write both column groups directly via QXlsx's arbitrary `write(baseRow + offset, col)` addressing (used throughout the writer) — hourly in columns ~1–2, weekday in columns ~4–5 — and finally advance the sheet's `row` cursor past the **taller** (24-row hourly) table so the footer that follows lands below the whole block.
 
 - **Formula-injection guard:** every app-generated **label/caption cell** (the section title, the two peak-label strings, `hourLabels`, `weekdayLabels`, and the table headers) is written through the existing `sanitizeXlsxText(...)` helper — even though these are app-generated and low-risk, running them through the same guard keeps a single, uniform escaping path for all string cells and avoids a reviewer flagging an inconsistency. Count cells are integers and need no sanitizing.
 - **Empty / Error states:** write only the section title row + the single note cell (also sanitized); no tables.
@@ -313,7 +318,7 @@ Synthetic data only — **no real student PII**, per the project security-hygien
 | Renderer signature | One trailing `const ReportTimeExport &` on `paintReport` and `writeReportToXlsx`; **no new bool** |
 | PDF representation | Two bar-chart images (hourly 24-bar w/ 3-hour x-labels; weekday 7-bar Mon→Sun) |
 | PDF placement | One logical "When do students visit?" section after the course chart(s), before the optional roster |
-| PDF pagination | Conceptual grouping only; each chart via `drawFullscreenChart`; natural page flow, **no forced same-page** |
+| PDF pagination | Conceptual grouping only; each chart via `drawFullscreenChart`; natural page flow, **no forced same-page**. Insert **before** the terminal `drawFooter` (l.590) so it foots the last When? page; peak captions ride in each **chart title** (the helper exposes no caption seam); Empty/Error note gets its own page |
 | PDF safeguard | New makers use `chartImageSize` screen-safe size → `drawFullscreenChart` upscale — **never** arbitrary/print size (screen-clamp bug) |
 | Excel representation | Table of cells |
 | Excel placement | Existing "Summary" sheet, below rankings; **side-by-side** Hourly (Hour/Count, 24) + Visits-by-Day (Day/Count, 7) |
