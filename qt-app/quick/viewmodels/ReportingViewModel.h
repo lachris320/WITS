@@ -171,6 +171,11 @@ public:
     Q_INVOKABLE void exportExcel(const QUrl &fileUrl);
     Q_INVOKABLE void printReport();
 
+    // Assembles the presentation-ready carrier from cached time state (spec §7.1).
+    // PUBLIC because tst_reportingviewmodel asserts it directly; also consumed by
+    // the two export seams. Pure w.r.t. member state; performs no fetch.
+    ReportTimeExport buildTimeExport() const;
+
     // Public slots (network-free test seam) — wired to ReportController in Task 5/6.
     void onDepartmentsLoaded(const QStringList &departments);
     void onYearsLoaded(const QStringList &years);
@@ -224,6 +229,7 @@ private:
     static QString hourTick(int hour);          // 0..23 -> "12A","3A",...,"9P"
     static QString formatHourRange(int hour);   // 14 -> "2–3 PM"
     static QString weekdayName(int monFirstIndex); // 0..6 (Mon..Sun) -> "Monday".."Sunday"
+    static QString weekdayShortName(int monFirstIndex); // 0..6 (Mon..Sun) -> "Mon".."Sun"
     bool operationInFlight() const;   // true until BOTH children settle
     void applyResult(const QJsonArray &data);    // Task 6
     void setExporting(bool v);

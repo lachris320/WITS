@@ -127,15 +127,22 @@ QList<BarsModel::Bar> ReportingViewModel::buildHourlyBars(const QList<int> &hour
     return bars;
 }
 
+QString ReportingViewModel::weekdayShortName(int monFirstIndex)
+{
+    static const char *const kShort[7] = { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
+    if (monFirstIndex < 0 || monFirstIndex >= 7)
+        return QString();
+    return QString::fromLatin1(kShort[monFirstIndex]);
+}
+
 QList<BarsModel::Bar> ReportingViewModel::buildWeekdayBars(const QList<int> &weekdayMonFirst)
 {
     QList<BarsModel::Bar> bars;
     if (weekdayMonFirst.size() != 7)
         return bars;
-    static const char *const kShort[7] = { "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun" };
     bars.reserve(7);
     for (int d = 0; d < 7; ++d)
-        bars.append({ QString::fromLatin1(kShort[d]), double(weekdayMonFirst.at(d)) });
+        bars.append({ weekdayShortName(d), double(weekdayMonFirst.at(d)) });
     return bars;
 }
 
@@ -166,6 +173,51 @@ QString ReportingViewModel::weekdayName(int monFirstIndex)
     if (monFirstIndex < 0 || monFirstIndex >= 7)
         return QString();
     return QString::fromLatin1(kNames[monFirstIndex]);
+}
+
+ReportTimeExport ReportingViewModel::buildTimeExport() const
+{
+    ReportTimeExport te;
+
+    // State order is LOCKED (spec §7.1): failure wins over empty so a failed
+    // fetch is never rendered as "no visits" (spec §9 Error≠Empty).
+    if (!m_timeError.isEmpty()) {
+        te.state = TimeAnalyticsExportState::Error;
+        return te;   // lists + peak labels stay empty
+    }
+
+    // Defensive length guard (spec §7.1): a malformed/short array degrades to
+    // Empty rather than emitting a truncated carrier — a second net beneath
+    // TimeAnalytics::compute (which already returns hasData=false on bad length).
+    if (m_timeAnalytics.hourly.size() != 24 || m_timeAnalytics.weekdayMonFirst.size() != 7) {
+        te.state = TimeAnalyticsExportState::Empty;
+        return te;
+    }
+
+    if (!m_timeAnalytics.hasData) {
+        te.state = TimeAnalyticsExportState::Empty;
+        return te;   // peak labels empty -> no stale "12–1 AM" default leaks
+    }
+
+    te.state = TimeAnalyticsExportState::Data;
+
+    te.hourLabels.reserve(24);
+    te.hourCounts.reserve(24);
+    for (int h = 0; h < 24; ++h) {
+        te.hourLabels.append(hourTick(h));                 // reused 4b-iv-a helper
+        te.hourCounts.append(m_timeAnalytics.hourly.at(h));
+    }
+
+    te.weekdayLabels.reserve(7);
+    te.weekdayCounts.reserve(7);
+    for (int d = 0; d < 7; ++d) {
+        te.weekdayLabels.append(weekdayShortName(d));       // single-sourced helper
+        te.weekdayCounts.append(m_timeAnalytics.weekdayMonFirst.at(d));
+    }
+
+    te.busiestHourLabel = formatHourRange(m_timeAnalytics.peakHour);
+    te.busiestDayLabel  = weekdayName(m_timeAnalytics.peakWeekdayMonFirst);
+    return te;
 }
 
 QJsonArray ReportingViewModel::normalizeExportRows(const QJsonArray &data)
