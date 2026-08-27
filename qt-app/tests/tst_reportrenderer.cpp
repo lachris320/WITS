@@ -3,8 +3,10 @@
 #include <QFontMetrics>
 #include <QJsonArray>
 #include <QJsonObject>
+#include <QColor>
 #include <QPainter>
 #include <QPdfWriter>
+#include <QPixmap>
 #include <QTemporaryDir>
 #include <QFileInfo>
 
@@ -39,6 +41,7 @@ private slots:
     void writeReportToXlsx_timeBlock_emptyAndErrorNotesDiffer();
     void makeHourlyBarChartImage_nonBlankAtScreenSafeSize();
     void makeWeekdayBarChartImage_nonBlankAtScreenSafeSize();
+    void circularLogoPixmap_squareCircularAndUndistorted();
 
 private:
     static QJsonArray sampleVisits() {
@@ -544,6 +547,35 @@ void TstReportRenderer::makeWeekdayBarChartImage_nonBlankAtScreenSafeSize() {
     const int barPixels = countBarColorPixels(img, samplePalette().chartColors.first());
     qDebug() << "weekday bar-color pixel count:" << barPixels;
     QVERIFY2(barPixels > 500, qPrintable(QString("expected >500 bar-color pixels, got %1").arg(barPixels)));
+}
+
+// Regression: the report-header logo drew a KeepAspectRatio (non-square) pixmap
+// stretched into a forced-square rect → vertical oblong. circularLogoPixmap must
+// return a SQUARE, circle-clipped pixmap whose non-square source is expanded to
+// fully cover the box (no letterbox gaps), matching the on-screen LLogoCircle.
+void TstReportRenderer::circularLogoPixmap_squareCircularAndUndistorted()
+{
+    QPixmap src(200, 80);            // deliberately non-square (2.5:1)
+    src.fill(Qt::red);               // fully opaque
+    const QPixmap out = ReportRenderer::circularLogoPixmap(src, 64);
+
+    // (A) Output is square — directly kills the oblong symptom.
+    QCOMPARE(out.size(), QSize(64, 64));
+
+    const QImage im = out.toImage().convertToFormat(QImage::Format_ARGB32);
+
+    // (B) Circular clip: the four corners are transparent, the center opaque.
+    QCOMPARE(qAlpha(im.pixel(0, 0)),   0);
+    QCOMPARE(qAlpha(im.pixel(63, 0)),  0);
+    QCOMPARE(qAlpha(im.pixel(0, 63)),  0);
+    QCOMPARE(qAlpha(im.pixel(63, 63)), 0);
+    QCOMPARE(qAlpha(im.pixel(32, 32)), 255);
+
+    // (C) Expand-to-cover (KeepAspectRatioByExpanding), not letterbox: the
+    // top- and bottom-center pixels just inside the circle are covered (opaque).
+    // A KeepAspectRatio scale of a 2.5:1 source would leave these bands transparent.
+    QCOMPARE(qAlpha(im.pixel(32, 4)),  255);
+    QCOMPARE(qAlpha(im.pixel(32, 59)), 255);
 }
 
 QTEST_MAIN(TstReportRenderer)
