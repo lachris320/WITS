@@ -50,8 +50,10 @@ public:
     // "When?" bar-chart makers (spec 4b-iv-b §8.2). Structurally identical to
     // makeBarChartImage; sized from chartImageSize(usableWidth,false) and
     // upscaled by drawFullscreenChart (NEVER an arbitrary/print size — the
-    // QChartView screen-clamp hazard, §8.3). Hourly shows an x-label only every
-    // 3rd category; weekday shows all 7 (Mon→Sun). Peak caption rides in the title.
+    // QChartView screen-clamp hazard, §8.3). Both show one unique label per bar
+    // (hourly: all 24 "12A".."11P"; weekday: all 7 Mon→Sun) — duplicate empty
+    // categories collapse QBarCategoryAxis's plot range and blank the bars, so
+    // hourly no longer thins to every 3rd label. Peak caption rides in the title.
     static QImage makeHourlyBarChartImage(const ReportTimeExport &t, QSize size,
                                           const ReportPalette &palette);
     static QImage makeWeekdayBarChartImage(const ReportTimeExport &t, QSize size,

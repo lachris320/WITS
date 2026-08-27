@@ -328,10 +328,13 @@ QImage ReportRenderer::makeLineChartImage(const QJsonArray &data, QSize size, co
     return renderChartToImage(chart, size);
 }
 
-// --- Hourly Bar Chart ("When?" — 24 bars, 3-hour x-labels) ---
-// Mirrors makeBarChartImage. The x-axis shows a label only on every 3rd
-// category (by POSITION); the maker never re-derives an hour string — it only
-// chooses which of the VM's finished labels to display (spec §5/§8.2). The peak
+// --- Hourly Bar Chart ("When?" — 24 bars, one label per bar) ---
+// Mirrors makeBarChartImage. All 24 of the VM's finished hour labels are shown,
+// one per category (by POSITION) — the maker never re-derives an hour string.
+// An earlier version thinned this to every 3rd label, leaving the other 16
+// categories as duplicate empty strings; QBarCategoryAxis derives its plot
+// range from the min/max category label, so the duplicates collapsed the range
+// and the bars never drew (title/axes still rendered, masking the bug). The peak
 // caption rides in the chart TITLE because drawFullscreenChart exposes no seam
 // to place a caption below the image (§8.4).
 QImage ReportRenderer::makeHourlyBarChartImage(const ReportTimeExport &t, QSize size,
