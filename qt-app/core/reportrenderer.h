@@ -2,6 +2,7 @@
 #define REPORTRENDERER_H
 
 #include <QImage>
+#include <QPixmap>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QMap>
@@ -38,6 +39,13 @@ public:
     // available screen so the QChartView (a QWidget) is never clamped; paintReport
     // upscales it to fill the page. usableWidth is unused (kept for call-site clarity).
     static QSize chartImageSize(int usableWidth, bool square);
+
+    // Scales `src` to fully cover a diameter×diameter box (KeepAspectRatioByExpanding),
+    // center-crops the overflow, and clips to an inscribed circle — the report-header
+    // logo look matching the on-screen LLogoCircle. Returns a diameter×diameter pixmap
+    // with transparent corners; a null/empty src yields a fully transparent box, and
+    // diameter<=0 yields a null (draw-nothing) pixmap.
+    static QPixmap circularLogoPixmap(const QPixmap &src, int diameter);
 
     static QImage makeBarChartImage(const QJsonArray &data, QSize size,
                                     const ReportPalette &palette);

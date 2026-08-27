@@ -21,6 +21,7 @@
 #include <QMarginsF>
 #include <QPagedPaintDevice>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPixmap>
 #include <QRect>
 #include <QScopeGuard>
@@ -131,6 +132,27 @@ QSize ReportRenderer::chartImageSize(int usableWidth, bool square) {
         }
     }
     return base;
+}
+
+// Circle-clipped, undistorted report-header logo — matches the on-screen LLogoCircle.
+QPixmap ReportRenderer::circularLogoPixmap(const QPixmap &src, int diameter)
+{
+    QPixmap out(diameter, diameter);
+    out.fill(Qt::transparent);
+    if (src.isNull() || diameter <= 0)
+        return out;
+    QPainter p(&out);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    QPainterPath clip;
+    clip.addEllipse(0, 0, diameter, diameter);
+    p.setClipPath(clip);
+    const QPixmap scaled = src.scaled(diameter, diameter,
+                                      Qt::KeepAspectRatioByExpanding,
+                                      Qt::SmoothTransformation);
+    p.drawPixmap((diameter - scaled.width()) / 2,
+                 (diameter - scaled.height()) / 2, scaled);
+    return out;
 }
 
 // Shared render tail of the three chart makers: paint a configured QChart into
@@ -526,11 +548,8 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
         if (!logoPath.isEmpty()) {
             QPixmap logo(logoPath);
             if (!logo.isNull()) {
-                QPixmap scaledLogo = logo.scaled(logoSize, logoSize,
-                                                 Qt::KeepAspectRatio,
-                                                 Qt::SmoothTransformation);
-                painter.drawPixmap(QRect(margin, y, logoSize, logoSize),
-                                   scaledLogo, scaledLogo.rect());
+                const QPixmap circular = circularLogoPixmap(logo, logoSize);
+                painter.drawPixmap(margin, y, circular);
             }
         }
 
