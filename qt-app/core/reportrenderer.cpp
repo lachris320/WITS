@@ -344,7 +344,7 @@ QImage ReportRenderer::makeHourlyBarChartImage(const ReportTimeExport &t, QSize 
     QStringList categories;
     for (int i = 0; i < t.hourCounts.size(); ++i) {
         *set << t.hourCounts.at(i);
-        categories << ((i % 3 == 0 && i < t.hourLabels.size()) ? t.hourLabels.at(i) : QString());
+        categories << (i < t.hourLabels.size() ? t.hourLabels.at(i) : QString());
     }
     set->setBrush(palette.chartColors.isEmpty() ? QBrush(palette.headerBg)
                                                 : QBrush(palette.chartColors.first()));

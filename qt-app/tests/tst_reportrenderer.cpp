@@ -138,6 +138,25 @@ private:
                 if (rgb.pixelColor(x, y) != QColor(Qt::white)) return true;
         return false;
     }
+
+    // Counts pixels approximately matching `target` (small per-channel tolerance
+    // for antialiasing at bar edges). Used to distinguish "chart with real bars"
+    // from "chart with only title/axis text" — both satisfy imageHasNonWhitePixel,
+    // but only the former paints a substantial number of bar-brush-colored pixels.
+    static int countBarColorPixels(const QImage &img, const QColor &target) {
+        const QImage rgb = img.convertToFormat(QImage::Format_ARGB32);
+        int count = 0;
+        for (int y = 0; y < rgb.height(); ++y) {
+            for (int x = 0; x < rgb.width(); ++x) {
+                const QColor px = rgb.pixelColor(x, y);
+                const int diff = qAbs(px.red() - target.red())
+                                + qAbs(px.green() - target.green())
+                                + qAbs(px.blue() - target.blue());
+                if (diff < 24) ++count;
+            }
+        }
+        return count;
+    }
 };
 
 void TstReportRenderer::aggregateVisitsByCourse_sumsPerCourse() {
@@ -505,6 +524,13 @@ void TstReportRenderer::makeHourlyBarChartImage_nonBlankAtScreenSafeSize() {
     QVERIFY(!img.isNull());
     QCOMPARE(img.size(), sz);                    // MUST render at the screen-safe size
     QVERIFY(imageHasNonWhitePixel(img));         // real bars, not a blank raster
+
+    // imageHasNonWhitePixel alone is satisfied by title/axis text even when the
+    // bars themselves never draw (QBarCategoryAxis duplicate-empty-category bug).
+    // Require a substantial count of actual bar-brush-colored pixels.
+    const int barPixels = countBarColorPixels(img, samplePalette().chartColors.first());
+    qDebug() << "hourly bar-color pixel count:" << barPixels;
+    QVERIFY2(barPixels > 500, qPrintable(QString("expected >500 bar-color pixels, got %1").arg(barPixels)));
 }
 
 void TstReportRenderer::makeWeekdayBarChartImage_nonBlankAtScreenSafeSize() {
@@ -514,6 +540,10 @@ void TstReportRenderer::makeWeekdayBarChartImage_nonBlankAtScreenSafeSize() {
     QVERIFY(!img.isNull());
     QCOMPARE(img.size(), sz);
     QVERIFY(imageHasNonWhitePixel(img));
+
+    const int barPixels = countBarColorPixels(img, samplePalette().chartColors.first());
+    qDebug() << "weekday bar-color pixel count:" << barPixels;
+    QVERIFY2(barPixels > 500, qPrintable(QString("expected >500 bar-color pixels, got %1").arg(barPixels)));
 }
 
 QTEST_MAIN(TstReportRenderer)
