@@ -5,6 +5,7 @@
 #include <QString>
 #include <QJsonObject>
 #include <QElapsedTimer>
+#include <QDateTime>
 #include <QUrl>
 #include <qqml.h>
 #include "RecentLoginsModel.h"
@@ -104,6 +105,10 @@ public:
     // Network-free seam: apply an already-parsed student record (used by the
     // network reply handlers AND directly by unit tests).
     void applyStudentLogin(const QJsonObject &student);
+
+    // Formats a login timestamp for the kiosk card/feed. Static + pure so the
+    // format is unit-testable and cannot drift from applyStudentLogin's use.
+    static QString formatLoginTime(const QDateTime &dt);
 
     // Network-free seam: decode an admin_login.php / student_login.php
     // response exactly as the reply handler does. On the admin branch it

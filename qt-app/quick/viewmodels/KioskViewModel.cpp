@@ -102,13 +102,22 @@ void KioskViewModel::setStatus(const QString &message, const QString &severity)
     emit statusChanged();
 }
 
+QString KioskViewModel::formatLoginTime(const QDateTime &dt)
+{
+    return dt.toString(QStringLiteral("h:mm AP"));
+}
+
 void KioskViewModel::applyStudentLogin(const QJsonObject &student)
 {
     m_currentFullName = student.value(QStringLiteral("name")).toString();
     m_currentCourse   = student.value(QStringLiteral("course")).toString();
     m_currentYear     = student.value(QStringLiteral("year_level")).toString();
     m_currentDept     = student.value(QStringLiteral("department")).toString();
-    m_currentTime     = student.value(QStringLiteral("time_date")).toString();
+    // Stamp the login time from the LOCAL device clock, agreeing with the
+    // sidebar clock to the minute. The backend echoes students.time_date, but
+    // that column is only NOW() at REGISTRATION and never updated on login, so
+    // it would show an arbitrary past registration timestamp. Ignore it.
+    m_currentTime     = formatLoginTime(QDateTime::currentDateTime());
     m_currentName     = m_currentFullName.section(QLatin1Char(' '), 0, 0);  // first name
     m_hasStudent      = true;
 
