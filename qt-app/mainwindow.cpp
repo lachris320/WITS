@@ -32,6 +32,7 @@
 #include <QApplication>
 #include <QElapsedTimer>
 #include "rfidkeyboardfilter.h"
+#include "reportrenderer.h"
 #include "theme.h"
 #include "brandtheme.h"
 #include "brandingcontroller.h"
@@ -415,23 +416,6 @@ void MainWindow::resizeEvent(QResizeEvent *event) {
     syncPosterBg();          // keep the poster layer covering frame_2 on resize
 }
 
-// Render src into a circular pixmap of the given diameter (transparent corners).
-static QPixmap makeCircularPixmap(const QPixmap &src, int diameter)
-{
-    QPixmap out(diameter, diameter);
-    out.fill(Qt::transparent);
-    QPainter p(&out);
-    p.setRenderHint(QPainter::Antialiasing, true);
-    QPainterPath clip;
-    clip.addEllipse(0, 0, diameter, diameter);
-    p.setClipPath(clip);
-    const QPixmap scaled = src.scaled(diameter, diameter,
-        Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
-    p.drawPixmap((diameter - scaled.width()) / 2,
-                 (diameter - scaled.height()) / 2, scaled);
-    return out;
-}
-
 void MainWindow::updateLogo(const QString &logoPath) {
     const int d = ui->schLogo_Image->width();
     ui->schLogo_Image->setFixedHeight(d); // keep the logo area square
@@ -442,7 +426,7 @@ void MainWindow::updateLogo(const QString &logoPath) {
     if (!logoPath.isEmpty() && QFile::exists(logoPath) && d > 0) {
         QPixmap pix(logoPath);
         if (!pix.isNull()) {
-            ui->schLogo_Image->setPixmap(makeCircularPixmap(pix, d));
+            ui->schLogo_Image->setPixmap(ReportRenderer::circularLogoPixmap(pix, d));
             return;
         }
     }
