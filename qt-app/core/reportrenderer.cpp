@@ -53,6 +53,21 @@ QString sanitizeXlsxText(const QString &s) {
     }
     return s;
 }
+
+// Shared "When?" export wording (spec 4b-iv-b §8.4/§10) — the section title,
+// the Empty/Error note, and the peak captions are each written from three
+// separate sites (PDF path, Excel path, chart makers); centralizing the
+// literals here keeps those sites byte-identical without copy-paste drift.
+QString whenSectionTitle() { return QStringLiteral("When do students visit?"); }
+
+QString timeExportNoteText(TimeAnalyticsExportState state) {
+    return state == TimeAnalyticsExportState::Error
+               ? QStringLiteral("Visit-time data could not be loaded")
+               : QStringLiteral("No visit activity in this range");
+}
+
+QString peakHourCaption(const ReportTimeExport &t) { return QStringLiteral("Peak Hour: %1").arg(t.busiestHourLabel); }
+QString peakDayCaption(const ReportTimeExport &t)  { return QStringLiteral("Busiest Day: %1").arg(t.busiestDayLabel); }
 } // namespace
 
 // Scales a legacy ~96-DPI pixel literal to the paged device's resolution.
@@ -357,7 +372,7 @@ QImage ReportRenderer::makeHourlyBarChartImage(const ReportTimeExport &t, QSize 
 
     QChart *chart = new QChart();
     chart->addSeries(series);
-    chart->setTitle(QStringLiteral("Peak Hour: %1").arg(t.busiestHourLabel));
+    chart->setTitle(peakHourCaption(t));
     chart->setTitleFont(titleFont);
 
     QBarCategoryAxis *axisX = new QBarCategoryAxis();
@@ -404,7 +419,7 @@ QImage ReportRenderer::makeWeekdayBarChartImage(const ReportTimeExport &t, QSize
 
     QChart *chart = new QChart();
     chart->addSeries(series);
-    chart->setTitle(QStringLiteral("Busiest Day: %1").arg(t.busiestDayLabel));
+    chart->setTitle(peakDayCaption(t));
     chart->setTitleFont(titleFont);
 
     QBarCategoryAxis *axisX = new QBarCategoryAxis();
@@ -718,12 +733,10 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
         painter.setFont(QFont("Arial", 13, QFont::Bold));
         painter.setPen(Qt::black);
         painter.drawText(QRect(margin, y, usableWidth, vs(24)), Qt::AlignLeft,
-                         "When do students visit?");
+                         whenSectionTitle());
         y += vs(30);
         painter.setFont(QFont("Arial", 11));
-        const QString note = (timeExport.state == TimeAnalyticsExportState::Error)
-                                 ? QStringLiteral("Visit-time data could not be loaded")
-                                 : QStringLiteral("No visit activity in this range");
+        const QString note = timeExportNoteText(timeExport.state);
         painter.drawText(QRect(margin, y, usableWidth, vs(22)), Qt::AlignLeft, note);
         y += vs(24);
         break;
@@ -959,20 +972,18 @@ bool ReportRenderer::writeReportToXlsx(QXlsx::Document &xlsx,
         break;   // legacy WITS.exe parity — write nothing
     case TimeAnalyticsExportState::Error:
     case TimeAnalyticsExportState::Empty: {
-        xlsx.write(row++, 1, sanitizeXlsxText(QStringLiteral("When do students visit?")), sectionFmt);
-        const QString note = (timeExport.state == TimeAnalyticsExportState::Error)
-                                 ? QStringLiteral("Visit-time data could not be loaded")
-                                 : QStringLiteral("No visit activity in this range");
+        xlsx.write(row++, 1, sanitizeXlsxText(whenSectionTitle()), sectionFmt);
+        const QString note = timeExportNoteText(timeExport.state);
         xlsx.write(row++, 1, sanitizeXlsxText(note));
         row += 1;
         break;
     }
     case TimeAnalyticsExportState::Data: {
-        xlsx.write(row++, 1, sanitizeXlsxText(QStringLiteral("When do students visit?")), sectionFmt);
+        xlsx.write(row++, 1, sanitizeXlsxText(whenSectionTitle()), sectionFmt);
 
         // Peak-label row: hourly caption in col 1, weekday caption a few cols over.
-        xlsx.write(row, 1, sanitizeXlsxText(QStringLiteral("Peak Hour: %1").arg(timeExport.busiestHourLabel)));
-        xlsx.write(row, 4, sanitizeXlsxText(QStringLiteral("Busiest Day: %1").arg(timeExport.busiestDayLabel)));
+        xlsx.write(row, 1, sanitizeXlsxText(peakHourCaption(timeExport)));
+        xlsx.write(row, 4, sanitizeXlsxText(peakDayCaption(timeExport)));
         row++;
 
         // Two tables SIDE-BY-SIDE sharing one header row: hourly (cols 1-2, 24
@@ -983,11 +994,11 @@ bool ReportRenderer::writeReportToXlsx(QXlsx::Document &xlsx,
         xlsx.write(baseRow, 2, sanitizeXlsxText(QStringLiteral("Count")), hdrFmt);
         xlsx.write(baseRow, 4, sanitizeXlsxText(QStringLiteral("Day")),   hdrFmt);
         xlsx.write(baseRow, 5, sanitizeXlsxText(QStringLiteral("Count")), hdrFmt);
-        for (int i = 0; i < timeExport.hourLabels.size(); ++i) {
+        for (int i = 0; i < qMin(timeExport.hourLabels.size(), timeExport.hourCounts.size()); ++i) {
             xlsx.write(baseRow + 1 + i, 1, sanitizeXlsxText(timeExport.hourLabels.at(i)));
             xlsx.write(baseRow + 1 + i, 2, timeExport.hourCounts.at(i));
         }
-        for (int i = 0; i < timeExport.weekdayLabels.size(); ++i) {
+        for (int i = 0; i < qMin(timeExport.weekdayLabels.size(), timeExport.weekdayCounts.size()); ++i) {
             xlsx.write(baseRow + 1 + i, 4, sanitizeXlsxText(timeExport.weekdayLabels.at(i)));
             xlsx.write(baseRow + 1 + i, 5, timeExport.weekdayCounts.at(i));
         }
