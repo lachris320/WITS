@@ -2,7 +2,9 @@
 #define REPORTDATA_H
 
 #include <QColor>
+#include <QList>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 // Moved verbatim out of adminwindow.h (was adminwindow.h:54-62).
@@ -42,6 +44,30 @@ struct DateRange {
     QString start;   // "yyyy-MM-dd"
     QString end;     // "yyyy-MM-dd"
     bool    valid = false;
+};
+
+// Presentation state of the exported "When?" block. Exactly FOUR states.
+enum class TimeAnalyticsExportState {
+    Disabled,  // caller opts out entirely (legacy WITS.exe) — renderer omits the section
+    Data,      // time fetch succeeded and hasData — render charts (PDF) / table (Excel)
+    Empty,     // time fetch succeeded but all-zero range — render the "no activity" note
+    Error      // time fetch failed — render the "could not be loaded" note (DISTINCT from Empty)
+};
+
+// Presentation-ready carrier for the exported time analytics. Assembled by the
+// ViewModel (the single owner of hour/weekday formatting); consumed verbatim by
+// ReportRenderer, which does NO hour/weekday math of its own. Default-constructed
+// value is state == Disabled with empty lists — the legacy WITS.exe payload.
+struct ReportTimeExport {
+    TimeAnalyticsExportState state = TimeAnalyticsExportState::Disabled;
+
+    QStringList hourLabels;      // 24 entries, VM-formatted (e.g. "12A","1A", … "11P")
+    QList<int>  hourCounts;      // 24 entries, index = hour 0..23
+    QStringList weekdayLabels;   // 7 entries, Mon→Sun, VM-formatted short names ("Mon".."Sun")
+    QList<int>  weekdayCounts;   // 7 entries, index 0=Mon .. 6=Sun
+
+    QString     busiestHourLabel;  // VM peak VALUE, e.g. "2–3 PM"  (empty unless state==Data)
+    QString     busiestDayLabel;   // VM peak VALUE, e.g. "Wednesday" (empty unless state==Data)
 };
 
 #endif // REPORTDATA_H

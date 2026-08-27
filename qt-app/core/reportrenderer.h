@@ -47,17 +47,31 @@ public:
                                      const ReportPalette &palette,
                                      int openHour, int closeHour);
 
+    // "When?" bar-chart makers (spec 4b-iv-b §8.2). Structurally identical to
+    // makeBarChartImage; sized from chartImageSize(usableWidth,false) and
+    // upscaled by drawFullscreenChart (NEVER an arbitrary/print size — the
+    // QChartView screen-clamp hazard, §8.3). Both show one unique label per bar
+    // (hourly: all 24 "12A".."11P"; weekday: all 7 Mon→Sun) — duplicate empty
+    // categories collapse QBarCategoryAxis's plot range and blank the bars, so
+    // hourly no longer thins to every 3rd label. Peak caption rides in the title.
+    static QImage makeHourlyBarChartImage(const ReportTimeExport &t, QSize size,
+                                          const ReportPalette &palette);
+    static QImage makeWeekdayBarChartImage(const ReportTimeExport &t, QSize size,
+                                           const ReportPalette &palette);
+
     static bool paintReport(QPagedPaintDevice *device, int resolution,
                             const QJsonArray &data, const QJsonObject &filters,
                             const ReportPalette &palette,
                             const ReportHeaderInfo &info,
-                            const ReportAnalytics &analytics, bool includeRoster);
+                            const ReportAnalytics &analytics, bool includeRoster,
+                            const ReportTimeExport &timeExport);
 
     static bool writeReportToXlsx(QXlsx::Document &xlsx,
                                   const QJsonArray &rows,
                                   const QJsonObject &filters,
                                   const ReportHeaderInfo &info,
-                                  const ReportAnalytics &analytics, bool includeRoster);
+                                  const ReportAnalytics &analytics, bool includeRoster,
+                                  const ReportTimeExport &timeExport);
 
 private:
     // Renders a configured chart into an ARGB32 image of `size` (shared tail of the chart makers).

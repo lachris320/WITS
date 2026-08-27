@@ -53,6 +53,21 @@ QString sanitizeXlsxText(const QString &s) {
     }
     return s;
 }
+
+// Shared "When?" export wording (spec 4b-iv-b §8.4/§10) — the section title,
+// the Empty/Error note, and the peak captions are each written from three
+// separate sites (PDF path, Excel path, chart makers); centralizing the
+// literals here keeps those sites byte-identical without copy-paste drift.
+QString whenSectionTitle() { return QStringLiteral("When do students visit?"); }
+
+QString timeExportNoteText(TimeAnalyticsExportState state) {
+    return state == TimeAnalyticsExportState::Error
+               ? QStringLiteral("Visit-time data could not be loaded")
+               : QStringLiteral("No visit activity in this range");
+}
+
+QString peakHourCaption(const ReportTimeExport &t) { return QStringLiteral("Peak Hour: %1").arg(t.busiestHourLabel); }
+QString peakDayCaption(const ReportTimeExport &t)  { return QStringLiteral("Busiest Day: %1").arg(t.busiestDayLabel); }
 } // namespace
 
 // Scales a legacy ~96-DPI pixel literal to the paged device's resolution.
@@ -328,6 +343,106 @@ QImage ReportRenderer::makeLineChartImage(const QJsonArray &data, QSize size, co
     return renderChartToImage(chart, size);
 }
 
+// --- Hourly Bar Chart ("When?" — 24 bars, one label per bar) ---
+// Mirrors makeBarChartImage. All 24 of the VM's finished hour labels are shown,
+// one per category (by POSITION) — the maker never re-derives an hour string.
+// An earlier version thinned this to every 3rd label, leaving the other 16
+// categories as duplicate empty strings; QBarCategoryAxis derives its plot
+// range from the min/max category label, so the duplicates collapsed the range
+// and the bars never drew (title/axes still rendered, masking the bug). The peak
+// caption rides in the chart TITLE because drawFullscreenChart exposes no seam
+// to place a caption below the image (§8.4).
+QImage ReportRenderer::makeHourlyBarChartImage(const ReportTimeExport &t, QSize size,
+                                               const ReportPalette &palette) {
+    const int h = size.height();
+    QFont titleFont("Arial");  titleFont.setPixelSize(qMax(10, qRound(h * 0.032)));  titleFont.setBold(true);
+    QFont labelFont("Arial");  labelFont.setPixelSize(qMax(8,  qRound(h * 0.024)));
+
+    QBarSet *set = new QBarSet("Visits");
+    QStringList categories;
+    for (int i = 0; i < t.hourCounts.size(); ++i) {
+        *set << t.hourCounts.at(i);
+        categories << (i < t.hourLabels.size() ? t.hourLabels.at(i) : QString());
+    }
+    set->setBrush(palette.chartColors.isEmpty() ? QBrush(palette.headerBg)
+                                                : QBrush(palette.chartColors.first()));
+
+    QBarSeries *series = new QBarSeries();
+    series->append(set);
+
+    QChart *chart = new QChart();
+    chart->addSeries(series);
+    chart->setTitle(peakHourCaption(t));
+    chart->setTitleFont(titleFont);
+
+    QBarCategoryAxis *axisX = new QBarCategoryAxis();
+    axisX->append(categories);
+    axisX->setLabelsFont(labelFont);
+    chart->addAxis(axisX, Qt::AlignBottom);
+    series->attachAxis(axisX);
+
+    QValueAxis *axisY = new QValueAxis();
+    axisY->setTitleText("Number of Visits");
+    axisY->setLabelsFont(labelFont);
+    axisY->setTitleFont(labelFont);
+    chart->addAxis(axisY, Qt::AlignLeft);
+    series->attachAxis(axisY);
+
+    chart->legend()->setVisible(false);
+    chart->setMargins(QMargins(0, 0, 0, 0));
+    chart->layout()->setContentsMargins(0, 0, 0, 0);
+    chart->setBackgroundRoundness(0);
+
+    return renderChartToImage(chart, size);
+}
+
+// --- Weekday Bar Chart ("When?" — 7 bars, Mon→Sun) ---
+// Mirrors makeBarChartImage; the carrier's weekdayLabels are already Mon→Sun so
+// all 7 labels are shown. Peak caption rides in the chart TITLE (§8.4).
+QImage ReportRenderer::makeWeekdayBarChartImage(const ReportTimeExport &t, QSize size,
+                                                const ReportPalette &palette) {
+    const int h = size.height();
+    QFont titleFont("Arial");  titleFont.setPixelSize(qMax(10, qRound(h * 0.032)));  titleFont.setBold(true);
+    QFont labelFont("Arial");  labelFont.setPixelSize(qMax(8,  qRound(h * 0.024)));
+
+    QBarSet *set = new QBarSet("Visits");
+    QStringList categories;
+    for (int i = 0; i < t.weekdayCounts.size(); ++i) {
+        *set << t.weekdayCounts.at(i);
+        categories << (i < t.weekdayLabels.size() ? t.weekdayLabels.at(i) : QString());
+    }
+    set->setBrush(palette.chartColors.isEmpty() ? QBrush(palette.headerBg)
+                                                : QBrush(palette.chartColors.first()));
+
+    QBarSeries *series = new QBarSeries();
+    series->append(set);
+
+    QChart *chart = new QChart();
+    chart->addSeries(series);
+    chart->setTitle(peakDayCaption(t));
+    chart->setTitleFont(titleFont);
+
+    QBarCategoryAxis *axisX = new QBarCategoryAxis();
+    axisX->append(categories);
+    axisX->setLabelsFont(labelFont);
+    chart->addAxis(axisX, Qt::AlignBottom);
+    series->attachAxis(axisX);
+
+    QValueAxis *axisY = new QValueAxis();
+    axisY->setTitleText("Number of Visits");
+    axisY->setLabelsFont(labelFont);
+    axisY->setTitleFont(labelFont);
+    chart->addAxis(axisY, Qt::AlignLeft);
+    series->attachAxis(axisY);
+
+    chart->legend()->setVisible(false);
+    chart->setMargins(QMargins(0, 0, 0, 0));
+    chart->layout()->setContentsMargins(0, 0, 0, 0);
+    chart->setBackgroundRoundness(0);
+
+    return renderChartToImage(chart, size);
+}
+
 // Verbatim port of adminWindow::paintReport (legacy adminwindow.cpp:2018-2291), with:
 //  - the top-level QSettings librarian/position reads replaced by info.librarian/info.position
 //  - the drawHeader lambda's QSettings schoolName/address/logoPath reads replaced by
@@ -340,7 +455,8 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
                                  const QJsonArray &data, const QJsonObject &filters,
                                  const ReportPalette &palette,
                                  const ReportHeaderInfo &info,
-                                 const ReportAnalytics &analytics, bool includeRoster)
+                                 const ReportAnalytics &analytics, bool includeRoster,
+                                 const ReportTimeExport &timeExport)
 {
     QPainter painter;
     if (!painter.begin(device)) {
@@ -586,6 +702,47 @@ bool ReportRenderer::paintReport(QPagedPaintDevice *device, int resolution,
         }
     }
 
+    // ===== WHEN? TIME ANALYTICS (spec 4b-iv-b §8.4) =====
+    // Inserted BEFORE the terminal drawFooter so that footer foots the LAST
+    // When? page. Placement note: drawFullscreenChart foots the PRIOR page at
+    // ENTRY (never its own page at exit) and declares a local `y` shadowing the
+    // outer one, exposing no seam for a caption — so the Data path's captions
+    // ride in each chart TITLE, and the Empty/Error note (which has no
+    // entry-foot of its own) must foot the current page itself before paging.
+    switch (timeExport.state) {
+    case TimeAnalyticsExportState::Disabled:
+        break;   // legacy WITS.exe parity — draw nothing, advance no page
+    case TimeAnalyticsExportState::Data: {
+        const QSize whenSize = chartImageSize(usableWidth, false);   // screen-safe; upscaled by drawFullscreenChart
+        drawFullscreenChart("Hourly Visits",
+                            makeHourlyBarChartImage(timeExport, whenSize, palette));
+        drawFullscreenChart("Visits by Day",
+                            makeWeekdayBarChartImage(timeExport, whenSize, palette));
+        break;
+    }
+    case TimeAnalyticsExportState::Empty:
+    case TimeAnalyticsExportState::Error: {
+        // The note can't share the last course-chart page (that page holds a
+        // chart image and the outer y sits near the header). Foot the current
+        // page FIRST, then open a fresh page and draw the note in normal y-flow.
+        drawFooter(currentPage);
+        device->newPage();
+        currentPage++;
+        y = margin;
+        drawHeader(y);
+        painter.setFont(QFont("Arial", 13, QFont::Bold));
+        painter.setPen(Qt::black);
+        painter.drawText(QRect(margin, y, usableWidth, vs(24)), Qt::AlignLeft,
+                         whenSectionTitle());
+        y += vs(30);
+        painter.setFont(QFont("Arial", 11));
+        const QString note = timeExportNoteText(timeExport.state);
+        painter.drawText(QRect(margin, y, usableWidth, vs(22)), Qt::AlignLeft, note);
+        y += vs(24);
+        break;
+    }
+    }
+
     // Footer on the last page with current page number
     drawFooter(currentPage);
 
@@ -718,7 +875,8 @@ bool ReportRenderer::writeReportToXlsx(QXlsx::Document &xlsx,
                                        const QJsonObject &filters,
                                        const ReportHeaderInfo &info,
                                        const ReportAnalytics &analytics,
-                                       bool includeRoster)
+                                       bool includeRoster,
+                                       const ReportTimeExport &timeExport)
 {
     const int colCount = 8;
 
@@ -804,6 +962,53 @@ bool ReportRenderer::writeReportToXlsx(QXlsx::Document &xlsx,
                  { "Rank", "Course", "Visits", "% of Total" }, analytics.topCourses, false, true);
     writeRanking(QStringLiteral("Top 10 Departments"),
                  { "Rank", "Department", "Visits", "% of Total" }, analytics.topDepartments, false, true);
+
+    // ===== WHEN? TIME ANALYTICS (spec 4b-iv-b §10) =====
+    // Side-by-side tables on the Summary sheet, below the rankings. Every
+    // label/caption/header cell runs through sanitizeXlsxText for a single
+    // uniform escaping path (count cells are integers, no sanitize needed).
+    switch (timeExport.state) {
+    case TimeAnalyticsExportState::Disabled:
+        break;   // legacy WITS.exe parity — write nothing
+    case TimeAnalyticsExportState::Error:
+    case TimeAnalyticsExportState::Empty: {
+        xlsx.write(row++, 1, sanitizeXlsxText(whenSectionTitle()), sectionFmt);
+        const QString note = timeExportNoteText(timeExport.state);
+        xlsx.write(row++, 1, sanitizeXlsxText(note));
+        row += 1;
+        break;
+    }
+    case TimeAnalyticsExportState::Data: {
+        xlsx.write(row++, 1, sanitizeXlsxText(whenSectionTitle()), sectionFmt);
+
+        // Peak-label row: hourly caption in col 1, weekday caption a few cols over.
+        xlsx.write(row, 1, sanitizeXlsxText(peakHourCaption(timeExport)));
+        xlsx.write(row, 4, sanitizeXlsxText(peakDayCaption(timeExport)));
+        row++;
+
+        // Two tables SIDE-BY-SIDE sharing one header row: hourly (cols 1-2, 24
+        // rows) and weekday (cols 4-5, 7 rows). The single-cursor writeRanking
+        // lambda can't drive two columns, so address cells directly by baseRow.
+        const int baseRow = row;
+        xlsx.write(baseRow, 1, sanitizeXlsxText(QStringLiteral("Hour")),  hdrFmt);
+        xlsx.write(baseRow, 2, sanitizeXlsxText(QStringLiteral("Count")), hdrFmt);
+        xlsx.write(baseRow, 4, sanitizeXlsxText(QStringLiteral("Day")),   hdrFmt);
+        xlsx.write(baseRow, 5, sanitizeXlsxText(QStringLiteral("Count")), hdrFmt);
+        for (int i = 0; i < qMin(timeExport.hourLabels.size(), timeExport.hourCounts.size()); ++i) {
+            xlsx.write(baseRow + 1 + i, 1, sanitizeXlsxText(timeExport.hourLabels.at(i)));
+            xlsx.write(baseRow + 1 + i, 2, timeExport.hourCounts.at(i));
+        }
+        for (int i = 0; i < qMin(timeExport.weekdayLabels.size(), timeExport.weekdayCounts.size()); ++i) {
+            xlsx.write(baseRow + 1 + i, 4, sanitizeXlsxText(timeExport.weekdayLabels.at(i)));
+            xlsx.write(baseRow + 1 + i, 5, timeExport.weekdayCounts.at(i));
+        }
+        // Advance the cursor past the TALLER (24-row hourly) table so the
+        // system-generated footer that follows lands below the whole block.
+        row = baseRow + 1 + timeExport.hourCounts.size();
+        row += 1;
+        break;
+    }
+    }
 
     xlsx.write(row++, 1,
                "This is a system-generated report. LOAMS.2 (Library Occupancy and Attendance Monitoring System), WITS 2016.");

@@ -72,6 +72,10 @@ private slots:
     void timeModels_populatedWithLabelBlanking();
     void captions_formattedForKnownPeaks();
     void hasTimeData_falseOnAllZeroShowsEmptyState();
+    void buildTimeExport_dataState_populatesLabelsCountsPeaks();
+    void buildTimeExport_emptyState_listsEmpty();
+    void buildTimeExport_errorState_winsOverData();
+    void buildTimeExport_defensiveWrongLength_degradesToEmpty();
 
 private:
     static QList<int> denseHours() {          // valid 24-array, peak at 14 (2 PM)
@@ -826,6 +830,70 @@ void TestReportingViewModel::hasTimeData_falseOnAllZeroShowsEmptyState() {
     QVERIFY(vm.busiestDayLabel().isEmpty());
     QCOMPARE(vm.hourlyBars()->rowCount(), 24);  // bars still dense (all zero)
     QCOMPARE(vm.weekdayBars()->rowCount(), 7);
+}
+
+void TestReportingViewModel::buildTimeExport_dataState_populatesLabelsCountsPeaks() {
+    ReportingViewModel vm;
+    vm.onTimeAnalyticsReady(denseHours(), denseWeek());   // peak hour 14, peak day Monday
+    const ReportTimeExport te = vm.buildTimeExport();
+    QCOMPARE(te.state, TimeAnalyticsExportState::Data);
+
+    // 24 hour labels, byte-identical to hourTick for known hours.
+    QCOMPARE(te.hourLabels.size(), 24);
+    QCOMPARE(te.hourLabels.at(0), QStringLiteral("12A"));
+    QCOMPARE(te.hourLabels.at(3), QStringLiteral("3A"));
+    QCOMPARE(te.hourLabels.at(14), QStringLiteral("2P"));
+
+    // Counts copied straight from the cached analytics.
+    const TimeAnalytics ta = TimeAnalytics::compute(denseHours(), denseWeek());
+    QCOMPARE(te.hourCounts, ta.hourly);
+    QCOMPARE(te.hourCounts.at(14), 12);
+    QCOMPARE(te.hourCounts.at(9), 3);
+
+    // 7 weekday labels Mon→Sun; counts == weekdayMonFirst.
+    QCOMPARE(te.weekdayLabels.size(), 7);
+    QCOMPARE(te.weekdayLabels.at(0), QStringLiteral("Mon"));
+    QCOMPARE(te.weekdayLabels.at(6), QStringLiteral("Sun"));
+    QCOMPARE(te.weekdayCounts, ta.weekdayMonFirst);
+    QCOMPARE(te.weekdayCounts.at(0), 40);
+
+    // Peak VALUE strings == the on-screen captions (parity).
+    QCOMPARE(te.busiestHourLabel, QStringLiteral("2–3 PM"));
+    QCOMPARE(te.busiestDayLabel, QStringLiteral("Monday"));
+}
+
+void TestReportingViewModel::buildTimeExport_emptyState_listsEmpty() {
+    ReportingViewModel vm;
+    vm.onTimeAnalyticsReady(zeros(24), zeros(7));   // all-zero, no error
+    const ReportTimeExport te = vm.buildTimeExport();
+    QCOMPARE(te.state, TimeAnalyticsExportState::Empty);
+    QVERIFY(te.hourLabels.isEmpty());
+    QVERIFY(te.hourCounts.isEmpty());
+    QVERIFY(te.weekdayLabels.isEmpty());
+    QVERIFY(te.weekdayCounts.isEmpty());
+    QVERIFY(te.busiestHourLabel.isEmpty());
+    QVERIFY(te.busiestDayLabel.isEmpty());
+}
+
+void TestReportingViewModel::buildTimeExport_errorState_winsOverData() {
+    ReportingViewModel vm;
+    vm.onTimeAnalyticsReady(denseHours(), denseWeek());   // hasData == true
+    vm.onTimeAnalyticsError(QStringLiteral("network down"));   // error set AFTER data
+    const ReportTimeExport te = vm.buildTimeExport();
+    QCOMPARE(te.state, TimeAnalyticsExportState::Error);   // error wins over hasData
+    QVERIFY(te.hourLabels.isEmpty());
+    QVERIFY(te.weekdayLabels.isEmpty());
+    QVERIFY(te.busiestHourLabel.isEmpty());
+    QVERIFY(te.busiestDayLabel.isEmpty());
+}
+
+void TestReportingViewModel::buildTimeExport_defensiveWrongLength_degradesToEmpty() {
+    ReportingViewModel vm;
+    vm.onTimeAnalyticsReady(zeros(10), zeros(7));   // hourly wrong length -> compute bails
+    const ReportTimeExport te = vm.buildTimeExport();
+    QCOMPARE(te.state, TimeAnalyticsExportState::Empty);   // degrade, no OOB
+    QVERIFY(te.hourLabels.isEmpty());
+    QVERIFY(te.weekdayLabels.isEmpty());
 }
 
 QTEST_MAIN(TestReportingViewModel)

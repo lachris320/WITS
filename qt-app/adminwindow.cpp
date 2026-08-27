@@ -1711,7 +1711,7 @@ void adminWindow::exportReportToPDF(const QJsonArray &data, const QJsonObject &f
     ReportPalette palette = ReportController::getPalette(filters["palette"].toString());
     // Legacy widgets export always showed the full roster; preserve that (includeRoster=true).
     if (!m_reportRenderer.paintReport(&pdf, 150, data, filters, palette, info,
-                                      ReportAnalytics::compute(data), true)) {
+                                      ReportAnalytics::compute(data), true, ReportTimeExport{})) {
         QMessageBox::critical(this, "Error", "Failed to open PDF for writing.");
         return;
     }
@@ -1750,7 +1750,7 @@ void adminWindow::printReport(const QJsonArray &data, const QJsonObject &filters
     ReportPalette palette = ReportController::getPalette(filters["palette"].toString());
     // Legacy widgets export always showed the full roster; preserve that (includeRoster=true).
     if (!m_reportRenderer.paintReport(&printer, printer.resolution(), data, filters, palette, info,
-                                      ReportAnalytics::compute(data), true)) {
+                                      ReportAnalytics::compute(data), true, ReportTimeExport{})) {
         QMessageBox::critical(this, "Error", "Failed to start painting to printer.");
     }
 }
@@ -1771,7 +1771,7 @@ void adminWindow::exportReportToExcel(const QJsonArray &rows, const QJsonObject 
     ReportHeaderInfo info = collectHeaderInfo();
     // Legacy widgets export always showed the full roster; preserve that (includeRoster=true).
     m_reportRenderer.writeReportToXlsx(xlsx, rows, filters, info,
-                                       ReportAnalytics::compute(rows), true);
+                                       ReportAnalytics::compute(rows), true, ReportTimeExport{});
 
     if (!xlsx.saveAs(filePath)) {
         QMessageBox::critical(this, "Error", "Failed to save Excel file.");
