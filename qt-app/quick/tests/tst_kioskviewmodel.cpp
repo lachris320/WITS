@@ -4,6 +4,7 @@
 #include <QFile>
 #include <QTemporaryDir>
 #include <QUrl>
+#include <QDateTime>
 #include "KioskViewModel.h"
 #include "RecentLoginsModel.h"
 #include "AdminSession.h"
@@ -26,6 +27,8 @@ class TestKioskViewModel : public QObject
 {
     Q_OBJECT
 private slots:
+    void formatLoginTimeUsesTwelveHourMeridiem();
+    void applyStudentStampsLocalTimeNotBackendTimeDate();
     void applyStudentSetsCurrentAndBumpsStats();
     void applyStudentPrependsRowFresh();
     void modelCapsAtForty();
@@ -77,6 +80,32 @@ QString TestKioskViewModel::writeLogoFile(const QString &fileName)
     f.write("not a real jpeg, just needs to exist on disk");
     f.close();
     return path;
+}
+
+void TestKioskViewModel::formatLoginTimeUsesTwelveHourMeridiem()
+{
+    QCOMPARE(KioskViewModel::formatLoginTime(QDateTime(QDate(2026,8,27), QTime(8,4,0))),
+             QStringLiteral("8:04 AM"));
+    QCOMPARE(KioskViewModel::formatLoginTime(QDateTime(QDate(2026,8,27), QTime(14,4,0))),
+             QStringLiteral("2:04 PM"));
+}
+
+void TestKioskViewModel::applyStudentStampsLocalTimeNotBackendTimeDate()
+{
+    KioskViewModel vm;
+    const QString sentinel = QStringLiteral("2020-01-01 00:00:00");  // a registration-style stamp
+    const QString before = KioskViewModel::formatLoginTime(QDateTime::currentDateTime());
+    vm.applyStudentLogin(student("Maria Santos", "BSCE", "3rd Year",
+                                 "Civil Engineering", sentinel));
+    const QString after = KioskViewModel::formatLoginTime(QDateTime::currentDateTime());
+
+    // The backend registration timestamp must NOT be shown.
+    QVERIFY(vm.currentTime() != sentinel);
+    // The shown time is the local login time (allowing a minute tick across the call).
+    QVERIFY(vm.currentTime() == before || vm.currentTime() == after);
+    // The feed row's time matches the card time (same single source).
+    RecentLoginsModel *m = vm.recentLogins();
+    QCOMPARE(m->data(m->index(0), RecentLoginsModel::TimeRole).toString(), vm.currentTime());
 }
 
 void TestKioskViewModel::applyStudentSetsCurrentAndBumpsStats()
