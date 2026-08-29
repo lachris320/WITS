@@ -88,6 +88,12 @@ void TestKioskViewModel::formatLoginTimeUsesTwelveHourMeridiem()
              QStringLiteral("8:04 AM"));
     QCOMPARE(KioskViewModel::formatLoginTime(QDateTime(QDate(2026,8,27), QTime(14,4,0))),
              QStringLiteral("2:04 PM"));
+    // 12-hour boundary: the classic off-by-12 trap. Noon is 12 PM (not 0 PM),
+    // midnight is 12 AM (not 0 AM) — pin both so the format can't regress.
+    QCOMPARE(KioskViewModel::formatLoginTime(QDateTime(QDate(2026,8,27), QTime(12,0,0))),
+             QStringLiteral("12:00 PM"));
+    QCOMPARE(KioskViewModel::formatLoginTime(QDateTime(QDate(2026,8,27), QTime(0,0,0))),
+             QStringLiteral("12:00 AM"));
 }
 
 void TestKioskViewModel::applyStudentStampsLocalTimeNotBackendTimeDate()
