@@ -119,6 +119,8 @@ static TimeAnalytics compute(const QList<int> &byHour,
 
 This matches the in-core precedent that library-hours filtering already lives in core (`aggregateVisitsByCourseHour(data, openHour, closeHour)`).
 
+**Single-source the decision-4 clamp.** The same `if (lo < 0 || hi > 23 || lo > hi) { lo = 0; hi = 23; }` clamp is needed in `compute`, `buildHourlyBars`, and `buildTimeExport`. Three hand-copied copies are a DRY liability — if one drifts, the peak and the bars desync. The plan should factor it into **one** shared helper both layers can call, e.g. a free function in `timeanalytics.h` (already included by the ViewModel) such as `void clampLibraryHours(int &lo, int &hi)` or `std::pair<int,int> clampedLibraryHours(int open, int close)`. This keeps the window arithmetic identical everywhere and pre-empts the dry-checker at PR time.
+
 ### 5.2 ViewModel — caching + windowed presentation (`ReportingViewModel.{h,cpp}`)
 
 **Cache the window at analytics-arrival (parity anchor).** Add two members:
@@ -139,6 +141,8 @@ m_hourlyBars.setBars(buildHourlyBars(m_timeAnalytics.hourly, m_openHour, m_close
 ```
 
 Both the screen path (here) and the `const buildTimeExport()` (export) read `m_openHour`/`m_closeHour`, so an identical window is guaranteed across screen and export **even if the librarian changes the hours in Settings between Generate and Export** — the window is frozen at the moment the analytics landed, not re-read at export time.
+
+**This caching is a correctness requirement, not merely a parity nicety.** `compute` scans the peak using the *arrival-time* window; the bars that `buildHourlyBars`/`buildTimeExport` emit later **must** use that same window, or the reported peak could name an hour with no drawn bar. The tempting "simplification" — re-reading `headerInfo()` fresh inside the const `buildTimeExport()` — would desync the peak from the bars whenever Settings changed mid-session. **The plan must preserve arrival-time caching; do not replace the cached members with a fresh `headerInfo()` read in the export path.**
 
 **Caption gate (decision 5).** Change the caption gate at `ReportingViewModel.cpp:497-502` from `m_timeAnalytics.hasData` to `m_timeAnalytics.peakHourCount > 0` for the **hour** caption:
 
@@ -254,6 +258,7 @@ The weekday caption and the two charts are unchanged; the enclosing data subtree
 | **Narrow window (e.g. `[11,12]`, 2 hours)** | Hourly table (2 rows) shorter than the weekday table (7 rows); the Excel cursor advances past the taller table (§5.4) so the footer never overprints the weekday rows. On-screen and PDF handle it automatically (fewer bars). |
 | **Empty range (`Empty` state)** | Unchanged from 4b-iv-b — the section shows the "No visit activity in this range" note, no charts/tables; windowing is irrelevant (no `Data` state reached). |
 | **Time-fetch failure (`Error` state)** | Unchanged — "Visit-time data could not be loaded" note; windowing irrelevant. |
+| **Librarian changes hours between Generate and Export** | Known, accepted asymmetry: the "When?" hourly chart uses the window **cached at Generate**, but `renderToDevice` reads `headerInfo()` fresh (`reportrenderer.cpp:632-633`), so within one PDF the per-course **line chart** (`makeLineChartImage`, `:710`/`:720`) could use the *live* hours while the When chart uses the cached hours — two charts with slightly different x-ranges. Rare, cosmetic, and the caching tradeoff is still correct (arrival-time caching is what keeps the windowed peak and its bars in agreement). In the common case (no mid-session change) they agree — a net improvement over today's fixed 24h. Documented so it is not a surprise smoke finding. |
 
 ## 8. Testing strategy
 
@@ -272,7 +277,7 @@ TDD per the project workflow (red → green → refactor, in subagents). The `co
 - **On-screen hourly bars window + every-hour labels:** `hourlyBars` (via `onTimeAnalyticsReady` + `buildHourlyBars`) yields `close-open+1` bars, each with a non-blank `label` (the `h % 3` blanking is gone).
 - **Windowed peak caption + parity:** `busiestHourLabel` equals `formatHourRange` of the **windowed** peak, and equals the carrier's `busiestHourLabel` (screen↔export parity). Include a case where the overall 24h peak is out-of-window to prove the caption follows the windowed peak.
 - **All-out-of-hours:** seed visits only outside the window → `busiestHourLabel().isEmpty()` and `buildTimeExport().busiestHourLabel.isEmpty()`, while `hasTimeData()` stays true and `weekdayBars` is populated.
-- **Existing `denseHours()`/`denseWeek()`/`zeros(n)` helpers** are reused; the `buildTimeExport_dataState_*` case (currently asserting 24 entries, `tst_reportingviewmodel.cpp:835-863`) is retargeted to the windowed count and the `TimeAnalytics::compute(...)` reference call at `:848` gains the window.
+- **Existing `denseHours()`/`denseWeek()`/`zeros(n)` helpers** are reused; the `buildTimeExport_dataState_*` case (currently asserting 24 entries, `tst_reportingviewmodel.cpp:835-863`) is retargeted to the windowed count and the `TimeAnalytics::compute(...)` reference call at `:848` gains the window. **The `:848-849` assertion is not a mechanical signature bump:** `QCOMPARE(te.hourCounts, ta.hourly)` compares the *windowed* carrier (e.g. 15 entries) against the *raw 24-wide* `hourly`, so it must be rewritten to compare against the `[open..close]` **slice** of `ta.hourly` (`ta.hourly.mid(open, close - open + 1)`), not the whole array. Call the assertion rewrite out explicitly in the plan.
 
 ### 8.3 `tst_reportrenderer` (`qt-app/tests/tst_reportrenderer.cpp`)
 - **`sampleTimeExportData()` reflects a windowed carrier:** the fixture (`:116-135`) currently seeds a full 24-entry carrier; retarget it to a windowed carrier (e.g. 15 entries for `[7,21]`, labels `"7A".."9P"`, peak `"2–3 PM"` at the in-window `2P` bar). The hourly/weekday image-maker "non-blank + >500 bar-color pixels" cases (`:523-550`) then exercise the windowed carrier; assert the maker draws `hourCounts.size()` bars.
