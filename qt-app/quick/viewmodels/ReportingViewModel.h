@@ -224,7 +224,8 @@ private:
     void resetTimeSection();          // clears ALL When-section state at Generate start
     // Presentation shaping for the "When?" section (formatting lives HERE, not in
     // core — spec §5.4). Static + pure so they are directly unit-testable.
-    static QList<BarsModel::Bar> buildHourlyBars(const QList<int> &hourly);        // 24, label blanked off-3h
+    static QList<BarsModel::Bar> buildHourlyBars(const QList<int> &hourly,
+                                                 int openHour, int closeHour);     // [open,close], every label
     static QList<BarsModel::Bar> buildWeekdayBars(const QList<int> &weekdayMonFirst); // 7, Mon-first
     static QString hourTick(int hour);          // 0..23 -> "12A","3A",...,"9P"
     static QString formatHourRange(int hour);   // 14 -> "2–3 PM"
@@ -281,6 +282,12 @@ private:
     BarsModel m_hourlyBars;
     BarsModel m_weekdayBars;
     TimeAnalytics m_timeAnalytics;
+    // Library-hours window cached from headerInfo() when analytics arrive, so the
+    // screen bars and the const buildTimeExport() crop to the SAME window as the
+    // peak scan (arrival-time parity anchor, spec §5.2). Defaults match the
+    // AppSettings library/openHour(7) / library/closeHour(21) defaults.
+    int m_openHour = 7;
+    int m_closeHour = 21;
     QString m_busiestHourLabel;
     QString m_busiestDayLabel;
     bool m_hasTimeData = false;

@@ -76,6 +76,8 @@ private slots:
     void buildTimeExport_emptyState_listsEmpty();
     void buildTimeExport_errorState_winsOverData();
     void buildTimeExport_defensiveWrongLength_degradesToEmpty();
+    void windowedCaption_followsInWindowPeakNotOverall();
+    void allOutOfHours_hourCaptionEmptyWeekdayStillShown();
 
 private:
     static QList<int> denseHours() {          // valid 24-array, peak at 14 (2 PM)
@@ -786,16 +788,18 @@ void TestReportingViewModel::timeModels_populatedWithLabelBlanking() {
     vm.onReportDataReady(QJsonArray());
     vm.onTimeAnalyticsReady(denseHours(), denseWeek());
 
-    QCOMPARE(vm.hourlyBars()->rowCount(), 24);
+    QCOMPARE(vm.hourlyBars()->rowCount(), 15);   // [7,21] inclusive = 15 bars
     QCOMPARE(vm.weekdayBars()->rowCount(), 7);
 
-    // Interval x-labels: hours 0/3/6.. carry a label, off-interval hours are blank.
+    // EVERY hour in the window is labeled now (the h%3 blanking is gone).
     QCOMPARE(vm.hourlyBars()->data(vm.hourlyBars()->index(0, 0),
-             BarsModel::LabelRole).toString(), QStringLiteral("12A"));
-    QCOMPARE(vm.hourlyBars()->data(vm.hourlyBars()->index(3, 0),
-             BarsModel::LabelRole).toString(), QStringLiteral("3A"));
-    QVERIFY(vm.hourlyBars()->data(vm.hourlyBars()->index(1, 0),
-            BarsModel::LabelRole).toString().isEmpty());
+             BarsModel::LabelRole).toString(), QStringLiteral("7A"));   // openHour
+    QCOMPARE(vm.hourlyBars()->data(vm.hourlyBars()->index(7, 0),
+             BarsModel::LabelRole).toString(), QStringLiteral("2P"));   // hour 14
+    QCOMPARE(vm.hourlyBars()->data(vm.hourlyBars()->index(14, 0),
+             BarsModel::LabelRole).toString(), QStringLiteral("9P"));   // closeHour 21
+    QVERIFY(!vm.hourlyBars()->data(vm.hourlyBars()->index(1, 0),
+             BarsModel::LabelRole).toString().isEmpty());               // no blanks
 
     // Weekday bars are Monday-first; value at Mon = denseWeek() Sun-first idx1 = 40.
     QCOMPARE(vm.weekdayBars()->data(vm.weekdayBars()->index(0, 0),
@@ -828,7 +832,7 @@ void TestReportingViewModel::hasTimeData_falseOnAllZeroShowsEmptyState() {
     QVERIFY(!vm.hasTimeData());
     QVERIFY(vm.busiestHourLabel().isEmpty());   // captions unused in the empty state
     QVERIFY(vm.busiestDayLabel().isEmpty());
-    QCOMPARE(vm.hourlyBars()->rowCount(), 24);  // bars still dense (all zero)
+    QCOMPARE(vm.hourlyBars()->rowCount(), 15);  // windowed bars (all zero)
     QCOMPARE(vm.weekdayBars()->rowCount(), 7);
 }
 
@@ -838,17 +842,17 @@ void TestReportingViewModel::buildTimeExport_dataState_populatesLabelsCountsPeak
     const ReportTimeExport te = vm.buildTimeExport();
     QCOMPARE(te.state, TimeAnalyticsExportState::Data);
 
-    // 24 hour labels, byte-identical to hourTick for known hours.
-    QCOMPARE(te.hourLabels.size(), 24);
-    QCOMPARE(te.hourLabels.at(0), QStringLiteral("12A"));
-    QCOMPARE(te.hourLabels.at(3), QStringLiteral("3A"));
-    QCOMPARE(te.hourLabels.at(14), QStringLiteral("2P"));
+    // 15 windowed hour labels ([7,21]), byte-identical to hourTick, EVERY label set.
+    QCOMPARE(te.hourLabels.size(), 15);
+    QCOMPARE(te.hourLabels.at(0), QStringLiteral("7A"));    // openHour 7
+    QCOMPARE(te.hourLabels.at(7), QStringLiteral("2P"));    // hour 14
+    QCOMPARE(te.hourLabels.at(14), QStringLiteral("9P"));   // closeHour 21
 
-    // Counts copied straight from the cached analytics.
-    const TimeAnalytics ta = TimeAnalytics::compute(denseHours(), denseWeek(), 0, 23);
-    QCOMPARE(te.hourCounts, ta.hourly);
-    QCOMPARE(te.hourCounts.at(14), 12);
-    QCOMPARE(te.hourCounts.at(9), 3);
+    // Counts equal the [7,21] SLICE of the RAW 24-wide hourly (NOT the whole array).
+    const TimeAnalytics ta = TimeAnalytics::compute(denseHours(), denseWeek(), 7, 21);
+    QCOMPARE(te.hourCounts, ta.hourly.mid(7, 15));   // hours 7..21 inclusive
+    QCOMPARE(te.hourCounts.at(7), 12);   // hour 14 -> window index 7
+    QCOMPARE(te.hourCounts.at(2), 3);    // hour 9  -> window index 2
 
     // 7 weekday labels Mon→Sun; counts == weekdayMonFirst.
     QCOMPARE(te.weekdayLabels.size(), 7);
@@ -894,6 +898,33 @@ void TestReportingViewModel::buildTimeExport_defensiveWrongLength_degradesToEmpt
     QCOMPARE(te.state, TimeAnalyticsExportState::Empty);   // degrade, no OOB
     QVERIFY(te.hourLabels.isEmpty());
     QVERIFY(te.weekdayLabels.isEmpty());
+}
+
+void TestReportingViewModel::windowedCaption_followsInWindowPeakNotOverall() {
+    // Overall 24h peak is at hour 6 (out of [7,21]); the in-window peak is hour 10.
+    // The caption must name the in-window peak, and screen must match export.
+    QList<int> byHour = zeros(24);
+    byHour[6] = 30;    // taller, pre-open -> ignored by the window
+    byHour[10] = 9;    // in-window peak -> "10-11 AM"
+    ReportingViewModel vm;
+    vm.onTimeAnalyticsReady(byHour, denseWeek());
+    QCOMPARE(vm.busiestHourLabel(), QStringLiteral("10–11 AM"));
+    QCOMPARE(vm.buildTimeExport().busiestHourLabel, QStringLiteral("10–11 AM"));
+    QVERIFY(vm.hasTimeData());
+}
+
+void TestReportingViewModel::allOutOfHours_hourCaptionEmptyWeekdayStillShown() {
+    // Every hourly visit is outside [7,21]; the windowed hour peak is 0 so the hour
+    // caption is suppressed, but hasData/weekday data remain (decision 5).
+    QList<int> byHour = zeros(24);
+    byHour[2] = 6;     // pre-open staff login, out of window
+    ReportingViewModel vm;
+    vm.onTimeAnalyticsReady(byHour, denseWeek());
+    QVERIFY(vm.busiestHourLabel().isEmpty());                       // screen caption gone
+    QVERIFY(vm.buildTimeExport().busiestHourLabel.isEmpty());       // export caption gone
+    QVERIFY(vm.hasTimeData());                                      // overall data present
+    QCOMPARE(vm.busiestDayLabel(), QStringLiteral("Monday"));       // weekday unaffected
+    QCOMPARE(vm.weekdayBars()->rowCount(), 7);
 }
 
 QTEST_MAIN(TestReportingViewModel)
