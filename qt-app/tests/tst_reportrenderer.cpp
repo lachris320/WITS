@@ -40,6 +40,7 @@ private slots:
     void writeReportToXlsx_timeBlock_narrowWindowFooterBelowWeekday();
     void writeReportToXlsx_timeBlock_disabledStateAbsent();
     void writeReportToXlsx_timeBlock_emptyAndErrorNotesDiffer();
+    void writeReportToXlsx_timeBlock_emptyPeakLabelUsesHourlyVisitsFallback();
     void makeHourlyBarChartImage_nonBlankAtScreenSafeSize();
     void makeWeekdayBarChartImage_nonBlankAtScreenSafeSize();
     void circularLogoPixmap_squareCircularAndUndistorted();
@@ -558,6 +559,43 @@ void TstReportRenderer::writeReportToXlsx_timeBlock_emptyAndErrorNotesDiffer() {
         xr, sampleRows(), sampleFilters(), sampleHeaderInfo(), sampleAnalytics(), false, err));
     QVERIFY(findNote(xr, "Visit-time data could not be loaded"));
     QVERIFY(!findNote(xr, "No visit activity in this range"));
+}
+
+// Mimics the all-out-of-hours case: peakHourCount==0 so the VM leaves
+// busiestHourLabel empty while the hourly table still renders (Data state).
+// Asserts the renderer's own empty-label -> "Hourly Visits" fallback in
+// peakHourCaption() (reportrenderer.cpp, anonymous namespace) fires on the
+// Excel "When?" peak cell, and that the dangling-colon bug ("Peak Hour: ")
+// is absent.
+void TstReportRenderer::writeReportToXlsx_timeBlock_emptyPeakLabelUsesHourlyVisitsFallback() {
+    ReportTimeExport t;
+    t.state = TimeAnalyticsExportState::Data;
+    t.hourLabels << QStringLiteral("7A") << QStringLiteral("8A") << QStringLiteral("9A");
+    t.hourCounts << 0 << 0 << 0;
+    static const char *const days[7] = { "Mon","Tue","Wed","Thu","Fri","Sat","Sun" };
+    const int dayCounts[7] = { 40, 8, 30, 8, 5, 1, 2 };
+    for (int d = 0; d < 7; ++d) {
+        t.weekdayLabels << QString::fromLatin1(days[d]);
+        t.weekdayCounts << dayCounts[d];
+    }
+    t.busiestHourLabel = QString();               // empty -> fallback caption
+    t.busiestDayLabel  = QStringLiteral("Monday");
+
+    QXlsx::Document xlsx;
+    QVERIFY(ReportRenderer::writeReportToXlsx(
+        xlsx, sampleRows(), sampleFilters(), sampleHeaderInfo(),
+        sampleAnalytics(), false, t));
+    QVERIFY(xlsx.selectSheet("Summary"));
+
+    auto findNote = [](QXlsx::Document &x, const QString &needle) {
+        for (int r = 1; r <= 80; ++r)
+            for (int c = 1; c <= 8; ++c)
+                if (x.read(r, c).toString() == needle) return true;
+        return false;
+    };
+
+    QVERIFY(findNote(xlsx, "Hourly Visits"));
+    QVERIFY(!findNote(xlsx, "Peak Hour: "));
 }
 
 void TstReportRenderer::makeHourlyBarChartImage_nonBlankAtScreenSafeSize() {
