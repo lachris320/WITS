@@ -1,7 +1,8 @@
 #include "timeanalytics.h"
 
 TimeAnalytics TimeAnalytics::compute(const QList<int> &byHour,
-                                     const QList<int> &byWeekdaySunFirst)
+                                     const QList<int> &byWeekdaySunFirst,
+                                     int openHour, int closeHour)
 {
     TimeAnalytics a;
 
@@ -20,9 +21,14 @@ TimeAnalytics TimeAnalytics::compute(const QList<int> &byHour,
     for (int i = 0; i < 7; ++i)
         a.weekdayMonFirst.append(byWeekdaySunFirst.at((i + 1) % 7));
 
-    // Peak hour — highest count; earliest bucket wins ties (strictly-greater keeps
-    // the first max seen).
-    for (int h = 0; h < 24; ++h) {
+    // Peak hour — highest count WITHIN the library-hours window [openHour,closeHour]
+    // inclusive (decision 1/3); earliest bucket wins ties (strictly-greater keeps
+    // the first max seen). A nonsensical window clamps to 0..23 (decision 4). When
+    // the window holds no positive bucket, peakHour/peakHourCount stay 0 — the
+    // sentinel decision 5 keys on. hourly stays RAW/24-wide (set above).
+    int lo = openHour, hi = closeHour;
+    clampLibraryHours(lo, hi);
+    for (int h = lo; h <= hi; ++h) {
         if (byHour.at(h) > a.peakHourCount) {
             a.peakHourCount = byHour.at(h);
             a.peakHour = h;

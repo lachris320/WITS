@@ -845,7 +845,7 @@ void TestReportingViewModel::buildTimeExport_dataState_populatesLabelsCountsPeak
     QCOMPARE(te.hourLabels.at(14), QStringLiteral("2P"));
 
     // Counts copied straight from the cached analytics.
-    const TimeAnalytics ta = TimeAnalytics::compute(denseHours(), denseWeek());
+    const TimeAnalytics ta = TimeAnalytics::compute(denseHours(), denseWeek(), 0, 23);
     QCOMPARE(te.hourCounts, ta.hourly);
     QCOMPARE(te.hourCounts.at(14), 12);
     QCOMPARE(te.hourCounts.at(9), 3);

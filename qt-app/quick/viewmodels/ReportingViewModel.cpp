@@ -484,7 +484,7 @@ void ReportingViewModel::onLoadError(const QString &/*title*/, const QString &me
 }
 void ReportingViewModel::onTimeAnalyticsReady(const QList<int> &byHour, const QList<int> &byWeekday)
 {
-    m_timeAnalytics = TimeAnalytics::compute(byHour, byWeekday);
+    m_timeAnalytics = TimeAnalytics::compute(byHour, byWeekday, 0, 23);
 
     m_hourlyBars.setBars(buildHourlyBars(m_timeAnalytics.hourly));
     m_weekdayBars.setBars(buildWeekdayBars(m_timeAnalytics.weekdayMonFirst));
