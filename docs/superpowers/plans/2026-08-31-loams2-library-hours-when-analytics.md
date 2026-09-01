@@ -82,8 +82,8 @@ ctest --test-dir C:\b\loams-lh --output-on-failure
 | `qt-app/core/timeanalytics.cpp` | clamp + windowed peak-hour scan; `hourly`/weekday/`hasData` unchanged | 1 |
 | `qt-app/tests/tst_timeanalytics.cpp` | existing 7 cases pass `0,23`; +5 windowed cases | 1 |
 | `qt-app/quick/viewmodels/ReportingViewModel.h` | `buildHourlyBars` 3-arg; new `m_openHour`/`m_closeHour` members | 2 |
-| `qt-app/quick/viewmodels/ReportingViewModel.cpp` | cache window in `onTimeAnalyticsReady`; window `buildHourlyBars` (drop `h%3`) + `buildTimeExport`; gate hour caption on `peakHourCount > 0` | 2 |
-| `qt-app/quick/tests/tst_reportingviewmodel.cpp` | windowed on-screen + export assertions incl. the `:848` slice rewrite; +windowed-peak / all-out-of-hours cases | 2 |
+| `qt-app/quick/viewmodels/ReportingViewModel.cpp` | T1: behavior-preserving `0,23` bump at the compute call. T2: cache window in `onTimeAnalyticsReady`; window `buildHourlyBars` (drop `h%3`) + `buildTimeExport`; gate hour caption on `peakHourCount > 0` | 1, 2 |
+| `qt-app/quick/tests/tst_reportingviewmodel.cpp` | T1: `0,23` bump at the `:848` reference call. T2: windowed on-screen + export assertions incl. the `:848` slice rewrite; +windowed-peak / all-out-of-hours cases | 1, 2 |
 | `qt-app/core/reportrenderer.cpp` | Excel cursor `qMax`; `peakHourCaption` empty-value fallback; **no change** to `makeHourlyBarChartImage` | 3 |
 | `qt-app/tests/tst_reportrenderer.cpp` | `sampleTimeExportData()` → windowed carrier; narrow-window Excel cursor test | 3 |
 | `qt-app/quick/qml/admin/ReportingScreen.qml` | `busiestHourCaption` visibility gated on `busiestHourLabel.length > 0` | 4 |
@@ -100,6 +100,8 @@ Adds the capability without turning the window on anywhere. `compute` gains the 
 - Modify: `qt-app/core/timeanalytics.h` — add `clampLibraryHours`; extend `compute` signature.
 - Modify: `qt-app/core/timeanalytics.cpp` — clamp + windowed peak scan.
 - Modify: `qt-app/tests/tst_timeanalytics.cpp` — pass `0,23` to existing cases; add 5 windowed cases.
+- Modify: `qt-app/quick/viewmodels/ReportingViewModel.cpp` — Step 5 behavior-preserving `0,23` bump at the `onTimeAnalyticsReady` compute call (Task 2 swaps in the cached window).
+- Modify: `qt-app/quick/tests/tst_reportingviewmodel.cpp` — Step 5 behavior-preserving `0,23` bump at the `:848` reference call (Task 2 rewrites the assertion).
 
 ### Interfaces
 
@@ -113,7 +115,7 @@ Adds the capability without turning the window on anywhere. `compute` gains the 
 
 - [ ] **Step 1: Update the existing `tst_timeanalytics` calls to the new 4-arg signature, and add the 5 windowed cases (RED).**
 
-In `qt-app/tests/tst_timeanalytics.cpp`, every existing `TimeAnalytics::compute(...)` call passes two args. Append `, 0, 23` to each so their assertions stay equivalent (full-range peak). The seven call sites are inside: `reorder_sundayFirstToMondayFirst`, `peakHour_picksHighestIndexAndCount`, `peakWeekday_picksHighestMonFirstIndexAndCount`, `tieBreak_earliestBucketWins`, `allZero_hasDataFalse`, `hasData_trueWhenAnyCountPositive`, and the three calls in `badLength_hasDataFalseNoCrash`.
+In `qt-app/tests/tst_timeanalytics.cpp`, every existing `TimeAnalytics::compute(...)` call passes two args. Append `, 0, 23` to each so their assertions stay equivalent (full-range peak). There are **nine** `compute(...)` calls across **seven** methods: one each in `reorder_sundayFirstToMondayFirst`, `peakHour_picksHighestIndexAndCount`, `peakWeekday_picksHighestMonFirstIndexAndCount`, `tieBreak_earliestBucketWins`, `allZero_hasDataFalse`, `hasData_trueWhenAnyCountPositive`, plus the **three** calls in `badLength_hasDataFalseNoCrash`. Update all nine.
 
 For example, change:
 
