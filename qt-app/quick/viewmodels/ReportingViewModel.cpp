@@ -178,6 +178,12 @@ QString ReportingViewModel::weekdayName(int monFirstIndex)
     return QString::fromLatin1(kNames[monFirstIndex]);
 }
 
+QString ReportingViewModel::windowedHourCaption() const
+{
+    return (m_timeAnalytics.peakHourCount > 0)
+               ? formatHourRange(m_timeAnalytics.peakHour) : QString();
+}
+
 ReportTimeExport ReportingViewModel::buildTimeExport() const
 {
     ReportTimeExport te;
@@ -225,8 +231,7 @@ ReportTimeExport ReportingViewModel::buildTimeExport() const
 
     // Mirror the screen gate (decision 5): empty hour caption when the windowed peak
     // is zero, so the export never prints a "Peak Hour: …" for an unshown bar.
-    te.busiestHourLabel = (m_timeAnalytics.peakHourCount > 0)
-                              ? formatHourRange(m_timeAnalytics.peakHour) : QString();
+    te.busiestHourLabel = windowedHourCaption();
     te.busiestDayLabel  = weekdayName(m_timeAnalytics.peakWeekdayMonFirst);
     return te;
 }
@@ -517,8 +522,7 @@ void ReportingViewModel::onTimeAnalyticsReady(const QList<int> &byHour, const QL
     // rather than naming a bar that is not drawn. The DAY caption stays gated on
     // hasData (the weekday chart is window-independent). In the common case the two
     // gates agree; they diverge only in the all-out-of-hours case.
-    m_busiestHourLabel = (m_timeAnalytics.peakHourCount > 0)
-                             ? formatHourRange(m_timeAnalytics.peakHour) : QString();
+    m_busiestHourLabel = windowedHourCaption();
     emit busiestHourLabelChanged();
     m_busiestDayLabel = m_timeAnalytics.hasData ? weekdayName(m_timeAnalytics.peakWeekdayMonFirst)
                                                 : QString();

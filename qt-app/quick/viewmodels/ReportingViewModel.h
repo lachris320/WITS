@@ -231,6 +231,7 @@ private:
     static QString formatHourRange(int hour);   // 14 -> "2–3 PM"
     static QString weekdayName(int monFirstIndex); // 0..6 (Mon..Sun) -> "Monday".."Sunday"
     static QString weekdayShortName(int monFirstIndex); // 0..6 (Mon..Sun) -> "Mon".."Sun"
+    QString windowedHourCaption() const;   // decision-5 gate: peak label, empty when no in-window peak
     bool operationInFlight() const;   // true until BOTH children settle
     void applyResult(const QJsonArray &data);    // Task 6
     void setExporting(bool v);

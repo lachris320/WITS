@@ -69,7 +69,7 @@ private slots:
     void outcome_rowsErrorTimeSuccess_primaryErrorFires();
     void canExport_unaffectedByTimeOutcome();
     void resetAtGenerate_clearsStaleTimeState();
-    void timeModels_populatedWithLabelBlanking();
+    void timeModels_windowedEveryHourLabeled();
     void captions_formattedForKnownPeaks();
     void hasTimeData_falseOnAllZeroShowsEmptyState();
     void buildTimeExport_dataState_populatesLabelsCountsPeaks();
@@ -780,7 +780,7 @@ void TestReportingViewModel::resetAtGenerate_clearsStaleTimeState() {
     QVERIFY(vm.timeLoading());           // section spinning again
 }
 
-void TestReportingViewModel::timeModels_populatedWithLabelBlanking() {
+void TestReportingViewModel::timeModels_windowedEveryHourLabeled() {
     ReportingViewModel vm;
     vm.setDurationType(0);
     vm.setDay("2026-08-14");
