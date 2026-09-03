@@ -456,6 +456,7 @@ Rectangle {
                         Text {
                             objectName: "busiestHourCaption"
                             text: qsTr("Busiest: %1").arg(screen.vm ? screen.vm.busiestHourLabel : "")
+                            visible: screen.vm ? screen.vm.busiestHourLabel.length > 0 : false
                             textFormat: Text.PlainText
                             color: Theme.text; font.family: Theme.typography.sans
                             font.pixelSize: Theme.typography.body

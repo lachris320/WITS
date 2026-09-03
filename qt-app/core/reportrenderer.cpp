@@ -67,7 +67,11 @@ QString timeExportNoteText(TimeAnalyticsExportState state) {
                : QStringLiteral("No visit activity in this range");
 }
 
-QString peakHourCaption(const ReportTimeExport &t) { return QStringLiteral("Peak Hour: %1").arg(t.busiestHourLabel); }
+QString peakHourCaption(const ReportTimeExport &t) {
+    return t.busiestHourLabel.isEmpty()
+               ? QStringLiteral("Hourly Visits")
+               : QStringLiteral("Peak Hour: %1").arg(t.busiestHourLabel);
+}
 QString peakDayCaption(const ReportTimeExport &t)  { return QStringLiteral("Busiest Day: %1").arg(t.busiestDayLabel); }
 } // namespace
 
@@ -1021,9 +1025,11 @@ bool ReportRenderer::writeReportToXlsx(QXlsx::Document &xlsx,
             xlsx.write(baseRow + 1 + i, 4, sanitizeXlsxText(timeExport.weekdayLabels.at(i)));
             xlsx.write(baseRow + 1 + i, 5, timeExport.weekdayCounts.at(i));
         }
-        // Advance the cursor past the TALLER (24-row hourly) table so the
-        // system-generated footer that follows lands below the whole block.
-        row = baseRow + 1 + timeExport.hourCounts.size();
+        // Advance the cursor past the TALLER of the two tables so the system-generated
+        // footer lands below the whole block. Windowing makes the hourly table as
+        // short as 2 rows (e.g. an [11,12] window), so it is no longer guaranteed
+        // taller than the 7-row weekday table (§5.4).
+        row = baseRow + 1 + qMax(timeExport.hourCounts.size(), timeExport.weekdayCounts.size());
         row += 1;
         break;
     }

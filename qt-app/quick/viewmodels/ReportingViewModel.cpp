@@ -111,19 +111,22 @@ QList<BarsModel::Bar> ReportingViewModel::aggregateVisitsByCourse(const QJsonArr
     return bars;
 }
 
-QList<BarsModel::Bar> ReportingViewModel::buildHourlyBars(const QList<int> &hourly)
+QList<BarsModel::Bar> ReportingViewModel::buildHourlyBars(const QList<int> &hourly,
+                                                          int openHour, int closeHour)
 {
     QList<BarsModel::Bar> bars;
     if (hourly.size() != 24)
         return bars;
-    bars.reserve(24);
-    for (int h = 0; h < 24; ++h) {
-        // Interval x-labels are DATA-DRIVEN (spec §5.4): only hours 0/3/6.. carry a
-        // label; the rest are blank so LBarChart (a Text under EVERY bar) shows
-        // ~every-3h ticks. The chart has no thinning logic of its own.
-        const QString label = (h % 3 == 0) ? hourTick(h) : QString();
-        bars.append({ label, double(hourly.at(h)) });
-    }
+    // Crop to the library-hours window [openHour,closeHour] inclusive (decision 3)
+    // via the SAME clamp fallback as the core peak scan (decision 4). Every bar
+    // carries its hour label now — the window is small (~8-15 bars) so the old
+    // every-3h blanking is dropped and the open/close endpoints become meaningful,
+    // labeled bars (decision 2).
+    int lo = openHour, hi = closeHour;
+    clampLibraryHours(lo, hi);
+    bars.reserve(hi - lo + 1);
+    for (int h = lo; h <= hi; ++h)
+        bars.append({ hourTick(h), double(hourly.at(h)) });
     return bars;
 }
 
@@ -175,6 +178,12 @@ QString ReportingViewModel::weekdayName(int monFirstIndex)
     return QString::fromLatin1(kNames[monFirstIndex]);
 }
 
+QString ReportingViewModel::windowedHourCaption() const
+{
+    return (m_timeAnalytics.peakHourCount > 0)
+               ? formatHourRange(m_timeAnalytics.peakHour) : QString();
+}
+
 ReportTimeExport ReportingViewModel::buildTimeExport() const
 {
     ReportTimeExport te;
@@ -201,9 +210,14 @@ ReportTimeExport ReportingViewModel::buildTimeExport() const
 
     te.state = TimeAnalyticsExportState::Data;
 
-    te.hourLabels.reserve(24);
-    te.hourCounts.reserve(24);
-    for (int h = 0; h < 24; ++h) {
+    // Crop the hour arrays to the cached library-hours window [m_openHour,m_closeHour]
+    // inclusive (decision 3), the SAME window compute scanned — so the exported bars
+    // and the exported peak agree. Same clamp fallback as core (decision 4).
+    int lo = m_openHour, hi = m_closeHour;
+    clampLibraryHours(lo, hi);
+    te.hourLabels.reserve(hi - lo + 1);
+    te.hourCounts.reserve(hi - lo + 1);
+    for (int h = lo; h <= hi; ++h) {
         te.hourLabels.append(hourTick(h));                 // reused 4b-iv-a helper
         te.hourCounts.append(m_timeAnalytics.hourly.at(h));
     }
@@ -215,7 +229,9 @@ ReportTimeExport ReportingViewModel::buildTimeExport() const
         te.weekdayCounts.append(m_timeAnalytics.weekdayMonFirst.at(d));
     }
 
-    te.busiestHourLabel = formatHourRange(m_timeAnalytics.peakHour);
+    // Mirror the screen gate (decision 5): empty hour caption when the windowed peak
+    // is zero, so the export never prints a "Peak Hour: …" for an unshown bar.
+    te.busiestHourLabel = windowedHourCaption();
     te.busiestDayLabel  = weekdayName(m_timeAnalytics.peakWeekdayMonFirst);
     return te;
 }
@@ -484,18 +500,29 @@ void ReportingViewModel::onLoadError(const QString &/*title*/, const QString &me
 }
 void ReportingViewModel::onTimeAnalyticsReady(const QList<int> &byHour, const QList<int> &byWeekday)
 {
-    m_timeAnalytics = TimeAnalytics::compute(byHour, byWeekday);
+    // Cache the library-hours window ONCE, at arrival, from the same AppSettings the
+    // export path reads. This is the parity anchor (spec §5.2): compute scans the
+    // peak with this window, and buildHourlyBars / buildTimeExport later emit bars
+    // with the SAME cached window, so the reported peak always names a drawn bar --
+    // even if the librarian changes the hours in Settings between Generate and Export.
+    const ReportHeaderInfo info = headerInfo();
+    m_openHour = info.openHour;
+    m_closeHour = info.closeHour;
 
-    m_hourlyBars.setBars(buildHourlyBars(m_timeAnalytics.hourly));
+    m_timeAnalytics = TimeAnalytics::compute(byHour, byWeekday, m_openHour, m_closeHour);
+
+    m_hourlyBars.setBars(buildHourlyBars(m_timeAnalytics.hourly, m_openHour, m_closeHour));
     m_weekdayBars.setBars(buildWeekdayBars(m_timeAnalytics.weekdayMonFirst));
 
     m_hasTimeData = m_timeAnalytics.hasData;
     emit hasTimeDataChanged();
 
-    // Captions ONLY when there is data — peak indices default to 0 ("12–1 AM" /
-    // "Monday") on an all-zero range and would mislead (spec §6).
-    m_busiestHourLabel = m_timeAnalytics.hasData ? formatHourRange(m_timeAnalytics.peakHour)
-                                                 : QString();
+    // HOUR caption is gated on the WINDOWED peak (decision 5): when every visit
+    // falls outside library hours, peakHourCount == 0 and the caption is suppressed
+    // rather than naming a bar that is not drawn. The DAY caption stays gated on
+    // hasData (the weekday chart is window-independent). In the common case the two
+    // gates agree; they diverge only in the all-out-of-hours case.
+    m_busiestHourLabel = windowedHourCaption();
     emit busiestHourLabelChanged();
     m_busiestDayLabel = m_timeAnalytics.hasData ? weekdayName(m_timeAnalytics.peakWeekdayMonFirst)
                                                 : QString();

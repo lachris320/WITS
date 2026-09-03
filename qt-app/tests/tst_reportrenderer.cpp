@@ -37,8 +37,10 @@ private slots:
     void paintReport_writesAnalyticsPdfAtHighDpi();
     void writeReportToXlsx_sanitizesFormulaLeadingNames();
     void writeReportToXlsx_timeBlock_dataStatePresent();
+    void writeReportToXlsx_timeBlock_narrowWindowFooterBelowWeekday();
     void writeReportToXlsx_timeBlock_disabledStateAbsent();
     void writeReportToXlsx_timeBlock_emptyAndErrorNotesDiffer();
+    void writeReportToXlsx_timeBlock_emptyPeakLabelUsesHourlyVisitsFallback();
     void makeHourlyBarChartImage_nonBlankAtScreenSafeSize();
     void makeWeekdayBarChartImage_nonBlankAtScreenSafeSize();
     void circularLogoPixmap_squareCircularAndUndistorted();
@@ -111,17 +113,18 @@ private:
             { QColor("#1f77b4"), QColor("#ff7f0e") }};
     }
 
-    // A Data-state carrier with VM-formatted labels seeded directly (this core
-    // test does not link the ViewModel). Peak hour 14 -> "2–3 PM"; Monday busiest.
+    // A Data-state carrier windowed to library hours [7,21] (15 hour entries),
+    // matching what the VM's windowed buildTimeExport now produces. Labels "7A".."9P";
+    // in-window peak "2–3 PM" at the 2P bar (hour 14). Weekday table stays 7 rows.
     static ReportTimeExport sampleTimeExportData() {
         ReportTimeExport t;
         t.state = TimeAnalyticsExportState::Data;
-        static const char *const hourTicks[24] = {
-            "12A","1A","2A","3A","4A","5A","6A","7A","8A","9A","10A","11A",
-            "12P","1P","2P","3P","4P","5P","6P","7P","8P","9P","10P","11P" };
-        for (int h = 0; h < 24; ++h) {
-            t.hourLabels << QString::fromLatin1(hourTicks[h]);
-            t.hourCounts << (h == 14 ? 12 : (h == 9 ? 3 : 0));
+        static const char *const hourTicks[15] = {
+            "7A","8A","9A","10A","11A","12P","1P","2P","3P","4P","5P","6P","7P","8P","9P" };
+        // Window index 7 == hour 14 (2 PM) peak; window index 2 == hour 9.
+        for (int i = 0; i < 15; ++i) {
+            t.hourLabels << QString::fromLatin1(hourTicks[i]);
+            t.hourCounts << (i == 7 ? 12 : (i == 2 ? 3 : 0));
         }
         static const char *const days[7] = { "Mon","Tue","Wed","Thu","Fri","Sat","Sun" };
         const int dayCounts[7] = { 40, 8, 30, 8, 5, 1, 2 };
@@ -483,6 +486,44 @@ void TstReportRenderer::writeReportToXlsx_timeBlock_dataStatePresent() {
     QVERIFY(foundDayCell);
 }
 
+void TstReportRenderer::writeReportToXlsx_timeBlock_narrowWindowFooterBelowWeekday() {
+    ReportTimeExport t;
+    t.state = TimeAnalyticsExportState::Data;
+    t.hourLabels << QStringLiteral("11A") << QStringLiteral("12P");   // 2-hour window
+    t.hourCounts << 3 << 5;
+    static const char *const days[7] = { "Mon","Tue","Wed","Thu","Fri","Sat","Sun" };
+    const int dayCounts[7] = { 40, 8, 30, 8, 5, 1, 2 };
+    for (int d = 0; d < 7; ++d) {
+        t.weekdayLabels << QString::fromLatin1(days[d]);
+        t.weekdayCounts << dayCounts[d];
+    }
+    t.busiestHourLabel = QStringLiteral("12–1 PM");
+    t.busiestDayLabel  = QStringLiteral("Monday");
+
+    QXlsx::Document xlsx;
+    QVERIFY(ReportRenderer::writeReportToXlsx(
+        xlsx, sampleRows(), sampleFilters(), sampleHeaderInfo(),
+        sampleAnalytics(), false, t));
+    QVERIFY(xlsx.selectSheet("Summary"));
+
+    // Find the weekday header ("Day") row and the system-generated footer row.
+    int dayHdrRow = -1, footerRow = -1;
+    for (int r = 1; r <= 120; ++r) {
+        for (int c = 1; c <= 8; ++c) {
+            const QString cell = xlsx.read(r, c).toString();
+            if (cell == "Day") dayHdrRow = r;
+            if (cell.startsWith("This is a system-generated report")) footerRow = r;
+        }
+    }
+    QVERIFY(dayHdrRow > 0);
+    QVERIFY(footerRow > 0);
+    // The weekday table occupies dayHdrRow+1 .. dayHdrRow+7. The footer must sit
+    // strictly BELOW the taller (weekday) table, never overprinting its rows.
+    QVERIFY2(footerRow > dayHdrRow + 7,
+             qPrintable(QString("footer row %1 overprints weekday table (Day hdr %2)")
+                            .arg(footerRow).arg(dayHdrRow)));
+}
+
 void TstReportRenderer::writeReportToXlsx_timeBlock_disabledStateAbsent() {
     QXlsx::Document xlsx;
     QVERIFY(ReportRenderer::writeReportToXlsx(
@@ -518,6 +559,43 @@ void TstReportRenderer::writeReportToXlsx_timeBlock_emptyAndErrorNotesDiffer() {
         xr, sampleRows(), sampleFilters(), sampleHeaderInfo(), sampleAnalytics(), false, err));
     QVERIFY(findNote(xr, "Visit-time data could not be loaded"));
     QVERIFY(!findNote(xr, "No visit activity in this range"));
+}
+
+// Mimics the all-out-of-hours case: peakHourCount==0 so the VM leaves
+// busiestHourLabel empty while the hourly table still renders (Data state).
+// Asserts the renderer's own empty-label -> "Hourly Visits" fallback in
+// peakHourCaption() (reportrenderer.cpp, anonymous namespace) fires on the
+// Excel "When?" peak cell, and that the dangling-colon bug ("Peak Hour: ")
+// is absent.
+void TstReportRenderer::writeReportToXlsx_timeBlock_emptyPeakLabelUsesHourlyVisitsFallback() {
+    ReportTimeExport t;
+    t.state = TimeAnalyticsExportState::Data;
+    t.hourLabels << QStringLiteral("7A") << QStringLiteral("8A") << QStringLiteral("9A");
+    t.hourCounts << 0 << 0 << 0;
+    static const char *const days[7] = { "Mon","Tue","Wed","Thu","Fri","Sat","Sun" };
+    const int dayCounts[7] = { 40, 8, 30, 8, 5, 1, 2 };
+    for (int d = 0; d < 7; ++d) {
+        t.weekdayLabels << QString::fromLatin1(days[d]);
+        t.weekdayCounts << dayCounts[d];
+    }
+    t.busiestHourLabel = QString();               // empty -> fallback caption
+    t.busiestDayLabel  = QStringLiteral("Monday");
+
+    QXlsx::Document xlsx;
+    QVERIFY(ReportRenderer::writeReportToXlsx(
+        xlsx, sampleRows(), sampleFilters(), sampleHeaderInfo(),
+        sampleAnalytics(), false, t));
+    QVERIFY(xlsx.selectSheet("Summary"));
+
+    auto findNote = [](QXlsx::Document &x, const QString &needle) {
+        for (int r = 1; r <= 80; ++r)
+            for (int c = 1; c <= 8; ++c)
+                if (x.read(r, c).toString() == needle) return true;
+        return false;
+    };
+
+    QVERIFY(findNote(xlsx, "Hourly Visits"));
+    QVERIFY(!findNote(xlsx, "Peak Hour: "));
 }
 
 void TstReportRenderer::makeHourlyBarChartImage_nonBlankAtScreenSafeSize() {
