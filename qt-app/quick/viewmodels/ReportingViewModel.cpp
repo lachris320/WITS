@@ -138,6 +138,11 @@ QString ReportingViewModel::weekdayShortName(int monFirstIndex)
     return QString::fromLatin1(kShort[monFirstIndex]);
 }
 
+QPageLayout::Orientation ReportingViewModel::pageOrientation(const QString &s)
+{
+    return s == QStringLiteral("Landscape") ? QPageLayout::Landscape : QPageLayout::Portrait;
+}
+
 QList<BarsModel::Bar> ReportingViewModel::buildWeekdayBars(const QList<int> &weekdayMonFirst)
 {
     QList<BarsModel::Bar> bars;
@@ -618,6 +623,13 @@ void ReportingViewModel::setChartType(const QString &c)
     if (m_chartType == c) return;
     m_chartType = c; emit chartTypeChanged();
 }
+void ReportingViewModel::setOrientation(const QString &v)
+{
+    if (v == m_orientation || !orientations().contains(v))
+        return;
+    m_orientation = v;
+    emit orientationChanged();
+}
 void ReportingViewModel::setIncludeRosterInExport(bool v)
 {
     if (m_includeRosterInExport == v) return;
@@ -697,6 +709,7 @@ void ReportingViewModel::exportPdf(const QUrl &fileUrl)
     QMetaObject::invokeMethod(this, [this, path]() {
         QPdfWriter writer(path);
         writer.setPageSize(QPageSize(QPageSize::A4));
+        writer.setPageOrientation(pageOrientation(m_orientation));
         const bool ok = renderToDevice(&writer, writer.resolution()) && QFileInfo::exists(path);
         if (ok)
             setExportStatus(tr("Saved %1").arg(QFileInfo(path).fileName()));
@@ -715,6 +728,7 @@ void ReportingViewModel::printReport()
     }
     // Opening the dialog is NOT "exporting" — the normal UI stays live.
     QPrinter printer(QPrinter::HighResolution);
+    printer.setPageOrientation(pageOrientation(m_orientation));
     QPrintDialog dlg(&printer);
     if (dlg.exec() != QDialog::Accepted)
         return;   // cancelled -> no-op, no error, no busy state

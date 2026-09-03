@@ -2572,6 +2572,8 @@ Item {
         property string palette: "Default"
         property var chartTypes: ["Bar", "Pie"]
         property string chartType: "Bar"
+        property var orientations: ["Portrait", "Landscape"]
+        property string orientation: "Portrait"
         property bool timeLoading: false
         property string timeError: ""
         property bool hasTimeData: true
@@ -2591,6 +2593,7 @@ Item {
         property int printCount: 0
         function setPalette(p) { palette = p }
         function setChartType(c) { chartType = c }
+        function setOrientation(v) { orientation = v }
         function exportPdf(u) { exportPdfCount++ }
         function exportExcel(u) { exportExcelCount++ }
         function printReport() { printCount++ }
@@ -2722,6 +2725,15 @@ Item {
             combo.selectValue("Blue");
             compare(reportingStub.palette, "Blue");
             reportingStub.palette = "Default";
+        }
+
+        function test_orientationComboHasAccessibleNameAndWrites() {
+            var combo = findChild(reporting, "orientationCombo");
+            verify(combo);
+            compare(combo.accessibleName, "Report orientation");
+            combo.selectValue("Landscape");
+            compare(reportingStub.orientation, "Landscape");
+            reportingStub.orientation = "Portrait";
         }
 
         function test_exportErrorPersistsAsFeedback() {

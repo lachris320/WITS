@@ -556,6 +556,16 @@ Rectangle {
                         currentValue: screen.vm ? screen.vm.chartType : "Bar"
                         onSelected: function(v) { if (screen.vm) screen.vm.setChartType(v); }
                     }
+                    LComboBox {
+                        id: orientationCombo
+                        objectName: "orientationCombo"
+                        accessibleName: qsTr("Report orientation")
+                        Layout.preferredWidth: 150
+                        model: screen.vm ? screen.vm.orientations : []
+                        placeholder: qsTr("Orientation")
+                        currentValue: screen.vm ? screen.vm.orientation : "Portrait"
+                        onSelected: function(v) { if (screen.vm) screen.vm.setOrientation(v); }
+                    }
 
                     Item { Layout.fillWidth: true }   // spacer
 

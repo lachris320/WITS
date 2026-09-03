@@ -2,6 +2,7 @@
 #include <QDate>
 #include <QJsonObject>
 #include <QJsonDocument>
+#include <QPageLayout>
 #include <QSignalSpy>
 #include <QUrl>
 #include <QTemporaryDir>
@@ -51,6 +52,13 @@ private slots:
     void buildExportFiltersMonthSchoolYear();
     void canExportTruthTable();
     void paletteAndChartTypeSettersEmit();
+    void orientation_defaultsToPortrait();
+    void setOrientation_validValueEmitsAndUpdates();
+    void setOrientation_blankRejectedNoSignal();
+    void setOrientation_garbageRejectedNoSignal();
+    void orientations_containsPortraitAndLandscape();
+    void pageOrientation_mapsPortraitAndLandscape();
+    void pageOrientation_mapsBlankAndGarbageToPortrait();
     void applyResultStoresNormalizedExportRows();
     void failedRefetchDisablesExportAndClearsRows();
     void exportPdfWritesFile();
@@ -925,6 +933,57 @@ void TestReportingViewModel::allOutOfHours_hourCaptionEmptyWeekdayStillShown() {
     QVERIFY(vm.hasTimeData());                                      // overall data present
     QCOMPARE(vm.busiestDayLabel(), QStringLiteral("Monday"));       // weekday unaffected
     QCOMPARE(vm.weekdayBars()->rowCount(), 7);
+}
+
+void TestReportingViewModel::orientation_defaultsToPortrait()
+{
+    ReportingViewModel vm;
+    QCOMPARE(vm.orientation(), QStringLiteral("Portrait"));
+}
+
+void TestReportingViewModel::setOrientation_validValueEmitsAndUpdates()
+{
+    ReportingViewModel vm;
+    QSignalSpy spy(&vm, &ReportingViewModel::orientationChanged);
+    vm.setOrientation("Landscape");
+    QCOMPARE(vm.orientation(), QStringLiteral("Landscape"));
+    QCOMPARE(spy.count(), 1);
+}
+
+void TestReportingViewModel::setOrientation_blankRejectedNoSignal()
+{
+    ReportingViewModel vm;
+    QSignalSpy spy(&vm, &ReportingViewModel::orientationChanged);
+    vm.setOrientation("");
+    QCOMPARE(vm.orientation(), QStringLiteral("Portrait"));   // unchanged
+    QCOMPARE(spy.count(), 0);                                  // no signal at all (decision 3)
+}
+
+void TestReportingViewModel::setOrientation_garbageRejectedNoSignal()
+{
+    ReportingViewModel vm;
+    QSignalSpy spy(&vm, &ReportingViewModel::orientationChanged);
+    vm.setOrientation("Diagonal");
+    QCOMPARE(vm.orientation(), QStringLiteral("Portrait"));   // unchanged
+    QCOMPARE(spy.count(), 0);                                  // no signal at all (decision 3)
+}
+
+void TestReportingViewModel::orientations_containsPortraitAndLandscape()
+{
+    ReportingViewModel vm;
+    QCOMPARE(vm.orientations(), QStringList({ QStringLiteral("Portrait"), QStringLiteral("Landscape") }));
+}
+
+void TestReportingViewModel::pageOrientation_mapsPortraitAndLandscape()
+{
+    QCOMPARE(ReportingViewModel::pageOrientation("Portrait"), QPageLayout::Portrait);
+    QCOMPARE(ReportingViewModel::pageOrientation("Landscape"), QPageLayout::Landscape);
+}
+
+void TestReportingViewModel::pageOrientation_mapsBlankAndGarbageToPortrait()
+{
+    QCOMPARE(ReportingViewModel::pageOrientation(""), QPageLayout::Portrait);
+    QCOMPARE(ReportingViewModel::pageOrientation("garbage"), QPageLayout::Portrait);
 }
 
 QTEST_MAIN(TestReportingViewModel)
