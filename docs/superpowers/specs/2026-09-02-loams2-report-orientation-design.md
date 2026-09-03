@@ -169,7 +169,7 @@ Add the signal next to `paletteChanged`/`chartTypeChanged` (`ReportingViewModel.
 void orientationChanged();
 ```
 
-Add the pure static mapping helper next to the other presentation-formatting statics (`ReportingViewModel.h:227-232`, the `buildHourlyBars`/`hourTick`/`formatHourRange` group — `pageOrientation` belongs in that same "static + pure, directly unit-testable" private section even though its job is page setup rather than hour formatting):
+Add the pure static mapping helper to the **PUBLIC** "Pure statics (network-free test seams)" group (`ReportingViewModel.h`, the `buildFilters`/`normalizeExportRows`/`semesterWindow` group near the top of `public:`), **not** the private presentation-helper group. It must be public because `tst_reportingviewmodel` asserts `ReportingViewModel::pageOrientation(...)` **directly** (§6.1) — a private static would not compile in the non-friend test. This mirrors the sibling library-hours spec's rationale for making `buildTimeExport()` public ("PUBLIC because tst_reportingviewmodel asserts it directly"), and the group it joins (`buildFilters` et al.) is the established home for directly-tested pure statics.
 
 ```cpp
 static QPageLayout::Orientation pageOrientation(const QString &s);   // "Landscape" only -> Landscape; else Portrait
@@ -336,7 +336,7 @@ Synthetic data only — no real student PII, per the project security-hygiene ru
 
 | File | Change |
 |---|---|
-| `qt-app/quick/viewmodels/ReportingViewModel.h` | New `Q_PROPERTY orientation`/`orientations`; new `orientation()`/`orientations()` readers; new `Q_INVOKABLE void setOrientation(const QString&)` declaration; new `orientationChanged()` signal; new private static `pageOrientation(const QString&)` declaration; new `#include <QPageLayout>`; new `QString m_orientation = QStringLiteral("Portrait");` member near `m_palette`/`m_chartType`. |
+| `qt-app/quick/viewmodels/ReportingViewModel.h` | New `Q_PROPERTY orientation`/`orientations`; new `orientation()`/`orientations()` readers; new `Q_INVOKABLE void setOrientation(const QString&)` declaration; new `orientationChanged()` signal; new **public** static `pageOrientation(const QString&)` declaration (a directly-tested pure seam, in the public seams group); new `#include <QPageLayout>`; new `QString m_orientation = QStringLiteral("Portrait");` member near `m_palette`/`m_chartType`. |
 | `qt-app/quick/viewmodels/ReportingViewModel.cpp` | New `setOrientation` (reject-invalid guard, decision 3); new `pageOrientation` static (decision 4); `exportPdf` gains one line (`writer.setPageOrientation(...)`) after `setPageSize`; `printReport` gains one line (`printer.setPageOrientation(...)`) between `QPrinter` construction and `QPrintDialog` construction (decision 5). |
 | `qt-app/quick/qml/admin/ReportingScreen.qml` | New `orientationCombo` `LComboBox` in `exportRow`, mirroring `chartTypeCombo`, inserted between the existing combos and the filling spacer. |
 | `qt-app/quick/tests/tst_reportingviewmodel.cpp` | New cases (each declared under `private slots:` AND defined): default `"Portrait"`; valid `setOrientation` emits + updates; invalid/blank `setOrientation` rejected with **zero** signal emissions; `orientations()` contents; four `pageOrientation()` mapping cases. |
