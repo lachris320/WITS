@@ -5,6 +5,7 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
+#include <QPageLayout>
 #include <QString>
 #include <QStringList>
 #include <QUrl>
@@ -64,6 +65,8 @@ class ReportingViewModel : public QObject
     Q_PROPERTY(QString palette READ palette WRITE setPalette NOTIFY paletteChanged)
     Q_PROPERTY(QStringList chartTypes READ chartTypes CONSTANT)
     Q_PROPERTY(QString chartType READ chartType WRITE setChartType NOTIFY chartTypeChanged)
+    Q_PROPERTY(QStringList orientations READ orientations CONSTANT)
+    Q_PROPERTY(QString orientation READ orientation WRITE setOrientation NOTIFY orientationChanged)
     Q_PROPERTY(bool exporting READ exporting NOTIFY exportingChanged)
     Q_PROPERTY(bool canExport READ canExport NOTIFY canExportChanged)
     Q_PROPERTY(QString exportStatus READ exportStatus NOTIFY exportStatusChanged)
@@ -91,6 +94,10 @@ public:
     struct Tiles { int totalVisits = 0; int studentsShown = 0; QString topCourse; };
     static Tiles deriveTiles(const QJsonArray &data);                             // Task 3
     static QJsonArray normalizeExportRows(const QJsonArray &data);   // visits string -> number
+    // "Landscape" (exact) -> QPageLayout::Landscape; everything else (incl. "Portrait", "",
+    // garbage) -> QPageLayout::Portrait. PUBLIC: a pure network-free test seam asserted
+    // directly by tst_reportingviewmodel (like buildFilters/normalizeExportRows).
+    static QPageLayout::Orientation pageOrientation(const QString &s);
     // Display-only Period for a semester, matching get_report_data.php's server windows.
     static DateRange semesterWindow(const QString &semester, int year);
     // Builds the JSON keys the export renderer (paintReport/writeReportToXlsx) reads:
@@ -137,6 +144,8 @@ public:
     QString palette() const { return m_palette; }
     QStringList chartTypes() const { return { QStringLiteral("Bar"), QStringLiteral("Pie") }; }
     QString chartType() const { return m_chartType; }
+    QStringList orientations() const { return { QStringLiteral("Portrait"), QStringLiteral("Landscape") }; }
+    QString orientation() const { return m_orientation; }
     bool exporting() const { return m_exporting; }
     bool canExport() const;
     QString exportStatus() const { return m_exportStatus; }
@@ -152,6 +161,7 @@ public:
 
     Q_INVOKABLE void setPalette(const QString &p);
     Q_INVOKABLE void setChartType(const QString &c);
+    Q_INVOKABLE void setOrientation(const QString &v);
     Q_INVOKABLE void setIncludeRosterInExport(bool v);
 
     Q_INVOKABLE void loadDepartments();          // bootstrap: departments + years (Task 5)
@@ -206,6 +216,7 @@ signals:
     void resultChanged();
     void paletteChanged();
     void chartTypeChanged();
+    void orientationChanged();
     void exportingChanged();
     void canExportChanged();
     void exportStatusChanged();
@@ -273,6 +284,7 @@ private:
 
     QString m_palette = QStringLiteral("Default");
     QString m_chartType = QStringLiteral("Bar");
+    QString m_orientation = QStringLiteral("Portrait");
     bool m_exporting = false;
     QString m_exportStatus;
     QString m_exportError;
