@@ -56,6 +56,7 @@ private slots:
     void setOrientation_validValueEmitsAndUpdates();
     void setOrientation_blankRejectedNoSignal();
     void setOrientation_garbageRejectedNoSignal();
+    void setOrientation_sameValueNoSignal();
     void orientations_containsPortraitAndLandscape();
     void pageOrientation_mapsPortraitAndLandscape();
     void pageOrientation_mapsBlankAndGarbageToPortrait();
@@ -966,6 +967,15 @@ void TestReportingViewModel::setOrientation_garbageRejectedNoSignal()
     vm.setOrientation("Diagonal");
     QCOMPARE(vm.orientation(), QStringLiteral("Portrait"));   // unchanged
     QCOMPARE(spy.count(), 0);                                  // no signal at all (decision 3)
+}
+
+void TestReportingViewModel::setOrientation_sameValueNoSignal()
+{
+    ReportingViewModel vm;
+    QSignalSpy spy(&vm, &ReportingViewModel::orientationChanged);
+    vm.setOrientation("Portrait");   // same as the default -> v == m_orientation half of the guard
+    QCOMPARE(vm.orientation(), QStringLiteral("Portrait"));   // unchanged
+    QCOMPARE(spy.count(), 0);                                  // no assignment, no signal
 }
 
 void TestReportingViewModel::orientations_containsPortraitAndLandscape()
