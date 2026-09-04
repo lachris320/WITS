@@ -874,6 +874,82 @@ Copy `deliverables/loams_api/search_students.php` → `C:/xampp/htdocs/loams_api
 
 ---
 
+### Task 9: Harden bulk-import photo→student matching
+
+Independent backend correctness fix (surfaced while designing display: a wrong match becomes a *visible* wrong face once photos are shown). The current bulk matcher `glob("*<school_id>*.*")` + `$candidates[0]` is a **substring, first-wins** match: a shorter ID that is a prefix of another (`2023-1` inside `2023-12`) can grab the wrong file, and multi-matches are non-deterministic. Replace it with a **whole-token** match (the ID must appear delimited by string start/end or a non-alphanumeric char), evaluated over a **sorted** file list for determinism. This preserves the existing "ID anywhere in the filename" flexibility (e.g. `lastname_2023-1234.jpg`) while eliminating the prefix collision.
+
+**Files:**
+- Modify: `deliverables/loams_api/upload_students_zip.php:86-96` (the per-row photo match)
+
+**No automated test:** this repo has no PHP test harness (backend is untested by design until Phase 6). Verify with `php -l` and the reasoning table below; do NOT stand up a PHP test framework for this.
+
+**Interfaces:**
+- Produces: unchanged JSON/DB contract — still writes `uploads/students/<school_id>.jpg` to the `photo` column; only the *matching* is stricter.
+
+- [ ] **Step 1: Add a token-match helper**
+
+In `deliverables/loams_api/upload_students_zip.php`, add near the top (after the includes, before the request handling) a helper:
+
+```php
+// Match a ZIP photo to a student by school_id as a WHOLE TOKEN: the id must be
+// bounded by string start/end or a non-alphanumeric char, so "2023-1" does NOT
+// match a "2023-12..." filename (the old glob("*id*") substring match did).
+// Scans a sorted list so a genuine multi-match is deterministic (first wins).
+function matchPhotoForId($photoDir, $schoolId) {
+    $files = glob($photoDir . "*.*");
+    if (!$files) return null;
+    sort($files); // deterministic order
+    $pattern = '/(^|[^A-Za-z0-9])' . preg_quote($schoolId, '/') . '([^A-Za-z0-9]|$)/';
+    foreach ($files as $f) {
+        if (preg_match($pattern, basename($f)) === 1) return $f;
+    }
+    return null;
+}
+```
+
+- [ ] **Step 2: Use it in the row loop**
+
+Replace the photo-match block (`deliverables/loams_api/upload_students_zip.php:86-96`, the `$photoPath = null; if ($zipExtracted) { $candidates = glob(...); ... }`) with:
+
+```php
+    // Photo comes ONLY from a whole-token ZIP match (never from a file column).
+    $photoPath = null;
+    if ($zipExtracted) {
+        $match = matchPhotoForId($photoDir, $school_id);
+        if ($match !== null) {
+            $targetPhoto = "uploads/students/" . $school_id . ".jpg";
+            if (copy($match, $targetPhoto)) {
+                $photoPath = $targetPhoto;
+            }
+        }
+    }
+```
+
+- [ ] **Step 3: Lint + reason through the cases**
+
+Run: `php -l "deliverables/loams_api/upload_students_zip.php"` (or `C:/xampp/php/php.exe -l ...`)
+Expected: `No syntax errors detected`.
+
+Confirm the intended behavior by inspection (matching `basename`, pattern anchored on non-alnum boundaries):
+
+| Student ID | ZIP filename | Old (substring) | New (token) |
+|---|---|---|---|
+| `2023-1`   | `2023-12.jpg`            | ✅ (wrong!) | ❌ correct |
+| `2023-1`   | `2023-1.jpg`            | ✅ | ✅ |
+| `2023-1234`| `2023-1234_maria.png`   | ✅ | ✅ (`_` boundary) |
+| `2023-1234`| `lastname_2023-1234.jpg`| ✅ | ✅ (mid-name, `_`/`.` boundaries) |
+| `2023-12`  | `2023-1.jpg`            | ❌ | ❌ |
+
+- [ ] **Step 4: Commit** (via the `commit` skill)
+
+Subject e.g. `fix(api): match bulk-import photos to students by whole-token id`. Body: substring+first-wins → deterministic whole-token match; note the prefix-collision (`2023-1` vs `2023-12`) it fixes and that display makes such mismatches user-visible; deploy alongside Task 8.
+
+- [ ] **Step 5: Deploy (manual, with Task 8)**
+
+Copy `deliverables/loams_api/upload_students_zip.php` → `C:/xampp/htdocs/loams_api/` when the client work deploys (a `.pre4a3-*.bak` backup already exists in the web root). Matching-only change; DB/JSON contract unchanged.
+
+---
+
 ## Verification (whole track, before `/create-pr`)
 
 - [ ] Full suite green: `ctest --test-dir qt-app/build --output-on-failure` (44 existing + `tst_searchresultsmodel` + the new component/kiosk/controller/kioskvm cases).
