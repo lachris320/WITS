@@ -17,7 +17,14 @@
 - **Naming:** QML types + C++ ViewModel/model classes are `PascalCase`; C++ members `m_camelCase`.
 - **Tests:** register via `wits_add_qttest()` (`qt-app/cmake/WitsTest.cmake`); add `OFFSCREEN` for any GUI/Quick/painting test.
 - **No shader-effects module:** do NOT `import QtQuick.Effects` / `Qt5Compat.GraphicalEffects`; circular crop is `Canvas`-based only (offscreen-safe).
-- **Build/test commands** (from `qt-app/build/`): configure `cmake -S qt-app -B qt-app/build`, build `cmake --build qt-app/build`, test `ctest --test-dir qt-app/build --output-on-failure`. Run a single test with `ctest --test-dir qt-app/build -R <name> --output-on-failure`.
+- **Build/test commands (THIS MACHINE — Qt tools not on PATH, and the default `qt-app/build` overflows Windows `MAX_PATH` on the QML module, so build into a SHORT external dir `C:\b\loams-4d`).** Run in PowerShell, prepending the kit to PATH every call (shell state does not persist):
+  ```powershell
+  $env:PATH = "C:\Qt\6.11.1\mingw_64\bin;C:\Qt\Tools\mingw1310_64\bin;C:\Qt\Tools\CMake_64\bin;C:\Qt\Tools\Ninja;" + $env:PATH
+  cmake -S "<repo>\qt-app" -B C:\b\loams-4d -G Ninja -DCMAKE_PREFIX_PATH="C:/Qt/6.11.1/mingw_64"   # once
+  cmake --build C:\b\loams-4d
+  ctest --test-dir C:\b\loams-4d -R <name> --output-on-failure   # single target; run isolated to avoid load-flakiness
+  ```
+  Harmless to ignore: the `LF will be replaced by CRLF` and the QXlsx `GuiPrivate target` CMake warnings. Note `tst_qml_theme` / `tst_qml_admin` can flake under a FULL parallel `ctest` run but pass in isolation (`-R`) — run per-target during task work.
 - **Commit** via the `commit` skill (Conventional Commits). Each commit ends with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>` (this session's attribution rule).
 
 ---
