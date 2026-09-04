@@ -7,6 +7,21 @@ include "db.php";
 include "auth_helper.php";
 requireAdminAuth($conn);   // 401 before any DB read, ZIP extract, or insert
 
+// Match a ZIP photo to a student by school_id as a WHOLE TOKEN: the id must be
+// bounded by string start/end or a non-alphanumeric char, so "2023-1" does NOT
+// match a "2023-12..." filename (the old glob("*id*") substring match did).
+// Scans a sorted list so a genuine multi-match is deterministic (first wins).
+function matchPhotoForId($photoDir, $schoolId) {
+    $files = glob($photoDir . "*.*");
+    if (!$files) return null;
+    sort($files); // deterministic order
+    $pattern = '/(^|[^A-Za-z0-9])' . preg_quote($schoolId, '/') . '([^A-Za-z0-9]|$)/';
+    foreach ($files as $f) {
+        if (preg_match($pattern, basename($f)) === 1) return $f;
+    }
+    return null;
+}
+
 if ($_SERVER["REQUEST_METHOD"] !== "POST") {
     echo json_encode(["status" => "error", "message" => "POST required"]);
     exit;
@@ -83,13 +98,13 @@ foreach ($rows as $row) {
         continue;
     }
 
-    // Photo comes ONLY from the ZIP match (never from a file column).
+    // Photo comes ONLY from a whole-token ZIP match (never from a file column).
     $photoPath = null;
     if ($zipExtracted) {
-        $candidates = glob($photoDir . "*" . $school_id . "*.*");
-        if ($candidates && count($candidates) > 0) {
+        $match = matchPhotoForId($photoDir, $school_id);
+        if ($match !== null) {
             $targetPhoto = "uploads/students/" . $school_id . ".jpg";
-            if (copy($candidates[0], $targetPhoto)) {
+            if (copy($match, $targetPhoto)) {
                 $photoPath = $targetPhoto;
             }
         }
