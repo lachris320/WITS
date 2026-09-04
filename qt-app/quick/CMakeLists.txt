@@ -67,6 +67,7 @@ qt_add_qml_module(witsquickmodule
         qml/components/LEyebrow.qml
         qml/components/LKioskGradient.qml
         qml/components/LLogoCircle.qml
+        qml/components/LCircleImage.qml
         qml/components/LSidebarBrand.qml
         qml/components/LConfirmDialog.qml
         qml/components/LComboBox.qml
