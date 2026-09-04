@@ -88,37 +88,57 @@ Item {
                     border.color: Qt.alpha(Theme.accent.base, 0.15)
                 }
 
-                ColumnLayout {
+                RowLayout {
                     anchors.fill: parent
                     anchors.margins: Theme.spacing.xl
-                    spacing: Theme.spacing.xs
-                    LEyebrow { text: qsTr("NOW SIGNED IN"); color: Theme.accent.base }
-                    Text {
+                    spacing: Theme.spacing.lg
+
+                    LAvatar {
+                        Layout.preferredWidth: 72
+                        Layout.preferredHeight: 72
+                        Layout.alignment: Qt.AlignVCenter
+                        size: 72
                         visible: mainArea.vm ? mainArea.vm.hasStudent : false
-                        text: mainArea.vm ? mainArea.vm.currentFullName : ""
-                        // Phase 4d role map: hero is the maroon gradient; name =
-                        // cream brand.on (Kiosk:76). onKiosk would be invisible.
-                        color: Theme.brand.on
-                        font.family: Theme.typography.serif
-                        font.pixelSize: Theme.typography.heroName
-                        font.weight: Font.Bold
+                        source: mainArea.vm ? mainArea.vm.currentPhotoUrl : ""
+                        initials: mainArea.vm ? mainArea.vm.currentInitials : ""
+                        // On-dark pairing for the maroon hero gradient (mirrors
+                        // the emphasized feed chip's brand.base/brand.on inversion,
+                        // KioskFeedRow.qml:41-45). Tokens + Qt.alpha, no raw hex.
+                        fallbackBackground: Qt.alpha(Theme.brand.on, 0.18)
+                        fallbackForeground: Theme.brand.on
                     }
-                    Text {
-                        visible: mainArea.vm ? mainArea.vm.hasStudent : false
-                        text: mainArea.vm
-                              ? (mainArea.vm.currentCourse + " · " + mainArea.vm.currentYear
-                                 + " · " + mainArea.vm.currentDept + " · " + mainArea.vm.currentTime)
-                              : ""
-                        color: Theme.brand.onMuted
-                        font.family: Theme.typography.sans
-                        font.pixelSize: Theme.typography.body
-                    }
-                    Text {
-                        visible: mainArea.vm ? !mainArea.vm.hasStudent : true
-                        text: qsTr("Scan your ID to begin")
-                        color: Theme.brand.onMuted
-                        font.family: Theme.typography.serif
-                        font.pixelSize: Theme.typography.cardTitle
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: Theme.spacing.xs
+                        LEyebrow { text: qsTr("NOW SIGNED IN"); color: Theme.accent.base }
+                        Text {
+                            visible: mainArea.vm ? mainArea.vm.hasStudent : false
+                            text: mainArea.vm ? mainArea.vm.currentFullName : ""
+                            // Phase 4d role map: hero is the maroon gradient; name =
+                            // cream brand.on (Kiosk:76). onKiosk would be invisible.
+                            color: Theme.brand.on
+                            font.family: Theme.typography.serif
+                            font.pixelSize: Theme.typography.heroName
+                            font.weight: Font.Bold
+                        }
+                        Text {
+                            visible: mainArea.vm ? mainArea.vm.hasStudent : false
+                            text: mainArea.vm
+                                  ? (mainArea.vm.currentCourse + " · " + mainArea.vm.currentYear
+                                     + " · " + mainArea.vm.currentDept + " · " + mainArea.vm.currentTime)
+                                  : ""
+                            color: Theme.brand.onMuted
+                            font.family: Theme.typography.sans
+                            font.pixelSize: Theme.typography.body
+                        }
+                        Text {
+                            visible: mainArea.vm ? !mainArea.vm.hasStudent : true
+                            text: qsTr("Scan your ID to begin")
+                            color: Theme.brand.onMuted
+                            font.family: Theme.typography.serif
+                            font.pixelSize: Theme.typography.cardTitle
+                        }
                     }
                 }
             }

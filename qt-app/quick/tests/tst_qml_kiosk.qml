@@ -80,6 +80,8 @@ Item {
         property int visitorsToday: 27
         property int visitorsThisHour: 4
         property var recentLogins: feedModel
+        property string currentPhotoUrl: ""
+        property string currentInitials: "MS"
     }
     KioskMain { id: main; width: 800; height: 800; vm: stubMainVm }
 
@@ -104,6 +106,14 @@ Item {
         function test_feedTransitionsAssigned() {
             verify(main.feedAddTransition !== null);
             verify(main.feedDisplacedTransition !== null);
+        }
+        function test_heroShowsInitialsWhenNoPhoto() {
+            // stubMainVm.hasStudent is true and currentPhotoUrl is empty ->
+            // the hero avatar falls back to initials.
+            waitForRendering(main);
+            var t = findChild(main, "avatarInitials");
+            verify(t !== null);
+            compare(t.text, "MS");
         }
     }
 
