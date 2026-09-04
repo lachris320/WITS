@@ -494,26 +494,16 @@ Rectangle {
                                 anchors.rightMargin: Theme.spacing.xl2
                                 spacing: Theme.spacing.md
 
-                                // Circle avatar. No student photo data exists
-                                // yet (spec owner decision, Phase 3:
-                                // search_students.php returns no photo
-                                // column) — initials-only, same chip pattern
-                                // as the kiosk login feed.
-                                Rectangle {
+                                // Photo-or-initials avatar (Phase 4d). Photo
+                                // comes from SearchResultsModel's absolute
+                                // PhotoRole; empty -> initials fallback.
+                                LAvatar {
                                     Layout.preferredWidth: 40
                                     Layout.preferredHeight: 40
                                     Layout.alignment: Qt.AlignVCenter
-                                    radius: width / 2
-                                    color: Theme.brand.soft
-                                    Text {
-                                        objectName: "avatarInitials"
-                                        anchors.centerIn: parent
-                                        text: model.initials
-                                        color: Theme.brand.base
-                                        font.family: Theme.typography.sans
-                                        font.pixelSize: Theme.typography.control
-                                        font.weight: Font.ExtraBold
-                                    }
+                                    size: 40
+                                    source: model.photo
+                                    initials: model.initials
                                 }
 
                                 ColumnLayout {
