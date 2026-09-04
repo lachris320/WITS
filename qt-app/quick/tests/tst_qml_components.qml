@@ -15,6 +15,24 @@ Item {
     // Task 7), the LDatePicker fixture, in its own band below `chk`.
     width: 400; height: 3600
 
+    // --- LAvatar fixtures (photo display) ---
+    // A valid, tiny, synchronously-decodable image (1x1 PNG data URI). Same
+    // bytes as the logoUrl fixtures below (brandWithLogo / logoCircleLoaded)
+    // — a byte-verified, well-formed PNG chunk stream, unlike the visually
+    // similar string originally drafted here, whose IDAT length field was
+    // corrupt (parses as 70 bytes instead of the correct 68, leaving IEND
+    // unreachable) and left avImage's Image.status stuck below Ready forever.
+    readonly property string tinyPng:
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+
+    LAvatar { id: avImage;   initials: "MS"; source: host.tinyPng }
+    LAvatar { id: avEmpty;   initials: "MS"; source: "" }
+    LAvatar { id: avSentinel;   initials: "MS"; source: "http://h/loams_api/uploads/default.jpg" }
+    LAvatar { id: avSentinelNested; initials: "MS"; source: "http://h/loams_api/uploads/students/default.jpg" }
+    LAvatar { id: avBroken;  initials: "MS"; source: "file:///no/such/avatar_zzz.jpg" }
+    LAvatar { id: avTokens;  initials: "MS"; source: "";
+              fallbackBackground: "#123456"; fallbackForeground: "#654321" }
+
     LButton    { id: b;  text: "OK" }
     LButton {
         id: bTip
@@ -1539,6 +1557,42 @@ Item {
             var field = findChild(datePicker, "datePickerField");   // a root child, not in the popup
             verify(field, "field text element exists");
             compare(field.text, "2026-08-14");
+        }
+    }
+
+    TestCase {
+        name: "LAvatarFallback"
+        when: windowShown
+
+        function test_emptySourceShowsInitials() {
+            compare(avEmpty.showInitials, true);
+            var t = findChild(avEmpty, "avatarInitials");
+            verify(t !== null); compare(t.text, "MS");
+        }
+        function test_sentinelShowsInitials() {
+            compare(avSentinel.showInitials, true);        // path ends default.jpg
+        }
+        function test_sentinelNestedShowsInitials() {
+            compare(avSentinelNested.showInitials, true);  // suffix check, not filename equality
+        }
+        function test_validImageShowsPhotoNotInitials() {
+            tryCompare(avImage, "showingImage", true, 5000);
+            compare(avImage.showInitials, false);
+        }
+        function test_brokenSourceFallsBackViaImageError() {
+            // Must reach a genuine Image.Error (distinct from empty source).
+            tryCompare(avBroken, "imageStatus", Image.Error, 5000);
+            compare(avBroken.showInitials, true);
+            compare(avBroken.showingImage, false);
+        }
+        function test_fallbackTokensOverrideDefaults() {
+            var t = findChild(avTokens, "avatarInitials");
+            verify(t !== null);
+            compare(String(t.color), String(Qt.color("#654321")));
+        }
+        function test_fallbackTokensDefaultToBrand() {
+            var t = findChild(avEmpty, "avatarInitials");
+            compare(String(t.color), String(Theme.brand.base));
         }
     }
 }
