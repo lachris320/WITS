@@ -81,7 +81,8 @@ while ($row = $result->fetch_assoc()) {
         "year_level" => $row['year_level'],
         "status" => $row['status'],
         "gender" => $row['gender'],
-        "visits" => isset($row['visits']) ? intval($row['visits']) : 0
+        "visits" => isset($row['visits']) ? intval($row['visits']) : 0,
+        "photo" => $row['photo'] ?? ""
     ];
 }
 
