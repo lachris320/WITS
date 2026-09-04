@@ -249,6 +249,12 @@ wits_add_qttest(tst_studentstablemodel
     SOURCES tests/tst_studentstablemodel.cpp
     LIBS witsquickmodule)
 
+# --- SearchResultsModel unit test (C++ QtTest). PhotoRole joins ApiConfig base;
+# pure model logic, no NAM -> QTEST_APPLESS_MAIN, no OFFSCREEN. ---
+wits_add_qttest(tst_searchresultsmodel
+    SOURCES tests/tst_searchresultsmodel.cpp
+    LIBS witsquickmodule)
+
 # --- ReportRowsModel unit test (C++ QtTest). Pure QAbstractListModel over
 # JSON rows, no NAM -> QTEST_APPLESS_MAIN, no OFFSCREEN. ---
 wits_add_qttest(tst_reportrowsmodel

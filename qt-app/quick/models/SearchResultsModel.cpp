@@ -1,6 +1,7 @@
 #include "SearchResultsModel.h"
 
 #include "Initials.h"
+#include "apiconfig.h"
 
 SearchResultsModel::SearchResultsModel(QObject *parent) : QAbstractListModel(parent) {}
 
@@ -27,6 +28,13 @@ QVariant SearchResultsModel::data(const QModelIndex &index, int role) const
     // the avatar chip is initials-only for now. Deriving here means a future
     // photo role can slot in without touching StudentRecord/the parser.
     case InitialsRole:   return Initials::of(r.name);
+    case PhotoRole:
+        // Approach A: the ONLY place a search photo becomes absolute. Never join
+        // an empty path (ApiConfig::endpoint("") yields the bare base URL, which
+        // would force a needless load-failure) — return empty so LAvatar shows
+        // initials.
+        return r.photo.isEmpty() ? QString()
+                                 : ApiConfig::endpoint(r.photo).toString();
     default:             return {};
     }
 }
@@ -36,7 +44,8 @@ QHash<int, QByteArray> SearchResultsModel::roleNames() const
     return {
         { NameRole, "name" }, { SchoolIdRole, "schoolId" }, { CourseRole, "course" },
         { DepartmentRole, "department" }, { YearLevelRole, "yearLevel" },
-        { StatusRole, "status" }, { VisitsRole, "visits" }, { InitialsRole, "initials" },
+        { StatusRole, "status" }, { VisitsRole, "visits" },
+        { InitialsRole, "initials" }, { PhotoRole, "photo" },
     };
 }
 

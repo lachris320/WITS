@@ -24,6 +24,7 @@ public:
         StatusRole,
         VisitsRole,
         InitialsRole,
+        PhotoRole,
     };
 
     explicit SearchResultsModel(QObject *parent = nullptr);
