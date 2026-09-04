@@ -155,6 +155,25 @@ Both new QML files must be added to the `witsquickmodule` `QML_FILES` list in
 `quick/CMakeLists.txt` (the `qt_add_qml_module` call) so the `LOAMS` module
 exposes them: `qml/components/LCircleImage.qml` and `qml/components/LAvatar.qml`.
 
+### 4.1c Builder notes (from review — carry into the plan)
+
+Two non-blocking implementation guards the `/writing-plans` step must encode:
+
+1. **Preserve `objectName`s during the `LCircleImage` extraction.** The moved
+   elements must keep their existing `objectName`s — `logoCanvas`, `logoImage`,
+   `logoPlaceholder` — because `LLogoCircle`'s regression tests locate them via
+   `findChild()` (`tst_qml_components.qml:961-1332`, including pixel-level
+   cover-crop/circular-clip proofs `test_paintIsCenterCroppedNotStretched` /
+   `test_paintStaysInsideTheCircle`). `findChild` walks the whole subtree, so the
+   extra `LLogoCircle → LCircleImage` nesting is fine, but a rename would silently
+   neuter the guard.
+2. **LAvatar toggles by `visible`, not by unmounting `LCircleImage`.** Keep
+   `LCircleImage` mounted with the initials chip as its placeholder slot and swap
+   `visible` (the `LLogoCircle` Canvas-and-placeholder pattern). A conditional
+   that unmounts `LCircleImage` when `showInitials` flips true would reset
+   `imageStatus`, and since `showInitials` binds on
+   `imageStatus === Image.Error`, that can oscillate the binding.
+
 ### 4.2 Data model — `core/studentdata.h`
 
 Add one field to `StudentRecord`:
