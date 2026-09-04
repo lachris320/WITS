@@ -38,6 +38,8 @@ class KioskViewModel : public QObject
     Q_PROPERTY(QString currentYear READ currentYear NOTIFY currentChanged)
     Q_PROPERTY(QString currentDept READ currentDept NOTIFY currentChanged)
     Q_PROPERTY(QString currentTime READ currentTime NOTIFY currentChanged)
+    Q_PROPERTY(QString currentPhotoUrl READ currentPhotoUrl NOTIFY currentChanged)
+    Q_PROPERTY(QString currentInitials READ currentInitials NOTIFY currentChanged)
     Q_PROPERTY(int visitorsToday READ visitorsToday NOTIFY statsChanged)
     Q_PROPERTY(int visitorsThisHour READ visitorsThisHour NOTIFY statsChanged)
     Q_PROPERTY(QString clockTime READ clockTime NOTIFY clockChanged)
@@ -70,6 +72,8 @@ public:
     QString currentYear() const { return m_currentYear; }
     QString currentDept() const { return m_currentDept; }
     QString currentTime() const { return m_currentTime; }
+    QString currentPhotoUrl() const { return m_currentPhotoUrl; }
+    QString currentInitials() const { return m_currentInitials; }
     int visitorsToday() const { return m_visitorsToday; }
     int visitorsThisHour() const { return m_visitorsThisHour; }
     QString clockTime() const { return m_clockTime; }
@@ -145,6 +149,7 @@ private:
     bool m_hasStudent = false;
     QString m_currentName, m_currentFullName, m_currentCourse,
             m_currentYear, m_currentDept, m_currentTime;
+    QString m_currentPhotoUrl, m_currentInitials;
     int m_visitorsToday = 0;
     int m_visitorsThisHour = 0;
     int m_currentHour = -1;
