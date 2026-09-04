@@ -71,6 +71,7 @@ SearchOutcome StudentController::parseSearchResponse(const QByteArray &raw,
         rec.gender     = s["gender"].toString();
         rec.status     = s["status"].toString();
         rec.visits     = s["visits"].toInt();
+        rec.photo      = s["photo"].toString();   // additive; absent/empty -> ""
         outRecords.append(rec);
     }
     outSearchTerm = obj["searchTerm"].toString();      // line 3242
