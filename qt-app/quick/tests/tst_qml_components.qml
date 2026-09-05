@@ -32,6 +32,10 @@ Item {
     LAvatar { id: avBroken;  initials: "MS"; source: "file:///no/such/avatar_zzz.jpg" }
     LAvatar { id: avTokens;  initials: "MS"; source: "";
               fallbackBackground: "#123456"; fallbackForeground: "#654321" }
+    // Near-miss suffix: contains "default.jpg" but does not END with it (extra
+    // trailing chars). _endsWithDefault does an exact suffix slice, not a
+    // substring search, so this must NOT be treated as the sentinel.
+    LAvatar { id: avNearMissSuffix; initials: "MS"; source: "http://h/loams_api/uploads/default.jpgx" }
 
     LButton    { id: b;  text: "OK" }
     LButton {
@@ -1574,6 +1578,11 @@ Item {
         }
         function test_sentinelNestedShowsInitials() {
             compare(avSentinelNested.showInitials, true);  // suffix check, not filename equality
+        }
+        function test_nearMissSuffixIsNotSentinel() {
+            // "default.jpgx" must NOT be treated as the default.jpg sentinel
+            // (suffix check is exact on "default.jpg", not a loose contains).
+            compare(avNearMissSuffix._emptyOrSentinel, false);
         }
         function test_validImageShowsPhotoNotInitials() {
             tryCompare(avImage, "showingImage", true, 5000);
