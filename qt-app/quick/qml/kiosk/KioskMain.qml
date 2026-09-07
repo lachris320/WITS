@@ -94,18 +94,23 @@ Item {
                     spacing: Theme.spacing.lg
 
                     LAvatar {
-                        Layout.preferredWidth: 72
-                        Layout.preferredHeight: 72
+                        Layout.preferredWidth: 84
+                        Layout.preferredHeight: 84
                         Layout.alignment: Qt.AlignVCenter
-                        size: 72
+                        size: 84
+                        cornerRadius: 14
+                        borderWidth: 2
+                        borderColor: Theme.accent.base
                         visible: mainArea.vm ? mainArea.vm.hasStudent : false
                         source: mainArea.vm ? mainArea.vm.currentPhotoUrl : ""
                         initials: mainArea.vm ? mainArea.vm.currentInitials : ""
-                        // On-dark pairing for the maroon hero gradient (mirrors
-                        // the emphasized feed chip's brand.base/brand.on inversion,
-                        // KioskFeedRow.qml:41-45). Tokens + Qt.alpha, no raw hex.
-                        fallbackBackground: Qt.alpha(Theme.brand.on, 0.18)
-                        fallbackForeground: Theme.brand.on
+                        // Reference: rounded-square photo with a 2px gold border on
+                        // translucent cream; fallback = gold serif initials only
+                        // (no caption — owner-confirmed, no "ID PHOTO" label).
+                        fallbackBackground: Qt.alpha(Theme.brand.on, 0.10)
+                        fallbackForeground: Theme.accent.base
+                        initialsFontFamily: Theme.typography.serif
+                        initialsPixelSize: 30
                     }
 
                     ColumnLayout {

@@ -33,8 +33,10 @@ Rectangle {
         spacing: Theme.spacing.md
 
         Rectangle {   // avatar chip
-            Layout.preferredWidth: 34; Layout.preferredHeight: 34
-            radius: width / 2
+            Layout.preferredWidth: 36; Layout.preferredHeight: 36
+            radius: 8   // rounded square, matching the updated kiosk reference
+            border.width: 1.5
+            border.color: row.rowFresh ? Theme.accent.base : Theme.border
             // Phase 4d role map: feed avatar = maroon brand, NOT gold (Kiosk:179-180),
             // matching the admin search avatar. Fresh: brand.base bg + brand.on cream
             // initials; non-fresh: brand.soft bg + brand.base maroon initials.
