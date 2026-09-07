@@ -115,6 +115,15 @@ Item {
             verify(t !== null);
             compare(t.text, "MS");
         }
+        // Idle hero (no student signed in): the LSpinner ring shows in the
+        // avatar's slot instead of the LAvatar photo/initials chip.
+        function test_idleHeroShowsSpinnerNotAvatar() {
+            stubMainVm.hasStudent = false;
+            waitForRendering(main);
+            var spinnerCanvas = findChild(main, "spinnerCanvas");
+            verify(spinnerCanvas !== null);
+            stubMainVm.hasStudent = true;   // restore for other tests
+        }
     }
 
     // --- KioskScreen fixture ---

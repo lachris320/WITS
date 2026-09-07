@@ -91,7 +91,15 @@ Item {
                 RowLayout {
                     anchors.fill: parent
                     anchors.margins: Theme.spacing.xl
-                    spacing: Theme.spacing.lg
+                    spacing: Theme.spacing.md
+
+                    LSpinner {
+                        Layout.preferredWidth: 52
+                        Layout.preferredHeight: 52
+                        Layout.alignment: Qt.AlignVCenter
+                        size: 52
+                        visible: mainArea.vm ? !mainArea.vm.hasStudent : true
+                    }
 
                     LAvatar {
                         Layout.preferredWidth: 84

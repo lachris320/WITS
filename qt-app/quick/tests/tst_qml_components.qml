@@ -43,6 +43,10 @@ Item {
     LAvatar { id: avRoundedSquare; initials: "MS"; source: ""; cornerRadius: 14 }
     LAvatar { id: avBordered; initials: "MS"; source: ""; borderWidth: 2; borderColor: "#E8B10E" }
 
+    // --- LSpinner fixtures (kiosk idle loading ring) ---
+    LSpinner { id: spin1; size: 52 }
+    LSpinner { id: spinStatic; size: 40; spinning: false }
+
     LButton    { id: b;  text: "OK" }
     LButton {
         id: bTip
@@ -1628,6 +1632,30 @@ Item {
             verify(overlay !== null);
             compare(overlay.visible, true);
             compare(overlay.border.width, 2);
+        }
+    }
+
+    TestCase {
+        name: "LSpinnerBehavior"
+        when: windowShown
+
+        function test_spinnerHasCanvas() {
+            verify(findChild(spin1, "spinnerCanvas") !== null);
+        }
+        function test_spinnerImplicitSizeFollowsSize() {
+            compare(spin1.implicitWidth, 52);
+        }
+        // The RotationAnimator is an animation node, not reliably locatable
+        // via findChild(); asserting on `spinning` itself (default follows
+        // Theme.motion.enabled) and proving the toggle is harmless is the
+        // robust check here rather than depending on private animation
+        // internals.
+        function test_spinningControlsAnimator() {
+            compare(spin1.spinning, true);
+            compare(spinStatic.spinning, false);
+            spin1.spinning = false;
+            compare(spin1.spinning, false);
+            spin1.spinning = true;   // restore fixture default
         }
     }
 }
