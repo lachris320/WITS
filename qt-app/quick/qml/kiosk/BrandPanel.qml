@@ -16,6 +16,25 @@ Rectangle {
     clip: true
     gradient: LKioskGradient {}
 
+    // Decorative gold ring poking in from the top-right corner (reference
+    // Library Kiosk v2.dc.html ~L31: a 240px circle at top:-70/right:-70 with a
+    // 36px translucent-gold border). Purely decorative — declared first so it
+    // sits behind the content, and clipped to the panel by the `clip: true`
+    // above. The reference slow-spins it (ringSpin 60s), but a uniform-border
+    // circle is rotationally symmetric so the spin is imperceptible; omitted.
+    Rectangle {
+        width: 240
+        height: 240
+        radius: width / 2
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.topMargin: -70
+        anchors.rightMargin: -70
+        color: "transparent"
+        border.width: 36
+        border.color: Qt.alpha(Theme.accent.base, 0.13)
+    }
+
     // The reference (Library Kiosk v2.dc.html ~L30) lays the three blocks out
     // as a vertically-centered group with an even 28px gap between them
     // (justify-content:center; gap:28px), not one pinned to the bottom by a
