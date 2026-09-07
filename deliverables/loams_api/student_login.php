@@ -71,9 +71,14 @@ try {
         $scriptDir = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/\\');
         $baseURL = $protocol . $host . $scriptDir . '/';
 
-        // Check if photo exists using absolute path
+        // Check if photo exists using absolute path.
+        // Photos are stored relative to THIS script's directory (loams_api/uploads/…),
+        // and the URL below is built from $scriptDir (loams_api/) — so the existence
+        // check must resolve against __DIR__ too. Using $_SERVER['DOCUMENT_ROOT']
+        // (htdocs/) looked one level too high (htdocs/uploads/…), never found a real
+        // photo, and every student fell back to the default.jpg sentinel.
         $photoRelPath = $student['photo'] ?: '';
-        $photoAbsPath = $_SERVER['DOCUMENT_ROOT'] . '/' . ltrim($photoRelPath, '/');
+        $photoAbsPath = __DIR__ . '/' . ltrim($photoRelPath, '/');
         
         if ($photoRelPath && file_exists($photoAbsPath)) {
             $photoURL = $baseURL . $photoRelPath;

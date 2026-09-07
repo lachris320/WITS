@@ -15,6 +15,38 @@ Item {
     // Task 7), the LDatePicker fixture, in its own band below `chk`.
     width: 400; height: 3600
 
+    // --- LAvatar fixtures (photo display) ---
+    // A valid, tiny, synchronously-decodable image (1x1 PNG data URI). Same
+    // bytes as the logoUrl fixtures below (brandWithLogo / logoCircleLoaded)
+    // — a byte-verified, well-formed PNG chunk stream, unlike the visually
+    // similar string originally drafted here, whose IDAT length field was
+    // corrupt (parses as 70 bytes instead of the correct 68, leaving IEND
+    // unreachable) and left avImage's Image.status stuck below Ready forever.
+    readonly property string tinyPng:
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+
+    LAvatar { id: avImage;   initials: "MS"; source: host.tinyPng }
+    LAvatar { id: avEmpty;   initials: "MS"; source: "" }
+    LAvatar { id: avSentinel;   initials: "MS"; source: "http://h/loams_api/uploads/default.jpg" }
+    LAvatar { id: avSentinelNested; initials: "MS"; source: "http://h/loams_api/uploads/students/default.jpg" }
+    LAvatar { id: avBroken;  initials: "MS"; source: "file:///no/such/avatar_zzz.jpg" }
+    LAvatar { id: avTokens;  initials: "MS"; source: "";
+              fallbackBackground: "#123456"; fallbackForeground: "#654321" }
+    // Near-miss suffix: contains "default.jpg" but does not END with it (extra
+    // trailing chars). _endsWithDefault does an exact suffix slice, not a
+    // substring search, so this must NOT be treated as the sentinel.
+    LAvatar { id: avNearMissSuffix; initials: "MS"; source: "http://h/loams_api/uploads/default.jpgx" }
+    // Shape/border fixtures (kiosk rounded-square round, Phase 4e): search's
+    // default (-1) must stay circular; the kiosk hero passes cornerRadius +
+    // a border to get a gold-bordered rounded square.
+    LAvatar { id: avDefaultShape; initials: "MS"; source: "" }
+    LAvatar { id: avRoundedSquare; initials: "MS"; source: ""; cornerRadius: 14 }
+    LAvatar { id: avBordered; initials: "MS"; source: ""; borderWidth: 2; borderColor: "#E8B10E" }
+
+    // --- LSpinner fixtures (kiosk idle loading ring) ---
+    LSpinner { id: spin1; size: 52 }
+    LSpinner { id: spinStatic; size: 40; spinning: false }
+
     LButton    { id: b;  text: "OK" }
     LButton {
         id: bTip
@@ -1539,6 +1571,91 @@ Item {
             var field = findChild(datePicker, "datePickerField");   // a root child, not in the popup
             verify(field, "field text element exists");
             compare(field.text, "2026-08-14");
+        }
+    }
+
+    TestCase {
+        name: "LAvatarFallback"
+        when: windowShown
+
+        function test_emptySourceShowsInitials() {
+            compare(avEmpty.showInitials, true);
+            var t = findChild(avEmpty, "avatarInitials");
+            verify(t !== null); compare(t.text, "MS");
+        }
+        function test_sentinelShowsInitials() {
+            compare(avSentinel.showInitials, true);        // path ends default.jpg
+        }
+        function test_sentinelNestedShowsInitials() {
+            compare(avSentinelNested.showInitials, true);  // suffix check, not filename equality
+        }
+        function test_nearMissSuffixIsNotSentinel() {
+            // "default.jpgx" must NOT be treated as the default.jpg sentinel
+            // (suffix check is exact on "default.jpg", not a loose contains).
+            compare(avNearMissSuffix._emptyOrSentinel, false);
+        }
+        function test_validImageShowsPhotoNotInitials() {
+            tryCompare(avImage, "showingImage", true, 5000);
+            compare(avImage.showInitials, false);
+        }
+        function test_brokenSourceFallsBackViaImageError() {
+            // Must reach a genuine Image.Error (distinct from empty source).
+            tryCompare(avBroken, "imageStatus", Image.Error, 5000);
+            compare(avBroken.showInitials, true);
+            compare(avBroken.showingImage, false);
+        }
+        function test_fallbackTokensOverrideDefaults() {
+            var t = findChild(avTokens, "avatarInitials");
+            verify(t !== null);
+            compare(String(t.color), String(Qt.color("#654321")));
+        }
+        function test_fallbackTokensDefaultToBrand() {
+            var t = findChild(avEmpty, "avatarInitials");
+            compare(String(t.color), String(Theme.brand.base));
+        }
+
+        // --- Shape/border params (kiosk rounded-square round) ---
+        // Regression guard: no cornerRadius set (the search default) must
+        // still render the fallback chip as a full circle.
+        function test_cornerRadiusDefaultsToCircle() {
+            var chip = findChild(avDefaultShape, "avatarChip");
+            verify(chip !== null);
+            compare(chip.radius, chip.width / 2);
+        }
+        function test_roundedSquareUsesCornerRadius() {
+            var chip = findChild(avRoundedSquare, "avatarChip");
+            verify(chip !== null);
+            compare(chip.radius, 14);
+        }
+        function test_borderShownWhenWidthSet() {
+            var overlay = findChild(avBordered, "avatarBorderFrame");
+            verify(overlay !== null);
+            compare(overlay.visible, true);
+            compare(overlay.border.width, 2);
+        }
+    }
+
+    TestCase {
+        name: "LSpinnerBehavior"
+        when: windowShown
+
+        function test_spinnerHasCanvas() {
+            verify(findChild(spin1, "spinnerCanvas") !== null);
+        }
+        function test_spinnerImplicitSizeFollowsSize() {
+            compare(spin1.implicitWidth, 52);
+        }
+        // The RotationAnimator is an animation node, not reliably locatable
+        // via findChild(); asserting on `spinning` itself (default follows
+        // Theme.motion.enabled) and proving the toggle is harmless is the
+        // robust check here rather than depending on private animation
+        // internals.
+        function test_spinningControlsAnimator() {
+            compare(spin1.spinning, true);
+            compare(spinStatic.spinning, false);
+            spin1.spinning = false;
+            compare(spin1.spinning, false);
+            spin1.spinning = true;   // restore fixture default
         }
     }
 }

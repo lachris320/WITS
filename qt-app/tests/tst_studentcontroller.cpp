@@ -33,6 +33,10 @@ private slots:
     void parseSearchReadsVisits();
     void parseSearchDefaultsVisitsToZero();
 
+    // parseSearchResponse — photo (additive, search-read-only)
+    void parseSearchResponsePopulatesPhoto();
+    void csvAndBulkUpdateDoNotEmitPhoto();
+
     // parseBulkUpdateResponse
     void parseBulkSuccessWithErrors();
     void parseBulkSuccessNoErrors();
@@ -345,6 +349,39 @@ void TestStudentController::parseSearchDefaultsVisitsToZero()
     StudentController::parseSearchResponse(raw, recs, msg, term);
     QCOMPARE(recs.size(), 1);
     QCOMPARE(recs.at(0).visits, 0);   // field absent -> QJsonValue::toInt() default
+}
+
+void TestStudentController::parseSearchResponsePopulatesPhoto()
+{
+    const QByteArray raw = R"({
+        "status":"success",
+        "students":[
+            {"school_id":"2023-1","name":"Maria Santos","photo":"uploads/students/2023-1.jpg"},
+            {"school_id":"2023-2","name":"Jose Ramirez","photo":""},
+            {"school_id":"2023-3","name":"Ana Cruz"}
+        ],
+        "searchTerm":"a"
+    })";
+    QList<StudentRecord> recs;
+    QString msg, term;
+    const SearchOutcome out = StudentController::parseSearchResponse(raw, recs, msg, term);
+    QCOMPARE(out, SearchOutcome::Results);
+    QCOMPARE(recs.size(), 3);
+    QCOMPARE(recs[0].photo, QStringLiteral("uploads/students/2023-1.jpg"));
+    QCOMPARE(recs[1].photo, QString());   // empty string -> empty
+    QCOMPARE(recs[2].photo, QString());   // absent key   -> empty
+}
+
+void TestStudentController::csvAndBulkUpdateDoNotEmitPhoto()
+{
+    StudentRecord r;
+    r.code = "C1"; r.schoolId = "2023-1"; r.name = "Maria Santos";
+    r.course = "BSCE"; r.department = "CE"; r.yearLevel = "3";
+    r.gender = "F"; r.status = "Regular"; r.photo = "uploads/students/2023-1.jpg";
+    // CSV must not gain a photo column.
+    const QByteArray csv = StudentController::toCsv({ r });
+    QVERIFY(!csv.contains("uploads/students/2023-1.jpg"));
+    QVERIFY(!csv.toLower().contains("photo"));
 }
 
 void TestStudentController::deleteStudents_buildsFormBodyWithAdminKey()

@@ -13,6 +13,7 @@
 #include "RfidQuickFilter.h"
 #include "AdminSession.h"
 #include "SchoolInfoUtil.h"
+#include "Initials.h"
 
 KioskViewModel::KioskViewModel(QObject *parent)
     : QObject(parent)
@@ -119,6 +120,8 @@ void KioskViewModel::applyStudentLogin(const QJsonObject &student)
     // it would show an arbitrary past registration timestamp. Ignore it.
     m_currentTime     = formatLoginTime(QDateTime::currentDateTime());
     m_currentName     = m_currentFullName.section(QLatin1Char(' '), 0, 0);  // first name
+    m_currentPhotoUrl = student.value(QStringLiteral("photo_url")).toString();
+    m_currentInitials = Initials::of(m_currentFullName);
     m_hasStudent      = true;
 
     m_recent.prepend(m_currentFullName, m_currentCourse, m_currentYear,

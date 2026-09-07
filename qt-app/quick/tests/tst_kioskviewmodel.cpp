@@ -50,6 +50,10 @@ private slots:
     void reloadIsQuietWhenNothingChanged();
     void reloadClearsRemovedLogo();
 
+    // photo_url + initials — precomputed in C++ for the kiosk avatar.
+    void test_applyStudentLoginSetsPhotoUrlAndInitials();
+    void test_applyStudentLoginEmptyPhotoUrlStaysEmpty();
+
 private:
     // AppSettings is process-isolated onto a throwaway INI by
     // settingsisolation.cpp (linked into every wits_add_qttest target), but
@@ -331,6 +335,32 @@ void TestKioskViewModel::reloadClearsRemovedLogo()
     QCOMPARE(info.count(), 1);
     QVERIFY(!vm.hasLogo());
     QVERIFY(vm.logoUrl().isEmpty());
+}
+
+void TestKioskViewModel::test_applyStudentLoginSetsPhotoUrlAndInitials()
+{
+    KioskViewModel vm;
+    QSignalSpy cur(&vm, &KioskViewModel::currentChanged);
+    QJsonObject s;
+    s["name"] = "Maria Santos";
+    s["course"] = "BSCE";
+    s["year_level"] = "3rd Year";
+    s["department"] = "CE";
+    s["photo_url"] = "http://localhost/loams_api/uploads/students/2023-1.jpg";
+    vm.applyStudentLogin(s);
+    QVERIFY(cur.count() >= 1);
+    QCOMPARE(vm.currentPhotoUrl(),
+             QStringLiteral("http://localhost/loams_api/uploads/students/2023-1.jpg"));
+    QCOMPARE(vm.currentInitials(), QStringLiteral("MS"));
+}
+
+void TestKioskViewModel::test_applyStudentLoginEmptyPhotoUrlStaysEmpty()
+{
+    KioskViewModel vm;
+    QJsonObject s; s["name"] = "Ana Cruz";   // no photo_url
+    vm.applyStudentLogin(s);
+    QCOMPARE(vm.currentPhotoUrl(), QString());
+    QCOMPARE(vm.currentInitials(), QStringLiteral("AC"));
 }
 
 QTEST_MAIN(TestKioskViewModel)

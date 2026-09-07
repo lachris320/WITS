@@ -20,6 +20,8 @@ struct StudentRecord
     QString gender;
     QString status;
     int     visits = 0;   // lifetime library visit count (search read-only, §5.3)
+    QString photo;   // relative path from search_students.php; empty on NULL.
+                     // Search-read-only: NOT serialized back (toCsv/bulkUpdate).
 };
 
 // Decoded bulk_update_students.php response.
