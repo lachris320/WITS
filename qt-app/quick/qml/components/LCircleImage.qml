@@ -15,6 +15,9 @@ Item {
     property int size: 52
     property int ringWidth: 0
     property color ringColor: Theme.accent.base
+    // -1 (or >= size/2) => full circle (default, unchanged behavior).
+    // 0..<size/2 => rounded-rect crop with that corner radius (kiosk hero/chips).
+    property int cornerRadius: -1
     // Shown when the canvas isn't drawing an image. Consumers fill this slot.
     default property alias placeholderContent: placeholderHost.data
     // Exposed so consumers can gate on load state (LAvatar reads imageStatus for
@@ -72,6 +75,19 @@ Item {
                  && canvasImageReady
         onVisibleChanged: if (visible) requestPaint()
 
+        // Traces a rounded-rect path for the non-circle clip. Core QtQuick
+        // Canvas only (no shader-effects module linked in this repo), same
+        // constraint that ruled out a Rectangle clip:true for the circle case.
+        function roundRectPath(ctx, x, y, w, h, r) {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.arcTo(x + w, y, x + w, y + h, r);
+            ctx.arcTo(x + w, y + h, x, y + h, r);
+            ctx.arcTo(x, y + h, x, y, r);
+            ctx.arcTo(x, y, x + w, y, r);
+            ctx.closePath();
+        }
+
         onPaint: {
             var ctx = getContext("2d");
             ctx.reset();
@@ -84,11 +100,18 @@ Item {
             var side = Math.min(natW, natH);
             var sx = (natW - side) / 2;
             var sy = (natH - side) / 2;
+            var circle = (frame.cornerRadius < 0)
+                         || (frame.cornerRadius >= Math.min(width, height) / 2);
             ctx.save();
-            ctx.beginPath();
-            ctx.arc(width / 2, height / 2, width / 2, 0, Math.PI * 2, true);
-            ctx.closePath();
-            ctx.clip();
+            if (circle) {
+                ctx.beginPath();
+                ctx.arc(width / 2, height / 2, width / 2, 0, Math.PI * 2, true);
+                ctx.closePath();
+                ctx.clip();
+            } else {
+                roundRectPath(ctx, 0, 0, width, height, frame.cornerRadius);
+                ctx.clip();
+            }
             ctx.drawImage(loadedUrl, sx, sy, side, side, 0, 0, width, height);
             ctx.restore();
         }
@@ -108,10 +131,12 @@ Item {
         visible: !circleCanvas.visible
     }
 
-    // Optional ring over the drawn photo (LLogoCircle's gold ring).
+    // Optional ring over the drawn photo (LLogoCircle's gold ring). Follows
+    // the same shape as the canvas clip: circle by default, rounded-rect when
+    // cornerRadius is set.
     Rectangle {
         anchors.fill: parent
-        radius: width / 2
+        radius: (frame.cornerRadius < 0) ? width / 2 : frame.cornerRadius
         color: "transparent"
         border.width: frame.ringWidth
         border.color: frame.ringColor

@@ -36,6 +36,12 @@ Item {
     // trailing chars). _endsWithDefault does an exact suffix slice, not a
     // substring search, so this must NOT be treated as the sentinel.
     LAvatar { id: avNearMissSuffix; initials: "MS"; source: "http://h/loams_api/uploads/default.jpgx" }
+    // Shape/border fixtures (kiosk rounded-square round, Phase 4e): search's
+    // default (-1) must stay circular; the kiosk hero passes cornerRadius +
+    // a border to get a gold-bordered rounded square.
+    LAvatar { id: avDefaultShape; initials: "MS"; source: "" }
+    LAvatar { id: avRoundedSquare; initials: "MS"; source: ""; cornerRadius: 14 }
+    LAvatar { id: avBordered; initials: "MS"; source: ""; borderWidth: 2; borderColor: "#E8B10E" }
 
     LButton    { id: b;  text: "OK" }
     LButton {
@@ -1602,6 +1608,26 @@ Item {
         function test_fallbackTokensDefaultToBrand() {
             var t = findChild(avEmpty, "avatarInitials");
             compare(String(t.color), String(Theme.brand.base));
+        }
+
+        // --- Shape/border params (kiosk rounded-square round) ---
+        // Regression guard: no cornerRadius set (the search default) must
+        // still render the fallback chip as a full circle.
+        function test_cornerRadiusDefaultsToCircle() {
+            var chip = findChild(avDefaultShape, "avatarChip");
+            verify(chip !== null);
+            compare(chip.radius, chip.width / 2);
+        }
+        function test_roundedSquareUsesCornerRadius() {
+            var chip = findChild(avRoundedSquare, "avatarChip");
+            verify(chip !== null);
+            compare(chip.radius, 14);
+        }
+        function test_borderShownWhenWidthSet() {
+            var overlay = findChild(avBordered, "avatarBorderFrame");
+            verify(overlay !== null);
+            compare(overlay.visible, true);
+            compare(overlay.border.width, 2);
         }
     }
 }
