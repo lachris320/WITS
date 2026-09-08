@@ -916,6 +916,8 @@ Insert a new `LCard` in the `ColumnLayout { id: content ... }`, immediately afte
 Run: `cmake --build C:/b/loams-5` then `ctest --test-dir C:/b/loams-5 -R tst_qml_admin --output-on-failure`
 Expected: **PASS**.
 
+> **Fixture-height coupling:** the new Appearance card grows the `settings` fixture's content column, which `test_fixtureFitsWholeContentColumn` (tst_qml_admin.qml ~:1214) pins against a deliberately-chosen `1600` height (comment ~:241-246). The one-line-description card (~110px) should fit inside the existing slack, but if that guard reddens, bump the pinned fixture height to absorb the card — do NOT shrink the card.
+
 - [ ] **Step 5: Full-suite regression check**
 
 Run: `ctest --test-dir C:/b/loams-5 --output-on-failure -j1`
