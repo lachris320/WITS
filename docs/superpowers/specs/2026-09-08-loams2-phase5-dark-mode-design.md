@@ -73,7 +73,11 @@ Because `isDark` is a QML binding over `Navigator.currentSurface` (a `QML_SINGLE
 
 ### 3.2 Admin sidebar in dark
 
-The admin brand sidebar (`sidebarBase`) gets a dark-neutral treatment from `darkNeutrals()` (a deep slate, not the light maroon), contrast-checked so the sidebar's brand text/icons stay ≥ their floors. Exact sidebar hue is a **human-review tuning item** (§6), anchored to reference `1b`'s dark sidebar.
+**Decision (locked, design review 2026-09-08):** the dark sidebar uses a **hand-tuned dark-neutral slate surface**, NOT the light-mode maroon brand fill.
+
+> **Dark-mode sidebar:** Use a hand-tuned dark-neutral slate surface rather than the light-mode maroon brand fill. Brand/maroon remains available through semantic accent roles and selected/interactive states where contrast permits. The sidebar's dark-neutral hue is part of the human-review tuning pass.
+
+Rationale: dark mode must actually reduce luminance rather than be a light UI with only the content area darkened; a large saturated maroon block would dominate the visual mass and flatten hierarchy; the sidebar is structural navigation, so a neutral surface lets content and selected-state accents carry the hierarchy while the brand stays recognizable through accents. Implementation: `sidebarBase` in dark comes from `darkNeutrals()` (deep slate); brand/maroon appears only via `brand`/`accent` accent roles on selected/interactive states, contrast-checked so sidebar text/icons stay ≥ their floors. Exact slate hue is a **human-review tuning item** (§6).
 
 ## 4. Data flow
 
