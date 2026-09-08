@@ -148,8 +148,14 @@ const char *const kDarkError         = "#F87171"; // red-400 (lifted for dark)
 // Soft tints on dark are mostly-card with a hint of the brand hue — the dark
 // analogue of kSoftMixToWhite, but toward the dark card instead of white.
 const double kDarkSoftMixToCard = 0.82;
+// Fallback for on-dark TEXT when raising VALUE alone can't reach the text
+// floor (a saturated dark brand): mix the fill this far toward the near-white
+// text token, yielding a light tint of the brand hue that clears 4.5:1.
+const double kDarkTextMixToLight = 0.65;
 } // namespace
 ```
+
+> `contrastRatio` and `mix` are already `using`-imported at the top of `brandtheme.cpp` (lines 20-21), so `darkPalette`'s `onDarkText` lambda can call them directly.
 
 - [ ] **Step 5: Implement `darkPalette()` in `brandtheme.cpp`**
 
@@ -172,10 +178,22 @@ BrandPalette darkPalette(const BrandPalette &light)
     d.success       = QColor(kDarkSuccess);
     d.error         = QColor(kDarkError);
 
-    // On-dark brand/accent text: LIGHTEN the fill hue until legible on the dark
-    // card. raiseToContrast lightens against a DARK `against` — its contract.
-    d.brandText  = raiseToContrast(light.brandBase,  d.card, kTextContrast);
-    d.accentText = raiseToContrast(light.accentBase, d.card, kTextContrast);
+    // On-dark brand/accent text. raiseToContrast raises HSV VALUE only
+    // (hue+sat preserved, brandtheme.cpp:324-337), so a saturated dark brand
+    // (navy #1E3A8A, maroon #7E1A15) value-maxes to a still-low-luminance
+    // colour that CANNOT reach the 4.5 text floor on a dark card. When raising
+    // value alone falls short, mix the fill toward the near-white text token
+    // first — a light tint of the brand hue whose luminance always clears the
+    // floor — then top up. A light fill (e.g. gold accent) passes the first
+    // branch unchanged, keeping its hue. Deterministic (mix + raiseToContrast).
+    auto onDarkText = [&](const QColor &fill) {
+        QColor c = raiseToContrast(fill, d.card, kTextContrast);
+        if (contrastRatio(c, d.card) < kTextContrast)
+            c = raiseToContrast(mix(fill, d.text, kDarkTextMixToLight), d.card, kTextContrast);
+        return c;
+    };
+    d.brandText  = onDarkText(light.brandBase);
+    d.accentText = onDarkText(light.accentBase);
 
     // Soft fills become dark tints (mostly card, a hint of hue) so a soft-fill
     // block reads as a dark surface, not a near-white block on a dark card.
@@ -294,11 +312,9 @@ void TestThemeViewModel::setModeEmitsSignals()
     vm.setMode("Light");
     QSignalSpy modeSpy(&vm, &ThemeViewModel::modeChanged);
     QSignalSpy darkSpy(&vm, &ThemeViewModel::resolvedDarkChanged);
-    QSignalSpy changedSpy(&vm, &ThemeViewModel::changed);
     vm.setMode("Dark");
-    QCOMPARE(modeSpy.count(), 1);
-    QCOMPARE(darkSpy.count(), 1);
-    QVERIFY(changedSpy.count() >= 1);
+    QCOMPARE(modeSpy.count(), 1);   // the picker binding re-evaluates
+    QCOMPARE(darkSpy.count(), 1);   // isDark re-evaluates; drives the token flip
 }
 ```
 
@@ -425,10 +441,11 @@ void ThemeViewModel::setMode(const QString &mode)
         s.sync();
     }
     emit modeChanged();
-    if (resolvedDark() != wasDark) {
+    // No emit changed(): the dark accessor VALUES don't change on a mode flip
+    // (the dark cache is unchanged). Theme.qml's `isDark ? *Dark : *` tokens
+    // re-evaluate off isDark, which reacts to resolvedDarkChanged directly.
+    if (resolvedDark() != wasDark)
         emit resolvedDarkChanged();
-        emit changed(); // dark-vs-light token selection re-evaluates
-    }
 }
 
 bool ThemeViewModel::resolvedDark() const
@@ -449,10 +466,8 @@ void ThemeViewModel::applySystemColorScheme(Qt::ColorScheme scheme)
         return;
     const bool wasDark = resolvedDark();
     m_systemScheme = scheme;
-    if (resolvedDark() != wasDark) {
-        emit resolvedDarkChanged();
-        emit changed();
-    }
+    if (resolvedDark() != wasDark)
+        emit resolvedDarkChanged();   // isDark re-evaluates; no changed() needed
 }
 ```
 
@@ -798,10 +813,14 @@ The user-facing control, writing through the singleton VM.
 
 - [ ] **Step 1: Write the failing QuickTest**
 
-In `qt-app/quick/tests/tst_qml_admin.qml`, add (inside the `TestCase`) a host item, an inline component, and a test function:
+In `qt-app/quick/tests/tst_qml_admin.qml`, add (inside the `TestCase`) a host item, an inline component, and a test function. Also ensure `mode` is reset to `System` regardless of how the test exits: if the `TestCase` already defines a `cleanup()`, add the reset line there; if not, add the `cleanup()` shown below (a mid-test failure otherwise leaves `mode=Dark` for later tests in the same binary — benign, since admin tests sit on the default Kiosk surface where `isDark` is false, but reset anyway for isolation):
 
 ```qml
     Item { id: settingsHost; width: 420; height: 640 }
+
+    // If the TestCase has no cleanup() yet, add this; otherwise fold the
+    // setMode line into the existing cleanup().
+    function cleanup() { Theme._vm.setMode("System"); }
 
     Component {
         id: settingsScreenComp
@@ -866,9 +885,17 @@ Insert a new `LCard` in the `ColumnLayout { id: content ... }`, immediately afte
                     LSegmented {
                         id: themeModePicker
                         objectName: "themeModePicker"
-                        // Reflects the persisted mode; the imperative self-assign
-                        // inside LSegmented resolves to the same value setMode
-                        // writes back, so the one-way binding stays consistent.
+                        // Reflects the persisted mode. NOTE: a real user click
+                        // runs `seg.currentValue = value` imperatively inside
+                        // LSegmented (LSegmented.qml:42), which SEVERS this
+                        // binding — but it self-assigns the same value setMode
+                        // writes back, and nothing else changes `mode`
+                        // programmatically today (System-scheme changes alter
+                        // resolvedDark, not mode), so the picker stays in sync.
+                        // If a future affordance sets mode programmatically
+                        // (e.g. a "reset to System" button), the picker will
+                        // need an explicit re-sync — the severed binding won't
+                        // pick it up.
                         currentValue: Theme.mode
                         options: [
                             { value: "Light",  label: qsTr("Light") },
