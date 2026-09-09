@@ -68,6 +68,12 @@ private slots:
     void autoModeRegenerates();
     void currentDefaultsToFallbackAndSets();
 
+    // Dark surfaces (Phase 5)
+    void darkPaletteNeutralsAreDark();
+    void darkPaletteTextRolesLegibleOnDark();
+    void darkPaletteCarriesBrandFills();
+    void darkPaletteIsDeterministic();
+
 private:
     QString writePng(const QString &name, const QColor &fill);
     QString writeSvg(const QString &name, const QString &fillHex);
@@ -619,6 +625,42 @@ void TestBrandTheme::currentDefaultsToFallbackAndSets()
 
     BrandTheme::setCurrent(fb);
     QVERIFY(BrandTheme::current() == fb);
+}
+
+void TestBrandTheme::darkPaletteNeutralsAreDark()
+{
+    const BrandPalette d = BrandTheme::darkPalette(BrandTheme::fallbackPalette());
+    QVERIFY(d.appBackground.lightness() < 128);
+    QVERIFY(d.card.lightness() < 128);
+    QVERIFY(d.sidebarBase.lightness() < 128);
+    QVERIFY(d.text.lightness() > 128);   // near-white body text on the dark ground
+}
+
+void TestBrandTheme::darkPaletteTextRolesLegibleOnDark()
+{
+    using BrandColorMath::contrastRatio;
+    const BrandPalette d = BrandTheme::darkPalette(BrandTheme::fallbackPalette());
+    QVERIFY(contrastRatio(d.text, d.card) >= 4.5);
+    QVERIFY(contrastRatio(d.text, d.appBackground) >= 4.5);
+    QVERIFY(contrastRatio(d.brandText, d.card) >= 4.5);
+    QVERIFY(contrastRatio(d.accentText, d.card) >= 4.5);
+    QVERIFY(contrastRatio(d.mutedText, d.card) >= 3.0);
+    QVERIFY(contrastRatio(d.brandOnMuted, d.sidebarBase) >= 4.5);
+}
+
+void TestBrandTheme::darkPaletteCarriesBrandFills()
+{
+    const BrandPalette light = BrandTheme::fallbackPalette();
+    const BrandPalette d = BrandTheme::darkPalette(light);
+    QCOMPARE(d.brandBase, light.brandBase);
+    QCOMPARE(d.accentBase, light.accentBase);
+    QCOMPARE(d.brandOn, light.brandOn);
+}
+
+void TestBrandTheme::darkPaletteIsDeterministic()
+{
+    const BrandPalette light = BrandTheme::fallbackPalette();
+    QVERIFY(BrandTheme::darkPalette(light) == BrandTheme::darkPalette(light));
 }
 
 QTEST_GUILESS_MAIN(TestBrandTheme)

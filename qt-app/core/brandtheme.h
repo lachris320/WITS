@@ -51,6 +51,16 @@ QString logoContentHash(const QString &logoPath);
 // runs after picking seeds from a logo, exposed so tests can drive it directly.
 BrandPalette buildPalette(const QColor &primarySeed, const QColor &secondarySeed);
 
+// --- Dark surfaces (Phase 5) ---
+// Derives a DARK palette from an already-built LIGHT palette. Neutral roles
+// become a fixed hand-tuned dark set (anchored to reference option 1b); the
+// brand/accent FILL roles (brandBase/Deep/On, accentBase/Deep/On) carry over
+// unchanged, while the on-LIGHT-surface roles (brandText/accentText, the soft
+// tints brandSoft/accentSoft, and the muted nav label brandOnMuted) are
+// re-derived for a dark surface and re-contrast-checked with the same WCAG
+// machinery. Pure and deterministic: a light palette always yields the same dark.
+BrandPalette darkPalette(const BrandPalette &light);
+
 // Quality gate (Task 7): true if the derived palette p is fit to ship. A
 // chromatic logo can still yield an unusable palette (washed-out accent,
 // illegible muted label, seeds too close in hue); extractPalette falls back to
