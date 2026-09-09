@@ -69,7 +69,7 @@ Item {
                 objectName: "headerClockText"
                 visible: hdr.clockText.length > 0
                 text: hdr.clockText
-                color: Theme.brand.base
+                color: Theme.brand.text
                 font.family: Theme.typography.sans
                 font.pixelSize: Theme.typography.cardTitle
                 font.weight: Font.Bold

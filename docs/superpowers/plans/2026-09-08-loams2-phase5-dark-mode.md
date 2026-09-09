@@ -935,6 +935,11 @@ Use the `commit` skill:
 
 Per the spec (§6, roadmap Risk 3) dark mode has no full design reference. After Task 5 lands and the build is green, launch `WITSQuick.exe` (from `C:/b/loams-5/quick/`, Qt bin on PATH), enter admin, set **Dark**, and walk Dashboard / Search / Visit Logs / Database / Reporting / Settings. Tune, in `Theme.qml` (literals) and `brandtheme.cpp` (`kDark*` constants) ONLY: the dark neutrals, the sidebar slate, and any brand/accent role that reads too hot or too dim. No structural change — the contract (roles, contrast floors, surface-scoping, persistence) is fixed. Re-run the full suite after any hex change.
 
+**Carried brand-fill legibility audit (from the final whole-branch review).** Brand/accent *fill* roles (`brand.base`, `accent.base`) carry over unchanged into dark by design, so anywhere a brand fill or tint sits on a dark card it can read faint. The illegible brand-*as-text* call sites were fixed on-branch (routed to the dark-aware `Theme.brand.text`). Still verify these *carried-fill* spots on the running dark admin app and, if any reads too faint, address it in this round (tune the dark neutral it sits on, or lift the tint alpha — never re-hex a token outside `Theme.qml`/the engine):
+- The department-pill background tint `Qt.alpha(Theme.brand.base, 0.10)` + its `brand.base` border (`SearchScreen.qml:288,290`) — near-invisible chip on a dark card.
+- `LAvatar.fallbackForeground` default `Theme.brand.base` (search-result initials) on the avatar fill.
+- Selected/hover fills carried at `brand.base`: dept/course chips (`SearchScreen.qml:212,255`), `LStatTile` Hero, `LSegmented` selected, `LCheckbox`, and the `Qt.alpha(brand.base, 0.06)` row-hover tints (`LTable.qml:197`, `SearchScreen.qml:476`).
+
 ---
 
 ## Self-Review
