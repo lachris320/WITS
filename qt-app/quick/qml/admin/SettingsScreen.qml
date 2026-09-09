@@ -264,7 +264,7 @@ Rectangle {
                         // Live re-theme MUST go through Theme._vm (the singleton's
                         // instance Theme binds its tokens to) — a VM-owned instance
                         // would update nothing the UI is bound to.
-                        onSelectionChanged: Theme._vm.setMode(value)
+                        onSelectionChanged: function(value) { Theme._vm.setMode(value); }
                     }
                 }
             }
