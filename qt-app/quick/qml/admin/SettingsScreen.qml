@@ -215,6 +215,60 @@ Rectangle {
                 }
             }
 
+            // --- Appearance (Phase 5) ---
+            LCard {
+                id: appearanceCard
+                Layout.fillWidth: true
+                padding: Theme.spacing.lg
+                implicitHeight: appearanceColumn.implicitHeight + padding * 2
+
+                ColumnLayout {
+                    id: appearanceColumn
+                    anchors.fill: parent
+                    spacing: Theme.spacing.md
+
+                    Text {
+                        text: qsTr("Appearance")
+                        color: Theme.text
+                        font.family: Theme.typography.sans
+                        font.pixelSize: Theme.typography.cardTitle
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        text: qsTr("Dark mode applies to the admin app only; the kiosk always stays light.")
+                        color: Theme.mutedText
+                        wrapMode: Text.WordWrap
+                        font.family: Theme.typography.sans
+                        font.pixelSize: Theme.typography.body
+                    }
+                    LSegmented {
+                        id: themeModePicker
+                        objectName: "themeModePicker"
+                        // Reflects the persisted mode. NOTE: a real user click
+                        // runs `seg.currentValue = value` imperatively inside
+                        // LSegmented (LSegmented.qml:42), which SEVERS this
+                        // binding — but it self-assigns the same value setMode
+                        // writes back, and nothing else changes `mode`
+                        // programmatically today (System-scheme changes alter
+                        // resolvedDark, not mode), so the picker stays in sync.
+                        // If a future affordance sets mode programmatically
+                        // (e.g. a "reset to System" button), the picker will
+                        // need an explicit re-sync — the severed binding won't
+                        // pick it up.
+                        currentValue: Theme.mode
+                        options: [
+                            { value: "Light",  label: qsTr("Light") },
+                            { value: "Dark",   label: qsTr("Dark") },
+                            { value: "System", label: qsTr("System") }
+                        ]
+                        // Live re-theme MUST go through Theme._vm (the singleton's
+                        // instance Theme binds its tokens to) — a VM-owned instance
+                        // would update nothing the UI is bound to.
+                        onSelectionChanged: Theme._vm.setMode(value)
+                    }
+                }
+            }
+
             // --- Administrator ---
             LCard {
                 id: adminCard
