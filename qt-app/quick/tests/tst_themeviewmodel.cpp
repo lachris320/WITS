@@ -23,6 +23,8 @@ private slots:
     void resolvedDarkTruthTable();
     void systemModeFollowsColorScheme();
     void setModeEmitsSignals();
+    void darkAccessorsMatchDarkPalette();
+    void darkCacheRebuildsAfterSetCurrentAndRefresh();
 
 private:
     QString writeSolidPng(const QString &path, const QColor &fill);
@@ -163,6 +165,30 @@ void TestThemeViewModel::setModeEmitsSignals()
     vm.setMode("Dark");
     QCOMPARE(modeSpy.count(), 1);   // the picker binding re-evaluates
     QCOMPARE(darkSpy.count(), 1);   // isDark re-evaluates; drives the token flip
+}
+
+void TestThemeViewModel::darkAccessorsMatchDarkPalette()
+{
+    BrandTheme::setCurrent(BrandTheme::fallbackPalette());
+    ThemeViewModel vm;
+    const BrandPalette d = BrandTheme::darkPalette(BrandTheme::current());
+    QCOMPARE(vm.cardDark(), d.card);
+    QCOMPARE(vm.textDark(), d.text);
+    QCOMPARE(vm.brandTextDark(), d.brandText);
+    QCOMPARE(vm.accentTextDark(), d.accentText);
+    QCOMPARE(vm.sidebarBaseDark(), d.sidebarBase);
+    QVERIFY(vm.property("cardDark").isValid());   // Q_PROPERTY registered for QML
+}
+
+void TestThemeViewModel::darkCacheRebuildsAfterSetCurrentAndRefresh()
+{
+    BrandTheme::setCurrent(BrandTheme::fallbackPalette());
+    ThemeViewModel vm;
+    BrandPalette custom = BrandTheme::fallbackPalette();
+    custom.brandBase = QColor(0x7E, 0x1A, 0x15);   // maroon
+    BrandTheme::setCurrent(custom);
+    vm.refresh();
+    QCOMPARE(vm.brandTextDark(), BrandTheme::darkPalette(custom).brandText);
 }
 
 QTEST_MAIN(TestThemeViewModel)

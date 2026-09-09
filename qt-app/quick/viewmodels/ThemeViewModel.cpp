@@ -27,6 +27,12 @@ ThemeViewModel::ThemeViewModel(QObject *parent)
         connect(hints, &QStyleHints::colorSchemeChanged,
                 this, &ThemeViewModel::applySystemColorScheme);
     }
+    rebuildDarkCache();
+}
+
+void ThemeViewModel::rebuildDarkCache()
+{
+    m_darkCache = BrandTheme::darkPalette(BrandTheme::current());
 }
 
 void ThemeViewModel::loadMode()
@@ -84,8 +90,10 @@ void ThemeViewModel::applySystemColorScheme(Qt::ColorScheme scheme)
 
 void ThemeViewModel::refresh()
 {
-    // Re-notify QML after an external BrandTheme::setCurrent. Nothing to cache —
-    // the getters already read the engine live; this just fires the binding.
+    // Re-notify QML after an external BrandTheme::setCurrent. The light getters
+    // already read the engine live; the dark cache must be rebuilt so its
+    // getters track the new palette too.
+    rebuildDarkCache();
     emit changed();
 }
 
@@ -102,6 +110,7 @@ ThemeViewModel::RegenResult ThemeViewModel::regenerateFromImportedLogo(const QSt
     // Apply for BOTH Ok and FellBack: on a gate fallback the fallback palette
     // is the correct visible result, so it must still be set and notified.
     BrandTheme::setCurrent(m_config.palette);
+    rebuildDarkCache();   // keep the dark palette in step with the new brand
     emit changed();
     return m_config.didFallBack ? RegenResult::FellBack : RegenResult::Ok;
 }

@@ -41,6 +41,22 @@ class ThemeViewModel : public QObject
     Q_PROPERTY(QColor success           READ success           NOTIFY changed)
     Q_PROPERTY(QColor error             READ error             NOTIFY changed)
 
+    // Dark-surface roles (Phase 5) — Theme.qml selects between the light role
+    // above and its *Dark twin here via isDark. Backed by m_darkCache.
+    Q_PROPERTY(QColor cardDark          READ cardDark          NOTIFY changed)
+    Q_PROPERTY(QColor appBackgroundDark READ appBackgroundDark NOTIFY changed)
+    Q_PROPERTY(QColor borderDark        READ borderDark        NOTIFY changed)
+    Q_PROPERTY(QColor textDark          READ textDark          NOTIFY changed)
+    Q_PROPERTY(QColor mutedTextDark     READ mutedTextDark     NOTIFY changed)
+    Q_PROPERTY(QColor successDark       READ successDark       NOTIFY changed)
+    Q_PROPERTY(QColor errorDark         READ errorDark         NOTIFY changed)
+    Q_PROPERTY(QColor sidebarBaseDark   READ sidebarBaseDark   NOTIFY changed)
+    Q_PROPERTY(QColor brandTextDark     READ brandTextDark     NOTIFY changed)
+    Q_PROPERTY(QColor brandSoftDark     READ brandSoftDark     NOTIFY changed)
+    Q_PROPERTY(QColor brandOnMutedDark  READ brandOnMutedDark  NOTIFY changed)
+    Q_PROPERTY(QColor accentTextDark    READ accentTextDark    NOTIFY changed)
+    Q_PROPERTY(QColor accentSoftDark    READ accentSoftDark    NOTIFY changed)
+
     // Theme mode (Phase 5). mode is Light|Dark|System; resolvedDark folds mode
     // with the OS colorScheme (System-only). Surface-scoping to admin lives in
     // Theme.qml, not here.
@@ -84,6 +100,20 @@ public:
     QColor success() const           { return BrandTheme::current().success; }
     QColor error() const             { return BrandTheme::current().error; }
 
+    QColor cardDark() const          { return m_darkCache.card; }
+    QColor appBackgroundDark() const { return m_darkCache.appBackground; }
+    QColor borderDark() const        { return m_darkCache.border; }
+    QColor textDark() const          { return m_darkCache.text; }
+    QColor mutedTextDark() const     { return m_darkCache.mutedText; }
+    QColor successDark() const       { return m_darkCache.success; }
+    QColor errorDark() const         { return m_darkCache.error; }
+    QColor sidebarBaseDark() const   { return m_darkCache.sidebarBase; }
+    QColor brandTextDark() const     { return m_darkCache.brandText; }
+    QColor brandSoftDark() const     { return m_darkCache.brandSoft; }
+    QColor brandOnMutedDark() const  { return m_darkCache.brandOnMuted; }
+    QColor accentTextDark() const    { return m_darkCache.accentText; }
+    QColor accentSoftDark() const    { return m_darkCache.accentSoft; }
+
     // Re-notify QML after an external BrandTheme::setCurrent (e.g. a remote
     // branding config arriving in a later phase).
     Q_INVOKABLE void refresh();
@@ -114,6 +144,9 @@ private:
     static bool schemeIsDark(Qt::ColorScheme s);
     QString m_mode = QStringLiteral("System");
     Qt::ColorScheme m_systemScheme = Qt::ColorScheme::Unknown;
+
+    void rebuildDarkCache();     // m_darkCache = darkPalette(current())
+    BrandPalette m_darkCache;    // derived dark palette; kept in sync with BrandTheme::current()
 };
 
 #endif // THEMEVIEWMODEL_H
