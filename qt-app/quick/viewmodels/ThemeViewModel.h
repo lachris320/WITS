@@ -3,6 +3,8 @@
 
 #include <QObject>
 #include <QColor>
+#include <QString>
+#include <qnamespace.h>   // Qt::ColorScheme
 #include <qqml.h>
 #include "brandtheme.h"
 #include "brandthemedata.h"
@@ -38,6 +40,12 @@ class ThemeViewModel : public QObject
     Q_PROPERTY(QColor mutedText         READ mutedText         NOTIFY changed)
     Q_PROPERTY(QColor success           READ success           NOTIFY changed)
     Q_PROPERTY(QColor error             READ error             NOTIFY changed)
+
+    // Theme mode (Phase 5). mode is Light|Dark|System; resolvedDark folds mode
+    // with the OS colorScheme (System-only). Surface-scoping to admin lives in
+    // Theme.qml, not here.
+    Q_PROPERTY(QString mode READ mode WRITE setMode NOTIFY modeChanged)
+    Q_PROPERTY(bool resolvedDark READ resolvedDark NOTIFY resolvedDarkChanged)
 
 public:
     // Outcome of a logo-driven re-theme, exposed to QML (QML sees
@@ -86,11 +94,26 @@ public:
     // mode / unreadable logo is a no-op returning Failed. See RegenResult.
     Q_INVOKABLE RegenResult regenerateFromImportedLogo(const QString &path);
 
+    QString mode() const { return m_mode; }
+    void setMode(const QString &mode);   // persists theme/mode, recomputes resolvedDark
+    bool resolvedDark() const;
+
+    // System-appearance seam (testable): the ctor connects
+    // QStyleHints::colorSchemeChanged to this; tests call it directly so the
+    // System branch never depends on the host OS appearance.
+    void applySystemColorScheme(Qt::ColorScheme scheme);
+
 signals:
     void changed();
+    void modeChanged();
+    void resolvedDarkChanged();
 
 private:
     BrandingConfig m_config; // scratch for regenerateFromImportedLogo only; NOT a palette cache
+    void loadMode();
+    static bool schemeIsDark(Qt::ColorScheme s);
+    QString m_mode = QStringLiteral("System");
+    Qt::ColorScheme m_systemScheme = Qt::ColorScheme::Unknown;
 };
 
 #endif // THEMEVIEWMODEL_H
