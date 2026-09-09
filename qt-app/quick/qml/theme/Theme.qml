@@ -14,37 +14,43 @@ QtObject {
     readonly property QtObject accent: QtObject {
         readonly property color base: root._vm.accentBase
         readonly property color deep: root._vm.accentDeep
-        readonly property color soft: root._vm.accentSoft
+        readonly property color soft: root.isDark ? root._vm.accentSoftDark : root._vm.accentSoft
         readonly property color on:   root._vm.accentOn
-        readonly property color text: root._vm.accentText
+        readonly property color text: root.isDark ? root._vm.accentTextDark : root._vm.accentText
     }
 
     readonly property QtObject brand: QtObject {
-        // New role tokens (4d).
         readonly property color base:     root._vm.brandBase
         readonly property color deep:     root._vm.brandDeep
-        readonly property color soft:     root._vm.brandSoft
+        readonly property color soft:     root.isDark ? root._vm.brandSoftDark    : root._vm.brandSoft
         readonly property color on:       root._vm.brandOn
-        readonly property color onMuted:  root._vm.brandOnMuted
-        readonly property color text:     root._vm.brandText
+        readonly property color onMuted:  root.isDark ? root._vm.brandOnMutedDark : root._vm.brandOnMuted
+        readonly property color text:     root.isDark ? root._vm.brandTextDark    : root._vm.brandText
     }
 
-    readonly property color card:          root._vm.card
-    readonly property color appBackground: root._vm.appBackground
-    readonly property color border:        root._vm.border
-    readonly property color text:          root._vm.text
-    readonly property color mutedText:     root._vm.mutedText
-    readonly property color success:       root._vm.success
-    readonly property color error:         root._vm.error
-    readonly property color sidebarBase:   root._vm.sidebarBase
+    readonly property color card:          isDark ? root._vm.cardDark          : root._vm.card
+    readonly property color appBackground: isDark ? root._vm.appBackgroundDark : root._vm.appBackground
+    readonly property color border:        isDark ? root._vm.borderDark        : root._vm.border
+    readonly property color text:          isDark ? root._vm.textDark          : root._vm.text
+    readonly property color mutedText:     isDark ? root._vm.mutedTextDark      : root._vm.mutedText
+    readonly property color success:       isDark ? root._vm.successDark        : root._vm.success
+    readonly property color error:         isDark ? root._vm.errorDark          : root._vm.error
+    readonly property color sidebarBase:   isDark ? root._vm.sidebarBaseDark    : root._vm.sidebarBase
 
-    // Extra design tokens (no BrandPalette field — literals, §12.1).
-    readonly property color mutedTextCaption: "#B0A08A"
-    readonly property color tableHeaderBg:    "#F7F1E6"
-    readonly property color rowHairline:      "#F3ECDD"
-    readonly property color errorSoft:        "#FDF4F3"
-    readonly property color errorBorder:      "#F3D9D6"
-    readonly property color scrim:            Qt.rgba(15/255, 23/255, 42/255, 0.45)
+    // Extra design tokens (no BrandPalette field — literals, §12.1). Dark twins
+    // are PROVISIONAL (tuned in the human-review round); hex is allowed here.
+    readonly property color mutedTextCaption: isDark ? "#7E8CA3" : "#B0A08A"
+    readonly property color tableHeaderBg:    isDark ? "#16223B" : "#F7F1E6"
+    readonly property color rowHairline:      isDark ? "#1F2C46" : "#F3ECDD"
+    readonly property color errorSoft:        isDark ? "#2A1517" : "#FDF4F3"
+    readonly property color errorBorder:      isDark ? "#5B2A2C" : "#F3D9D6"
+    readonly property color scrim:            isDark ? Qt.rgba(0, 0, 0, 0.55)
+                                                     : Qt.rgba(15/255, 23/255, 42/255, 0.45)
+
+    // Admin nav surface: the brand fill in light, a dark slate in dark (Phase 5
+    // review decision — the dark sidebar is a neutral slate, not the maroon
+    // brand block). LSideNav consumes THIS, not brand.base directly.
+    readonly property color sidebarSurface: isDark ? root._vm.sidebarBaseDark : root.brand.base
 
     // Structural scales (§12.2/12.3).
     readonly property QtObject spacing: QtObject {
@@ -136,8 +142,11 @@ QtObject {
         }
     }
 
-    // Mode (§13.5) — Phase 1 defaults to light; full light/dark derivation is
-    // a Phase-5 item (spec §10 Risk 3).
-    readonly property string mode: "Light"
-    readonly property bool isDark: false
+    // Mode (§13.5 / Phase 5). isDark is surface-scoped: only the admin surface
+    // goes dark — the kiosk (a public wall display) always renders light. The
+    // AppShell Loader swaps kiosk/admin so they never coexist, which is what
+    // makes admin-only enforceable by surface rather than duplicated tokens.
+    readonly property string mode: root._vm.mode
+    readonly property bool isDark: Navigator.currentSurface === Navigator.Admin
+                                   && root._vm.resolvedDark
 }

@@ -125,7 +125,10 @@ public:
     Q_INVOKABLE RegenResult regenerateFromImportedLogo(const QString &path);
 
     QString mode() const { return m_mode; }
-    void setMode(const QString &mode);   // persists theme/mode, recomputes resolvedDark
+    // Q_INVOKABLE (not just the property WRITE) so QuickTests can call
+    // `Theme._vm.setMode("Dark")` directly — a plain WRITE-only method isn't
+    // registered as a callable meta-method for QML/JS call syntax.
+    Q_INVOKABLE void setMode(const QString &mode);   // persists theme/mode, recomputes resolvedDark
     bool resolvedDark() const;
 
     // System-appearance seam (testable): the ctor connects

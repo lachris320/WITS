@@ -25,7 +25,7 @@ Rectangle {
         }
     }
 
-    color: Theme.brand.base
+    color: Theme.sidebarSurface
     implicitWidth: 240
     implicitHeight: 600
 
