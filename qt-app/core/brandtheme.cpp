@@ -418,7 +418,8 @@ BrandPalette buildPalette(const QColor &primarySeed, const QColor &secondarySeed
 // buildPalette so raiseToContrast/mix and kTextContrast are all file-visible.
 BrandPalette darkPalette(const BrandPalette &light)
 {
-    BrandPalette d = light; // carry the brand/accent FILL roles unchanged
+    BrandPalette d = light; // start from light; overrides below (accent fills +
+                            // brandOn stay unchanged, brand fill is desaturated)
 
     // Fixed dark neutral ground.
     d.appBackground = QColor(kDarkAppBackground);

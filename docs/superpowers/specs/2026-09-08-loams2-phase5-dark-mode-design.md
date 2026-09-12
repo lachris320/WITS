@@ -50,7 +50,7 @@ Because `isDark` is a QML binding over `Navigator.currentSurface` (a `QML_SINGLE
 
 **`BrandTheme` (core engine, C++)** — *pure, unit-testable, light path untouched.*
 - Add `BrandPalette darkPalette(const BrandPalette &light)`:
-  - Copies `brandBase` / `accentBase` (the brand fills stay the brand color).
+  - Carries `accentBase` and `brandOn` unchanged (accent — typically gold — reads fine on dark). **Updated during the human-review round:** the `brandBase` fill (and `brandDeep`, re-derived from it) is **desaturated** for dark — a saturated/electric logo brand glares as a large fill on the dark ground, so it is toned down via HSV (owner-approved; Design-OS-backed by the admin-context `von-restorff` / `aesthetic-minimalism` reserve-emphasis rules). Brand-as-*text* / *soft* roles are re-derived separately (below).
   - Attaches a fixed `darkNeutrals()` struct: `appBackground`, `card`, `sidebarBase`, `text`, `mutedText`, `border`, `success`, `error` — the hand-tuned dark set.
   - Re-derives the *on-light* brand roles for a **dark** surface: `brandText` / `accentText` / `brandSoft` / `accentSoft` / `brandOnMuted` (and any role whose light value assumed a light background), then runs the existing `enforceContrast` / `raiseToContrast` against the dark `card` (text floor 4.5, UI floor 3.0). `raiseToContrast` already lightens toward legibility, which is the correct direction on dark.
 - `current()` remains the **light** palette; the dark palette is derived on demand from it — no churn of the global on navigation.
