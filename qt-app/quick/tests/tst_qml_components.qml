@@ -1610,8 +1610,11 @@ Item {
             compare(String(t.color), String(Qt.color("#654321")));
         }
         function test_fallbackTokensDefaultToBrand() {
+            // LAvatar's default fallbackForeground is Theme.brand.text (dark-aware),
+            // not Theme.brand.base — brand.base is a saturated FILL that reads as
+            // low-contrast blue-on-dark-blue when used as text on the soft tint.
             var t = findChild(avEmpty, "avatarInitials");
-            compare(String(t.color), String(Theme.brand.base));
+            compare(String(t.color), String(Theme.brand.text));
         }
 
         // --- Shape/border params (kiosk rounded-square round) ---

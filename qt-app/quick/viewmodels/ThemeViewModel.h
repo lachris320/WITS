@@ -56,6 +56,8 @@ class ThemeViewModel : public QObject
     Q_PROPERTY(QColor brandOnMutedDark  READ brandOnMutedDark  NOTIFY changed)
     Q_PROPERTY(QColor accentTextDark    READ accentTextDark    NOTIFY changed)
     Q_PROPERTY(QColor accentSoftDark    READ accentSoftDark    NOTIFY changed)
+    Q_PROPERTY(QColor brandBaseDark     READ brandBaseDark     NOTIFY changed)
+    Q_PROPERTY(QColor brandDeepDark     READ brandDeepDark     NOTIFY changed)
 
     // Theme mode (Phase 5). mode is Light|Dark|System; resolvedDark folds mode
     // with the OS colorScheme (System-only). Surface-scoping to admin lives in
@@ -113,6 +115,8 @@ public:
     QColor brandOnMutedDark() const  { return m_darkCache.brandOnMuted; }
     QColor accentTextDark() const    { return m_darkCache.accentText; }
     QColor accentSoftDark() const    { return m_darkCache.accentSoft; }
+    QColor brandBaseDark() const     { return m_darkCache.brandBase; }
+    QColor brandDeepDark() const     { return m_darkCache.brandDeep; }
 
     // Re-notify QML after an external BrandTheme::setCurrent (e.g. a remote
     // branding config arriving in a later phase).

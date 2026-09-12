@@ -20,8 +20,8 @@ QtObject {
     }
 
     readonly property QtObject brand: QtObject {
-        readonly property color base:     root._vm.brandBase
-        readonly property color deep:     root._vm.brandDeep
+        readonly property color base:     root.isDark ? root._vm.brandBaseDark : root._vm.brandBase
+        readonly property color deep:     root.isDark ? root._vm.brandDeepDark : root._vm.brandDeep
         readonly property color soft:     root.isDark ? root._vm.brandSoftDark    : root._vm.brandSoft
         readonly property color on:       root._vm.brandOn
         readonly property color onMuted:  root.isDark ? root._vm.brandOnMutedDark : root._vm.brandOnMuted

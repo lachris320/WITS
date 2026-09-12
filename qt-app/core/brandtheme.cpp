@@ -59,6 +59,10 @@ const double kDarkSoftMixToCard = 0.82;
 // floor (a saturated dark brand): mix the fill this far toward the near-white
 // text token, yielding a light tint of the brand hue that clears 4.5:1.
 const double kDarkTextMixToLight = 0.65;
+// Brand FILL deepen on dark: the saturated brand glares as a large fill on the
+// dark ground; deepen it so hero tiles / selected chips / bars read calmer. The
+// text/soft/onMuted roles still derive from the ORIGINAL light brand (true hue).
+const double kBrandFillDarkShade = -0.22;
 } // namespace
 
 BrandPalette fallbackPalette()
@@ -448,6 +452,12 @@ BrandPalette darkPalette(const BrandPalette &light)
 
     // The muted nav label must stay legible on the dark slate sidebar.
     d.brandOnMuted = raiseToContrast(light.brandOnMuted, d.sidebarBase, kTextContrast);
+
+    // Calm the brand FILL on dark, and re-derive brandDeep from the deepened base
+    // so hover/pressed stays darker than base. shade() is the RGB darken helper;
+    // kHoverShade (-0.28) is the existing hover-shade constant, file-visible here.
+    d.brandBase = shade(light.brandBase, kBrandFillDarkShade);
+    d.brandDeep = shade(d.brandBase, kHoverShade);
 
     return d;
 }
