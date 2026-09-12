@@ -3,6 +3,8 @@
 #include <QImage>
 #include <QSignalSpy>
 #include <QTemporaryDir>
+#include <QGuiApplication>
+#include <QStyleHints>
 #include "ThemeViewModel.h"
 #include "brandtheme.h"
 #include "brandthemedata.h"
@@ -16,6 +18,13 @@ private slots:
     void regenerateFromLogoRethemesAndNotifies();
     void getterIsLiveNotCached();
     void roleAccessorsReadEngine();
+    void init();   // reset persisted mode to a known default before each test
+    void modePersistsAcrossInstances();
+    void resolvedDarkTruthTable();
+    void systemModeFollowsColorScheme();
+    void setModeEmitsSignals();
+    void darkAccessorsMatchDarkPalette();
+    void darkCacheRebuildsAfterSetCurrentAndRefresh();
 
 private:
     QString writeSolidPng(const QString &path, const QColor &fill);
@@ -98,6 +107,88 @@ void TestThemeViewModel::roleAccessorsReadEngine()
     // READ name that would otherwise only surface in Task 3's QML.
     QVERIFY(vm.property("brandBase").isValid());
     QCOMPARE(vm.property("brandBase").value<QColor>(), vm.brandBase());
+}
+
+void TestThemeViewModel::init()
+{
+    // AppSettings is process-isolated in tests, but shared across test
+    // functions in this process; reset to the default so each test is
+    // independent of persisted leftovers from another.
+    ThemeViewModel v;
+    v.setMode("System");
+}
+
+void TestThemeViewModel::modePersistsAcrossInstances()
+{
+    { ThemeViewModel vm; vm.setMode("Dark"); }
+    ThemeViewModel vm2;
+    QCOMPARE(vm2.mode(), QStringLiteral("Dark"));
+}
+
+void TestThemeViewModel::resolvedDarkTruthTable()
+{
+    ThemeViewModel vm;
+    vm.setMode("Light");
+    vm.applySystemColorScheme(Qt::ColorScheme::Dark);
+    QVERIFY(!vm.resolvedDark());                       // Light overrides system
+
+    vm.setMode("Dark");
+    vm.applySystemColorScheme(Qt::ColorScheme::Light);
+    QVERIFY(vm.resolvedDark());                        // Dark overrides system
+
+    vm.setMode("System");
+    vm.applySystemColorScheme(Qt::ColorScheme::Dark);
+    QVERIFY(vm.resolvedDark());                        // System follows dark OS
+    vm.applySystemColorScheme(Qt::ColorScheme::Light);
+    QVERIFY(!vm.resolvedDark());                       // System follows light OS
+    vm.applySystemColorScheme(Qt::ColorScheme::Unknown);
+    QVERIFY(!vm.resolvedDark());                       // Unknown treated as light
+}
+
+void TestThemeViewModel::systemModeFollowsColorScheme()
+{
+    ThemeViewModel vm;
+    vm.setMode("System");
+    vm.applySystemColorScheme(Qt::ColorScheme::Light);
+    QSignalSpy spy(&vm, &ThemeViewModel::resolvedDarkChanged);
+    vm.applySystemColorScheme(Qt::ColorScheme::Dark);
+    QCOMPARE(spy.count(), 1);
+    QVERIFY(vm.resolvedDark());
+}
+
+void TestThemeViewModel::setModeEmitsSignals()
+{
+    ThemeViewModel vm;
+    vm.setMode("Light");
+    QSignalSpy modeSpy(&vm, &ThemeViewModel::modeChanged);
+    QSignalSpy darkSpy(&vm, &ThemeViewModel::resolvedDarkChanged);
+    vm.setMode("Dark");
+    QCOMPARE(modeSpy.count(), 1);   // the picker binding re-evaluates
+    QCOMPARE(darkSpy.count(), 1);   // isDark re-evaluates; drives the token flip
+}
+
+void TestThemeViewModel::darkAccessorsMatchDarkPalette()
+{
+    BrandTheme::setCurrent(BrandTheme::fallbackPalette());
+    ThemeViewModel vm;
+    const BrandPalette d = BrandTheme::darkPalette(BrandTheme::current());
+    QCOMPARE(vm.cardDark(), d.card);
+    QCOMPARE(vm.textDark(), d.text);
+    QCOMPARE(vm.brandTextDark(), d.brandText);
+    QCOMPARE(vm.accentTextDark(), d.accentText);
+    QCOMPARE(vm.sidebarBaseDark(), d.sidebarBase);
+    QVERIFY(vm.property("cardDark").isValid());   // Q_PROPERTY registered for QML
+}
+
+void TestThemeViewModel::darkCacheRebuildsAfterSetCurrentAndRefresh()
+{
+    BrandTheme::setCurrent(BrandTheme::fallbackPalette());
+    ThemeViewModel vm;
+    BrandPalette custom = BrandTheme::fallbackPalette();
+    custom.brandBase = QColor(0x7E, 0x1A, 0x15);   // maroon
+    BrandTheme::setCurrent(custom);
+    vm.refresh();
+    QCOMPARE(vm.brandTextDark(), BrandTheme::darkPalette(custom).brandText);
 }
 
 QTEST_MAIN(TestThemeViewModel)

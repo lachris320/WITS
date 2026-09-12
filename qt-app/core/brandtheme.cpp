@@ -39,6 +39,34 @@ const char *const kDefaultAccentOn    = kDefaultBrandDeep; // on-amber text = br
 const char *const kDefaultAccentText  = "#92400E"; // dark amber-brown; gold-as-text on white cards
 } // namespace
 
+namespace {
+// Fixed hand-tuned DARK neutral surfaces (Phase 5), anchored to reference dark
+// option 1b (deep-navy ground, near-white text, gold accent). NOT logo-derived
+// — the dark ground is a curated set, tuned in the human-review round. None of
+// these hexes leak past this engine / Theme.qml. PROVISIONAL values.
+const char *const kDarkAppBackground = "#0C1524"; // deep navy ground
+const char *const kDarkCard          = "#15213A"; // raised navy card
+const char *const kDarkSidebarBase   = "#0A1220"; // darker slate — the admin nav mass
+const char *const kDarkBorder        = "#26324B"; // subtle hairline on dark
+const char *const kDarkText          = "#E8EDF5"; // near-white body text
+const char *const kDarkMutedText     = "#94A3B8"; // slate-400 muted text
+const char *const kDarkSuccess       = "#34D399"; // emerald-400 (lifted for dark)
+const char *const kDarkError         = "#F87171"; // red-400 (lifted for dark)
+// Soft tints on dark are mostly-card with a hint of the brand hue — the dark
+// analogue of kSoftMixToWhite, but toward the dark card instead of white.
+const double kDarkSoftMixToCard = 0.82;
+// Fallback for on-dark TEXT when raising VALUE alone can't reach the text
+// floor (a saturated dark brand): mix the fill this far toward the near-white
+// text token, yielding a light tint of the brand hue that clears 4.5:1.
+const double kDarkTextMixToLight = 0.65;
+// Brand FILL on dark: a saturated (electric) brand glares as a large fill on the
+// dark ground. Desaturate it (toward a muted, richer tone) and gently lower its
+// value so on-brand WHITE text stays legible. The text/soft/onMuted roles still
+// derive from the ORIGINAL light brand (true hue), so only fills are affected.
+const double kBrandFillDarkSat = 0.62;   // multiply HSV saturation
+const double kBrandFillDarkVal = 0.80;   // multiply HSV value
+} // namespace
+
 BrandPalette fallbackPalette()
 {
     const QColor white(Qt::white);
@@ -384,6 +412,62 @@ BrandPalette buildPalette(const QColor &primarySeed, const QColor &secondarySeed
         p.accentText = enforceContrast(p.accentText, p.accentSoft, kTextContrast);
 
     return p;
+}
+
+// Derives a dark palette from a light one (see brandtheme.h). Placed after
+// buildPalette so raiseToContrast/mix and kTextContrast are all file-visible.
+BrandPalette darkPalette(const BrandPalette &light)
+{
+    BrandPalette d = light; // start from light; overrides below (accent fills +
+                            // brandOn stay unchanged, brand fill is desaturated)
+
+    // Fixed dark neutral ground.
+    d.appBackground = QColor(kDarkAppBackground);
+    d.card          = QColor(kDarkCard);
+    d.sidebarBase   = QColor(kDarkSidebarBase);
+    d.border        = QColor(kDarkBorder);
+    d.text          = QColor(kDarkText);
+    d.mutedText     = QColor(kDarkMutedText);
+    d.success       = QColor(kDarkSuccess);
+    d.error         = QColor(kDarkError);
+
+    // On-dark brand/accent text. raiseToContrast raises HSV VALUE only
+    // (hue+sat preserved, brandtheme.cpp:324-337), so a saturated dark brand
+    // (navy #1E3A8A, maroon #7E1A15) value-maxes to a still-low-luminance
+    // colour that CANNOT reach the 4.5 text floor on a dark card. When raising
+    // value alone falls short, mix the fill toward the near-white text token
+    // first — a light tint of the brand hue whose luminance always clears the
+    // floor — then top up. A light fill (e.g. gold accent) passes the first
+    // branch unchanged, keeping its hue. Deterministic (mix + raiseToContrast).
+    auto onDarkText = [&](const QColor &fill) {
+        QColor c = raiseToContrast(fill, d.card, kTextContrast);
+        if (contrastRatio(c, d.card) < kTextContrast)
+            c = raiseToContrast(mix(fill, d.text, kDarkTextMixToLight), d.card, kTextContrast);
+        return c;
+    };
+    d.brandText  = onDarkText(light.brandBase);
+    d.accentText = onDarkText(light.accentBase);
+
+    // Soft fills become dark tints (mostly card, a hint of hue) so a soft-fill
+    // block reads as a dark surface, not a near-white block on a dark card.
+    d.brandSoft  = mix(light.brandBase,  d.card, kDarkSoftMixToCard);
+    d.accentSoft = mix(light.accentBase, d.card, kDarkSoftMixToCard);
+
+    // The muted nav label must stay legible on the dark slate sidebar.
+    d.brandOnMuted = raiseToContrast(light.brandOnMuted, d.sidebarBase, kTextContrast);
+
+    // Desaturate + slightly darken the brand fill for dark (calmer than the raw
+    // electric brand), preserving hue. Re-derive brandDeep from the new base so
+    // hover/pressed stays darker than base. getHsvF hue is -1 for greys — guard it.
+    {
+        float bh, bs, bv, ba;
+        light.brandBase.getHsvF(&bh, &bs, &bv, &ba);
+        if (bh < 0.0f) bh = 0.0f;
+        d.brandBase = QColor::fromHsvF(bh, bs * kBrandFillDarkSat, bv * kBrandFillDarkVal, ba);
+    }
+    d.brandDeep = shade(d.brandBase, kHoverShade);
+
+    return d;
 }
 
 // Quality gate for a derived palette — see brandtheme.h for the check list.

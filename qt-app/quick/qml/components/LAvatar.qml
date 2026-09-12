@@ -14,7 +14,7 @@ Item {
     property string initials: ""
     property int size: 40
     property color fallbackBackground: Theme.brand.soft
-    property color fallbackForeground: Theme.brand.base
+    property color fallbackForeground: Theme.brand.text
     // -1 = circle (search default, unchanged); the kiosk hero passes a
     // rounded-square radius (e.g. 14) to match the updated kiosk reference.
     property int cornerRadius: -1

@@ -302,14 +302,14 @@ Rectangle {
                                 spacing: Theme.spacing.xs
                                 Text {
                                     text: pill.modelData.label
-                                    color: Theme.brand.base
+                                    color: Theme.brand.text
                                     font.family: Theme.typography.sans
                                     font.pixelSize: Theme.typography.eyebrow
                                     font.weight: Font.DemiBold
                                 }
                                 Text {
                                     text: "×"
-                                    color: Theme.brand.base
+                                    color: Theme.brand.text
                                     font.family: Theme.typography.sans
                                     font.pixelSize: Theme.typography.control
                                     font.weight: Font.ExtraBold

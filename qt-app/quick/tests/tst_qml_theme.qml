@@ -122,4 +122,48 @@ TestCase {
         // modal stays neutral black
         compare(Theme.elevation.modal.shadowColor.toString(), Qt.rgba(0, 0, 0, 0.30).toString());
     }
+
+    // Phase 5: reset the process-global mode + surface after each test so a
+    // dark/admin state never leaks into another test in this file.
+    function cleanup() {
+        Theme._vm.setMode("System");
+        Navigator.showKiosk();
+    }
+
+    function test_kioskAlwaysLightRegardlessOfMode() {
+        Theme._vm.setMode("Dark");
+        Navigator.showKiosk();
+        verify(!Theme.isDark);
+    }
+
+    function test_adminDarkWhenModeDark() {
+        Theme._vm.setMode("Dark");
+        Navigator.showAdmin();
+        verify(Theme.isDark);
+    }
+
+    function test_adminLightWhenModeLight() {
+        Theme._vm.setMode("Light");
+        Navigator.showAdmin();
+        verify(!Theme.isDark);
+    }
+
+    function test_neutralTokensFlipWithDark() {
+        Theme._vm.setMode("Light");
+        Navigator.showAdmin();
+        verify(Theme.card.hslLightness > 0.5);          // light card
+        var lightText = Theme.text.toString();
+        Theme._vm.setMode("Dark");
+        verify(Theme.card.hslLightness < 0.5);          // dark card
+        verify(Theme.text.toString() !== lightText);    // text token swapped
+    }
+
+    function test_sidebarSurfaceIsBrandInLightSlateInDark() {
+        Theme._vm.setMode("Light");
+        Navigator.showAdmin();
+        compare(Theme.sidebarSurface.toString(), Theme.brand.base.toString());
+        Theme._vm.setMode("Dark");
+        verify(Theme.sidebarSurface.hslLightness < 0.5);
+        verify(Theme.sidebarSurface.toString() !== Theme.brand.base.toString());
+    }
 }

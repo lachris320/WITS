@@ -1621,6 +1621,40 @@ Item {
             // The logo slot must not latch on with no vm to supply one.
             compare(findChild(vmlessSettings, "logoPreview").visible, false);
         }
+
+        // --- Appearance (Phase 5): Light/Dark/System picker ---
+
+        Item { id: settingsHost; width: 420; height: 640 }
+
+        // Reset the process-global mode regardless of how this test exits —
+        // a mid-test failure would otherwise leak Dark mode into later admin
+        // tests in this binary. Benign either way (admin tests sit on the
+        // default Kiosk surface, where isDark stays false), but reset anyway
+        // for isolation.
+        function cleanup() { Theme._vm.setMode("System"); }
+
+        Component {
+            id: settingsScreenComp
+            SettingsScreen { anchors.fill: parent }
+        }
+
+        function test_themeModePickerReflectsAndDrivesMode() {
+            Theme._vm.setMode("System");
+            var s = createTemporaryObject(settingsScreenComp, settingsHost);
+            verify(s);
+            var picker = findChild(s, "themeModePicker");
+            verify(picker);
+
+            // Reflects Theme.mode…
+            Theme._vm.setMode("Dark");
+            compare(picker.currentValue, "Dark");
+
+            // …and drives it: emitting the picker's selection runs onSelectionChanged.
+            picker.selectionChanged("Light");
+            compare(Theme.mode, "Light");
+
+            Theme._vm.setMode("System");   // reset process-global mode
+        }
     }
 
     // --- Database screen fixture (own band below Settings, y 3800..4500) ---
