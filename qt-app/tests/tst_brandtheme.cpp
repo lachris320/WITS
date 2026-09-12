@@ -650,18 +650,20 @@ void TestBrandTheme::darkPaletteTextRolesLegibleOnDark()
 
 void TestBrandTheme::darkPaletteCarriesBrandFills()
 {
-    using BrandColorMath::relativeLuminance;
     using BrandColorMath::contrastRatio;
+    using BrandColorMath::relativeLuminance;
     const BrandPalette light = BrandTheme::fallbackPalette();
     const BrandPalette d = BrandTheme::darkPalette(light);
     // Accent fill + on-brand text carry over unchanged.
     QCOMPARE(d.accentBase, light.accentBase);
     QCOMPARE(d.brandOn, light.brandOn);
-    // Brand FILL is deepened for dark; hover stays darker than the deepened base.
-    QVERIFY(relativeLuminance(d.brandBase) < relativeLuminance(light.brandBase));
-    QVERIFY(relativeLuminance(d.brandDeep) < relativeLuminance(d.brandBase));
-    // White on-brand text stays legible on the deepened fill.
+    // Brand FILL is DESATURATED for dark (calmer than the raw brand), hue preserved,
+    // and on-brand white text stays legible on it.
+    QVERIFY(d.brandBase.hsvSaturationF() < light.brandBase.hsvSaturationF());
+    QVERIFY(qAbs(d.brandBase.hsvHueF() - light.brandBase.hsvHueF()) < 0.04);
     QVERIFY(contrastRatio(d.brandOn, d.brandBase) >= 4.5);
+    // Hover stays darker than the (desaturated) base.
+    QVERIFY(relativeLuminance(d.brandDeep) < relativeLuminance(d.brandBase));
 }
 
 void TestBrandTheme::darkPaletteIsDeterministic()

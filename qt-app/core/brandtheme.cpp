@@ -59,10 +59,12 @@ const double kDarkSoftMixToCard = 0.82;
 // floor (a saturated dark brand): mix the fill this far toward the near-white
 // text token, yielding a light tint of the brand hue that clears 4.5:1.
 const double kDarkTextMixToLight = 0.65;
-// Brand FILL deepen on dark: the saturated brand glares as a large fill on the
-// dark ground; deepen it so hero tiles / selected chips / bars read calmer. The
-// text/soft/onMuted roles still derive from the ORIGINAL light brand (true hue).
-const double kBrandFillDarkShade = -0.22;
+// Brand FILL on dark: a saturated (electric) brand glares as a large fill on the
+// dark ground. Desaturate it (toward a muted, richer tone) and gently lower its
+// value so on-brand WHITE text stays legible. The text/soft/onMuted roles still
+// derive from the ORIGINAL light brand (true hue), so only fills are affected.
+const double kBrandFillDarkSat = 0.62;   // multiply HSV saturation
+const double kBrandFillDarkVal = 0.80;   // multiply HSV value
 } // namespace
 
 BrandPalette fallbackPalette()
@@ -453,10 +455,15 @@ BrandPalette darkPalette(const BrandPalette &light)
     // The muted nav label must stay legible on the dark slate sidebar.
     d.brandOnMuted = raiseToContrast(light.brandOnMuted, d.sidebarBase, kTextContrast);
 
-    // Calm the brand FILL on dark, and re-derive brandDeep from the deepened base
-    // so hover/pressed stays darker than base. shade() is the RGB darken helper;
-    // kHoverShade (-0.28) is the existing hover-shade constant, file-visible here.
-    d.brandBase = shade(light.brandBase, kBrandFillDarkShade);
+    // Desaturate + slightly darken the brand fill for dark (calmer than the raw
+    // electric brand), preserving hue. Re-derive brandDeep from the new base so
+    // hover/pressed stays darker than base. getHsvF hue is -1 for greys — guard it.
+    {
+        float bh, bs, bv, ba;
+        light.brandBase.getHsvF(&bh, &bs, &bv, &ba);
+        if (bh < 0.0f) bh = 0.0f;
+        d.brandBase = QColor::fromHsvF(bh, bs * kBrandFillDarkSat, bv * kBrandFillDarkVal, ba);
+    }
     d.brandDeep = shade(d.brandBase, kHoverShade);
 
     return d;
