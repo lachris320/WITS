@@ -49,9 +49,9 @@ public:
     void loadDepartments();                      // GET get_departments.php
     void loadYears();                            // GET get_years.php
     void loadCourses(const QString &department); // GET get_courses.php?department=..&include_all=true
-    void fetchReportRows(const QJsonObject &filters);  // POST get_report_data.php
-    void fetchPreviewData(const QJsonObject &filters); // POST api.php/reports/data
-    void fetchTimeAnalytics(const QJsonObject &filters); // POST get_report_time_data.php
+    void fetchReportRows(const QJsonObject &filters, const QString &adminKey);   // POST get_report_data.php
+    void fetchPreviewData(const QJsonObject &filters); // POST api.php/reports/data (legacy, unauthenticated)
+    void fetchTimeAnalytics(const QJsonObject &filters, const QString &adminKey); // POST get_report_time_data.php
 
 signals:
     void departmentsLoaded(const QStringList &departments);

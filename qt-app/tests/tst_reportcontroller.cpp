@@ -3,7 +3,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QList>
+#include <QSignalSpy>
 
+#include "capturingnam.h"
 #include "reportcontroller.h"
 
 class TstReportController : public QObject
@@ -38,6 +40,11 @@ private slots:
     void parseTimeAnalytics_nonNumeric_fails();
     void parseTimeAnalytics_stringEncodedCounts_ok();
     void parseTimeAnalytics_statusError_failsWithMessage();
+
+    // ---- admin_key threading (Phase 6a) ----
+    void fetchReportRows_mergesAdminKeyIntoJsonBody();
+    void fetchTimeAnalytics_mergesAdminKeyIntoJsonBody();
+    void fetchReportRows_guard401_emitsReportError();
 
     // ---- computeDateRange ----
     void computeDateRange_day_valid();
@@ -199,6 +206,41 @@ void TstReportController::parseTimeAnalytics_statusError_failsWithMessage() {
     QVERIFY(!ReportController::parseTimeAnalytics(
         QJsonDocument(o).toJson(QJsonDocument::Compact), outH, outW, err));
     QCOMPARE(err, QStringLiteral("boom"));
+}
+
+void TstReportController::fetchReportRows_mergesAdminKeyIntoJsonBody()
+{
+    CapturingNam nam;
+    ReportController ctrl(&nam);
+    QJsonObject filters; filters["department"] = "CCS";
+
+    ctrl.fetchReportRows(filters, "test-key");
+
+    QCOMPARE(nam.lastOp, QNetworkAccessManager::PostOperation);
+    QCOMPARE(nam.lastContentType, QStringLiteral("application/json"));
+    const QJsonObject body = QJsonDocument::fromJson(nam.lastBody).object();
+    QCOMPARE(body.value("admin_key").toString(), QStringLiteral("test-key"));
+    QCOMPARE(body.value("department").toString(), QStringLiteral("CCS"));
+}
+
+void TstReportController::fetchTimeAnalytics_mergesAdminKeyIntoJsonBody()
+{
+    CapturingNam nam;
+    ReportController ctrl(&nam);
+    ctrl.fetchTimeAnalytics(QJsonObject{}, "test-key");
+    const QJsonObject body = QJsonDocument::fromJson(nam.lastBody).object();
+    QCOMPARE(body.value("admin_key").toString(), QStringLiteral("test-key"));
+}
+
+void TstReportController::fetchReportRows_guard401_emitsReportError()
+{
+    CapturingNam nam(QByteArrayLiteral("{\"status\":\"error\"}"),
+                     QNetworkReply::AuthenticationRequiredError, 401);
+    ReportController ctrl(&nam);
+    QSignalSpy err(&ctrl, &ReportController::reportError);
+    ctrl.fetchReportRows(QJsonObject{}, "");
+    QVERIFY(err.wait(1000));
+    QCOMPARE(err.count(), 1);
 }
 
 void TstReportController::computeDateRange_day_valid() {
