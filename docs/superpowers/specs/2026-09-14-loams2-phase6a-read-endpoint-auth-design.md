@@ -64,7 +64,7 @@ No other change to these files' bodies in this slice (error-echoing / `display_e
 - **The two non-JSON reads need a client method switch (§3.3), not a server input change.** `get_library_visits.php` reads its filters from `$_GET`; `dashboard_summary.php` reads nothing. Neither has a `$_POST` body today. Rather than change how they read filters, the client switches these two requests from GET to POST and sends only `admin_key` in the urlencoded body — **keeping `range`/`start`/`end` in the URL query string** so the server's existing `$_GET` reads still resolve. `$_GET` is populated from the query string regardless of method, so this is a client-only change; the endpoint body is untouched apart from the guard call.
 - **`api.php` routes `reports/data` → `require_once 'get_report_data.php'` (`api.php:99`).** Guarding `get_report_data.php` therefore also guards the `api.php` router path — one guard covers both entry points. (This is what breaks the legacy app's report preview — see §6.)
 
-### 3.3 Client — thread `admin_key` into the four admin read paths
+### 3.3 Client — thread `admin_key` into the admin read paths
 
 Mirror the established write pattern exactly: the **view-model** calls the process-wide singleton `AdminSession::instance().key()` and passes the key **as a method parameter** to the controller (as `DatabaseViewModel`/`ImportViewModel` already do for the writes) — controllers are not made `AdminSession`-aware. Guard fields are never logged. Per endpoint:
 
