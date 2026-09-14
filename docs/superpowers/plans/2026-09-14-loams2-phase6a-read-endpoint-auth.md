@@ -232,6 +232,7 @@ git commit -m "feat(api): require admin_key on search_students; thread key from 
 **Files:**
 - Modify: `qt-app/core/reportcontroller.h` (fetchReportRows/fetchTimeAnalytics decls, lines 52 & 54), `qt-app/core/reportcontroller.cpp` (both bodies, ~lines 359 & 397)
 - Modify: `qt-app/quick/viewmodels/ReportingViewModel.cpp:450-451`
+- Modify: `qt-app/adminwindow.cpp:1544, 1555, 1730` (legacy `fetchReportRows` callers — explicit empty key, compile-compat only)
 - Modify: `deliverables/loams_api/get_report_data.php`, `deliverables/loams_api/get_report_time_data.php`
 - Test: `qt-app/tests/tst_reportcontroller.cpp`
 
@@ -315,10 +316,20 @@ Leave `fetchPreviewData` untouched.
     m_controller->fetchTimeAnalytics(filters, key);   // parallel, same filters
 ```
 
+- [ ] **Step 4b: Update the legacy `adminwindow.cpp` callers (compile-compat only)**
+
+`fetchReportRows` is also called single-arg by the legacy Widgets app at `adminwindow.cpp:1544`, `:1555`, and `:1730` (all on `m_reportController`). Since the new param has no default, add `QString()` to each so the legacy build compiles — do NOT thread a real key (legacy is unauthenticated per spec §6):
+
+```cpp
+    m_reportController->fetchReportRows(filters, QString());   // legacy WITS.exe — unauthenticated, breaks per spec §6
+```
+
+(`fetchTimeAnalytics` has only the `ReportingViewModel` caller, so no legacy edit is needed for it.)
+
 - [ ] **Step 5: Run to verify the tests pass**
 
 Run: `ctest --test-dir C:/b/loams-6a -R tst_reportcontroller --output-on-failure`
-Expected: PASS.
+Expected: PASS. (Also confirm the whole client still compiles — the legacy `adminwindow.cpp` edit is what keeps the build green.)
 
 - [ ] **Step 6: Add the server guards**
 
@@ -329,13 +340,13 @@ require_once 'auth_helper.php';
 requireAdminAuth($conn);
 ```
 
-(The client sends `admin_key` inside the same JSON body the endpoint already decodes; the guard reads it via the JSON branch, the endpoint ignores it.)
+(The client sends `admin_key` inside the same JSON body the endpoint already decodes; the guard reads it via the JSON branch, the endpoint ignores it. `php://input` is re-readable for JSON, so the helper reading it does not disturb the endpoint's own `file_get_contents('php://input')`.) **Benign behavior change:** these two endpoints have no `connect_error` block, so the guard sits right after `include 'db.php';`, *before* the existing `REQUEST_METHOD` check — a keyless non-POST request now gets `401` instead of `"Invalid request method"`. Acceptable (arguably better).
 
 - [ ] **Step 7: Commit**
 
 ```bash
 git add qt-app/core/reportcontroller.h qt-app/core/reportcontroller.cpp \
-        qt-app/quick/viewmodels/ReportingViewModel.cpp \
+        qt-app/quick/viewmodels/ReportingViewModel.cpp qt-app/adminwindow.cpp \
         deliverables/loams_api/get_report_data.php deliverables/loams_api/get_report_time_data.php \
         qt-app/tests/tst_reportcontroller.cpp
 git commit -m "feat(api): require admin_key on report reads; thread key from ReportingViewModel"
@@ -364,8 +375,7 @@ void TestVisitLogsViewModel::studentRefresh_postsWithAdminKeyBodyAndRangeInQuery
 {
     AdminSession::instance().setKey("test-key");
     CapturingNam nam;
-    VisitLogsViewModel vm(nullptr, &nam);
-    vm.setMode(VisitLogsViewModel::Student);   // if a setter exists; else default is Student
+    VisitLogsViewModel vm(nullptr, &nam);   // mode defaults to Student
     vm.refresh();
 
     QCOMPARE(nam.lastOp, QNetworkAccessManager::PostOperation);
@@ -381,8 +391,7 @@ void TestVisitLogsViewModel::guestRefresh_addsAdminKeyToJsonPayload()
     AdminSession::instance().setKey("test-key");
     CapturingNam nam;
     VisitLogsViewModel vm(nullptr, &nam);
-    vm.setMode(VisitLogsViewModel::Guest);
-    vm.refresh();
+    vm.setMode(VisitLogsViewModel::Guest);   // setMode() itself fires refresh() (cpp:52) — captures the guest POST
 
     QCOMPARE(nam.lastOp, QNetworkAccessManager::PostOperation);
     const QJsonObject body = QJsonDocument::fromJson(nam.lastBody).object();
@@ -391,7 +400,7 @@ void TestVisitLogsViewModel::guestRefresh_addsAdminKeyToJsonPayload()
 }
 ```
 
-(If `setMode` is not a public method, drive the mode the way existing `tst_visitlogsviewmodel` tests do — check the file for the existing mode-setting seam and mirror it.)
+(`setMode(Mode)` is public — `VisitLogsViewModel.h:44`, enum `{ Student, Guest }` at `:29` — and it calls `refresh()` as a side effect, so the guest test needs no explicit `refresh()`. The default mode is `Student`, so the student test just calls `refresh()` directly.)
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -416,7 +425,9 @@ VisitLogsViewModel::VisitLogsViewModel(QObject *parent, QNetworkAccessManager *n
 }
 ```
 
-Add `#include "AdminSession.h"` to the .cpp.
+Add `#include "AdminSession.h"` and `#include <QNetworkAccessManager>` to the .cpp.
+
+**QML-safety (verified):** both `VisitLogsViewModel` and `DashboardViewModel` are `QML_ELEMENT`. Adding a *second defaulted* ctor arg keeps the type default-constructible, which is the path `qmltyperegistrar` uses (QML always default-constructs, then the VM allocates its own NAM exactly as today). The extra non-invokable ctor is ignored by the registrar and existing no-arg constructions still compile — no setter needed.
 
 - [ ] **Step 4: Switch the student branch GET→POST (keep range in the query string)**
 
@@ -512,14 +523,14 @@ void TestDashboardViewModel::refresh_guard401_setsError()
     CapturingNam nam(QByteArrayLiteral("{\"status\":\"error\"}"),
                      QNetworkReply::AuthenticationRequiredError, 401);
     DashboardViewModel vm(nullptr, &nam);
-    QSignalSpy dc(&vm, &DashboardViewModel::dataChanged);
+    QSignalSpy err(&vm, &DashboardViewModel::errorTextChanged);
     vm.refresh();
-    QVERIFY(dc.wait(1000));
-    QVERIFY(!vm.error().isEmpty());   // 401 lands in the error state, not empty success
+    QVERIFY(err.wait(1000));
+    QVERIFY(!vm.errorText().isEmpty());   // 401 lands in the error state, not empty success
 }
 ```
 
-(Match the actual error-notify signal/accessor names in `DashboardViewModel.h` — adjust `dataChanged`/`error()` if the file names them differently.)
+(Confirmed names: accessor `errorText()`, notify signal `errorTextChanged()` — `DashboardViewModel.h:40,62`. On the 401 path `refresh()` sets both `dataChanged` (via `resetPeakOnError()`) and `errorTextChanged` (via `setError`); spying `errorTextChanged` ties the assertion directly to the error state.)
 
 - [ ] **Step 2: Run to verify it fails**
 
