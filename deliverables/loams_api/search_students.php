@@ -11,6 +11,9 @@ if ($conn->connect_error) {
     exit;
 }
 
+require_once 'auth_helper.php';
+requireAdminAuth($conn);
+
 // --- Read incoming JSON ---
 $input = json_decode(file_get_contents('php://input'), true);
 

@@ -2428,7 +2428,8 @@ void adminWindow::performStudentSearch(bool showOverlay)
     m_studentController->searchStudents(
         ui->searchLineEdit->text().trimmed(),
         ui->searchDepartmentFilter->currentText(),
-        ui->searchCourseFilter->currentText());
+        ui->searchCourseFilter->currentText(),
+        QString());   // legacy WITS.exe — unauthenticated read, breaks per spec §6
 }
 
 void adminWindow::displaySearchResults(const QList<StudentRecord> &students,

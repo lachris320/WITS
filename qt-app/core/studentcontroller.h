@@ -59,7 +59,8 @@ public:
     // permits connecting a signal to a slot with fewer trailing parameters.
     quint64 searchStudents(const QString &search,
                         const QString &department,
-                        const QString &course);
+                        const QString &course,
+                        const QString &adminKey);
 
     // Async — result arrives via bulkUpdateFinished / bulkUpdateFailed. The
     // updates array is sent as a JSON string in a single `students` FORM field
