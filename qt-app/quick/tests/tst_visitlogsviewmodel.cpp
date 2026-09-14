@@ -1,8 +1,13 @@
 #include <QtTest>
 #include <QSignalSpy>
 #include <QDate>
+#include <QUrlQuery>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include "VisitLogsViewModel.h"
 #include "VisitLogRowsModel.h"
+#include "AdminSession.h"
+#include "capturingnam.h"
 
 class TestVisitLogsViewModel : public QObject
 {
@@ -17,6 +22,8 @@ private slots:
     void supersededRequestSeqIsNotCurrent();
     void setRangeUpdatesRangeLabelImmediately();
     void parseErrorAfterGoodDataClearsStaleRowsAndRecomputesLabel();
+    void studentRefresh_postsWithAdminKeyBodyAndRangeInQuery();
+    void guestRefresh_addsAdminKeyToJsonPayload();
 };
 
 void TestVisitLogsViewModel::defaultsToStudentToday()
@@ -163,6 +170,38 @@ void TestVisitLogsViewModel::parseErrorAfterGoodDataClearsStaleRowsAndRecomputes
     const QDate today = QDate::currentDate();
     const QDate monday = today.addDays(-(today.dayOfWeek() - 1));
     QCOMPARE(vm.rangeLabel(), VisitLogsViewModel::formatWeekLabel(monday));
+}
+
+// Phase 6a: the two Visit-Logs reads now require admin_key. Student switches
+// GET -> POST (key in the urlencoded body, filters stay in the query string
+// so the server's $_GET-based range/start/end handling is untouched); Guest's
+// existing JSON POST gains an admin_key field.
+void TestVisitLogsViewModel::studentRefresh_postsWithAdminKeyBodyAndRangeInQuery()
+{
+    AdminSession::instance().setKey("test-key");
+    CapturingNam nam;
+    VisitLogsViewModel vm(nullptr, &nam);   // mode defaults to Student
+    vm.refresh();
+
+    QCOMPARE(nam.lastOp, QNetworkAccessManager::PostOperation);
+    QCOMPARE(nam.lastContentType, QStringLiteral("application/x-www-form-urlencoded"));
+    QVERIFY(nam.lastUrl.query().contains("range="));               // filter stays in the query string
+    const QUrlQuery form(QString::fromUtf8(nam.lastBody));
+    QCOMPARE(form.queryItemValue("admin_key"), QStringLiteral("test-key"));
+    AdminSession::instance().clear();
+}
+
+void TestVisitLogsViewModel::guestRefresh_addsAdminKeyToJsonPayload()
+{
+    AdminSession::instance().setKey("test-key");
+    CapturingNam nam;
+    VisitLogsViewModel vm(nullptr, &nam);
+    vm.setMode(VisitLogsViewModel::Guest);   // setMode() itself fires refresh() (cpp:52) — captures the guest POST
+
+    QCOMPARE(nam.lastOp, QNetworkAccessManager::PostOperation);
+    const QJsonObject body = QJsonDocument::fromJson(nam.lastBody).object();
+    QCOMPARE(body.value("admin_key").toString(), QStringLiteral("test-key"));
+    AdminSession::instance().clear();
 }
 
 QTEST_MAIN(TestVisitLogsViewModel)

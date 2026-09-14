@@ -8,6 +8,9 @@ if ($conn->connect_error) {
     exit;
 }
 
+require_once 'auth_helper.php';
+requireAdminAuth($conn);
+
 $range = isset($_GET['range']) ? strtolower(trim($_GET['range'])) : 'today';
 $start = isset($_GET['start']) ? trim($_GET['start']) : '';
 $end   = isset($_GET['end'])   ? trim($_GET['end'])   : '';
