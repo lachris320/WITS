@@ -70,15 +70,15 @@ Mirror the established write pattern exactly: the **view-model** calls the proce
 
 - `StudentController::searchStudents` (`SearchViewModel`) → `search_students.php`: add `admin_key` **into the JSON body**.
 - `ReportController::fetchReportRows` / `fetchTimeAnalytics` (`ReportingViewModel`) → `get_report_data.php` / `get_report_time_data.php`: `admin_key` **into the JSON body**.
-- `VisitorController::fetchVisitors` (`VisitLogsViewModel`) → `get_visitors.php`: `admin_key` **into the JSON body**.
-- `VisitLogsViewModel` → `get_library_visits.php`: **switch the request GET→POST**, keep `range`/`start`/`end` in the URL query string, send `admin_key` in the urlencoded body (§3.2).
+- `VisitLogsViewModel::refresh()` **guest branch** (the inline `get_visitors.php` POST at `VisitLogsViewModel.cpp:123`, which builds its own JSON payload — **not** `VisitorController::fetchVisitors`, which is legacy-only, called only from `adminwindow.cpp` and left to break per §6) → `admin_key` **into the JSON body**.
+- `VisitLogsViewModel::refresh()` **student branch** → `get_library_visits.php`: **switch the request GET→POST**, keep `range`/`start`/`end` in the URL query string, send `admin_key` in the urlencoded body (§3.2).
 - `DashboardViewModel` → `dashboard_summary.php`: **switch the request GET→POST**, send `admin_key` in the urlencoded body (no filters to preserve).
 
 `AdminSession.h` is already included by the write paths but **not** by `DashboardViewModel`, `VisitLogsViewModel`, or the reporting path today — that include is new wiring in this slice. These reads only fire from admin surfaces (post-login), so `AdminSession::instance().hasKey()` is always true in practice; the VM still guards defensively (§5) rather than firing an unauthenticated request.
 
 ### 3.4 Client — handle a 401
 
-Mostly already handled — a 401 sets `reply->error() != NoError`, and the Quick read paths already route that to their existing failure signals (`searchFailed`, `reportError` / `timeAnalyticsError`, `VisitorController::fetchError`, and the Dashboard/VisitLogs "Network error. Please try again."). So a 401 does **not** fall through to success-with-empty-rows on the LOAMS 2.0 client today. The work here is therefore only: (a) a per-path test asserting a 401 lands in the error state (§5), and (b) optionally distinguishing an auth failure from a generic network error in the message. The one genuinely-silent path (`ReportController::fetchPreviewData`, `qDebug`-only) belongs to the **legacy** Widgets app and is addressed under §6, not fixed here.
+Mostly already handled — a 401 sets `reply->error() != NoError`, and the Quick read paths already route that to their existing failure signals (`searchFailed`, `reportError` / `timeAnalyticsError`, and the Dashboard/VisitLogs inline `netErr → "Network error. Please try again."`, e.g. `VisitLogsViewModel.cpp:130`). So a 401 does **not** fall through to success-with-empty-rows on the LOAMS 2.0 client today. The work here is therefore only: (a) a per-path test asserting a 401 lands in the error state (§5), and (b) optionally distinguishing an auth failure from a generic network error in the message. The one genuinely-silent path (`ReportController::fetchPreviewData`, `qDebug`-only) belongs to the **legacy** Widgets app and is addressed under §6, not fixed here.
 
 ### 3.5 Endpoints that MUST stay public (do NOT guard)
 
@@ -120,7 +120,7 @@ All client tests via `wits_add_qttest()` (+ `OFFSCREEN` where a test needs it).
 
 - `deliverables/loams_api/auth_helper.php`: payload-aware key extraction.
 - `deliverables/loams_api/{search_students,get_library_visits,get_visitors,get_report_data,get_report_time_data,dashboard_summary}.php`: `requireAdminAuth()` guard.
-- Client: `StudentController`/`SearchViewModel` (JSON body), `VisitorController` (JSON body), `ReportController` (JSON body ×2), `VisitLogsViewModel` + `DashboardViewModel` (**GET→POST switch**, key in urlencoded body) — thread `admin_key` from `AdminSession::instance().key()`; new `AdminSession.h` includes in the three read VMs; per-path 401-in-error-state test.
+- Client: `StudentController`/`SearchViewModel` (JSON body), `ReportController` (JSON body ×2), `VisitLogsViewModel::refresh()` guest branch (inline `get_visitors.php` JSON POST, `cpp:123`) and student branch (`get_library_visits.php` **GET→POST**, key in urlencoded body, filters kept in query string), `DashboardViewModel` (`dashboard_summary.php` **GET→POST**) — thread `admin_key` from `AdminSession::instance().key()`; new `AdminSession.h` includes in the read VMs; per-path 401-in-error-state test. (`VisitorController::fetchVisitors` is legacy-only and intentionally not threaded — §6.)
 - Client tests: key-attached + 401-handling cases for each path.
 - A manual server-verification checklist (curl with/without key → 200/401) in the PR body or a docs note.
 
