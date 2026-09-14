@@ -5,12 +5,32 @@
  */
 
 /**
+ * Extract the admin key from the request: $_POST first (urlencoded/multipart),
+ * else the admin_key field of a JSON body. NEVER $_GET — a secret in the query
+ * string would leak into access logs (security-hygiene rule). php://input is
+ * re-readable for JSON bodies, so this does not disturb endpoints that decode
+ * their own JSON payload.
+ */
+function extractAdminKey() {
+    if (isset($_POST['admin_key']) && $_POST['admin_key'] !== '') {
+        return (string) $_POST['admin_key'];
+    }
+    $raw = file_get_contents('php://input');
+    if ($raw !== false && $raw !== '') {
+        $body = json_decode($raw, true);
+        if (is_array($body) && isset($body['admin_key'])) {
+            return (string) $body['admin_key'];
+        }
+    }
+    return '';
+}
+
+/**
  * Verify admin key from request
  * Returns true if valid, sends error response and exits if invalid
  */
 function requireAdminAuth($conn) {
-    // Check if admin_key is provided
-    $admin_key = isset($_POST['admin_key']) ? $_POST['admin_key'] : '';
+    $admin_key = extractAdminKey();
 
     if (empty($admin_key)) {
         http_response_code(401);
