@@ -3,12 +3,14 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
+#include <QUrlQuery>
+#include "AdminSession.h"
 #include "apiconfig.h"
 #include "dashboardparser.h"
 
-DashboardViewModel::DashboardViewModel(QObject *parent)
+DashboardViewModel::DashboardViewModel(QObject *parent, QNetworkAccessManager *nam)
     : QObject(parent)
-    , m_nam(new QNetworkAccessManager(this))
+    , m_nam(nam ? nam : new QNetworkAccessManager(this))
 {
 }
 
@@ -25,8 +27,12 @@ void DashboardViewModel::refresh()
 {
     setError(QString());
     setLoading(true);
-    QNetworkReply *reply = m_nam->get(
-        QNetworkRequest(ApiConfig::endpoint(QStringLiteral("dashboard_summary.php"))));
+    QNetworkRequest req(ApiConfig::endpoint(QStringLiteral("dashboard_summary.php")));
+    req.setHeader(QNetworkRequest::ContentTypeHeader,
+                  QStringLiteral("application/x-www-form-urlencoded"));
+    QUrlQuery form;
+    form.addQueryItem(QStringLiteral("admin_key"), AdminSession::instance().key());
+    QNetworkReply *reply = m_nam->post(req, form.toString(QUrl::FullyEncoded).toUtf8());
     const quint64 seq = nextRequestSeq();
     connect(reply, &QNetworkReply::finished, this, [this, reply, seq]() {
         const bool netErr = reply->error() != QNetworkReply::NoError;

@@ -8,6 +8,9 @@ if ($conn->connect_error) {
     exit;
 }
 
+require_once 'auth_helper.php';
+requireAdminAuth($conn);
+
 // Current Mon–Sun calendar week as a half-open [weekStart, weekEnd) datetime range
 // (spec §5). Shared with get_library_visits.php via date_window.php so the two
 // "this week" definitions cannot silently drift apart.

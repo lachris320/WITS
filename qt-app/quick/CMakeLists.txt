@@ -286,10 +286,15 @@ wits_add_qttest(tst_qml_kiosk
     DEFINES QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
     OFFSCREEN)
 
-# --- DashboardViewModel unit test (C++ QtTest, offscreen) ---
+# --- DashboardViewModel unit test (C++ QtTest, offscreen). Phase 6a threads
+# AdminSession's key through refresh(), captured via the CapturingNam harness
+# (qt-app/testsupport) — mirrors tst_visitlogsviewmodel's approach. ---
 wits_add_qttest(tst_dashboardviewmodel
     SOURCES tests/tst_dashboardviewmodel.cpp
+        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
+        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
     OFFSCREEN)
 
 # --- VisitLogsViewModel unit test (C++ QtTest, offscreen). Phase 6a threads
