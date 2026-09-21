@@ -3,8 +3,8 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
-#include <QUrlQuery>
 #include "AdminSession.h"
+#include "HttpForm.h"
 #include "apiconfig.h"
 #include "dashboardparser.h"
 
@@ -27,12 +27,8 @@ void DashboardViewModel::refresh()
 {
     setError(QString());
     setLoading(true);
-    QNetworkRequest req(ApiConfig::endpoint(QStringLiteral("dashboard_summary.php")));
-    req.setHeader(QNetworkRequest::ContentTypeHeader,
-                  QStringLiteral("application/x-www-form-urlencoded"));
-    QUrlQuery form;
-    form.addQueryItem(QStringLiteral("admin_key"), AdminSession::instance().key());
-    QNetworkReply *reply = m_nam->post(req, form.toString(QUrl::FullyEncoded).toUtf8());
+    QNetworkRequest req = HttpForm::formRequest(ApiConfig::endpoint(QStringLiteral("dashboard_summary.php")));
+    QNetworkReply *reply = m_nam->post(req, HttpForm::encodeForm({{QStringLiteral("admin_key"), AdminSession::instance().key()}}));
     const quint64 seq = nextRequestSeq();
     connect(reply, &QNetworkReply::finished, this, [this, reply, seq]() {
         const bool netErr = reply->error() != QNetworkReply::NoError;

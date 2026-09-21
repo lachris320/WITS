@@ -8,6 +8,7 @@
 #include <QUrl>
 #include <QUrlQuery>
 #include "AdminSession.h"
+#include "HttpForm.h"
 #include "apiconfig.h"
 #include "visitlogparser.h"
 #include "visitorcontroller.h"
@@ -86,12 +87,8 @@ void VisitLogsViewModel::refresh()
         q.addQueryItem(QStringLiteral("range"),
                        m_range == Week ? QStringLiteral("week") : QStringLiteral("today"));
         url.setQuery(q);                       // filters stay in $_GET
-        QNetworkRequest req(url);
-        req.setHeader(QNetworkRequest::ContentTypeHeader,
-                      QStringLiteral("application/x-www-form-urlencoded"));
-        QUrlQuery form;
-        form.addQueryItem(QStringLiteral("admin_key"), AdminSession::instance().key());
-        QNetworkReply *reply = m_nam->post(req, form.toString(QUrl::FullyEncoded).toUtf8());
+        QNetworkRequest req = HttpForm::formRequest(url);
+        QNetworkReply *reply = m_nam->post(req, HttpForm::encodeForm({{QStringLiteral("admin_key"), AdminSession::instance().key()}}));
         const quint64 seq = nextRequestSeq();
         connect(reply, &QNetworkReply::finished, this, [this, reply, seq]() {
             const bool netErr = reply->error() != QNetworkReply::NoError;
