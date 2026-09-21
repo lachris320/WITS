@@ -446,6 +446,7 @@ void TestStudentController::searchStudents_buildsJsonBodyWithAdminKey()
     const QJsonObject body = QJsonDocument::fromJson(nam.lastBody).object();
     QCOMPARE(body.value("admin_key").toString(), QStringLiteral("test-key"));
     QCOMPARE(body.value("search").toString(), QStringLiteral("cruz"));
+    QVERIFY(!QUrlQuery(nam.lastUrl).hasQueryItem("admin_key"));
 }
 
 void TestStudentController::searchStudents_guard401_emitsSearchFailed()

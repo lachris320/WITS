@@ -95,6 +95,7 @@ void TestDashboardViewModel::refresh_postsWithAdminKeyInBody()
     QCOMPARE(nam.lastContentType, QStringLiteral("application/x-www-form-urlencoded"));
     const QUrlQuery form(QString::fromUtf8(nam.lastBody));
     QCOMPARE(form.queryItemValue("admin_key"), QStringLiteral("test-key"));
+    QVERIFY(!QUrlQuery(nam.lastUrl).hasQueryItem("admin_key"));
     AdminSession::instance().clear();
 }
 

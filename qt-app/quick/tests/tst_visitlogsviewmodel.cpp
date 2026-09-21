@@ -188,6 +188,7 @@ void TestVisitLogsViewModel::studentRefresh_postsWithAdminKeyBodyAndRangeInQuery
     QVERIFY(nam.lastUrl.query().contains("range="));               // filter stays in the query string
     const QUrlQuery form(QString::fromUtf8(nam.lastBody));
     QCOMPARE(form.queryItemValue("admin_key"), QStringLiteral("test-key"));
+    QVERIFY(!QUrlQuery(nam.lastUrl).hasQueryItem("admin_key"));
     AdminSession::instance().clear();
 }
 

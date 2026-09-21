@@ -4,6 +4,7 @@
 #include <QJsonObject>
 #include <QList>
 #include <QSignalSpy>
+#include <QUrlQuery>
 
 #include "capturingnam.h"
 #include "reportcontroller.h"
@@ -221,6 +222,7 @@ void TstReportController::fetchReportRows_mergesAdminKeyIntoJsonBody()
     const QJsonObject body = QJsonDocument::fromJson(nam.lastBody).object();
     QCOMPARE(body.value("admin_key").toString(), QStringLiteral("test-key"));
     QCOMPARE(body.value("department").toString(), QStringLiteral("CCS"));
+    QVERIFY(!QUrlQuery(nam.lastUrl).hasQueryItem("admin_key"));
 }
 
 void TstReportController::fetchTimeAnalytics_mergesAdminKeyIntoJsonBody()
