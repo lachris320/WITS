@@ -65,6 +65,11 @@ private slots:
     void deleteStudents_buildsFormBodyWithAdminKey();
     void bulkUpdate_buildsFormBodyWithStudentsJsonAndAdminKey();
 
+    // searchStudents — Phase 6a: search_students.php is now requireAdminAuth-
+    // guarded, so the request must carry admin_key too.
+    void searchStudents_buildsJsonBodyWithAdminKey();
+    void searchStudents_guard401_emitsSearchFailed();
+
     // deleteStudents — guard 401 must surface as deleteFinished(false, msg),
     // never deleteFailed (the whole point of Task 2's rewrite).
     void deleteStudents_guard401WithBody_emitsDeleteFinishedNotFailed();
@@ -427,6 +432,33 @@ void TestStudentController::bulkUpdate_buildsFormBodyWithStudentsJsonAndAdminKey
     QCOMPARE(arr.size(), 1);
     QCOMPARE(arr.at(0).toObject().value("school_id").toString(), QStringLiteral("2023-001"));
     QCOMPARE(arr.at(0).toObject().value("year_level").toString(), QStringLiteral("2"));
+}
+
+void TestStudentController::searchStudents_buildsJsonBodyWithAdminKey()
+{
+    CapturingNam nam;
+    StudentController ctrl(&nam);
+
+    ctrl.searchStudents("cruz", "CCS", "BSIT", "test-key");
+
+    QCOMPARE(nam.lastOp, QNetworkAccessManager::PostOperation);
+    QCOMPARE(nam.lastContentType, QStringLiteral("application/json"));
+    const QJsonObject body = QJsonDocument::fromJson(nam.lastBody).object();
+    QCOMPARE(body.value("admin_key").toString(), QStringLiteral("test-key"));
+    QCOMPARE(body.value("search").toString(), QStringLiteral("cruz"));
+    QVERIFY(!QUrlQuery(nam.lastUrl).hasQueryItem("admin_key"));
+}
+
+void TestStudentController::searchStudents_guard401_emitsSearchFailed()
+{
+    CapturingNam nam(QByteArrayLiteral("{\"status\":\"error\",\"message\":\"Admin authentication required\"}"),
+                     QNetworkReply::AuthenticationRequiredError, 401);
+    StudentController ctrl(&nam);
+    QSignalSpy failed(&ctrl, &StudentController::searchFailed);
+
+    ctrl.searchStudents("x", "", "", "");
+    QVERIFY(failed.wait(1000));
+    QCOMPARE(failed.count(), 1);
 }
 
 void TestStudentController::deleteStudents_guard401WithBody_emitsDeleteFinishedNotFailed()

@@ -2,6 +2,7 @@
 
 #include <QNetworkAccessManager>
 #include "studentcontroller.h"
+#include "AdminSession.h"
 
 SearchViewModel::SearchViewModel(QObject *parent)
     : QObject(parent)
@@ -30,7 +31,7 @@ void SearchViewModel::search(const QString &search, const QString &course)
 {
     setError(QString());
     setLoading(true);
-    m_controller->searchStudents(search, m_department, course);
+    m_controller->searchStudents(search, m_department, course, AdminSession::instance().key());
 }
 
 void SearchViewModel::setDepartment(const QString &department)

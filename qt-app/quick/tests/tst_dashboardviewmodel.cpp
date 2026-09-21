@@ -1,7 +1,10 @@
 #include <QtTest>
 #include <QSignalSpy>
+#include <QUrlQuery>
 #include "DashboardViewModel.h"
 #include "BarsModel.h"
+#include "AdminSession.h"
+#include "capturingnam.h"
 
 class TestDashboardViewModel : public QObject
 {
@@ -12,6 +15,8 @@ private slots:
     void applySummaryDerivesPeak();
     void applyInvalidSetsErrorText();
     void supersededRequestSeqIsNotCurrent();
+    void refresh_postsWithAdminKeyInBody();
+    void refresh_guard401_setsError();
 };
 
 void TestDashboardViewModel::formatPeakHourMapsTo12Hour()
@@ -77,6 +82,33 @@ void TestDashboardViewModel::supersededRequestSeqIsNotCurrent()
     const quint64 second = vm.nextRequestSeq();    // Retry mashed before the GET returns
     QVERIFY(!vm.isCurrentRequest(first));
     QVERIFY(vm.isCurrentRequest(second));
+}
+
+void TestDashboardViewModel::refresh_postsWithAdminKeyInBody()
+{
+    AdminSession::instance().setKey("test-key");
+    CapturingNam nam;
+    DashboardViewModel vm(nullptr, &nam);
+    vm.refresh();
+
+    QCOMPARE(nam.lastOp, QNetworkAccessManager::PostOperation);
+    QCOMPARE(nam.lastContentType, QStringLiteral("application/x-www-form-urlencoded"));
+    const QUrlQuery form(QString::fromUtf8(nam.lastBody));
+    QCOMPARE(form.queryItemValue("admin_key"), QStringLiteral("test-key"));
+    QVERIFY(!QUrlQuery(nam.lastUrl).hasQueryItem("admin_key"));
+    AdminSession::instance().clear();
+}
+
+void TestDashboardViewModel::refresh_guard401_setsError()
+{
+    AdminSession::instance().setKey("");
+    CapturingNam nam(QByteArrayLiteral("{\"status\":\"error\"}"),
+                     QNetworkReply::AuthenticationRequiredError, 401);
+    DashboardViewModel vm(nullptr, &nam);
+    QSignalSpy err(&vm, &DashboardViewModel::errorTextChanged);
+    vm.refresh();
+    QVERIFY(err.wait(1000));
+    QVERIFY(!vm.errorText().isEmpty());   // 401 lands in the error state, not empty success
 }
 
 QTEST_MAIN(TestDashboardViewModel)

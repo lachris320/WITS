@@ -2,6 +2,9 @@
 header('Content-Type: application/json');
 include 'db.php'; // must set $conn = new mysqli(...);
 
+require_once 'auth_helper.php';
+requireAdminAuth($conn);
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     echo json_encode(['status' => 'error', 'message' => 'Invalid request method']);
     exit;

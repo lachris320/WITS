@@ -31,7 +31,10 @@ public:
     enum Range { Today, Week };
     Q_ENUM(Range)
 
-    explicit VisitLogsViewModel(QObject *parent = nullptr);
+    // nam: injection seam for tests (CapturingNam) — when null (production,
+    // and every existing QML default-construction path), the VM owns a fresh
+    // QNetworkAccessManager exactly as before.
+    explicit VisitLogsViewModel(QObject *parent = nullptr, QNetworkAccessManager *nam = nullptr);
 
     Mode mode() const { return m_mode; }
     Range range() const { return m_range; }

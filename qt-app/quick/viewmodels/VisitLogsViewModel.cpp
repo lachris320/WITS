@@ -7,14 +7,16 @@
 #include <QNetworkRequest>
 #include <QUrl>
 #include <QUrlQuery>
+#include "AdminSession.h"
+#include "HttpForm.h"
 #include "apiconfig.h"
 #include "visitlogparser.h"
 #include "visitorcontroller.h"
 #include "visitordata.h"
 
-VisitLogsViewModel::VisitLogsViewModel(QObject *parent)
+VisitLogsViewModel::VisitLogsViewModel(QObject *parent, QNetworkAccessManager *nam)
     : QObject(parent)
-    , m_nam(new QNetworkAccessManager(this))
+    , m_nam(nam ? nam : new QNetworkAccessManager(this))
 {
     m_rangeLabel = computeRangeLabel();
 }
@@ -75,12 +77,18 @@ void VisitLogsViewModel::refresh()
     setLoading(true);
 
     if (m_mode == Student) {
+        // GET -> POST (Phase 6a): the server's extractAdminKey() only ever
+        // looks at $_POST / a JSON body, never $_GET (a secret in the query
+        // string would leak into access logs) — so admin_key must ride the
+        // urlencoded body. range/start/end stay in the query string, since
+        // get_library_visits.php still resolves its date window via $_GET.
         QUrl url = ApiConfig::endpoint(QStringLiteral("get_library_visits.php"));
         QUrlQuery q;
         q.addQueryItem(QStringLiteral("range"),
                        m_range == Week ? QStringLiteral("week") : QStringLiteral("today"));
-        url.setQuery(q);
-        QNetworkReply *reply = m_nam->get(QNetworkRequest(url));
+        url.setQuery(q);                       // filters stay in $_GET
+        QNetworkRequest req = HttpForm::formRequest(url);
+        QNetworkReply *reply = m_nam->post(req, HttpForm::encodeForm({{QStringLiteral("admin_key"), AdminSession::instance().key()}}));
         const quint64 seq = nextRequestSeq();
         connect(reply, &QNetworkReply::finished, this, [this, reply, seq]() {
             const bool netErr = reply->error() != QNetworkReply::NoError;
@@ -119,6 +127,7 @@ void VisitLogsViewModel::refresh()
     payload[QStringLiteral("date_type")]  = dateType;
     payload[QStringLiteral("start_date")] = startDate;
     payload[QStringLiteral("end_date")]   = endDate;
+    payload[QStringLiteral("admin_key")] = AdminSession::instance().key();   // guard field — never logged
 
     QNetworkRequest req(ApiConfig::endpoint(QStringLiteral("get_visitors.php")));
     req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));

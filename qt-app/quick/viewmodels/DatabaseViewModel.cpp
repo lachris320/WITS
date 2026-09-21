@@ -58,7 +58,7 @@ void DatabaseViewModel::reloadTable()
     setError(QString());
     setLoading(true);
     // Empty search + current dept/course filter = "all matching students".
-    m_controller->searchStudents(QString(), m_department, m_course);
+    m_controller->searchStudents(QString(), m_department, m_course, AdminSession::instance().key());
 }
 
 void DatabaseViewModel::setDepartment(const QString &department)

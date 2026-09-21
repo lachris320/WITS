@@ -9,6 +9,7 @@
 #include <QPrinter>
 #include <QUrl>
 #include <algorithm>
+#include "AdminSession.h"
 #include "appsettings.h"
 #include "reportanalytics.h"
 #include "reportcontroller.h"
@@ -447,8 +448,9 @@ void ReportingViewModel::generateReport()
         m_department, m_course, m_durationType,
         parseDate(m_day), m_month, m_monthYear,
         m_semester, m_semYear, parseDate(m_customStart), parseDate(m_customEnd));
-    m_controller->fetchReportRows(filters);
-    m_controller->fetchTimeAnalytics(filters);   // parallel, same filters
+    const QString key = AdminSession::instance().key();
+    m_controller->fetchReportRows(filters, key);
+    m_controller->fetchTimeAnalytics(filters, key);   // parallel, same filters
 }
 
 void ReportingViewModel::retry()

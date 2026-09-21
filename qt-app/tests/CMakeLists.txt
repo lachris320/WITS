@@ -138,9 +138,11 @@ qt_add_executable(tst_reportcontroller
     ${CMAKE_SOURCE_DIR}/core/reportcontroller.cpp
     ${CMAKE_SOURCE_DIR}/core/reportcontroller.h
     ${CMAKE_SOURCE_DIR}/core/reportdata.h
+    ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
+    ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
 )
 set_target_properties(tst_reportcontroller PROPERTIES WIN32_EXECUTABLE FALSE)
-target_include_directories(tst_reportcontroller PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/core)
+target_include_directories(tst_reportcontroller PRIVATE ${CMAKE_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/core ${CMAKE_SOURCE_DIR}/testsupport)
 target_link_libraries(tst_reportcontroller PRIVATE
     Qt${QT_VERSION_MAJOR}::Test
     Qt${QT_VERSION_MAJOR}::Network

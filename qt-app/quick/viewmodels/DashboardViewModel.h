@@ -27,7 +27,7 @@ class DashboardViewModel : public QObject
     Q_PROPERTY(QString errorText READ errorText NOTIFY errorTextChanged)
 
 public:
-    explicit DashboardViewModel(QObject *parent = nullptr);
+    explicit DashboardViewModel(QObject *parent = nullptr, QNetworkAccessManager *nam = nullptr);
 
     int statToday() const { return m_today; }
     int statWeek() const { return m_week; }

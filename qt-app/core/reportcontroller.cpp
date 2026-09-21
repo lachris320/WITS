@@ -357,11 +357,13 @@ void ReportController::loadCourses(const QString &department) {
 
 // Ported from adminWindow::postReportData (adminwindow.cpp:1646-1675), routed
 // through the parseReportData outcome switch instead of inline JSON checks.
-void ReportController::fetchReportRows(const QJsonObject &filters) {
+void ReportController::fetchReportRows(const QJsonObject &filters, const QString &adminKey) {
     QUrl url = ApiConfig::endpoint("get_report_data.php");
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    QNetworkReply *reply = m_nam->post(request, QJsonDocument(filters).toJson());
+    QJsonObject body = filters;
+    body.insert("admin_key", adminKey);   // guard field (spec §3.3) — never logged
+    QNetworkReply *reply = m_nam->post(request, QJsonDocument(body).toJson());
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         if (reply->error() != QNetworkReply::NoError) {
             emit reportError(reply->errorString(), true);
@@ -392,11 +394,13 @@ void ReportController::fetchReportRows(const QJsonObject &filters) {
 // failure -> the DEDICATED timeAnalyticsError. This path is deliberately DISJOINT
 // from reportError, which the VM routes to m_errorText (blanking the whole preview
 // + blocking export) — a time hiccup must never do that (spec §4.1/§5.2).
-void ReportController::fetchTimeAnalytics(const QJsonObject &filters) {
+void ReportController::fetchTimeAnalytics(const QJsonObject &filters, const QString &adminKey) {
     QUrl url = ApiConfig::endpoint("get_report_time_data.php");
     QNetworkRequest request(url);
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-    QNetworkReply *reply = m_nam->post(request, QJsonDocument(filters).toJson());
+    QJsonObject body = filters;
+    body.insert("admin_key", adminKey);   // guard field (spec §3.3) — never logged
+    QNetworkReply *reply = m_nam->post(request, QJsonDocument(body).toJson());
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         if (reply->error() != QNetworkReply::NoError) {
             emit timeAnalyticsError(reply->errorString());

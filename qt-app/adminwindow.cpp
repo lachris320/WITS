@@ -1541,7 +1541,7 @@ void adminWindow::onGeneratePDFBtnClicked() {
 
     m_pendingReportAction  = ReportAction::Pdf;
     m_pendingReportFilters = filters;
-    m_reportController->fetchReportRows(filters);
+    m_reportController->fetchReportRows(filters, QString());   // legacy WITS.exe — unauthenticated, breaks per spec §6
 }
 
 void adminWindow::onGenerateExcelBtnClicked() {
@@ -1552,7 +1552,7 @@ void adminWindow::onGenerateExcelBtnClicked() {
 
     m_pendingReportAction  = ReportAction::Excel;
     m_pendingReportFilters = filters;
-    m_reportController->fetchReportRows(filters);
+    m_reportController->fetchReportRows(filters, QString());   // legacy WITS.exe — unauthenticated, breaks per spec §6
 }
 
 
@@ -1727,7 +1727,7 @@ void adminWindow::onPrintReportBtnClicked() {
 
     m_pendingReportAction  = ReportAction::Print;
     m_pendingReportFilters = filters;
-    m_reportController->fetchReportRows(filters);
+    m_reportController->fetchReportRows(filters, QString());   // legacy WITS.exe — unauthenticated, breaks per spec §6
 }
 
 void adminWindow::printReport(const QJsonArray &data, const QJsonObject &filters) {
@@ -2428,7 +2428,8 @@ void adminWindow::performStudentSearch(bool showOverlay)
     m_studentController->searchStudents(
         ui->searchLineEdit->text().trimmed(),
         ui->searchDepartmentFilter->currentText(),
-        ui->searchCourseFilter->currentText());
+        ui->searchCourseFilter->currentText(),
+        QString());   // legacy WITS.exe — unauthenticated read, breaks per spec §6
 }
 
 void adminWindow::displaySearchResults(const QList<StudentRecord> &students,

@@ -214,7 +214,8 @@ bool StudentController::replyIsServerAnswer(bool replyHadError, int httpStatus,
 
 quint64 StudentController::searchStudents(const QString &search,
                                        const QString &department,
-                                       const QString &course)
+                                       const QString &course,
+                                       const QString &adminKey)
 {
     QNetworkRequest request(ApiConfig::endpoint(QStringLiteral("search_students.php")));
     request.setHeader(QNetworkRequest::ContentTypeHeader,
@@ -224,6 +225,7 @@ quint64 StudentController::searchStudents(const QString &search,
     filters["search"]     = search;
     filters["department"] = normalizeFilter(department);   // reproduces adminwindow.cpp:3171
     filters["course"]     = normalizeFilter(course);       // reproduces adminwindow.cpp:3172
+    filters["admin_key"]  = adminKey;   // guard field (spec §3.3) — never logged
 
     QNetworkReply *reply = m_nam->post(request, QJsonDocument(filters).toJson());
 

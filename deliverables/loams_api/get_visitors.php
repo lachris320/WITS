@@ -2,6 +2,9 @@
 header("Content-Type: application/json");
 include "db.php";
 
+require_once 'auth_helper.php';
+requireAdminAuth($conn);
+
 // Decode JSON input safely
 $input = json_decode(file_get_contents("php://input"), true);
 if (!is_array($input)) $input = [];

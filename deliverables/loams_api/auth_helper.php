@@ -5,12 +5,39 @@
  */
 
 /**
+ * Extract the admin key from the request: $_POST first (urlencoded/multipart),
+ * else the admin_key field of a JSON body. NEVER $_GET — a secret in the query
+ * string would leak into access logs (security-hygiene rule). php://input is
+ * re-readable for JSON bodies, so this does not disturb endpoints that decode
+ * their own JSON payload.
+ *
+ * A non-scalar admin_key (e.g. admin_key[]=x, or JSON "admin_key":[]) is
+ * rejected rather than cast to string — casting an array would emit an
+ * "Array to string conversion" warning and silently yield the literal
+ * "Array", which must never reach password_verify(). If $_POST['admin_key']
+ * is present but non-scalar, the request is treated as invalid and we fail
+ * closed (returning '') rather than falling through to the JSON body.
+ */
+function extractAdminKey() {
+    if (isset($_POST['admin_key']) && $_POST['admin_key'] !== '') {
+        return is_scalar($_POST['admin_key']) ? (string) $_POST['admin_key'] : '';
+    }
+    $raw = file_get_contents('php://input');
+    if ($raw !== false && $raw !== '') {
+        $body = json_decode($raw, true);
+        if (is_array($body) && isset($body['admin_key'])) {
+            return is_scalar($body['admin_key']) ? (string) $body['admin_key'] : '';
+        }
+    }
+    return '';
+}
+
+/**
  * Verify admin key from request
  * Returns true if valid, sends error response and exits if invalid
  */
 function requireAdminAuth($conn) {
-    // Check if admin_key is provided
-    $admin_key = isset($_POST['admin_key']) ? $_POST['admin_key'] : '';
+    $admin_key = extractAdminKey();
 
     if (empty($admin_key)) {
         http_response_code(401);
