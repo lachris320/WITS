@@ -47,7 +47,9 @@ if (!in_array($remoteIp, ['127.0.0.1', '::1'], true)) {
 }
 
 $httpMethod = $_SERVER['REQUEST_METHOD'] ?? '';
-$action     = isset($_REQUEST['action']) ? (string)$_REQUEST['action'] : '';
+// GET is a pure read and carries no action. Mutations (claim/release) MUST be a
+// POST and their action is read from the POST body only.
+$action = ($httpMethod === 'POST' && isset($_POST['action'])) ? (string)$_POST['action'] : '';
 
 try {
     require_once __DIR__ . '/config.php';
@@ -57,8 +59,8 @@ try {
     $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
     $conn->set_charset('utf8mb4');
 
-    // --- Read: oldest pending event -----------------------------------------
-    if ($httpMethod === 'GET' && $action === '') {
+    // --- Read: oldest pending event (GET is always a pure read) --------------
+    if ($httpMethod === 'GET') {
         $freshness = PULL_FRESHNESS_SECONDS;
         $stmt = $conn->prepare(
             'SELECT id, card, created_at FROM turnstile_events '

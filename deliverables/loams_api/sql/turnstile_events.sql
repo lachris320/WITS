@@ -29,7 +29,11 @@ CREATE TABLE IF NOT EXISTS turnstile_events (
     -- Bridge poll: oldest pending (uninjected) recent event.
     INDEX idx_turnstile_pending (injected_at, created_at),
     -- rfid_login.php suppression lookup by card.
-    INDEX idx_turnstile_consume (card, consumed_at, injected_at)
+    INDEX idx_turnstile_consume (card, consumed_at, injected_at),
+    -- turnstile.php retransmit idempotency: (Serial, Index) primary path and the
+    -- (card, reader) fallback used when the firmware omits Serial/Index.
+    INDEX idx_turnstile_retransmit (controller_serial, controller_index, created_at),
+    INDEX idx_turnstile_retransmit_fb (card, reader, created_at)
 
     -- Retransmit de-duplication.
     -- PREFERRED once packet capture confirms the controller's Index is unique over

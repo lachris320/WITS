@@ -36,7 +36,9 @@ param(
     [double] $FreshnessSec   = 5.0,
     # Must exceed WITS's ~2.5 s same-card handleRfidLogin debounce.
     [double] $SameCardGapSec = 2.8,
-    [string] $LogPath        = (Join-Path $PSScriptRoot 'loams-turnstile-bridge.log')
+    # Log OUTSIDE the web root. The bridge folder may be deployed under htdocs,
+    # and a log containing card numbers must never be downloadable over the LAN.
+    [string] $LogPath        = (Join-Path $env:ProgramData 'LOAMS\loams-turnstile-bridge.log')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -114,7 +116,19 @@ namespace LoamsBridge {
 
 function Write-Log([string] $msg) {
     $line = ('{0} {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss.fff'), $msg)
-    try { Add-Content -Path $LogPath -Value $line -Encoding utf8 } catch { }
+    try {
+        $dir = Split-Path -Parent $LogPath
+        if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+        Add-Content -Path $LogPath -Value $line -Encoding utf8
+    } catch { }
+}
+
+# Card numbers are student credentials — never log them in full. Show only the
+# last 4 characters so the log is still useful for troubleshooting.
+function Format-Card([string] $c) {
+    if (-not $c) { return '' }
+    if ($c.Length -le 4) { return ('*' * $c.Length) }
+    return ('{0}{1}' -f ('*' * ($c.Length - 4)), $c.Substring($c.Length - 4))
 }
 
 # WITS is foreground iff the foreground window's owning process is $WitsProcess.
@@ -127,12 +141,14 @@ function Test-WitsForeground {
     } catch { return $false }
 }
 
-# True age (seconds) of the event from its server-local created_at. Same PC as
-# the DB, so clocks match; on any parse trouble we return 0 (don't block — the
-# pull endpoint already filtered to fresh events).
+# True age (seconds) of the event from its server-local created_at. created_at is
+# a MySQL DATETIME in the SERVER's local time; the bridge runs on the SAME PC as
+# MySQL, so Windows local time matches (a single-host deployment assumption). On
+# any parse trouble we return a very large age so the caller FAILS CLOSED
+# (aborts + releases the claim) rather than injecting a possibly-stale event.
 function Get-EventAgeSec([string] $createdAt) {
     try { return ((Get-Date) - [datetime]::Parse($createdAt)).TotalSeconds }
-    catch { return 0.0 }
+    catch { return [double]::MaxValue }
 }
 
 Write-Log "bridge start; pull=$PullUrl proc=$WitsProcess poll=${PollMs}ms fresh=${FreshnessSec}s"
@@ -167,7 +183,7 @@ while ($true) {
                         [void][LoamsBridge.Native]::SendCode($card)  # token now NEVER released
                         $lastCard = $card
                         $lastInject = Get-Date
-                        Write-Log "injected id=$id card=$card age=$([math]::Round($age,2))s"
+                        Write-Log "injected id=$id card=$(Format-Card $card) age=$([math]::Round($age,2))s"
                     } else {
                         # Aborted before typing -> release so a later manual scan
                         # of this card is not wrongly suppressed.

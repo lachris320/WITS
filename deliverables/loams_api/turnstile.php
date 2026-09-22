@@ -40,8 +40,11 @@ header('Cache-Control: no-store');
 // the JSON response, change this to 'DATA='.
 const CONTROLLER_RESPONSE_PREFIX = '';
 
-// Optional LAN restriction. Leave empty during commissioning.
-// Example after the controller IP is fixed: '192.168.1.64'
+// LAN restriction. This endpoint is an UNAUTHENTICATED authoritative attendance
+// writer: with an empty allowlist, any host that can reach Apache can forge
+// attendance for any known student. It may be left empty ONLY during bench
+// commissioning. Before production you MUST pin the controller IP here AND bind
+// Apache to the controller-facing interface. Example: '192.168.1.64'
 const ALLOWED_CONTROLLER_IP = '';
 
 // Supplier protocol: Reader 0 = IN, Reader 1 = OUT.
@@ -52,8 +55,15 @@ const ENTRY_READER = 0;
 const OPEN_TIME_SECONDS = 1;
 
 // Window within which a repeated (Serial, Index) is treated as a controller
-// retransmit of the SAME swipe and must NOT record attendance again.
+// retransmit of the SAME swipe and must NOT record attendance again. Safe to
+// keep generous because (Serial, Index) uniquely identify one physical swipe.
 const RETRANSMIT_WINDOW_SECONDS = 30;
+
+// Fallback window used ONLY when the firmware omits Serial/Index, keyed on
+// (card, reader). Deliberately short: long enough to absorb an immediate
+// controller resend, short enough that a genuine re-entry is not swallowed
+// (a person cannot physically walk the gate twice within a few seconds).
+const RETRANSMIT_FALLBACK_WINDOW_SECONDS = 3;
 
 // -----------------------------------------------------------------------------
 // Helpers
@@ -253,30 +263,42 @@ try {
     $conn->begin_transaction();
 
     try {
-        // Idempotency: has this exact swipe (Serial, Index) already been recorded
-        // recently? FOR UPDATE serialises two near-simultaneous identical requests.
+        // Idempotency: has this exact swipe already been recorded recently?
+        // FOR UPDATE serialises two near-simultaneous identical requests.
         // (Once packet capture confirms Index uniqueness, a UNIQUE KEY on
-        // (controller_serial, controller_index) makes this airtight — see the SQL.)
+        // (controller_serial, controller_index) makes the Serial/Index path
+        // airtight — see the SQL.) When the firmware omits Serial/Index we fall
+        // back to a short (card, reader) window so a resend still can't double
+        // count.
         if ($serial !== '' && $cindex !== '') {
+            $dupWindow = RETRANSMIT_WINDOW_SECONDS;
             $dupStmt = $conn->prepare(
                 'SELECT id FROM turnstile_events '
                 . 'WHERE controller_serial = ? AND controller_index = ? '
                 . 'AND created_at >= (NOW() - INTERVAL ? SECOND) '
                 . 'ORDER BY id DESC LIMIT 1 FOR UPDATE'
             );
-            $retransmitWindow = RETRANSMIT_WINDOW_SECONDS;
-            $dupStmt->bind_param('ssi', $serial, $cindex, $retransmitWindow);
-            $dupStmt->execute();
-            $dupExisting = $dupStmt->get_result()->fetch_assoc();
-            $dupStmt->close();
+            $dupStmt->bind_param('ssi', $serial, $cindex, $dupWindow);
+        } else {
+            $dupWindow = RETRANSMIT_FALLBACK_WINDOW_SECONDS;
+            $dupStmt = $conn->prepare(
+                'SELECT id FROM turnstile_events '
+                . 'WHERE card = ? AND reader = ? '
+                . 'AND created_at >= (NOW() - INTERVAL ? SECOND) '
+                . 'ORDER BY id DESC LIMIT 1 FOR UPDATE'
+            );
+            $dupStmt->bind_param('sii', $card, $reader, $dupWindow);
+        }
+        $dupStmt->execute();
+        $dupExisting = $dupStmt->get_result()->fetch_assoc();
+        $dupStmt->close();
 
-            if ($dupExisting) {
-                // Same physical swipe resent by the controller. Attendance was
-                // already recorded on the first request; just re-open the gate.
-                $conn->commit();
-                $conn->close();
-                allowAccess($reader);
-            }
+        if ($dupExisting) {
+            // Same physical swipe resent by the controller. Attendance was
+            // already recorded on the first request; just re-open the gate.
+            $conn->commit();
+            $conn->close();
+            allowAccess($reader);
         }
 
         $logStmt = $conn->prepare(
