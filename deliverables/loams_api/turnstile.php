@@ -65,6 +65,22 @@ const RETRANSMIT_WINDOW_SECONDS = 30;
 // (a person cannot physically walk the gate twice within a few seconds).
 const RETRANSMIT_FALLBACK_WINDOW_SECONDS = 3;
 
+// Gate-side greeting (voice + on-screen name), per the vendor doc's "voice
+// broadcasting and screen display" SearchCardAcs response. These fields are
+// OPTIONAL extras the CONTROLLER renders on its own speaker/screen — separate
+// from the LOAMS PC display the bridge drives. If packet capture shows this
+// firmware ignores or dislikes the extra fields, set GREETING_ENABLED = false
+// to fall back to the plain {ActIndex, AcsRes, Time} response.
+const GREETING_ENABLED     = true;
+const GREETING_ENTRY_VOICE = 'Welcome';
+const GREETING_EXIT_VOICE  = 'Goodbye';
+
+// The doc says the voice/display response is GB2312-encoded. Plain-Latin (ASCII)
+// text is byte-identical in GB2312, so the '' (UTF-8) default is safe for most
+// names. If the gate garbles an accented name (e.g. "Peña"), set this to
+// 'GB2312' to transcode the whole response — confirm the expectation by capture.
+const GREETING_RESPONSE_CHARSET = '';
+
 // -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
@@ -82,7 +98,20 @@ function controllerResponse(array $payload, int $httpStatus = 200): never
         $json = '{"AcsRes":"0","ActIndex":"0","Time":"1"}';
     }
 
-    echo CONTROLLER_RESPONSE_PREFIX . $json;
+    $out = CONTROLLER_RESPONSE_PREFIX . $json;
+
+    // Optional whole-response transcode for firmware that expects the greeting
+    // response in GB2312 (the doc's stated encoding). ASCII is unchanged, so
+    // this is a no-op for plain-Latin names; //TRANSLIT//IGNORE keeps it from
+    // failing on a character GB2312 can't represent.
+    if (GREETING_RESPONSE_CHARSET !== '') {
+        $conv = @iconv('UTF-8', GREETING_RESPONSE_CHARSET . '//TRANSLIT//IGNORE', $out);
+        if ($conv !== false) {
+            $out = $conv;
+        }
+    }
+
+    echo $out;
     exit;
 }
 
@@ -133,6 +162,33 @@ function denyAccess(int $reader = 0): never
 function allowAccess(int $reader = 0): never
 {
     controllerResponse([
+        'ActIndex' => (string)($reader & 0x01),
+        'AcsRes'   => '1',
+        'Time'     => (string)OPEN_TIME_SECONDS,
+    ]);
+}
+
+// Allow passage AND greet on the gate's own screen/speaker. Falls back to the
+// plain allow response when greetings are disabled. $card is echoed as-received
+// (the doc's display example carries the card number); Name/Note drive the
+// on-screen text, Voice the announcement.
+function allowAccessWithGreeting(int $reader, array $student, string $card, string $voice): never
+{
+    if (!GREETING_ENABLED) {
+        allowAccess($reader);
+    }
+
+    $name   = trim((string)($student['name'] ?? ''));
+    $course = trim((string)($student['course'] ?? ''));
+    $year   = trim((string)($student['year_level'] ?? ''));
+    $note   = trim($course . ($year !== '' ? ' ' . $year : ''));
+
+    controllerResponse([
+        'Card'     => $card,
+        'Systime'  => date('Y-m-d H:i:s'),
+        'Voice'    => $voice,
+        'Name'     => $name,
+        'Note'     => $note,
         'ActIndex' => (string)($reader & 0x01),
         'AcsRes'   => '1',
         'Time'     => (string)OPEN_TIME_SECONDS,
@@ -252,7 +308,7 @@ try {
     // visit as an entry/login event.
     if ($reader !== ENTRY_READER) {
         $conn->close();
-        allowAccess($reader);
+        allowAccessWithGreeting($reader, $student, $card, GREETING_EXIT_VOICE);
     }
 
     // ENTRY (Reader 0): attendance write + retransmit guard + turnstile_events
@@ -298,7 +354,7 @@ try {
             // already recorded on the first request; just re-open the gate.
             $conn->commit();
             $conn->close();
-            allowAccess($reader);
+            allowAccessWithGreeting($reader, $student, $card, GREETING_ENTRY_VOICE);
         }
 
         $logStmt = $conn->prepare(
@@ -355,7 +411,7 @@ try {
         $conn->commit();
         $conn->close();
 
-        allowAccess($reader);
+        allowAccessWithGreeting($reader, $student, $card, GREETING_ENTRY_VOICE);
     } catch (Throwable $e) {
         $conn->rollback();
         $conn->close();
