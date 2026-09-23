@@ -1,0 +1,12 @@
+# The turnstile bridge scripts are local tooling, not web content. If this folder
+# is deployed under Apache's document root, deny all HTTP access so the .ps1
+# source (and any stray logs) cannot be downloaded over the LAN.
+<IfModule mod_authz_core.c>
+    # Apache 2.4+
+    Require all denied
+</IfModule>
+<IfModule !mod_authz_core.c>
+    # Apache 2.2
+    Order deny,allow
+    Deny from all
+</IfModule>
