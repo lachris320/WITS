@@ -76,10 +76,11 @@ foreach (['turnstile.php','turnstile_pull.php','rfid_login.php'] as $f) {
 // Pin the controller allowlist to loopback in the copied endpoint so turnstile.php's
 // fail-closed gate passes for these local tests (REMOTE_ADDR is 127.0.0.1).
 $tp = $docroot . '/turnstile.php';
-file_put_contents($tp, str_replace(
-    "const ALLOWED_CONTROLLER_IP = '';",
-    "const ALLOWED_CONTROLLER_IP = '127.0.0.1';",
-    file_get_contents($tp)));
+$tpSrc = file_get_contents($tp);
+$tpPinned = str_replace("const ALLOWED_CONTROLLER_IP = '';",
+                        "const ALLOWED_CONTROLLER_IP = '127.0.0.1';", $tpSrc);
+if ($tpPinned === $tpSrc) { fwrite(STDERR, "FATAL: allowlist pin needle not found in turnstile.php\n"); exit(2); }
+file_put_contents($tp, $tpPinned);
 file_put_contents($docroot . '/config.php',
     "<?php define('DB_HOST','localhost');define('DB_USER','root');define('DB_PASS','');define('DB_NAME','" . TEST_DB . "');\n");
 file_put_contents($docroot . '/db.php',
