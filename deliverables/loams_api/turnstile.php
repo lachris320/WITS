@@ -41,11 +41,24 @@ header('Cache-Control: no-store');
 const CONTROLLER_RESPONSE_PREFIX = '';
 
 // LAN restriction. This endpoint is an UNAUTHENTICATED authoritative attendance
-// writer: with an empty allowlist, any host that can reach Apache can forge
-// attendance for any known student. It may be left empty ONLY during bench
-// commissioning. Before production you MUST pin the controller IP here AND bind
-// Apache to the controller-facing interface. Example: '192.168.1.64'
+// writer, so it FAILS CLOSED: if this is empty AND BENCH_MODE is false, every
+// request is refused (a forgotten deployment step breaks the gate loudly instead
+// of silently opening attendance to the whole LAN). Before production you MUST
+// pin the controller IP here AND bind Apache to the controller-facing interface.
+// Example: '192.168.1.64'
 const ALLOWED_CONTROLLER_IP = '';
+
+// Commissioning escape hatch. Set true ONLY on an isolated bench to exercise the
+// endpoint before the controller IP is known; MUST be false in production.
+const BENCH_MODE = false;
+
+// Defense-in-depth: when true, the attendance-writing path (SearchCardAcs / any
+// Card-bearing request) is refused unless it arrives as POST, blocking a
+// navigable-URL / <img src> CSRF forgery of an attendance write. Left OFF by
+// default because the vendor doc shows SearchCardAcs as a GET request, so a
+// GET-mode controller would break; the IP allowlist above is the primary CSRF
+// control. Enable once packet capture confirms this controller uses POST mode.
+const WRITE_REQUIRES_POST = false;
 
 // Supplier protocol: Reader 0 = IN, Reader 1 = OUT.
 // LOAMS currently records a library visit on entry only.
@@ -203,6 +216,13 @@ if (!in_array($_SERVER['REQUEST_METHOD'] ?? '', ['POST', 'GET'], true)) {
     controllerResponse(['error' => 'Method not allowed'], 405);
 }
 
+// Fail closed: an unconfigured allowlist refuses everything unless BENCH_MODE is
+// explicitly set. This turns a missed deployment step into a loud failure rather
+// than a silent LAN-wide attendance-forgery hole.
+if (ALLOWED_CONTROLLER_IP === '' && !BENCH_MODE) {
+    controllerResponse(['error' => 'Controller allowlist not configured'], 403);
+}
+
 if (ALLOWED_CONTROLLER_IP !== '') {
     $remoteIp = $_SERVER['REMOTE_ADDR'] ?? '';
     if (!hash_equals(ALLOWED_CONTROLLER_IP, $remoteIp)) {
@@ -245,13 +265,27 @@ if ($type === '101') {
 // (Card=ODIwNDM0MjE3NDQwMDIwNA== -> "8204342174400204"), but other firmware sends
 // plain digits. We deliberately DO NOT auto-decode here. Packet-capture the real
 // request first; only add a decode once the observed format proves it is encoded.
-$card   = trim((string)($request['Card'] ?? ''));
-$reader = ((int)($request['Reader'] ?? 0)) & 0x01;
+$card = trim((string)($request['Card'] ?? ''));
+
+// The entry/exit DECISION uses the raw reader index: ONLY reader 0 records a
+// visit; any other value (1, or an unexpected 2/3 on some firmware) is treated
+// as a non-entry passage (allowed, no visit) rather than masked into entry.
+// Masking with & 0x01 would map reader 2 -> 0 and silently record a false visit.
+// The response's ActIndex still echoes Reader & 0x01 as the vendor doc requires.
+$readerRaw = (int)($request['Reader'] ?? 0);
+$reader    = $readerRaw & 0x01;
 
 // (Serial, Index) identify a single physical swipe and are used for retransmit
 // de-duplication so a controller resend cannot record a second visit.
 $serial = trim((string)($request['Serial'] ?? ''));
 $cindex = trim((string)($request['Index'] ?? ''));
+
+// Defense-in-depth CSRF guard: the attendance-writing path must be POST when
+// WRITE_REQUIRES_POST is enabled. GET only ever reaches the GetStatus heartbeat
+// and the type=100/101 acks handled above.
+if (WRITE_REQUIRES_POST && ($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+    denyAccess($reader);
+}
 
 if ($method !== 'SearchCardAcs' && $card === '') {
     denyAccess($reader);
@@ -303,10 +337,11 @@ try {
         denyAccess($reader);
     }
 
-    // For EXIT (Reader 1), verify the credential and allow passage, but do not
-    // create another library visit because the current LOAMS schema treats a
-    // visit as an entry/login event.
-    if ($reader !== ENTRY_READER) {
+    // Any non-entry reader (exit, or an unexpected index): verify the credential
+    // and allow passage, but do not create a library visit — the LOAMS schema
+    // treats a visit as an entry/login event. Compared on the RAW reader so a
+    // stray index can never be masked into entry.
+    if ($readerRaw !== ENTRY_READER) {
         $conn->close();
         allowAccessWithGreeting($reader, $student, $card, GREETING_EXIT_VOICE);
     }

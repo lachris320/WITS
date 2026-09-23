@@ -147,8 +147,13 @@ function Test-WitsForeground {
 # any parse trouble we return a very large age so the caller FAILS CLOSED
 # (aborts + releases the claim) rather than injecting a possibly-stale event.
 function Get-EventAgeSec([string] $createdAt) {
-    try { return ((Get-Date) - [datetime]::Parse($createdAt)).TotalSeconds }
-    catch { return [double]::MaxValue }
+    try {
+        # ParseExact with the invariant culture: MySQL always emits this exact
+        # 'yyyy-MM-dd HH:mm:ss' shape, so parsing is deterministic regardless of
+        # the machine's locale.
+        $dt = [datetime]::ParseExact($createdAt, 'yyyy-MM-dd HH:mm:ss', [cultureinfo]::InvariantCulture)
+        return ((Get-Date) - $dt).TotalSeconds
+    } catch { return [double]::MaxValue }
 }
 
 Write-Log "bridge start; pull=$PullUrl proc=$WitsProcess poll=${PollMs}ms fresh=${FreshnessSec}s"

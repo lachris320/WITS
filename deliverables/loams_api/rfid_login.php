@@ -54,6 +54,10 @@ try {
         // card within the window), consume the token and SKIP the attendance write.
         // Oldest-first + FOR UPDATE handles two rapid swipes of the same card in
         // order. Attendance is left to turnstile.php, the authoritative writer.
+        // Accepted best-effort trade-off: if the bridge injected but WITS lost
+        // focus before processing, the token stays injected+unconsumed and would
+        // suppress a genuine desk re-scan of the SAME card within the window
+        // (under-count by one). Rare, and preferred over the double-count risk.
         $acceptWindow = TURNSTILE_TOKEN_ACCEPT_SECONDS;
         $tokenStmt = $conn->prepare(
             "SELECT id FROM turnstile_events
@@ -128,8 +132,8 @@ try {
         // the existence check must resolve against __DIR__, not DOCUMENT_ROOT (which
         // pointed one level too high and made every student fall back to default.jpg).
         $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? "https://" : "http://";
-        $host = $_SERVER['HTTP_HOST'];
-        $scriptDir = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/\\');
+        $host = $_SERVER['HTTP_HOST'] ?? '';
+        $scriptDir = rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? ''), '/\\');
         $baseURL = $protocol . $host . $scriptDir . '/';
 
         $photoRelPath = $student['photo'] ?: '';

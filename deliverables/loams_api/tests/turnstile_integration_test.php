@@ -103,6 +103,14 @@ foreach ([['SID_A','CARD_A'],['SID_B','CARD_B'],['SID_C','CARD_C'],['SID_D','CAR
 foreach (['turnstile.php','turnstile_pull.php','rfid_login.php'] as $f) {
     copy($apiDir . '/' . $f, $docroot . '/' . $f);
 }
+// Pin the controller allowlist to loopback in the copied endpoint so turnstile.php's
+// fail-closed gate passes for these local tests (REMOTE_ADDR is 127.0.0.1). This
+// also exercises the allowlist positive path; production ships with it empty.
+$tp = $docroot . '/turnstile.php';
+file_put_contents($tp, str_replace(
+    "const ALLOWED_CONTROLLER_IP = '';",
+    "const ALLOWED_CONTROLLER_IP = '127.0.0.1';",
+    file_get_contents($tp)));
 $cfg = "<?php define('DB_HOST','localhost');define('DB_USER','root');define('DB_PASS','');define('DB_NAME','" . TEST_DB . "');\n";
 file_put_contents($docroot . '/config.php', $cfg);
 file_put_contents($docroot . '/db.php', "<?php \$conn=new mysqli('localhost','root','','" . TEST_DB . "');\n");
