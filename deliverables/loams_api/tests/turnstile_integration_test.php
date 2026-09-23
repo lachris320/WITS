@@ -108,9 +108,10 @@ file_put_contents($docroot . '/config.php', $cfg);
 file_put_contents($docroot . '/db.php', "<?php \$conn=new mysqli('localhost','root','','" . TEST_DB . "');\n");
 
 // Launch the built-in server on the temp docroot.
-$php = PHP_BINARY;
 $descr = [0 => ['pipe','r'], 1 => ['file', $docroot . '/server.log', 'a'], 2 => ['file', $docroot . '/server.log', 'a']];
-$proc = proc_open('"' . $php . '" -S ' . HOST_PORT . ' -t "' . $docroot . '"', $descr, $pipes);
+// Array form (no cmd.exe wrapper) so proc_terminate reliably kills php.exe on
+// Windows — the string form leaves an orphaned dev server holding the port.
+$proc = proc_open([PHP_BINARY, '-S', HOST_PORT, '-t', $docroot], $descr, $pipes);
 usleep(700000); // let it bind
 
 try {
