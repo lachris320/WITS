@@ -19,7 +19,7 @@
 - **Decision ≠ Entry:** `AccessEvent::Type::EntryObserved` (confirmed physical entry) is a distinct type from `AccessEvent::Type::AccessGranted` (permission). The mock must emit each independently.
 - **Timeout = Error, never Denied:** an `AccessDecisionService::verify()` that times out or hits a transport failure yields `AccessDecision::Result::Error`, never a fabricated `Denied`. `Denied` is reserved for a well-formed policy rejection from the backend.
 - **Bus currency is DECIDED events:** a raw `Credential` stays internal to the adapter that captured it and is NEVER published on the `EventBus`. (This is enforced *structurally* — `EventBus::publish` only accepts `AccessEvent`, and no type on the bus carries a `Credential` — not by a runtime test.)
-- **Single-thread affinity (v1):** the whole seam is single-threaded — `AccessControlService`, its active provider, the `EventBus`, and every subscriber live in the same thread, so provider signals are delivered by **direct** connection. A future cross-thread provider (e.g. a blocking USB SDK on a worker thread) must marshal its signals back to the service's thread; that is out of scope here. Every callback is nonetheless written to be safe against a late/stale delivery (guarded by `m_enabled` + a live-provider check) so turning cross-thread on later cannot cause a use-after-free.
+- **Single-thread affinity (v1):** the whole seam is single-threaded — `AccessControlService`, its active provider, the `EventBus`, and every subscriber live in the same thread, so provider signals are delivered by **direct** connection. A future cross-thread provider (e.g. a blocking USB SDK on a worker thread) must marshal its signals back to the service's thread; that is out of scope here. Every callback is nonetheless written to be safe against a late/stale delivery — guarded by `m_enabled`, a live-provider check, **and a source-provider check** (the callback compares the captured provider instance / `sender()` against the current `m_provider`) — so a queued event from a torn-down or superseded provider is dropped rather than causing a use-after-free or being misattributed to the new provider.
 - **EventBus delivery is synchronous, same-thread, re-entrant:** `publish()` emits a direct signal, so subscribers run to completion on the caller's stack before `publish()` returns; a subscriber that itself calls `publish()` is delivered depth-first (nested) before the outer delivery resumes. Subscribers must not block. There is no internal queue in v1.
 - **The `accessControl.enabled` flag seam:** in this sub-plan the flag is exposed only as `AccessControlService::isEnabled()` / `enable()` / `disable()`, and its invariant is "constructed disabled → nothing built, no bus traffic, until `enable()`." Persisting the flag to `QSettings` and auto-enabling the chosen provider at app startup is wired by the later admin/config sub-plan, not here.
 
@@ -487,7 +487,15 @@ qt-app/
 
   EventBus::EventBus(QObject *parent)
       : QObject(parent)
-  {}
+  {
+      // Guarantee the access-control value types are registered the moment a bus
+      // exists. This is the seam's self-contained registration point: because the
+      // bus is central to every access-control flow, any binary that constructs one
+      // references this translation unit, so accesstypes.cpp is force-linked and
+      // registration can never be elided from the static library. (registerMetaTypes
+      // is idempotent; the Q_CONSTRUCTOR_FUNCTION in accesstypes.cpp is a backstop.)
+      registerMetaTypes();
+  }
 
   void EventBus::publish(const AccessEvent &event)
   {
@@ -858,8 +866,8 @@ qt-app/
   - `using CreatorFn = std::function<IAccessProvider*(const ProviderDescriptor&, const QVariantMap&, QObject*)>;`
   - `void registerProvider(const ProviderDescriptor &descriptor, CreatorFn creator);`
   - `QList<ProviderDescriptor> available() const;`
-  - `IAccessProvider *create(const ProviderDescriptor &descriptor, const QVariantMap &config, QObject *parent = nullptr) const;`
-  - `create()` dispatches on `descriptor.providerId`; returns `nullptr` for an unknown id. Created providers are parented to `parent` (ownership via the Qt tree).
+  - `IAccessProvider *create(const ProviderDescriptor &descriptor, const QVariantMap &config, QObject *parent) const;` (**`parent` is required, non-null** — ownership is mandatory)
+  - `create()` returns `nullptr` for an unknown id **or a null `parent`**; otherwise it dispatches on `descriptor.providerId`, builds the provider, and guarantees it is parented to `parent` (reparenting it if the creator ignored the argument) so no provider ever escapes unowned.
 
 **Steps**
 
@@ -880,6 +888,7 @@ qt-app/
       void availableListsRegisteredDescriptors();
       void createBuildsRegisteredProvider();
       void createUnknownIdReturnsNull();
+      void createWithNullParentReturnsNull();
       void createParentsProviderToOwner();
       void createEnforcesParentWhenCreatorIgnoresIt();
   };
@@ -914,9 +923,18 @@ qt-app/
   void TestAccessProviderFactory::createUnknownIdReturnsNull()
   {
       const AccessProviderFactory f = makeFactoryWithMock();
+      QObject owner;
       ProviderDescriptor unknown;
       unknown.providerId = QStringLiteral("does-not-exist");
-      QVERIFY(f.create(unknown, {}, nullptr) == nullptr);
+      QVERIFY(f.create(unknown, {}, &owner) == nullptr);
+  }
+
+  void TestAccessProviderFactory::createWithNullParentReturnsNull()
+  {
+      // Ownership is mandatory: a null parent must yield nullptr, never an
+      // unowned provider, even for a registered id.
+      const AccessProviderFactory f = makeFactoryWithMock();
+      QVERIFY(f.create(MockProvider::defaultDescriptor(), {}, nullptr) == nullptr);
   }
 
   void TestAccessProviderFactory::createParentsProviderToOwner()
@@ -991,9 +1009,11 @@ qt-app/
 
       void registerProvider(const ProviderDescriptor &descriptor, CreatorFn creator);
       QList<ProviderDescriptor> available() const;
+      // parent is REQUIRED (non-null): ownership is mandatory, so a null parent
+      // yields nullptr rather than an unowned provider.
       IAccessProvider *create(const ProviderDescriptor &descriptor,
                               const QVariantMap &config,
-                              QObject *parent = nullptr) const;
+                              QObject *parent) const;
 
   private:
       struct Entry {
@@ -1033,6 +1053,8 @@ qt-app/
                                                  const QVariantMap &config,
                                                  QObject *parent) const
   {
+      if (!parent)
+          return nullptr;   // ownership is mandatory — never return an unowned provider
       for (const Entry &e : m_entries) {
           if (e.descriptor.providerId == descriptor.providerId && e.creator) {
               IAccessProvider *p = e.creator(descriptor, config, parent);
@@ -1049,7 +1071,7 @@ qt-app/
 
   } // namespace AccessControl
   ```
-- [ ] Run it, expect PASS: `cmake --build qt-app/build --target tst_accessproviderfactory && ctest --test-dir qt-app/build -R tst_accessproviderfactory --output-on-failure` — 5 slots pass.
+- [ ] Run it, expect PASS: `cmake --build qt-app/build --target tst_accessproviderfactory && ctest --test-dir qt-app/build -R tst_accessproviderfactory --output-on-failure` — 6 slots pass.
 - [ ] Commit:
   ```bash
   git add qt-app/core/accesscontrol/accessproviderfactory.h qt-app/core/accesscontrol/accessproviderfactory.cpp qt-app/tests/tst_accessproviderfactory.cpp qt-app/tests/CMakeLists.txt
@@ -1075,6 +1097,7 @@ qt-app/
   - `explicit AccessDecisionService(QNetworkAccessManager *nam, QObject *parent = nullptr);`
   - `void setTimeoutMs(int ms);`
   - `void verify(const Credential &credential);`  // async → emits `decided`
+  - `void cancel();`  // invalidate all in-flight verifies; a capture adapter calls this from its `stop()` so a decision that arrives after shutdown is dropped, never emitted
   - `static AccessDecision decodeResponse(const QByteArray &raw, const QString &correlationId);`  // pure
   - `signals: void decided(const AccessControl::AccessDecision &decision);`
 - Response contract decoded (from the future backend endpoint, a later sub-plan): a JSON object `{"decision":"granted"|"denied", "subject_id":"...", "message":"..."}`. `granted` **with a non-empty string `subject_id`** → `Granted`; `granted` **missing/empty/non-string `subject_id`** → `Error` (a grant with no identifiable subject is a broken contract, not a real allow); `denied` → `Denied`; anything else / non-object → `Error`. Transport failure or timeout → `Error` (never `Denied`).
@@ -1138,6 +1161,7 @@ qt-app/
       void verifyGrantedEmitsDecidedGrantedAndSendsRequest();
       void verifyTransportFailureEmitsError();
       void verifyTimeoutEmitsError();   // the required invariant
+      void cancelDropsPendingDecision();
   };
 
   void TestAccessDecisionService::decodeGrantedResponse()
@@ -1245,6 +1269,23 @@ qt-app/
       QCOMPARE(d.reason, QStringLiteral("Verification timed out"));
   }
 
+  void TestAccessDecisionService::cancelDropsPendingDecision()
+  {
+      // CapturingNam finishes its reply on the event loop (not synchronously), so a
+      // cancel() issued before we spin the loop invalidates the in-flight verify: the
+      // finished handler sees a newer generation and emits nothing. This is the
+      // contract a capture adapter relies on when it stops mid-verify.
+      CapturingNam nam(QByteArrayLiteral("{\"decision\":\"granted\",\"subject_id\":\"S-1\"}"));
+      AccessDecisionService svc(&nam);
+      QSignalSpy spy(&svc, &AccessDecisionService::decided);
+      Credential c;
+      c.raw = QStringLiteral("CARD-1");
+      svc.verify(c);
+      svc.cancel();          // invalidate before the reply is delivered
+      QTest::qWait(100);
+      QCOMPARE(spy.count(), 0);   // the late decision was dropped, not emitted
+  }
+
   QTEST_MAIN(TestAccessDecisionService)
   #include "tst_accessdecisionservice.moc"
   ```
@@ -1284,6 +1325,12 @@ qt-app/
   // through a pure static so decode logic is unit-testable with no network.
   // A timeout or transport failure yields Result::Error — NEVER a fabricated
   // Denied (Denied is reserved for a well-formed policy rejection).
+  //
+  // Lifecycle: verify() is fire-and-forget. cancel() invalidates every verify still
+  // in flight (via a generation counter) so a capture adapter can call it from its
+  // own stop() and be sure no late decided() fires after shutdown. Reply cleanup is
+  // bound to the reply itself, so replies never leak against the injected NAM even
+  // if this service is destroyed mid-request.
   class AccessDecisionService : public QObject
   {
       Q_OBJECT
@@ -1292,6 +1339,7 @@ qt-app/
 
       void setTimeoutMs(int ms);
       void verify(const Credential &credential);
+      void cancel();
 
       static AccessDecision decodeResponse(const QByteArray &raw,
                                            const QString &correlationId);
@@ -1302,6 +1350,7 @@ qt-app/
   private:
       QNetworkAccessManager *m_nam;   // injected, not owned
       int m_timeoutMs = 5000;
+      quint64 m_generation = 0;       // bumped by cancel(); a verify from an older gen is dropped
   };
 
   } // namespace AccessControl
@@ -1330,6 +1379,13 @@ qt-app/
   {}
 
   void AccessDecisionService::setTimeoutMs(int ms) { m_timeoutMs = ms; }
+
+  void AccessDecisionService::cancel()
+  {
+      // Bump the generation: any verify still in flight captured an older generation,
+      // so its finished handler will drop the result instead of emitting decided().
+      ++m_generation;
+  }
 
   AccessDecision AccessDecisionService::decodeResponse(const QByteArray &raw,
                                                        const QString &correlationId)
@@ -1372,6 +1428,7 @@ qt-app/
   {
       const QString correlationId =
           QUuid::createUuid().toString(QUuid::WithoutBraces);
+      const quint64 gen = m_generation;   // snapshot; cancel() bumps this to invalidate
 
       QNetworkRequest request(ApiConfig::endpoint(QStringLiteral("access_verify.php")));
       request.setHeader(QNetworkRequest::ContentTypeHeader,
@@ -1402,7 +1459,9 @@ qt-app/
       connect(timer, &QTimer::timeout, reply, [reply]() { reply->abort(); });
       timer->start(m_timeoutMs);
 
-      connect(reply, &QNetworkReply::finished, this, [this, reply, correlationId]() {
+      connect(reply, &QNetworkReply::finished, this, [this, reply, correlationId, gen]() {
+          if (gen != m_generation)
+              return;   // cancelled since this request began — drop the late decision
           if (reply->error() != QNetworkReply::NoError) {
               AccessDecision d;
               d.result = AccessDecision::Result::Error;   // timeout OR transport == Error
@@ -1419,7 +1478,7 @@ qt-app/
 
   } // namespace AccessControl
   ```
-- [ ] Run it, expect PASS: `cmake --build qt-app/build --target tst_accessdecisionservice && ctest --test-dir qt-app/build -R tst_accessdecisionservice --output-on-failure` — 7 slots pass, including `verifyTimeoutEmitsError` and `verifyTransportFailureEmitsError`.
+- [ ] Run it, expect PASS: `cmake --build qt-app/build --target tst_accessdecisionservice && ctest --test-dir qt-app/build -R tst_accessdecisionservice --output-on-failure` — 8 slots pass, including `verifyTimeoutEmitsError`, `verifyTransportFailureEmitsError`, and `cancelDropsPendingDecision`.
 - [ ] Commit:
   ```bash
   git add qt-app/core/accesscontrol/accessdecisionservice.h qt-app/core/accesscontrol/accessdecisionservice.cpp qt-app/tests/tst_accessdecisionservice.cpp qt-app/tests/CMakeLists.txt
@@ -1697,6 +1756,7 @@ qt-app/
   - `void disable();`
   - `ConnectionState connectionState() const;`
   - `HealthMonitor *healthMonitor() const;`
+  - `bool isReconnectPending() const;`  // true while a reconnect timer is armed (diagnostics + deterministic tests)
   - `void setReconnectBaseMs(int ms);`  // injectable backoff base for tests
   - `signals: void enabledChanged(bool enabled); void connectionStateChanged(AccessControl::ConnectionState state);`
 - Produced for later sub-plans: `KioskViewModel` and the admin `AccessControlViewModel` will consume `EventBus::eventPublished` and this service's `enable()/disable()` (later sub-plans; not in scope here).
@@ -1726,6 +1786,8 @@ qt-app/
       void providerEventIsRepublishedOnBus();
       void disableStopsRepublishing();
       void degradedSchedulesReconnect();
+      void reconnectTimerCancelledWhenConnected();
+      void unexpectedDisconnectPublishesAndReconnects();
   };
 
   // Builds a factory whose "mock" creator stores the created instance in *out so
@@ -1791,8 +1853,11 @@ qt-app/
       QSignalSpy busSpy(&bus, &EventBus::eventPublished);
       mock->simulateGranted(QStringLiteral("S-1"), QStringLiteral("gate-a"));
       QCOMPARE(busSpy.count(), 1);
-      QCOMPARE(qvariant_cast<AccessEvent>(busSpy.at(0).at(0)).type,
-               AccessEvent::Type::AccessGranted);
+      const auto ev = qvariant_cast<AccessEvent>(busSpy.at(0).at(0));
+      QCOMPARE(ev.type, AccessEvent::Type::AccessGranted);
+      // The service stamps the emitting provider's id even though the mock left it
+      // empty — bus consumers always know the provenance.
+      QCOMPARE(ev.providerId, QStringLiteral("mock"));
   }
 
   void TestAccessControlService::disableStopsRepublishing()
@@ -1831,17 +1896,50 @@ qt-app/
       QVERIFY(QTest::qWaitFor([&]() {
           return svc.connectionState() == ConnectionState::Connected;
       }, 1000));
-      const int retriesAtConnect =
-          svc.healthMonitor()->snapshot(QStringLiteral("mock")).retryCount;
-      QVERIFY(retriesAtConnect >= 1);
+      QVERIFY(svc.healthMonitor()->snapshot(QStringLiteral("mock")).retryCount >= 1);
+  }
 
-      // Reaching Connected must CANCEL the pending reconnect timer: wait several
-      // backoff intervals and confirm no further reconnect fired (retryCount stable,
-      // still Connected). If Connected didn't stop the timer this would keep climbing.
-      QTest::qWait(50);
+  void TestAccessControlService::reconnectTimerCancelledWhenConnected()
+  {
+      EventBus bus;
+      MockProvider *mock = nullptr;
+      AccessProviderFactory f = factoryCapturing(&mock);
+      AccessControlService svc(&bus, &f);
+      svc.setReconnectBaseMs(60000);   // long: the timer will NOT fire during the test
+      svc.enable(MockProvider::defaultDescriptor(), {});
+      QVERIFY(mock != nullptr);
+
+      mock->simulateDisconnect();               // -> Degraded, arms the reconnect timer
+      QCOMPARE(svc.connectionState(), ConnectionState::Degraded);
+      QVERIFY(svc.isReconnectPending());        // timer is armed (won't fire for 60s)
+
+      mock->start();                            // provider recovers on its own -> Connected
       QCOMPARE(svc.connectionState(), ConnectionState::Connected);
-      QCOMPARE(svc.healthMonitor()->snapshot(QStringLiteral("mock")).retryCount,
-               retriesAtConnect);
+      QVERIFY(!svc.isReconnectPending());       // reaching Connected CANCELLED the timer
+  }
+
+  void TestAccessControlService::unexpectedDisconnectPublishesAndReconnects()
+  {
+      EventBus bus;
+      MockProvider *mock = nullptr;
+      AccessProviderFactory f = factoryCapturing(&mock);
+      AccessControlService svc(&bus, &f);
+      svc.setReconnectBaseMs(5);
+      svc.enable(MockProvider::defaultDescriptor(), {});
+      QVERIFY(mock != nullptr);
+
+      QSignalSpy busSpy(&bus, &EventBus::eventPublished);
+      mock->stop();   // an UNEXPECTED drop while enabled (the service did not ask for it)
+      QCOMPARE(svc.connectionState(), ConnectionState::Disconnected);
+      bool sawDisconnected = false;
+      for (const auto &call : busSpy)
+          if (qvariant_cast<AccessEvent>(call.at(0)).type == AccessEvent::Type::ControllerDisconnected)
+              sawDisconnected = true;
+      QVERIFY(sawDisconnected);
+      // ...and the scheduled reconnect brings it back to Connected.
+      QVERIFY(QTest::qWaitFor([&]() {
+          return svc.connectionState() == ConnectionState::Connected;
+      }, 1000));
   }
 
   QTEST_MAIN(TestAccessControlService)
@@ -1906,6 +2004,7 @@ qt-app/
 
       ConnectionState connectionState() const;
       HealthMonitor *healthMonitor() const;
+      bool isReconnectPending() const;
       void setReconnectBaseMs(int ms);
 
   signals:
@@ -1972,6 +2071,11 @@ qt-app/
 
   HealthMonitor *AccessControlService::healthMonitor() const { return m_health; }
 
+  bool AccessControlService::isReconnectPending() const
+  {
+      return m_reconnectTimer->isActive();
+  }
+
   void AccessControlService::setReconnectBaseMs(int ms)
   {
       m_reconnectBaseMs = ms;
@@ -1988,8 +2092,20 @@ qt-app/
       if (!m_provider)
           return;   // unknown provider id — stay disabled
 
+      // Capture the specific provider instance so a stale (e.g. queued) event from
+      // a previous provider — after a disable()/enable() cycle — is dropped instead
+      // of being republished or attributed to the new provider. Also stamp the
+      // emitting provider's id onto every republished event so bus consumers always
+      // know the provenance (adapters may leave AccessEvent::providerId empty).
+      IAccessProvider *const p = m_provider;
+      const QString providerId = m_provider->descriptor().providerId;
       connect(m_provider, &IAccessProvider::accessEvent, this,
-              [this](const AccessEvent &e) { if (m_enabled) m_bus->publish(e); });
+              [this, p, providerId](AccessEvent e) {
+                  if (!m_enabled || p != m_provider)
+                      return;
+                  e.providerId = providerId;   // stamp provenance on republish
+                  m_bus->publish(e);
+              });
       connect(m_provider, &IAccessProvider::stateChanged, this,
               &AccessControlService::onProviderState);
       connect(m_provider, &IAccessProvider::hardwareError, this,
@@ -2028,9 +2144,11 @@ qt-app/
   {
       // Guard against a late/stale delivery: once disabled (provider torn down) a
       // still-queued transition must not run — it would deref a null provider or
-      // emit after shutdown. This is also what keeps a future cross-thread provider
-      // safe (see the single-thread affinity note in the plan).
-      if (!m_enabled || !m_provider)
+      // emit after shutdown. sender() pins the event to the CURRENT provider, so a
+      // transition from a previous provider (after a disable()/enable() cycle) is
+      // dropped rather than applied to the new one. (v1 is single-threaded per the
+      // affinity note; these checks also make a future cross-thread provider safe.)
+      if (!m_enabled || !m_provider || sender() != m_provider)
           return;
 
       m_state = state;
@@ -2065,7 +2183,7 @@ qt-app/
 
   void AccessControlService::onHardwareError(const QString &message)
   {
-      if (!m_enabled || !m_provider)
+      if (!m_enabled || !m_provider || sender() != m_provider)
           return;
       AccessEvent e;
       e.type = AccessEvent::Type::HardwareError;
@@ -2096,7 +2214,7 @@ qt-app/
 
   } // namespace AccessControl
   ```
-- [ ] Run it, expect PASS: `cmake --build qt-app/build --target tst_accesscontrolservice && ctest --test-dir qt-app/build -R tst_accesscontrolservice --output-on-failure` — 5 slots pass.
+- [ ] Run it, expect PASS: `cmake --build qt-app/build --target tst_accesscontrolservice && ctest --test-dir qt-app/build -R tst_accesscontrolservice --output-on-failure` — 7 slots pass.
 - [ ] Commit:
   ```bash
   git add qt-app/core/accesscontrol/accesscontrolservice.h qt-app/core/accesscontrol/accesscontrolservice.cpp qt-app/tests/tst_accesscontrolservice.cpp qt-app/tests/CMakeLists.txt
@@ -2122,7 +2240,7 @@ qt-app/
 
 > Rationale: Tasks 1–7 compile each seam source *directly* into its own test target, so the tests are green before this task. This task folds the same sources into the shared `witscore` library so the application binaries link them once and future sub-plans (kiosk/admin wiring) can `#include "accesscontrol/..."` from any `witscore` consumer. AUTOMOC is already ON for the `witscore` target, so the new `Q_OBJECT` classes (`EventBus`, `IAccessProvider`, `MockProvider`, `AccessDecisionService`, `HealthMonitor`, `AccessControlService`) are moc'd automatically.
 >
-> Forward note (metatype registration in the app): the `Q_CONSTRUCTOR_FUNCTION` in `accesstypes.cpp` runs automatically for every test target (which compiles the source directly) and for any app that references a symbol from that translation unit. This sub-plan does NOT wire the seam into an app entrypoint (it stays OFF), so nothing in `WITS`/`WITSQuick` pulls `accesstypes.o` from the static lib yet and the auto-registration may be elided there — harmless, because the app never touches the seam until a later sub-plan enables it. When that later sub-plan wires the seam into an app surface, it MUST call `AccessControl::registerMetaTypes()` once at startup (belt-and-suspenders against static-lib TU elision), in addition to instantiating the seam types. That call site is created by the sub-plan that turns the flag on, not here.
+> Metatype registration is self-contained: `EventBus`'s constructor calls `AccessControl::registerMetaTypes()`, so registration happens the moment any access-control flow spins up a bus, and constructing a bus force-links `accesstypes.o` into the binary — the registration cannot be elided from the static library. (`registerMetaTypes()` is idempotent and the `Q_CONSTRUCTOR_FUNCTION` in `accesstypes.cpp` is an additional backstop; tests also call it in `initTestCase`.) A later sub-plan that wires the seam into an app surface therefore needs no separate registration step — it gets one for free by owning an `EventBus`.
 
 **Steps**
 
@@ -2181,4 +2299,7 @@ qt-app/
 - **reconnect + cancel-on-connect** — `degradedSchedulesReconnect` also proves the timer is cancelled once Connected (retryCount stops climbing) (T7).
 - **no fabricated latency** — `recordCommTimeLeavesLatencyUnknown` keeps `latencyMs == -1` (T6).
 
-**Structurally enforced (not a runtime test), by design:** the bus carries only decided events — `EventBus::publish` accepts only `AccessEvent`, and no bus type embeds a `Credential`; a raw `Credential` exists only as the input to `AccessDecisionService::verify` and inside an adapter, so it can never reach a subscriber. The seven `AccessEvent` types are emitted across the seam — access/entry/hardware directly by `MockProvider`, and `ControllerConnected`/`ControllerDisconnected` synthesized by `AccessControlService` on state transitions (verified in T7), not by the mock.
+- **provenance + ownership** — the service stamps `providerId` on every republished event (`providerEventIsRepublishedOnBus` asserts it, T7); a stale event from a superseded provider is dropped (source-provider guard, T7); the factory refuses a null parent (`createWithNullParentReturnsNull`, T4).
+- **in-flight verify cancellation** — `cancelDropsPendingDecision` proves a decision arriving after `cancel()` is never emitted (T5), the contract a capture adapter uses on `stop()`.
+
+**Structurally enforced (not a runtime test), by design:** the bus carries only decided events — `EventBus::publish` accepts only `AccessEvent`, and no bus type embeds a `Credential`; a raw `Credential` exists only as the input to `AccessDecisionService::verify` and inside an adapter, so it can never reach a subscriber. The seven `AccessEvent` types are emitted across the seam as follows: `MockProvider` emits `AccessGranted`/`AccessDenied`/`AccessError`/`EntryObserved` directly; `HardwareError`, `ControllerConnected`, and `ControllerDisconnected` are **synthesized by `AccessControlService`** — the mock emits a `hardwareError(QString)` signal and raw state transitions, and the service turns those into the corresponding `AccessEvent`s (verified in T7). The mock does **not** emit `HardwareError` (or the controller events) as an `AccessEvent` itself.
