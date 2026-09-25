@@ -18,7 +18,10 @@
 - **No live network in tests:** every network path is exercised through `CapturingNam` (immediate canned reply) or a test-local hanging `QNetworkAccessManager`; never a real `http://` call.
 - **Decision ≠ Entry:** `AccessEvent::Type::EntryObserved` (confirmed physical entry) is a distinct type from `AccessEvent::Type::AccessGranted` (permission). The mock must emit each independently.
 - **Timeout = Error, never Denied:** an `AccessDecisionService::verify()` that times out or hits a transport failure yields `AccessDecision::Result::Error`, never a fabricated `Denied`. `Denied` is reserved for a well-formed policy rejection from the backend.
-- **Bus currency is DECIDED events:** a raw `Credential` stays internal to the adapter that captured it and is NEVER published on the `EventBus`.
+- **Bus currency is DECIDED events:** a raw `Credential` stays internal to the adapter that captured it and is NEVER published on the `EventBus`. (This is enforced *structurally* — `EventBus::publish` only accepts `AccessEvent`, and no type on the bus carries a `Credential` — not by a runtime test.)
+- **Single-thread affinity (v1):** the whole seam is single-threaded — `AccessControlService`, its active provider, the `EventBus`, and every subscriber live in the same thread, so provider signals are delivered by **direct** connection. A future cross-thread provider (e.g. a blocking USB SDK on a worker thread) must marshal its signals back to the service's thread; that is out of scope here. Every callback is nonetheless written to be safe against a late/stale delivery (guarded by `m_enabled` + a live-provider check) so turning cross-thread on later cannot cause a use-after-free.
+- **EventBus delivery is synchronous, same-thread, re-entrant:** `publish()` emits a direct signal, so subscribers run to completion on the caller's stack before `publish()` returns; a subscriber that itself calls `publish()` is delivered depth-first (nested) before the outer delivery resumes. Subscribers must not block. There is no internal queue in v1.
+- **The `accessControl.enabled` flag seam:** in this sub-plan the flag is exposed only as `AccessControlService::isEnabled()` / `enable()` / `disable()`, and its invariant is "constructed disabled → nothing built, no bus traffic, until `enable()`." Persisting the flag to `QSettings` and auto-enabling the chosen provider at app startup is wired by the later admin/config sub-plan, not here.
 
 ---
 
@@ -78,7 +81,7 @@ qt-app/
   - `enum class ConnectionState { Disconnected, Connecting, Connected, Degraded, Error };`
   - `struct Credential { CredentialKind kind; QString raw; QString gateId; QDateTime presentedAt; };`
   - `struct AccessDecision { enum class Result { Granted, Denied, Error }; Result result; QString subjectId; QString reason; QString correlationId; };`
-  - `struct AccessEvent { enum class Type { AccessGranted, AccessDenied, AccessError, EntryObserved, ControllerConnected, ControllerDisconnected, HardwareError }; Type type; QJsonObject subject; QString gateId; CredentialKind credentialKind; QString reason; QString correlationId; QDateTime at; };`
+  - `struct AccessEvent { enum class Type { AccessGranted, AccessDenied, AccessError, EntryObserved, ControllerConnected, ControllerDisconnected, HardwareError }; Type type; QJsonObject subject; QString gateId; QString providerId; CredentialKind credentialKind; QString reason; QString correlationId; QDateTime at; };` (`providerId` identifies the emitting provider/controller; `gateId` identifies a physical gate — a provider can serve several gates, so controller/hardware events set `providerId` and leave `gateId` for actual gate-scoped events like `EntryObserved`.)
   - `struct ConfigFieldDescriptor { QString key; QString displayName; QString type; bool required; };`
   - `struct GateDescriptor { QString gateId; QString displayName; };`
   - `struct ProviderDescriptor { QString providerId; QString displayName; QList<ConfigFieldDescriptor> configSchema; };`
@@ -96,6 +99,17 @@ qt-app/
 
   using namespace AccessControl;
 
+  // A tiny sender so the test can exercise an actual QUEUED signal carrying an
+  // AccessEvent — the property the seam truly needs (an AccessEvent must survive
+  // a cross-thread/queued hop). A plain isValid() check would be tautological:
+  // Q_DECLARE_METATYPE alone makes QMetaType::fromType<T>() valid.
+  class TypeEmitter : public QObject
+  {
+      Q_OBJECT
+  signals:
+      void fire(const AccessControl::AccessEvent &event);
+  };
+
   class TestAccessTypes : public QObject
   {
       Q_OBJECT
@@ -104,7 +118,7 @@ qt-app/
       void decisionDefaultsToError();
       void entryObservedIsDistinctFromGranted();
       void providerDescriptorCarriesConfigSchema();
-      void registerMetaTypesMakesEventQueueable();
+      void accessEventSurvivesQueuedConnection();
   };
 
   void TestAccessTypes::credentialHoldsRawAndKind()
@@ -144,18 +158,44 @@ qt-app/
       QVERIFY(pd.configSchema.first().required);
   }
 
-  void TestAccessTypes::registerMetaTypesMakesEventQueueable()
+  void TestAccessTypes::accessEventSurvivesQueuedConnection()
   {
+      // registerMetaTypes() runs automatically at library load (Q_CONSTRUCTOR_FUNCTION
+      // in accesstypes.cpp); call it again to prove idempotency.
       registerMetaTypes();
-      QVERIFY(QMetaType::fromType<AccessEvent>().isValid());
-      QVERIFY(QMetaType::fromType<AccessDecision>().isValid());
-      QVERIFY(QMetaType::fromType<ConnectionState>().isValid());
-      QVERIFY(QMetaType::fromType<ProviderDescriptor>().isValid());
+      registerMetaTypes();
+
+      TypeEmitter em;
+      AccessEvent received;
+      bool got = false;
+      // Qt::QueuedConnection forces the payload through the metatype system: if
+      // AccessEvent were not a usable queued metatype this delivery would be
+      // dropped and `got` would stay false.
+      connect(&em, &TypeEmitter::fire, this,
+              [&](const AccessEvent &e) { received = e; got = true; },
+              Qt::QueuedConnection);
+
+      AccessEvent e;
+      e.type = AccessEvent::Type::EntryObserved;
+      e.gateId = QStringLiteral("gate-a");
+      e.correlationId = QStringLiteral("corr-q");
+      emit em.fire(e);
+
+      QVERIFY(QTest::qWaitFor([&]() { return got; }, 1000));
+      QCOMPARE(received.type, AccessEvent::Type::EntryObserved);
+      QCOMPARE(received.gateId, QStringLiteral("gate-a"));
+      QCOMPARE(received.correlationId, QStringLiteral("corr-q"));
   }
 
   QTEST_MAIN(TestAccessTypes)
   #include "tst_accesstypes.moc"
   ```
+  > Note: `TypeEmitter` and `TestAccessTypes` are both moc'd via the trailing
+  > `#include "tst_accesstypes.moc"`. Qt 6 also auto-registers a `Q_DECLARE_METATYPE`
+  > type on first queued use, so this test guards the behaviour we depend on rather
+  > than the mechanism; `registerMetaTypes()` remains an explicit, name-lookup-safe
+  > registration for any code path that resolves these types by name before a
+  > connection exists.
 - [ ] Register the test target in `qt-app/tests/CMakeLists.txt` (append):
   ```cmake
   # --- Access Control: domain value types (pure core, no offscreen) ---
@@ -212,7 +252,8 @@ qt-app/
       };
       Type type = Type::AccessError;
       QJsonObject subject;   // resolved subject/student JSON (empty until a later sub-plan resolves it)
-      QString gateId;
+      QString gateId;        // physical gate id — set for gate-scoped events (e.g. EntryObserved)
+      QString providerId;    // emitting provider/controller id — set for Controller*/HardwareError
       CredentialKind credentialKind = CredentialKind::Rfid;
       QString reason;
       QString correlationId;
@@ -262,6 +303,7 @@ qt-app/
 
   void registerMetaTypes()
   {
+      // qRegisterMetaType is idempotent, so this is safe to call repeatedly.
       qRegisterMetaType<Credential>();
       qRegisterMetaType<AccessDecision>();
       qRegisterMetaType<AccessEvent>();
@@ -271,8 +313,15 @@ qt-app/
   }
 
   } // namespace AccessControl
+
+  // Register automatically when witscore loads, so the types are name-resolvable
+  // before any consumer sets up a connection — no reliance on a caller remembering
+  // to call registerMetaTypes(). Q_CONSTRUCTOR_FUNCTION must sit at file scope,
+  // outside the namespace, and takes a free function.
+  namespace { void accesscontrolRegisterMetaTypes() { AccessControl::registerMetaTypes(); } }
+  Q_CONSTRUCTOR_FUNCTION(accesscontrolRegisterMetaTypes)
   ```
-  > Note: the `.cpp` includes its header as `"accesscontrol/accesstypes.h"`; the `witscore` target and the test both have `core/` on the include path, so this resolves in both.
+  > Note: the `.cpp` includes its header as `"accesscontrol/accesstypes.h"`; the `witscore` target and the test both have `core/` on the include path, so this resolves in both. `Q_CONSTRUCTOR_FUNCTION` (from `<QtGlobal>`, pulled in transitively) runs `accesscontrolRegisterMetaTypes()` during static init of the translation unit.
 - [ ] Run it, expect PASS: `cmake --build qt-app/build --target tst_accesstypes && ctest --test-dir qt-app/build -R tst_accesstypes --output-on-failure` — 5 slots pass.
 - [ ] Commit:
   ```bash
@@ -321,6 +370,7 @@ qt-app/
       void initTestCase() { registerMetaTypes(); }
       void publishReachesSubscriber();
       void publishCarriesEventPayload();
+      void nestedPublishFromSubscriberIsDeliveredDepthFirst();
   };
 
   void TestEventBus::publishReachesSubscriber()
@@ -347,6 +397,34 @@ qt-app/
       QCOMPARE(received.type, AccessEvent::Type::AccessGranted);
       QCOMPARE(received.gateId, QStringLiteral("gate-9"));
       QCOMPARE(received.correlationId, QStringLiteral("corr-1"));
+  }
+
+  void TestEventBus::nestedPublishFromSubscriberIsDeliveredDepthFirst()
+  {
+      EventBus bus;
+      QSignalSpy spy(&bus, &EventBus::eventPublished);   // connected first
+      QList<AccessEvent::Type> order;
+      bool nested = false;
+      // A subscriber that republishes a nested event once, on an AccessGranted.
+      connect(&bus, &EventBus::eventPublished, this, [&](const AccessEvent &e) {
+          order.append(e.type);
+          if (e.type == AccessEvent::Type::AccessGranted && !nested) {
+              nested = true;
+              AccessEvent inner;
+              inner.type = AccessEvent::Type::EntryObserved;
+              bus.publish(inner);   // re-entrant publish
+          }
+      });
+
+      AccessEvent outer;
+      outer.type = AccessEvent::Type::AccessGranted;
+      bus.publish(outer);
+
+      QCOMPARE(spy.count(), 2);   // both the outer and the nested event were delivered
+      // Depth-first: the nested EntryObserved completes before the outer resumes.
+      QCOMPARE(order.size(), 2);
+      QCOMPARE(order.at(0), AccessEvent::Type::AccessGranted);
+      QCOMPARE(order.at(1), AccessEvent::Type::EntryObserved);
   }
 
   QTEST_MAIN(TestEventBus)
@@ -378,6 +456,14 @@ qt-app/
   // Typed, in-process publish/subscribe over a single Qt signal. The bus's
   // currency is DECIDED AccessEvents; a raw Credential is never published here.
   // A subscriber "subscribes" by connecting to eventPublished().
+  //
+  // Delivery contract (v1): publish() emits a DIRECT signal, so delivery is
+  // synchronous and on the CALLER'S thread — every subscriber runs to completion
+  // before publish() returns. The bus is single-threaded (see Global Constraints);
+  // a cross-thread publisher must marshal onto the bus's thread. Re-entrant
+  // (nested) publish() from inside a subscriber IS supported and delivered
+  // depth-first: the inner event reaches all subscribers before the outer
+  // delivery resumes. Subscribers must therefore not block. No internal queue.
   class EventBus : public QObject
   {
       Q_OBJECT
@@ -410,7 +496,7 @@ qt-app/
 
   } // namespace AccessControl
   ```
-- [ ] Run it, expect PASS: `cmake --build qt-app/build --target tst_eventbus && ctest --test-dir qt-app/build -R tst_eventbus --output-on-failure` — 2 slots pass.
+- [ ] Run it, expect PASS: `cmake --build qt-app/build --target tst_eventbus && ctest --test-dir qt-app/build -R tst_eventbus --output-on-failure` — 3 slots pass.
 - [ ] Commit:
   ```bash
   git add qt-app/core/accesscontrol/eventbus.h qt-app/core/accesscontrol/eventbus.cpp qt-app/tests/tst_eventbus.cpp qt-app/tests/CMakeLists.txt
@@ -469,6 +555,7 @@ qt-app/
   private slots:
       void initTestCase() { registerMetaTypes(); }
       void startsIntoConnectedState();
+      void startIsIdempotentWhenConnected();
       void stopReturnsToDisconnected();
       void simulateEmitsEachEventTypeIndependently();
       void simulateHardwareErrorEmitsSignal();
@@ -486,6 +573,17 @@ qt-app/
       QCOMPARE(states.count(), 2);
       QCOMPARE(qvariant_cast<ConnectionState>(states.at(1).at(0)),
                ConnectionState::Connected);
+  }
+
+  void TestMockProvider::startIsIdempotentWhenConnected()
+  {
+      MockProvider p(MockProvider::defaultDescriptor());
+      p.start();
+      QCOMPARE(p.state(), ConnectionState::Connected);
+      QSignalSpy states(&p, &IAccessProvider::stateChanged);
+      p.start();   // already connected — must be a no-op
+      QCOMPARE(states.count(), 0);
+      QCOMPARE(p.state(), ConnectionState::Connected);
   }
 
   void TestMockProvider::stopReturnsToDisconnected()
@@ -660,6 +758,8 @@ qt-app/
 
   void MockProvider::start()
   {
+      if (m_state == ConnectionState::Connected)
+          return;   // idempotent: starting an already-connected provider is a no-op
       setState(ConnectionState::Connecting);
       setState(ConnectionState::Connected);
   }
@@ -730,7 +830,7 @@ qt-app/
 
   } // namespace AccessControl
   ```
-- [ ] Run it, expect PASS: `cmake --build qt-app/build --target tst_mockprovider && ctest --test-dir qt-app/build -R tst_mockprovider --output-on-failure` — 5 slots pass.
+- [ ] Run it, expect PASS: `cmake --build qt-app/build --target tst_mockprovider && ctest --test-dir qt-app/build -R tst_mockprovider --output-on-failure` — 6 slots pass.
 - [ ] Commit:
   ```bash
   git add qt-app/core/accesscontrol/iaccessprovider.h qt-app/core/accesscontrol/mockprovider.h qt-app/core/accesscontrol/mockprovider.cpp qt-app/tests/tst_mockprovider.cpp qt-app/tests/CMakeLists.txt
@@ -781,6 +881,7 @@ qt-app/
       void createBuildsRegisteredProvider();
       void createUnknownIdReturnsNull();
       void createParentsProviderToOwner();
+      void createEnforcesParentWhenCreatorIgnoresIt();
   };
 
   static AccessProviderFactory makeFactoryWithMock()
@@ -826,6 +927,22 @@ qt-app/
       QVERIFY(p != nullptr);
       QCOMPARE(p->parent(), owner);
       delete owner;   // deleting the parent must delete the provider — no leak
+  }
+
+  void TestAccessProviderFactory::createEnforcesParentWhenCreatorIgnoresIt()
+  {
+      // A misbehaving creator that ignores the parent argument must NOT be able to
+      // leave the provider unowned — the factory reparents the result.
+      AccessProviderFactory f;
+      f.registerProvider(MockProvider::defaultDescriptor(),
+          [](const ProviderDescriptor &d, const QVariantMap &, QObject *) -> IAccessProvider * {
+              return new MockProvider(d, nullptr);   // forgets to pass the parent
+          });
+      auto *owner = new QObject;
+      IAccessProvider *p = f.create(MockProvider::defaultDescriptor(), {}, owner);
+      QVERIFY(p != nullptr);
+      QCOMPARE(p->parent(), owner);   // factory enforced ownership anyway
+      delete owner;                    // no leak
   }
 
   QTEST_MAIN(TestAccessProviderFactory)
@@ -917,15 +1034,22 @@ qt-app/
                                                  QObject *parent) const
   {
       for (const Entry &e : m_entries) {
-          if (e.descriptor.providerId == descriptor.providerId && e.creator)
-              return e.creator(descriptor, config, parent);
+          if (e.descriptor.providerId == descriptor.providerId && e.creator) {
+              IAccessProvider *p = e.creator(descriptor, config, parent);
+              // Enforce the ownership contract regardless of what the creator did:
+              // a creator that forgot to pass `parent` (or parented elsewhere) must
+              // not leave the provider unowned. setParent is a no-op if already correct.
+              if (p && p->parent() != parent)
+                  p->setParent(parent);
+              return p;
+          }
       }
       return nullptr;   // unknown id — caller decides how to surface it
   }
 
   } // namespace AccessControl
   ```
-- [ ] Run it, expect PASS: `cmake --build qt-app/build --target tst_accessproviderfactory && ctest --test-dir qt-app/build -R tst_accessproviderfactory --output-on-failure` — 4 slots pass.
+- [ ] Run it, expect PASS: `cmake --build qt-app/build --target tst_accessproviderfactory && ctest --test-dir qt-app/build -R tst_accessproviderfactory --output-on-failure` — 5 slots pass.
 - [ ] Commit:
   ```bash
   git add qt-app/core/accesscontrol/accessproviderfactory.h qt-app/core/accesscontrol/accessproviderfactory.cpp qt-app/tests/tst_accessproviderfactory.cpp qt-app/tests/CMakeLists.txt
@@ -953,7 +1077,7 @@ qt-app/
   - `void verify(const Credential &credential);`  // async → emits `decided`
   - `static AccessDecision decodeResponse(const QByteArray &raw, const QString &correlationId);`  // pure
   - `signals: void decided(const AccessControl::AccessDecision &decision);`
-- Response contract decoded (from the future backend endpoint, a later sub-plan): a JSON object `{"decision":"granted"|"denied", "subject_id":"...", "message":"..."}`. `granted`→`Granted`, `denied`→`Denied`, anything else / non-object → `Error`. Transport failure or timeout → `Error` (never `Denied`).
+- Response contract decoded (from the future backend endpoint, a later sub-plan): a JSON object `{"decision":"granted"|"denied", "subject_id":"...", "message":"..."}`. `granted` **with a non-empty string `subject_id`** → `Granted`; `granted` **missing/empty/non-string `subject_id`** → `Error` (a grant with no identifiable subject is a broken contract, not a real allow); `denied` → `Denied`; anything else / non-object → `Error`. Transport failure or timeout → `Error` (never `Denied`).
 
 **Steps**
 
@@ -1008,9 +1132,11 @@ qt-app/
   private slots:
       void initTestCase() { registerMetaTypes(); }
       void decodeGrantedResponse();
+      void decodeGrantedWithoutSubjectIsError();
       void decodeDeniedResponse();
       void decodeInvalidBodyIsError();
-      void verifyGrantedEmitsDecidedGranted();
+      void verifyGrantedEmitsDecidedGrantedAndSendsRequest();
+      void verifyTransportFailureEmitsError();
       void verifyTimeoutEmitsError();   // the required invariant
   };
 
@@ -1022,6 +1148,20 @@ qt-app/
       QCOMPARE(d.result, AccessDecision::Result::Granted);
       QCOMPARE(d.subjectId, QStringLiteral("S-1"));
       QCOMPARE(d.correlationId, QStringLiteral("corr-x"));
+  }
+
+  void TestAccessDecisionService::decodeGrantedWithoutSubjectIsError()
+  {
+      // A 200 that says "granted" but carries no subject_id must NOT authorize.
+      const AccessDecision d = AccessDecisionService::decodeResponse(
+          QByteArrayLiteral("{\"decision\":\"granted\"}"), QStringLiteral("corr-n"));
+      QCOMPARE(d.result, AccessDecision::Result::Error);
+      QVERIFY(d.result != AccessDecision::Result::Granted);
+      // An empty-string subject_id is equally unacceptable.
+      const AccessDecision d2 = AccessDecisionService::decodeResponse(
+          QByteArrayLiteral("{\"decision\":\"granted\",\"subject_id\":\"\"}"),
+          QStringLiteral("corr-n2"));
+      QCOMPARE(d2.result, AccessDecision::Result::Error);
   }
 
   void TestAccessDecisionService::decodeDeniedResponse()
@@ -1041,7 +1181,7 @@ qt-app/
       QCOMPARE(d.result, AccessDecision::Result::Error);
   }
 
-  void TestAccessDecisionService::verifyGrantedEmitsDecidedGranted()
+  void TestAccessDecisionService::verifyGrantedEmitsDecidedGrantedAndSendsRequest()
   {
       CapturingNam nam(QByteArrayLiteral("{\"decision\":\"granted\",\"subject_id\":\"S-9\"}"));
       AccessDecisionService svc(&nam);
@@ -1056,6 +1196,34 @@ qt-app/
       const auto d = qvariant_cast<AccessDecision>(spy.at(0).at(0));
       QCOMPARE(d.result, AccessDecision::Result::Granted);
       QCOMPARE(d.subjectId, QStringLiteral("S-9"));
+
+      // Assert the request the service actually assembled (CapturingNam records it).
+      QCOMPARE(nam.lastOp, QNetworkAccessManager::PostOperation);
+      QVERIFY(nam.lastUrl.toString().endsWith(QStringLiteral("access_verify.php")));
+      QCOMPARE(nam.lastContentType, QStringLiteral("application/x-www-form-urlencoded"));
+      const QString body = QString::fromUtf8(nam.lastBody);
+      QVERIFY(body.contains(QStringLiteral("raw=CARD-9")));
+      QVERIFY(body.contains(QStringLiteral("gate_id=gate-a")));
+      QVERIFY(body.contains(QStringLiteral("kind=")));   // CredentialKind encoded
+  }
+
+  void TestAccessDecisionService::verifyTransportFailureEmitsError()
+  {
+      // A transport failure (connection refused) carries no decodable decision:
+      // it is Error, never a fabricated Denied — and its reason is NOT the timeout
+      // message (this proves the transport branch, distinct from the timeout branch).
+      CapturingNam nam(QByteArrayLiteral(""), QNetworkReply::ConnectionRefusedError, 0);
+      AccessDecisionService svc(&nam);
+      QSignalSpy spy(&svc, &AccessDecisionService::decided);
+      Credential c;
+      c.raw = QStringLiteral("CARD-X");
+      svc.verify(c);
+      QVERIFY(spy.wait(1000));
+      QCOMPARE(spy.count(), 1);
+      const auto d = qvariant_cast<AccessDecision>(spy.at(0).at(0));
+      QCOMPARE(d.result, AccessDecision::Result::Error);
+      QVERIFY(d.result != AccessDecision::Result::Denied);
+      QVERIFY(d.reason != QStringLiteral("Verification timed out"));
   }
 
   void TestAccessDecisionService::verifyTimeoutEmitsError()
@@ -1070,9 +1238,11 @@ qt-app/
       QVERIFY(spy.wait(1000));
       QCOMPARE(spy.count(), 1);
       const auto d = qvariant_cast<AccessDecision>(spy.at(0).at(0));
-      // A timeout is Error, NEVER a fabricated Denied.
+      // A timeout is Error, NEVER a fabricated Denied — and the reason proves it was
+      // the timeout/abort path, not some other transport error masquerading as one.
       QCOMPARE(d.result, AccessDecision::Result::Error);
       QVERIFY(d.result != AccessDecision::Result::Denied);
+      QCOMPARE(d.reason, QStringLiteral("Verification timed out"));
   }
 
   QTEST_MAIN(TestAccessDecisionService)
@@ -1177,8 +1347,16 @@ qt-app/
       const QJsonObject obj = doc.object();
       const QString decision = obj.value(QStringLiteral("decision")).toString();
       if (decision == QLatin1String("granted")) {
+          const QJsonValue subj = obj.value(QStringLiteral("subject_id"));
+          if (!subj.isString() || subj.toString().isEmpty()) {
+              // A grant with no identifiable subject is a broken contract, not a
+              // real allow. Fail safe to Error so a malformed 200 cannot authorize.
+              d.result = AccessDecision::Result::Error;
+              d.reason = QStringLiteral("Granted response missing subject_id");
+              return d;
+          }
           d.result = AccessDecision::Result::Granted;
-          d.subjectId = obj.value(QStringLiteral("subject_id")).toString();
+          d.subjectId = subj.toString();
       } else if (decision == QLatin1String("denied")) {
           d.result = AccessDecision::Result::Denied;   // real policy rejection
           d.subjectId = obj.value(QStringLiteral("subject_id")).toString();
@@ -1208,6 +1386,14 @@ qt-app/
       QNetworkReply *reply =
           m_nam->post(request, form.query(QUrl::FullyEncoded).toUtf8());
 
+      // Lifecycle: verify() is fire-and-forget. The reply's cleanup is bound to
+      // the REPLY itself (not to `this`), so it is always deleted when it finishes
+      // even if this service is destroyed while the request is in flight — no leak
+      // against the long-lived injected NAM. The decode handler below uses `this`
+      // as its context object, so Qt auto-disconnects it if the service dies first;
+      // a late reply is then simply dropped (no use-after-free, no spurious emit).
+      connect(reply, &QNetworkReply::finished, reply, &QObject::deleteLater);
+
       // Timeout timer parented to the reply so it dies with the reply (no leak,
       // no manual delete). On timeout it aborts the reply, which finishes it with
       // OperationCanceledError and routes to the Error branch below.
@@ -1217,7 +1403,6 @@ qt-app/
       timer->start(m_timeoutMs);
 
       connect(reply, &QNetworkReply::finished, this, [this, reply, correlationId]() {
-          reply->deleteLater();
           if (reply->error() != QNetworkReply::NoError) {
               AccessDecision d;
               d.result = AccessDecision::Result::Error;   // timeout OR transport == Error
@@ -1234,7 +1419,7 @@ qt-app/
 
   } // namespace AccessControl
   ```
-- [ ] Run it, expect PASS: `cmake --build qt-app/build --target tst_accessdecisionservice && ctest --test-dir qt-app/build -R tst_accessdecisionservice --output-on-failure` — 5 slots pass, including `verifyTimeoutEmitsError`.
+- [ ] Run it, expect PASS: `cmake --build qt-app/build --target tst_accessdecisionservice && ctest --test-dir qt-app/build -R tst_accessdecisionservice --output-on-failure` — 7 slots pass, including `verifyTimeoutEmitsError` and `verifyTransportFailureEmitsError`.
 - [ ] Commit:
   ```bash
   git add qt-app/core/accesscontrol/accessdecisionservice.h qt-app/core/accesscontrol/accessdecisionservice.cpp qt-app/tests/tst_accessdecisionservice.cpp qt-app/tests/CMakeLists.txt
@@ -1262,7 +1447,8 @@ qt-app/
   - `class AccessControl::HealthMonitor : public QObject`:
     - `explicit HealthMonitor(QObject *parent = nullptr);`
     - `void recordState(const QString &providerId, ConnectionState state);`
-    - `void recordComm(const QString &providerId, qint64 latencyMs, const QDateTime &at);`
+    - `void recordComm(const QString &providerId, qint64 latencyMs, const QDateTime &at);` (records a comm WITH a measured latency)
+    - `void recordCommTime(const QString &providerId, const QDateTime &at);` (records that a comm happened but leaves `latencyMs` untouched — used when latency is unknown, e.g. on connect; never fabricates a zero)
     - `void recordRetry(const QString &providerId);`
     - `HealthSnapshot snapshot(const QString &providerId) const;`
     - `signals: void healthChanged(const AccessControl::HealthSnapshot &snapshot);`
@@ -1306,6 +1492,7 @@ qt-app/
       void unknownProviderReturnsDefaultSnapshot();
       void recordStateUpdatesSnapshotAndEmits();
       void recordCommTracksLatencyAndTime();
+      void recordCommTimeLeavesLatencyUnknown();
       void recordRetryIncrements();
   };
 
@@ -1337,6 +1524,16 @@ qt-app/
       const HealthSnapshot s = m.snapshot(QStringLiteral("mock"));
       QCOMPARE(s.latencyMs, qint64(42));
       QCOMPARE(s.lastCommTime, t);
+  }
+
+  void TestHealthMonitor::recordCommTimeLeavesLatencyUnknown()
+  {
+      HealthMonitor m;
+      const QDateTime t = QDateTime::currentDateTimeUtc();
+      m.recordCommTime(QStringLiteral("mock"), t);
+      const HealthSnapshot s = m.snapshot(QStringLiteral("mock"));
+      QCOMPARE(s.lastCommTime, t);
+      QCOMPARE(s.latencyMs, qint64(-1));   // latency stays unknown — never fabricated
   }
 
   void TestHealthMonitor::recordRetryIncrements()
@@ -1387,6 +1584,7 @@ qt-app/
 
       void recordState(const QString &providerId, ConnectionState state);
       void recordComm(const QString &providerId, qint64 latencyMs, const QDateTime &at);
+      void recordCommTime(const QString &providerId, const QDateTime &at);
       void recordRetry(const QString &providerId);
 
       HealthSnapshot snapshot(const QString &providerId) const;
@@ -1441,6 +1639,15 @@ qt-app/
       emit healthChanged(s);
   }
 
+  void HealthMonitor::recordCommTime(const QString &providerId, const QDateTime &at)
+  {
+      // A comm happened but we have no latency measurement — record the time only,
+      // leaving latencyMs at whatever it was (-1 == still unknown). Never fabricate.
+      HealthSnapshot &s = entry(providerId);
+      s.lastCommTime = at;
+      emit healthChanged(s);
+  }
+
   void HealthMonitor::recordRetry(const QString &providerId)
   {
       HealthSnapshot &s = entry(providerId);
@@ -1461,7 +1668,7 @@ qt-app/
 
   } // namespace AccessControl
   ```
-- [ ] Run it, expect PASS: `cmake --build qt-app/build --target tst_healthmonitor && ctest --test-dir qt-app/build -R tst_healthmonitor --output-on-failure` — 4 slots pass.
+- [ ] Run it, expect PASS: `cmake --build qt-app/build --target tst_healthmonitor && ctest --test-dir qt-app/build -R tst_healthmonitor --output-on-failure` — 5 slots pass.
 - [ ] Commit:
   ```bash
   git add qt-app/core/accesscontrol/healthmonitor.h qt-app/core/accesscontrol/healthmonitor.cpp qt-app/core/accesscontrol/accesstypes.h qt-app/core/accesscontrol/accesstypes.cpp qt-app/tests/tst_healthmonitor.cpp qt-app/tests/CMakeLists.txt
@@ -1540,8 +1747,15 @@ qt-app/
       EventBus bus;
       MockProvider *mock = nullptr;
       AccessProviderFactory f = factoryCapturing(&mock);
+      QSignalSpy busSpy(&bus, &EventBus::eventPublished);
       AccessControlService svc(&bus, &f);
-      QVERIFY(!svc.isEnabled());   // flag OFF by default — zero behaviour change
+
+      // Flag OFF by default means MORE than a bool: nothing is built and nothing
+      // is emitted. Prove all three so "zero behaviour change" is actually tested.
+      QVERIFY(!svc.isEnabled());
+      QVERIFY(mock == nullptr);                 // factory creator was never called
+      QCOMPARE(busSpy.count(), 0);              // no traffic on the bus
+      QCOMPARE(svc.connectionState(), ConnectionState::Disconnected);
   }
 
   void TestAccessControlService::enableStartsProviderAndPublishesConnected()
@@ -1617,7 +1831,17 @@ qt-app/
       QVERIFY(QTest::qWaitFor([&]() {
           return svc.connectionState() == ConnectionState::Connected;
       }, 1000));
-      QVERIFY(svc.healthMonitor()->snapshot(QStringLiteral("mock")).retryCount >= 1);
+      const int retriesAtConnect =
+          svc.healthMonitor()->snapshot(QStringLiteral("mock")).retryCount;
+      QVERIFY(retriesAtConnect >= 1);
+
+      // Reaching Connected must CANCEL the pending reconnect timer: wait several
+      // backoff intervals and confirm no further reconnect fired (retryCount stable,
+      // still Connected). If Connected didn't stop the timer this would keep climbing.
+      QTest::qWait(50);
+      QCOMPARE(svc.connectionState(), ConnectionState::Connected);
+      QCOMPARE(svc.healthMonitor()->snapshot(QStringLiteral("mock")).retryCount,
+               retriesAtConnect);
   }
 
   QTEST_MAIN(TestAccessControlService)
@@ -1765,7 +1989,7 @@ qt-app/
           return;   // unknown provider id — stay disabled
 
       connect(m_provider, &IAccessProvider::accessEvent, this,
-              [this](const AccessEvent &e) { m_bus->publish(e); });
+              [this](const AccessEvent &e) { if (m_enabled) m_bus->publish(e); });
       connect(m_provider, &IAccessProvider::stateChanged, this,
               &AccessControlService::onProviderState);
       connect(m_provider, &IAccessProvider::hardwareError, this,
@@ -1782,14 +2006,19 @@ qt-app/
       if (!m_enabled)
           return;
 
+      // Flip the flag and sever the provider's signals BEFORE stopping it, so the
+      // provider's own Disconnected transition during teardown is NOT mistaken for
+      // an unexpected drop (which would schedule a reconnect). Any transition already
+      // queued from the provider is also ignored, because onProviderState and the
+      // republish lambda both bail when !m_enabled.
+      m_enabled = false;
       m_reconnectTimer->stop();
       if (m_provider) {
-          m_provider->stop();
           disconnect(m_provider, nullptr, this, nullptr);
+          m_provider->stop();
           m_provider->deleteLater();   // parented to this, torn down cleanly
           m_provider = nullptr;
       }
-      m_enabled = false;
       m_state = ConnectionState::Disconnected;
       emit enabledChanged(false);
       emit connectionStateChanged(m_state);
@@ -1797,20 +2026,33 @@ qt-app/
 
   void AccessControlService::onProviderState(ConnectionState state)
   {
+      // Guard against a late/stale delivery: once disabled (provider torn down) a
+      // still-queued transition must not run — it would deref a null provider or
+      // emit after shutdown. This is also what keeps a future cross-thread provider
+      // safe (see the single-thread affinity note in the plan).
+      if (!m_enabled || !m_provider)
+          return;
+
       m_state = state;
-      if (m_provider)
-          m_health->recordState(m_provider->descriptor().providerId, state);
+      m_health->recordState(m_provider->descriptor().providerId, state);
       emit connectionStateChanged(state);
 
       switch (state) {
       case ConnectionState::Connected:
           m_reconnectNextMs = m_reconnectBaseMs;   // reset backoff on success
-          m_health->recordComm(m_provider->descriptor().providerId, 0,
-                               QDateTime::currentDateTimeUtc());
+          m_reconnectTimer->stop();                // cancel any pending reconnect
+          // A successful connect IS a real comm moment — record the time. Latency
+          // stays -1 (unknown) until the verify/decision path measures a real one;
+          // never fabricate a zero.
+          m_health->recordCommTime(m_provider->descriptor().providerId,
+                                   QDateTime::currentDateTimeUtc());
           publishControllerEvent(AccessEvent::Type::ControllerConnected);
           break;
       case ConnectionState::Disconnected:
+          // An unexpected drop while enabled (teardown severs signals first, so this
+          // is never the intentional disable() path): report it and try to recover.
           publishControllerEvent(AccessEvent::Type::ControllerDisconnected);
+          scheduleReconnect();
           break;
       case ConnectionState::Degraded:
       case ConnectionState::Error:
@@ -1823,12 +2065,13 @@ qt-app/
 
   void AccessControlService::onHardwareError(const QString &message)
   {
+      if (!m_enabled || !m_provider)
+          return;
       AccessEvent e;
       e.type = AccessEvent::Type::HardwareError;
       e.reason = message;
       e.at = QDateTime::currentDateTimeUtc();
-      if (m_provider)
-          e.gateId = m_provider->descriptor().providerId;
+      e.providerId = m_provider->descriptor().providerId;   // provider identity, not a gate
       m_bus->publish(e);
   }
 
@@ -1838,7 +2081,7 @@ qt-app/
       e.type = type;
       e.at = QDateTime::currentDateTimeUtc();
       if (m_provider)
-          e.gateId = m_provider->descriptor().providerId;
+          e.providerId = m_provider->descriptor().providerId;   // provider identity, not a gate
       m_bus->publish(e);
   }
 
@@ -1878,6 +2121,8 @@ qt-app/
 - Produces: the `witscore` static library now contains the access-control seam; no new public API beyond the headers already added.
 
 > Rationale: Tasks 1–7 compile each seam source *directly* into its own test target, so the tests are green before this task. This task folds the same sources into the shared `witscore` library so the application binaries link them once and future sub-plans (kiosk/admin wiring) can `#include "accesscontrol/..."` from any `witscore` consumer. AUTOMOC is already ON for the `witscore` target, so the new `Q_OBJECT` classes (`EventBus`, `IAccessProvider`, `MockProvider`, `AccessDecisionService`, `HealthMonitor`, `AccessControlService`) are moc'd automatically.
+>
+> Forward note (metatype registration in the app): the `Q_CONSTRUCTOR_FUNCTION` in `accesstypes.cpp` runs automatically for every test target (which compiles the source directly) and for any app that references a symbol from that translation unit. This sub-plan does NOT wire the seam into an app entrypoint (it stays OFF), so nothing in `WITS`/`WITSQuick` pulls `accesstypes.o` from the static lib yet and the auto-registration may be elided there — harmless, because the app never touches the seam until a later sub-plan enables it. When that later sub-plan wires the seam into an app surface, it MUST call `AccessControl::registerMetaTypes()` once at startup (belt-and-suspenders against static-lib TU elision), in addition to instantiating the seam types. That call site is created by the sub-plan that turns the flag on, not here.
 
 **Steps**
 
@@ -1923,6 +2168,17 @@ qt-app/
 
 **Placeholder scan** — no `TODO`, "add error handling", "similar to Task N", or elided bodies. Every code step contains complete, compilable C++ and complete QtTest slots with real assertions. Every `wits_add_qttest()` block lists real source paths; the two CMake edits show the exact lines to insert.
 
-**Type consistency** — signatures are identical wherever a type crosses a task boundary: `AccessEvent`/`AccessDecision`/`ConnectionState`/`ProviderDescriptor`/`HealthSnapshot` are defined once in `accesstypes.h` (T1/T6) and consumed by value/const-ref everywhere; `IAccessProvider`'s three signals match the `connect` targets in `AccessControlService` (T7); `AccessProviderFactory::CreatorFn` matches the lambdas used in the T4 and T7 tests; `AccessDecisionService::decodeResponse`/`verify`/`decided` signatures match their test call sites (T5). All new `QObject`s are parent-owned (constructors take `QObject *parent`; `AccessControlService` parents `HealthMonitor`, the reconnect `QTimer`, and the factory-built provider to itself; replies use `deleteLater()`), and every `connect` uses function-pointer or lambda syntax — consistent with the Global Constraints.
+**Type consistency** — signatures are identical wherever a type crosses a task boundary: `AccessEvent` (with both `gateId` and `providerId`), `AccessDecision`, `ConnectionState`, `ProviderDescriptor`, and `HealthSnapshot` are defined once in `accesstypes.h` (T1/T6) and consumed by value/const-ref everywhere; `IAccessProvider`'s three signals match the `connect` targets in `AccessControlService` (T7); `AccessProviderFactory::CreatorFn` matches the lambdas used in the T4 and T7 tests; `AccessDecisionService::decodeResponse`/`verify`/`decided` signatures match their test call sites (T5); `HealthMonitor::recordComm` (with latency) and `recordCommTime` (time-only) are both consumed by T7. All new `QObject`s are parent-owned (constructors take `QObject *parent`; `AccessControlService` parents `HealthMonitor`, the reconnect `QTimer`, and the factory-built provider to itself; `AccessDecisionService` binds each reply's `deleteLater` to the reply so it cannot outlive the service), the factory reparents any provider a creator leaves unowned, and every `connect` uses function-pointer or lambda syntax — consistent with the Global Constraints.
 
-**Invariants enforced by tests** — decision≠entry (`entryObservedIsDistinctFromGranted` T1, `simulateEmitsEachEventTypeIndependently` T3), timeout=Error (`verifyTimeoutEmitsError` T5, `decideInvalidBodyIsError` T5), flag-OFF default (`defaultsToDisabled` T7), bus carries only decided events (service republishes `AccessEvent`, never `Credential`; `Credential` appears only inside `AccessDecisionService::verify` input and adapter internals).
+**Invariants enforced by tests:**
+- **decision ≠ entry** — `entryObservedIsDistinctFromGranted` (T1), `simulateEmitsEachEventTypeIndependently` (T3).
+- **timeout = Error, transport failure = Error (never a fabricated Denied)** — `verifyTimeoutEmitsError` (asserts the timeout *reason*, proving the abort path) and `verifyTransportFailureEmitsError` (T5); malformed body → Error via `decodeInvalidBodyIsError`; a `granted` with no `subject_id` → Error via `decodeGrantedWithoutSubjectIsError` (T5).
+- **request shape** — `verifyGrantedEmitsDecidedGrantedAndSendsRequest` asserts method/URL/content-type/body via `CapturingNam` (T5).
+- **flag-OFF default is real** — `defaultsToDisabled` proves the factory creator was never called and the bus stayed silent (T7).
+- **an AccessEvent survives a queued hop** — `accessEventSurvivesQueuedConnection` exercises a real `Qt::QueuedConnection` (T1); auto-registration via `Q_CONSTRUCTOR_FUNCTION`.
+- **EventBus nested/re-entrant publish** — `nestedPublishFromSubscriberIsDeliveredDepthFirst` (T2).
+- **provider ownership enforced** — `createEnforcesParentWhenCreatorIgnoresIt` (T4); `MockProvider::start()` idempotency — `startIsIdempotentWhenConnected` (T3).
+- **reconnect + cancel-on-connect** — `degradedSchedulesReconnect` also proves the timer is cancelled once Connected (retryCount stops climbing) (T7).
+- **no fabricated latency** — `recordCommTimeLeavesLatencyUnknown` keeps `latencyMs == -1` (T6).
+
+**Structurally enforced (not a runtime test), by design:** the bus carries only decided events — `EventBus::publish` accepts only `AccessEvent`, and no bus type embeds a `Credential`; a raw `Credential` exists only as the input to `AccessDecisionService::verify` and inside an adapter, so it can never reach a subscriber. The seven `AccessEvent` types are emitted across the seam — access/entry/hardware directly by `MockProvider`, and `ControllerConnected`/`ControllerDisconnected` synthesized by `AccessControlService` on state transitions (verified in T7), not by the mock.
