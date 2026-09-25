@@ -1905,7 +1905,7 @@ qt-app/
       MockProvider *mock = nullptr;
       AccessProviderFactory f = factoryCapturing(&mock);
       AccessControlService svc(&bus, &f);
-      svc.setReconnectBaseMs(60000);   // long: the timer will NOT fire during the test
+      svc.setReconnectBaseMs(30000);   // == cap; far longer than the test, so the timer will NOT fire
       svc.enable(MockProvider::defaultDescriptor(), {});
       QVERIFY(mock != nullptr);
 
@@ -2078,8 +2078,11 @@ qt-app/
 
   void AccessControlService::setReconnectBaseMs(int ms)
   {
-      m_reconnectBaseMs = ms;
-      m_reconnectNextMs = ms;
+      // Clamp to [1, kReconnectMaxMs]: a base of 0/negative would busy-loop, and a
+      // base above the cap makes the doubling in scheduleReconnect pointless and
+      // risks int overflow. Bounding the base keeps every backoff value <= the cap.
+      m_reconnectBaseMs = qBound(1, ms, kReconnectMaxMs);
+      m_reconnectNextMs = m_reconnectBaseMs;
   }
 
   void AccessControlService::enable(const ProviderDescriptor &descriptor,
@@ -2286,7 +2289,7 @@ qt-app/
 
 **Placeholder scan** — no `TODO`, "add error handling", "similar to Task N", or elided bodies. Every code step contains complete, compilable C++ and complete QtTest slots with real assertions. Every `wits_add_qttest()` block lists real source paths; the two CMake edits show the exact lines to insert.
 
-**Type consistency** — signatures are identical wherever a type crosses a task boundary: `AccessEvent` (with both `gateId` and `providerId`), `AccessDecision`, `ConnectionState`, `ProviderDescriptor`, and `HealthSnapshot` are defined once in `accesstypes.h` (T1/T6) and consumed by value/const-ref everywhere; `IAccessProvider`'s three signals match the `connect` targets in `AccessControlService` (T7); `AccessProviderFactory::CreatorFn` matches the lambdas used in the T4 and T7 tests; `AccessDecisionService::decodeResponse`/`verify`/`decided` signatures match their test call sites (T5); `HealthMonitor::recordComm` (with latency) and `recordCommTime` (time-only) are both consumed by T7. All new `QObject`s are parent-owned (constructors take `QObject *parent`; `AccessControlService` parents `HealthMonitor`, the reconnect `QTimer`, and the factory-built provider to itself; `AccessDecisionService` binds each reply's `deleteLater` to the reply so it cannot outlive the service), the factory reparents any provider a creator leaves unowned, and every `connect` uses function-pointer or lambda syntax — consistent with the Global Constraints.
+**Type consistency** — signatures are identical wherever a type crosses a task boundary: `AccessEvent` (with both `gateId` and `providerId`), `AccessDecision`, `ConnectionState`, `ProviderDescriptor`, and `HealthSnapshot` are defined once in `accesstypes.h` (T1/T6) and consumed by value/const-ref everywhere; `IAccessProvider`'s three signals match the `connect` targets in `AccessControlService` (T7); `AccessProviderFactory::CreatorFn` matches the lambdas used in the T4 and T7 tests; `AccessDecisionService::decodeResponse`/`verify`/`decided` signatures match their test call sites (T5); `HealthMonitor::recordComm` (with latency) and `recordCommTime` (time-only) are both consumed by T7. All new `QObject`s are parent-owned (constructors take `QObject *parent`; `AccessControlService` parents `HealthMonitor`, the reconnect `QTimer`, and the factory-built provider to itself; `AccessDecisionService` binds each reply's `deleteLater` to the reply itself, so a reply may safely finish after the service is destroyed — the `this`-context decode handler is auto-disconnected on destruction, preventing a late callback, and the reply-bound cleanup prevents any leak), the factory reparents any provider a creator leaves unowned, and every `connect` uses function-pointer or lambda syntax — consistent with the Global Constraints.
 
 **Invariants enforced by tests:**
 - **decision ≠ entry** — `entryObservedIsDistinctFromGranted` (T1), `simulateEmitsEachEventTypeIndependently` (T3).
@@ -2296,10 +2299,12 @@ qt-app/
 - **an AccessEvent survives a queued hop** — `accessEventSurvivesQueuedConnection` exercises a real `Qt::QueuedConnection` (T1); auto-registration via `Q_CONSTRUCTOR_FUNCTION`.
 - **EventBus nested/re-entrant publish** — `nestedPublishFromSubscriberIsDeliveredDepthFirst` (T2).
 - **provider ownership enforced** — `createEnforcesParentWhenCreatorIgnoresIt` (T4); `MockProvider::start()` idempotency — `startIsIdempotentWhenConnected` (T3).
-- **reconnect + cancel-on-connect** — `degradedSchedulesReconnect` also proves the timer is cancelled once Connected (retryCount stops climbing) (T7).
+- **reconnect on degrade / unexpected drop, and cancel-on-connect** — `degradedSchedulesReconnect` (Degraded → reconnect → Connected), `unexpectedDisconnectPublishesAndReconnects` (enabled-provider Disconnected → ControllerDisconnected + reconnect), and `reconnectTimerCancelledWhenConnected` (arms a long-backoff timer, then a self-recovery to Connected must disarm it — the deterministic cancel-on-connect proof) (T7).
 - **no fabricated latency** — `recordCommTimeLeavesLatencyUnknown` keeps `latencyMs == -1` (T6).
 
-- **provenance + ownership** — the service stamps `providerId` on every republished event (`providerEventIsRepublishedOnBus` asserts it, T7); a stale event from a superseded provider is dropped (source-provider guard, T7); the factory refuses a null parent (`createWithNullParentReturnsNull`, T4).
+- **provenance + ownership** — the service stamps `providerId` on every republished event (`providerEventIsRepublishedOnBus` asserts it, T7); the factory refuses a null parent (`createWithNullParentReturnsNull`, T4) and reparents a provider a creator left unowned (`createEnforcesParentWhenCreatorIgnoresIt`, T4).
 - **in-flight verify cancellation** — `cancelDropsPendingDecision` proves a decision arriving after `cancel()` is never emitted (T5), the contract a capture adapter uses on `stop()`.
 
 **Structurally enforced (not a runtime test), by design:** the bus carries only decided events — `EventBus::publish` accepts only `AccessEvent`, and no bus type embeds a `Credential`; a raw `Credential` exists only as the input to `AccessDecisionService::verify` and inside an adapter, so it can never reach a subscriber. The seven `AccessEvent` types are emitted across the seam as follows: `MockProvider` emits `AccessGranted`/`AccessDenied`/`AccessError`/`EntryObserved` directly; `HardwareError`, `ControllerConnected`, and `ControllerDisconnected` are **synthesized by `AccessControlService`** — the mock emits a `hardwareError(QString)` signal and raw state transitions, and the service turns those into the corresponding `AccessEvent`s (verified in T7). The mock does **not** emit `HardwareError` (or the controller events) as an `AccessEvent` itself.
+
+**Enforced by implementation (not a dedicated test):** the source-provider guard that drops a stale event from a superseded provider (captured-instance / `sender()` checks in the republish lambda, `onProviderState`, and `onHardwareError`). In the single-thread v1 there is no way to deterministically construct a queued cross-provider delivery, so this defensive check is verified by inspection; it becomes directly testable once (and if) a cross-thread provider is added.
