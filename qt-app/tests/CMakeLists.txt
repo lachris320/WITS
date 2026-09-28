@@ -271,3 +271,11 @@ wits_add_qttest(tst_timeanalytics
         ${CMAKE_SOURCE_DIR}/core/timeanalytics.cpp
         ${CMAKE_SOURCE_DIR}/core/timeanalytics.h
     INCLUDES ${CMAKE_SOURCE_DIR}/core)
+
+# --- Access Control: domain value types (pure core, no offscreen) ---
+wits_add_qttest(tst_accesstypes
+    SOURCES
+        tst_accesstypes.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.h
+    INCLUDES ${CMAKE_SOURCE_DIR}/core)
