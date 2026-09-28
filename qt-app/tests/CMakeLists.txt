@@ -336,3 +336,22 @@ wits_add_qttest(tst_healthmonitor
         ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.cpp
         ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.h
     INCLUDES ${CMAKE_SOURCE_DIR}/core)
+
+# --- Access Control: lifecycle service + state machine (pure core, no offscreen) ---
+wits_add_qttest(tst_accesscontrolservice
+    SOURCES
+        tst_accesscontrolservice.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesscontrolservice.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesscontrolservice.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/healthmonitor.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/healthmonitor.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accessproviderfactory.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accessproviderfactory.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/eventbus.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/eventbus.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/mockprovider.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/mockprovider.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/iaccessprovider.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.h
+    INCLUDES ${CMAKE_SOURCE_DIR}/core)
