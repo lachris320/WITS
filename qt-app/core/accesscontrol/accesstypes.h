@@ -68,6 +68,15 @@ struct ProviderDescriptor {
     QList<ConfigFieldDescriptor> configSchema;
 };
 
+// A point-in-time view of one provider's connection health.
+struct HealthSnapshot {
+    QString providerId;
+    ConnectionState state = ConnectionState::Disconnected;
+    QDateTime lastCommTime;
+    qint64 latencyMs = -1;     // -1 == no successful comm recorded yet
+    int retryCount = 0;
+};
+
 // Registers every value type above (and ConnectionState) as a Qt metatype so
 // it survives a queued signal/slot hop and is capturable by QSignalSpy.
 // Idempotent — safe to call more than once (main.cpp and each test init).
@@ -81,5 +90,6 @@ Q_DECLARE_METATYPE(AccessControl::AccessEvent)
 Q_DECLARE_METATYPE(AccessControl::GateDescriptor)
 Q_DECLARE_METATYPE(AccessControl::ProviderDescriptor)
 Q_DECLARE_METATYPE(AccessControl::ConnectionState)
+Q_DECLARE_METATYPE(AccessControl::HealthSnapshot)
 
 #endif // ACCESSCONTROL_ACCESSTYPES_H

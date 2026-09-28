@@ -326,3 +326,13 @@ wits_add_qttest(tst_accessdecisionservice
         ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
     LIBS Qt${QT_VERSION_MAJOR}::Network
     INCLUDES ${CMAKE_SOURCE_DIR}/core ${CMAKE_SOURCE_DIR}/testsupport)
+
+# --- Access Control: health monitor (pure core, no offscreen) ---
+wits_add_qttest(tst_healthmonitor
+    SOURCES
+        tst_healthmonitor.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/healthmonitor.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/healthmonitor.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.h
+    INCLUDES ${CMAKE_SOURCE_DIR}/core)

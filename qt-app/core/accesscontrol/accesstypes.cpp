@@ -11,6 +11,7 @@ void registerMetaTypes()
     qRegisterMetaType<GateDescriptor>();
     qRegisterMetaType<ProviderDescriptor>();
     qRegisterMetaType<ConnectionState>();
+    qRegisterMetaType<HealthSnapshot>();
 }
 
 } // namespace AccessControl
