@@ -121,6 +121,14 @@ $root->query("INSERT INTO turnstile_events (id, card, reader, created_at) VALUES
     (101,'CARD_A',0,NOW()), (102,'SID_B',0,NOW()), (103,'CARD_GONE',0,NOW()),
     (105,'CARD_C',0,NOW()), (106,'CARD_D',0,NOW())");
 
+// Admin auth: ephemeral secret, never committed. auth_helper reads
+// SELECT admin_key_hash FROM admin LIMIT 1.
+$root->query('CREATE TABLE admin (admin_key_hash VARCHAR(255))');
+$ADMIN_KEY = bin2hex(random_bytes(16));                       // ephemeral, per-run
+$adminHash = password_hash($ADMIN_KEY, PASSWORD_DEFAULT);
+$st = $root->prepare('INSERT INTO admin (admin_key_hash) VALUES (?)');
+$st->bind_param('s', $adminHash); $st->execute(); $st->close();
+
 // Temp docroot with the real endpoints + helper + a test config pointing at $TEST_DB.
 $docroot = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'loams_acc_' . getmypid() . '_' . $PORT;
 @mkdir($docroot . '/uploads', 0777, true);
@@ -135,7 +143,7 @@ file_put_contents($docroot . '/config.php',
 // otherwise deliver a non-loopback request). Not shipped — lives only in the docroot.
 file_put_contents($docroot . '/__force_remote.php',
     "<?php \$_SERVER['REMOTE_ADDR']='203.0.113.9'; require __DIR__ . '/turnstile_display.php';\n");
-foreach (['access_helpers.php','turnstile_display.php'] as $f) {
+foreach (['access_helpers.php','turnstile_display.php','access_recent.php','auth_helper.php'] as $f) {
     copy($apiDir . '/' . $f, $docroot . '/' . $f);
 }
 
@@ -213,7 +221,62 @@ try {
     ok('display: next-poll catch-up returns new 107',
         (httpGet($HOSTPORT, '/turnstile_display.php?since=106')['json']['entry']['id'] ?? null) === 107);
 
-    // --- Task 2 (access_recent.php) assertions are inserted here in Task 2 ---
+    // ---- access_recent.php ----
+    // Method BEFORE auth: a GET carrying a VALID admin_key in a JSON body (which
+    // extractAdminKey() WOULD accept) is still 405 — method is checked first.
+    ok('recent: GET+valid-key JSON body -> 405 (method before auth)',
+        httpMethod($HOSTPORT, 'GET', '/access_recent.php', ['admin_key' => $ADMIN_KEY])['code'] === 405);
+
+    // Missing / wrong key on POST -> 401.
+    ok('recent: missing admin_key -> 401', httpPostForm($HOSTPORT, '/access_recent.php', [])['code'] === 401);
+    ok('recent: wrong admin_key -> 401',   httpPostForm($HOSTPORT, '/access_recent.php', ['admin_key' => 'wrong'])['code'] === 401);
+
+    // Valid key -> newest-first, resolved slim projection, orphaned null.
+    $r = httpPostForm($HOSTPORT, '/access_recent.php', ['admin_key' => $ADMIN_KEY]);
+    $entries = $r['json']['entries'] ?? [];
+    ok('recent: valid key -> success',          ($r['json']['status'] ?? null) === 'success');
+    ok('recent: newest first (id DESC) -> 107', ($entries[0]['id'] ?? null) === 107);
+    // Slim projection asserted on a RESOLVED entry (107 = CARD_A): exact key set, no year_level.
+    $st107 = $entries[0]['student'] ?? null;
+    ok('recent: resolved slim projection keys',
+        is_array($st107) && array_keys($st107) === ['name','school_id','course','department','photo_path']);
+    // Orphaned row (103, CARD_GONE) present with student null.
+    $has103Null = false;
+    foreach ($entries as $e) { if (($e['id'] ?? null) === 103) { $has103Null = isJsonNull($e, 'student'); } }
+    ok('recent: orphaned row present with student null', $has103Null);
+
+    // 50-entry cap: bulk-insert past 50 (ids 300..359) and assert exactly 50, newest kept.
+    for ($i = 300; $i < 360; $i++) {
+        $root->query("INSERT INTO turnstile_events (id, card, reader, created_at) VALUES ($i,'CARD_A',0,NOW())");
+    }
+    $r = httpPostForm($HOSTPORT, '/access_recent.php', ['admin_key' => $ADMIN_KEY]);
+    ok('recent: 50-entry cap',                 count($r['json']['entries'] ?? []) === 50);
+    ok('recent: cap keeps newest (359 first)', ($r['json']['entries'][0]['id'] ?? null) === 359);
+
+    // Counts: entries_today via the DB clock. Seed BOTH midnight boundaries with
+    // the DB's own clock — one row at exactly CURDATE() (today 00:00:00, the
+    // INCLUSIVE lower bound) and one at CURDATE() - 1s (yesterday 23:59:59, must be
+    // excluded). last_entry_at = EXACT MAX(created_at).
+    $root->query("INSERT INTO turnstile_events (id, card, reader, created_at)
+                  VALUES (400,'CARD_A',0, CURDATE() - INTERVAL 1 SECOND)"); // yesterday 23:59:59 -> excluded
+    $root->query("INSERT INTO turnstile_events (id, card, reader, created_at)
+                  VALUES (401,'CARD_A',0, CURDATE())");                     // today 00:00:00 -> included
+    $r = httpPostForm($HOSTPORT, '/access_recent.php', ['admin_key' => $ADMIN_KEY]);
+    $todayCount = (int) $root->query("SELECT COUNT(*) c FROM turnstile_events
+        WHERE created_at >= CURDATE() AND created_at < CURDATE() + INTERVAL 1 DAY")->fetch_assoc()['c'];
+    $midnightIncluded = (int) $root->query("SELECT COUNT(*) c FROM turnstile_events
+        WHERE id = 401 AND created_at >= CURDATE() AND created_at < CURDATE() + INTERVAL 1 DAY")->fetch_assoc()['c'];
+    $maxAt = $root->query('SELECT MAX(created_at) m FROM turnstile_events')->fetch_assoc()['m'];
+    ok('recent: entries_today matches DB range count',           ($r['json']['entries_today'] ?? null) === $todayCount);
+    ok('recent: exact-midnight (CURDATE()) row is counted',      $midnightIncluded === 1);
+    ok('recent: last_entry_at = exact MAX(created_at)',          ($r['json']['last_entry_at'] ?? null) === $maxAt);
+
+    // Empty table -> entries [], entries_today 0, last_entry_at null. (Own TRUNCATE.)
+    $root->query('TRUNCATE TABLE turnstile_events');
+    $r = httpPostForm($HOSTPORT, '/access_recent.php', ['admin_key' => $ADMIN_KEY]);
+    ok('recent: empty -> entries []',          ($r['json']['entries'] ?? 'x') === []);
+    ok('recent: empty -> entries_today 0',     ($r['json']['entries_today'] ?? 'x') === 0);
+    ok('recent: empty -> last_entry_at null',  isJsonNull($r['json'] ?? null, 'last_entry_at'));
 
     // 5. Empty table -> latest_id 0, entry null. Run LAST of the read tests.
     $root->query('TRUNCATE TABLE turnstile_events');
