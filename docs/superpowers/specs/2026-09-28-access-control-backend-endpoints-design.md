@@ -64,7 +64,8 @@ so a consumer can distinguish, but v1 does not filter on it because only reader-
   is POST-only (405 otherwise, enforced *before* auth) and reads the key through
   `auth_helper.php::extractAdminKey()` ($_POST / JSON body only).
 - **No PII in logs.** Neither endpoint may `error_log()` a card value or a resolved student
-  payload. On failure they log a generic message only (matches `turnstile.php:455-459`).
+  payload. On failure they log the exception class and code only — *stricter* than
+  `turnstile.php:455-459`, which logs `$e->getMessage()`; these endpoints deliberately do not.
 - **Plaintext-HTTP security debt is documented, not fixed here.** Both endpoints expose entry PII
   over plaintext HTTP in the current deployment; `turnstile_display.php` rests on the loopback
   trust boundary and `access_recent.php` on `admin_key`. TLS + per-user identity/RBAC + device
@@ -120,7 +121,10 @@ or any client-supplied header. This invariant is stated in the file header comme
 scalar, ASCII-decimal string (validate with `is_string($raw) && ctype_digit($raw)`); **any**
 other form — absent, an array (`since[]=…`), a negative sign, or a partly-numeric value like
 `"12abc"` — is treated as `0`, not coerced with `(int)` (which would silently turn `"12abc"` into
-`12` and warn on an array). After validation, cast the digit string to int for binding.
+`12` and warn on an array). After validation, if the digit string exceeds `PHP_INT_MAX` (ids are
+`BIGINT UNSIGNED`, whose range exceeds a 64-bit PHP int), clamp to `PHP_INT_MAX` rather than
+overflowing the mysqli `i` bind — the query then returns `entry: null`, which is correct since no
+real id can exceed the clamp in practice. Otherwise cast the digit string to int for binding.
 
 ### Cursor semantics (load-bearing — corrected in review)
 
@@ -140,8 +144,10 @@ are assigned at INSERT but rows appear at COMMIT (`turnstile.php:443-446`), so i
 commit out of id order (id 102 visible and consumed before id 101 commits) the client *would* skip
 the lower id. Under the deployment's **producer invariant** — a single turnstile lane whose
 controller issues one request per swipe and waits for the gate response — entries are effectively
-serialized and this reordering does not occur in practice. The residual risk is bounded and **display-only**: at worst one welcome screen is not
-shown. Attendance is unaffected (`turnstile.php` is authoritative), so this is an accepted
+serialized and this reordering does not occur in practice. The residual risk is bounded and
+**display-only**: one or more welcome displays may be missed (one per overlapping out-of-order
+commit pair — none under the serialization invariant, more only if that invariant fails).
+Attendance is unaffected (`turnstile.php` is authoritative), so this is an accepted
 trade-off for a display channel, exactly like the legacy bridge it replaces. The spec deliberately
 does **not** add a display-acknowledgement column or serialization coordination for v1; if a
 multi-lane deployment ever makes concurrent out-of-order commits real, revisit with a
@@ -269,10 +275,12 @@ Both endpoints resolve a card to a student the same way, so that logic lives onc
   assumed: the stored `photo` value is **rejected** (→ `uploads/default.jpg`) if it is empty, is an
   absolute path, contains `..`, contains a backslash or any alternate separator, or does not
   resolve inside the canonical uploads directory. Concretely: reject on those lexical checks, then
-  confirm `realpath(__DIR__ . '/' . $photo)` exists **and** is a prefix-match under
-  `realpath(__DIR__ . '/uploads')`; only then return the relative path, else the default. A naive
-  `file_exists(__DIR__ . '/' . $photo)` alone is insufficient — `uploads/../config.php` would pass
-  it. It returns a **relative path, not an absolute URL** — deliberately unlike `rfid_login.php`,
+  confirm `realpath(__DIR__ . '/' . $photo)` exists **and** sits inside the canonical uploads
+  directory — compared as `realpath(__DIR__ . '/uploads') . DIRECTORY_SEPARATOR` being a prefix of
+  the resolved path (the trailing separator matters, so a sibling like `uploads-evil/…` cannot
+  satisfy a raw string prefix of `uploads`); only then return the relative path, else the default.
+  A naive `file_exists(__DIR__ . '/' . $photo)` alone is insufficient — `uploads/../config.php`
+  would pass it. It returns a **relative path, not an absolute URL** — deliberately unlike `rfid_login.php`,
   which builds an absolute URL from the raw `HTTP_HOST` (an attacker-controllable header → poisoned
   URL). The desktop / admin client already knows its base URL (`ApiConfig`) and composes the full
   URL itself, so the backend never trusts `HTTP_HOST`.
@@ -320,7 +328,9 @@ Assertions:
    `turnstile_events` row whose matching student was deleted after insert) → entry present with
    `student: null` and the cursor still advances.
 5. `photo_path` is relative and falls back to `uploads/default.jpg` when the file is absent; no
-   absolute URL and no `HTTP_HOST` in the payload.
+   absolute URL and no `HTTP_HOST` in the payload. **Hostile stored paths** — seed a student whose
+   `photo` is `uploads/../config.php` and one that is a sibling-prefix like `uploads-evil/x.jpg`;
+   assert both fall back to `uploads/default.jpg` (containment, not a raw string prefix).
 6. No row is mutated (assert `turnstile_events` / `library_visits` / `students.visits` unchanged
    after calls).
 7. **Ordinary next-poll catch-up:** a row inserted *after* a poll returns is delivered by the
