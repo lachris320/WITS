@@ -279,3 +279,13 @@ wits_add_qttest(tst_accesstypes
         ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.cpp
         ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.h
     INCLUDES ${CMAKE_SOURCE_DIR}/core)
+
+# --- Access Control: in-process event bus (pure core, no offscreen) ---
+wits_add_qttest(tst_eventbus
+    SOURCES
+        tst_eventbus.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/eventbus.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/eventbus.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.h
+    INCLUDES ${CMAKE_SOURCE_DIR}/core)
