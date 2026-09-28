@@ -41,8 +41,10 @@ void TestHealthMonitor::recordStateUpdatesSnapshotAndEmits()
 void TestHealthMonitor::recordCommTracksLatencyAndTime()
 {
     HealthMonitor m;
+    QSignalSpy spy(&m, &HealthMonitor::healthChanged);
     const QDateTime t = QDateTime::currentDateTimeUtc();
     m.recordComm(QStringLiteral("mock"), 42, t);
+    QCOMPARE(spy.count(), 1);
     const HealthSnapshot s = m.snapshot(QStringLiteral("mock"));
     QCOMPARE(s.latencyMs, qint64(42));
     QCOMPARE(s.lastCommTime, t);
@@ -51,8 +53,10 @@ void TestHealthMonitor::recordCommTracksLatencyAndTime()
 void TestHealthMonitor::recordCommTimeLeavesLatencyUnknown()
 {
     HealthMonitor m;
+    QSignalSpy spy(&m, &HealthMonitor::healthChanged);
     const QDateTime t = QDateTime::currentDateTimeUtc();
     m.recordCommTime(QStringLiteral("mock"), t);
+    QCOMPARE(spy.count(), 1);
     const HealthSnapshot s = m.snapshot(QStringLiteral("mock"));
     QCOMPARE(s.lastCommTime, t);
     QCOMPARE(s.latencyMs, qint64(-1));   // latency stays unknown — never fabricated
@@ -61,8 +65,10 @@ void TestHealthMonitor::recordCommTimeLeavesLatencyUnknown()
 void TestHealthMonitor::recordRetryIncrements()
 {
     HealthMonitor m;
+    QSignalSpy spy(&m, &HealthMonitor::healthChanged);
     m.recordRetry(QStringLiteral("mock"));
     m.recordRetry(QStringLiteral("mock"));
+    QCOMPARE(spy.count(), 2);
     QCOMPARE(m.snapshot(QStringLiteral("mock")).retryCount, 2);
 }
 
