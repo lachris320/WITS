@@ -88,11 +88,14 @@ $conn = new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
 $conn->set_charset('utf8mb4');          // student names are unicode
 ```
 
-Wrap the body in `try { … } catch (Throwable $e) { error_log('access endpoint error: ' .
-$e->getMessage()); /* generic JSON */ }`. A single generic JSON error writer emits
-`{"status":"error","message":"Internal server error"}` with HTTP 500 — never SQL, connection, or
-stack detail. Both endpoints also send `Cache-Control: no-store` (responses carry PII) and check
-the return of `json_encode()` before echoing (emit the generic 500 if encoding fails).
+Wrap the body in `try { … } catch (Throwable $e) { … }`. On failure, `error_log()` a
+**sanitized** line — the exception **class and code only** (e.g. `get_class($e) . ' code ' .
+$e->getCode()`), **never** `$e->getMessage()`, which can carry SQL fragments or connection detail
+and would violate the no-PII / no-internals logging rule. A single generic JSON error writer then
+emits `{"status":"error","message":"Internal server error"}` with HTTP 500 — never SQL,
+connection, or stack detail to the client. Both endpoints also send `Cache-Control: no-store`
+(responses carry PII) and check the return of `json_encode()` before echoing (emit the generic 500
+if encoding fails).
 
 ---
 
@@ -113,8 +116,11 @@ remote traffic to it — otherwise PHP sees the proxy as `127.0.0.1` and the bou
 The guard consults **only** `REMOTE_ADDR`; it must never consult `X-Forwarded-For`, `Forwarded`,
 or any client-supplied header. This invariant is stated in the file header comment and in the PR.
 
-**Query params:** `?since=<id>` — the client's last **processed** event id. Optional; absent or
-non-numeric is treated as `0`. Parse as `(int)`; negative values clamp to `0`.
+**Query params:** `?since=<id>` — the client's last **processed** event id. Accepted only as a
+scalar, ASCII-decimal string (validate with `is_string($raw) && ctype_digit($raw)`); **any**
+other form — absent, an array (`since[]=…`), a negative sign, or a partly-numeric value like
+`"12abc"` — is treated as `0`, not coerced with `(int)` (which would silently turn `"12abc"` into
+`12` and warn on an array). After validation, cast the digit string to int for binding.
 
 ### Cursor semantics (load-bearing — corrected in review)
 
@@ -127,14 +133,14 @@ walk the backlog in id order:
   **informational backlog metadata only** — the client advances its processed cursor to the
   **returned entry's `id`**, never to `latest_id`.
 
-**Delivery guarantee (narrowed after review):** the endpoint delivers every **committed** row in
-strictly increasing id order to a client that advances its cursor only by returned-entry id.
-Because `turnstile_events` ids are assigned at INSERT but rows appear at COMMIT
-(`turnstile.php:443-446`), a client *could* skip a lower id if two entries commit out of id order
-(id 102 visible and consumed before id 101 commits). Under the deployment's **producer
-invariant** — a single turnstile lane whose controller issues one request per swipe and waits for
-the gate response — entries are effectively serialized and this reordering does not occur in
-practice. The residual risk is bounded and **display-only**: at worst one welcome screen is not
+**Delivery guarantee (narrowed after review):** *provided rows become visible in id order*, the
+endpoint delivers every **committed** row in strictly increasing id order to a client that
+advances its cursor only by returned-entry id. That proviso is not free: `turnstile_events` ids
+are assigned at INSERT but rows appear at COMMIT (`turnstile.php:443-446`), so if two entries
+commit out of id order (id 102 visible and consumed before id 101 commits) the client *would* skip
+the lower id. Under the deployment's **producer invariant** — a single turnstile lane whose
+controller issues one request per swipe and waits for the gate response — entries are effectively
+serialized and this reordering does not occur in practice. The residual risk is bounded and **display-only**: at worst one welcome screen is not
 shown. Attendance is unaffected (`turnstile.php` is authoritative), so this is an accepted
 trade-off for a display channel, exactly like the legacy bridge it replaces. The spec deliberately
 does **not** add a display-acknowledgement column or serialization coordination for v1; if a
@@ -146,9 +152,10 @@ commit-ordered marker (e.g. an `observed_seq` assigned at commit) — noted as a
   between display and cursor-save re-shows at most one entry and never double-counts anything
   (there is no attendance write to double).
 - **Baseline on a *fresh* start only** (no persisted cursor): issue one call, read `latest_id`,
-  set the cursor there, and begin consuming from the next event — so historical rows are not
-  replayed onto the kiosk. A restart *with* a persisted cursor resumes from it (downtime backlog
-  during a persisted session is intentionally skipped only on a first-ever start).
+  set the cursor there, and begin consuming from the next event — so pre-existing historical rows
+  are not replayed onto the kiosk. A restart *with* a persisted cursor **resumes from it and
+  consumes the downtime backlog** (every row that arrived while the app was down is displayed in
+  order). Only the first-ever start, with no cursor to resume, skips the pre-existing history.
 
 **Steady state:** `since=100` with committed rows 101, 102, 103 yields 101, then 102, then 103,
 then `entry: null` — every committed event consumed in order.
@@ -233,9 +240,15 @@ the guard reads is ignored.
 - `entries_today`:
   `SELECT COUNT(*) FROM turnstile_events WHERE created_at >= CURDATE() AND created_at < CURDATE() + INTERVAL 1 DAY`
   — a half-open range, **not** `DATE(created_at) = CURDATE()`, so it stays sargable against a
-  future index on `created_at`. "Today" is the **MySQL session timezone**; tests pin that timezone
-  so the application day and DB day cannot diverge. (`CURDATE()` and the stored `created_at`
-  `NOW()` share the same session tz, so they agree by construction.)
+  future index on `created_at`. **Timezone invariant:** neither endpoint (nor `turnstile.php`)
+  overrides the connection's session timezone, so the writer's `NOW()` and this reader's
+  `CURDATE()` both resolve against the **MySQL server's default timezone**. "Today" is that server
+  day. This must hold even though the writer and reader run in separate PHP requests / mysqli
+  connections — it does, because both inherit the same server default and neither issues
+  `SET time_zone`. The endpoints therefore need no per-connection tz setup; the correctness
+  dependency is simply "don't set a session tz." (Tests assert the boundary using the DB's own
+  clock — see Testing — rather than a PHP wall-clock, so no cross-connection tz assumption is
+  needed.)
 - `last_entry_at`: `SELECT MAX(created_at) FROM turnstile_events` (`null` when empty).
 - **Gate-specific by design:** counts `turnstile_events`, never `library_visits`, so it does not
   duplicate `dashboard_summary.php` / `get_library_visits.php`, which count general attendance.
@@ -251,13 +264,18 @@ Both endpoints resolve a card to a student the same way, so that logic lives onc
   = ? LIMIT 1`, then fallback `WHERE school_id = ? LIMIT 1`; returns the associative row or `null`.
   Prepared statements only. Callers pick their enumerated projection from the returned row (the
   helper does the lookup; it does not decide the projection).
-- `normalizeStudentPhotoPath(?array $student): string` — returns a **relative** path under
-  `uploads/` (e.g. `uploads/abc.jpg`), or `uploads/default.jpg` when the student has no photo or
-  the file is absent (existence checked against `__DIR__ . '/' . photo`, as `rfid_login.php`
-  does). It returns a **relative path, not an absolute URL** — deliberately unlike
-  `rfid_login.php`, which builds an absolute URL from the raw `HTTP_HOST` (an attacker-controllable
-  header → poisoned URL). The desktop / admin client already knows its base URL (`ApiConfig`) and
-  composes the full URL itself, so the backend never trusts `HTTP_HOST`.
+- `normalizeStudentPhotoPath(?array $student): string` — returns a **contained relative** path
+  under `uploads/` (e.g. `uploads/abc.jpg`), or `uploads/default.jpg`. Containment is enforced, not
+  assumed: the stored `photo` value is **rejected** (→ `uploads/default.jpg`) if it is empty, is an
+  absolute path, contains `..`, contains a backslash or any alternate separator, or does not
+  resolve inside the canonical uploads directory. Concretely: reject on those lexical checks, then
+  confirm `realpath(__DIR__ . '/' . $photo)` exists **and** is a prefix-match under
+  `realpath(__DIR__ . '/uploads')`; only then return the relative path, else the default. A naive
+  `file_exists(__DIR__ . '/' . $photo)` alone is insufficient — `uploads/../config.php` would pass
+  it. It returns a **relative path, not an absolute URL** — deliberately unlike `rfid_login.php`,
+  which builds an absolute URL from the raw `HTTP_HOST` (an attacker-controllable header → poisoned
+  URL). The desktop / admin client already knows its base URL (`ApiConfig`) and composes the full
+  URL itself, so the backend never trusts `HTTP_HOST`.
 
 `rfid_login.php` is **not** modified in this slice — the helper is a fresh extraction, so the
 legacy login path is unaffected. (A later, separate cleanup could retrofit `rfid_login.php` onto
@@ -265,12 +283,13 @@ the helper; explicitly out of scope here.)
 
 ## Error handling
 
-- Prepared statements throughout. On any DB/prepare/`json_encode` failure, `error_log()` a
-  **generic** message (no card, no student payload, no SQL) and return
+- Prepared statements throughout. On any DB/prepare/`json_encode` failure, `error_log()` only the
+  exception **class and code** (no message, no card, no student payload, no SQL) and return
   `{"status":"error","message":"Internal server error"}` with HTTP 500 via the single shared error
-  writer — never leak SQL, connection, or `HTTP_HOST` detail.
-- `turnstile_display.php`: non-GET → 405; non-loopback → 403 — both before any DB access.
-  Malformed/negative `since` → clamped to 0, not an error.
+  writer — never leak SQL, connection, or `HTTP_HOST` detail to the client or the log.
+- `turnstile_display.php`: non-GET → 405; non-loopback → 403 — both before any DB access. A `since`
+  that is not a scalar ASCII-decimal string (array, signed, partly-numeric, absent) → treated as
+  `0`, not an error.
 - `access_recent.php`: non-POST → 405 before auth; `requireAdminAuth()` owns 401 on missing/invalid
   key and exits.
 
@@ -283,7 +302,10 @@ A throwaway-DB PHP harness at `deliverables/loams_api/tests/access_display_test.
 - seeds **synthetic** `students` + `turnstile_events` rows (no real PII);
 - generates an **ephemeral admin secret** at runtime and installs its hash, so no admin key is
   ever committed;
-- pins the MySQL session timezone so "today" assertions are deterministic;
+- seeds and asserts date boundaries using the **database's own clock** (`NOW()`, `NOW() - INTERVAL
+  1 DAY`, `CURDATE()`) rather than a PHP wall-clock, so the test needs no assumption about how the
+  endpoint's separate connection is timezoned — it exercises the exact same server-tz `CURDATE()`
+  the endpoint uses;
 - tears the schema down on exit.
 
 Assertions:
@@ -301,11 +323,13 @@ Assertions:
    absolute URL and no `HTTP_HOST` in the payload.
 6. No row is mutated (assert `turnstile_events` / `library_visits` / `students.visits` unchanged
    after calls).
-7. **Known-limitation documentation check** (not a race repro): a row inserted between the `WHERE
-   id > ?` read and the `MAX(id)` read is covered on the next poll — assert a fresh insert after a
-   call is returned by the following call (documents that `latest_id` lagging the entry query is
-   benign). The concurrent-out-of-order-commit gap is documented, not asserted (it cannot occur
-   under the single-lane producer invariant and requires two interleaved transactions to force).
+7. **Ordinary next-poll catch-up:** a row inserted *after* a poll returns is delivered by the
+   following poll (walk to `entry: null`, insert a new row, assert the next call returns it and the
+   cursor advances). This is plain sequential behavior, **not** a between-queries race repro. The
+   concurrent-out-of-order-commit gap (a lower id committing after a higher id was already consumed)
+   is a documented limitation, **not** asserted here: it cannot occur under the single-lane producer
+   invariant and would require two deliberately interleaved transactions to force, which this
+   single-threaded harness cannot express.
 
 **`access_recent.php`**
 8. Non-POST method → 405 **before** auth (a GET carrying a valid `admin_key` JSON body is still
@@ -314,8 +338,10 @@ Assertions:
 10. Valid key → newest ≤50 entries, id DESC; slim student projection; orphaned card → `student:
     null`.
 11. `entries_today` counts only today's rows via the range predicate, correct across the midnight
-    boundary (seed a row dated yesterday 23:59 and today 00:00 with the pinned tz); `last_entry_at`
-    = MAX, null when empty.
+    boundary — seed boundary rows with the DB's own clock (`created_at = CURDATE() - INTERVAL 1
+    SECOND` for "yesterday 23:59:59" and `created_at = CURDATE()` for "today 00:00:00") so the
+    assertion uses the same server-tz day the endpoint's `CURDATE()` sees; `last_entry_at` = MAX,
+    null when empty.
 
 **DB-failure shape:** a forced connection/query failure returns the generic
 `{"status":"error"}` JSON with HTTP 500 and leaks no SQL/connection detail (verify the endpoints
