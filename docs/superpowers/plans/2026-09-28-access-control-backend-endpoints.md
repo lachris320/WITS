@@ -227,7 +227,7 @@ Expected: the 14 pure-helper assertions PASS (harness prints `14 passed, 0 faile
 
 Insert the throwaway-DB bootstrap, `php -S` launch, and display assertions into the same file **immediately before the final `echo`/`exit` tally added in Step 1** (so the file stays a single runnable gate). This mirrors `turnstile_integration_test.php` but with a unique DB name, an ephemeral port + readiness probe, and a synthetic `uploads/` (+ a sibling `uploads-evil/`) for the photo-containment cases.
 
-> **Endpoint-level 403 note:** a non-loopback request cannot reach a loopback-bound `php -S` (its `REMOTE_ADDR` is always `127.0.0.1`), so the 403 branch is not integration-testable here. It is covered by the `isLoopback()` pure unit tests in Step 1 (`192.168.0.100`/`::ffff:127.0.0.1`/`''` → false); the endpoint simply wires that function to `$_SERVER['REMOTE_ADDR']`.
+> **Endpoint-level 403 note:** a non-loopback request cannot reach a loopback-bound `php -S` directly, so the 403 branch is exercised through a test-only `__force_remote.php` wrapper (written into the docroot below) that spoofs a non-loopback `REMOTE_ADDR` and then `require`s the real endpoint. The `isLoopback()` pure unit tests (`192.168.0.100`/`::ffff:127.0.0.1`/`''` → false) back it up.
 
 ```php
 // ---- HTTP + DB harness ------------------------------------------------------
@@ -274,6 +274,13 @@ function isJsonNull($arr, string $key): bool {
     return is_array($arr) && array_key_exists($key, $arr) && $arr[$key] === null;
 }
 
+// Allocate the port FIRST — before anything that needs cleanup — so a freePort()
+// failure exits with nothing to tear down. (A concurrent run could still lose the
+// freed port to another process; the readiness probe + first-request assertion turn
+// that into a visible test failure rather than a hang, which is acceptable here.)
+$PORT = freePort();
+$HOSTPORT = '127.0.0.1:' . $PORT;
+
 // Throwaway schema + synthetic rows.
 $root = new mysqli('localhost', 'root', '');
 $root->query('DROP DATABASE IF EXISTS ' . $TEST_DB);
@@ -306,8 +313,6 @@ $root->query("INSERT INTO turnstile_events (id, card, reader, created_at) VALUES
     (105,'CARD_C',0,NOW()), (106,'CARD_D',0,NOW())");
 
 // Temp docroot with the real endpoints + helper + a test config pointing at $TEST_DB.
-$PORT = freePort();
-$HOSTPORT = '127.0.0.1:' . $PORT;
 $docroot = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'loams_acc_' . getmypid() . '_' . $PORT;
 @mkdir($docroot . '/uploads', 0777, true);
 @mkdir($docroot . '/uploads-evil', 0777, true);
