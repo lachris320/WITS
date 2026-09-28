@@ -271,3 +271,87 @@ wits_add_qttest(tst_timeanalytics
         ${CMAKE_SOURCE_DIR}/core/timeanalytics.cpp
         ${CMAKE_SOURCE_DIR}/core/timeanalytics.h
     INCLUDES ${CMAKE_SOURCE_DIR}/core)
+
+# --- Access Control: domain value types (pure core, no offscreen) ---
+wits_add_qttest(tst_accesstypes
+    SOURCES
+        tst_accesstypes.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.h
+    INCLUDES ${CMAKE_SOURCE_DIR}/core)
+
+# --- Access Control: in-process event bus (pure core, no offscreen) ---
+wits_add_qttest(tst_eventbus
+    SOURCES
+        tst_eventbus.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/eventbus.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/eventbus.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.h
+    INCLUDES ${CMAKE_SOURCE_DIR}/core)
+
+# --- Access Control: mock provider + interface (pure core, no offscreen) ---
+wits_add_qttest(tst_mockprovider
+    SOURCES
+        tst_mockprovider.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/mockprovider.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/mockprovider.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/iaccessprovider.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.h
+    INCLUDES ${CMAKE_SOURCE_DIR}/core)
+
+# --- Access Control: provider factory (pure core, no offscreen) ---
+wits_add_qttest(tst_accessproviderfactory
+    SOURCES
+        tst_accessproviderfactory.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accessproviderfactory.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accessproviderfactory.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/mockprovider.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/mockprovider.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/iaccessprovider.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.h
+    INCLUDES ${CMAKE_SOURCE_DIR}/core)
+
+# --- Access Control: decision service (Network; no offscreen) ---
+wits_add_qttest(tst_accessdecisionservice
+    SOURCES
+        tst_accessdecisionservice.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accessdecisionservice.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accessdecisionservice.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.h
+        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
+        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
+    LIBS Qt${QT_VERSION_MAJOR}::Network
+    INCLUDES ${CMAKE_SOURCE_DIR}/core ${CMAKE_SOURCE_DIR}/testsupport)
+
+# --- Access Control: health monitor (pure core, no offscreen) ---
+wits_add_qttest(tst_healthmonitor
+    SOURCES
+        tst_healthmonitor.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/healthmonitor.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/healthmonitor.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.h
+    INCLUDES ${CMAKE_SOURCE_DIR}/core)
+
+# --- Access Control: lifecycle service + state machine (pure core, no offscreen) ---
+wits_add_qttest(tst_accesscontrolservice
+    SOURCES
+        tst_accesscontrolservice.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesscontrolservice.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesscontrolservice.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/healthmonitor.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/healthmonitor.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accessproviderfactory.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accessproviderfactory.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/eventbus.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/eventbus.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/mockprovider.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/mockprovider.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/iaccessprovider.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.h
+    INCLUDES ${CMAKE_SOURCE_DIR}/core)
