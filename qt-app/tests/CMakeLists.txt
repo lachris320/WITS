@@ -289,3 +289,14 @@ wits_add_qttest(tst_eventbus
         ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.cpp
         ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.h
     INCLUDES ${CMAKE_SOURCE_DIR}/core)
+
+# --- Access Control: mock provider + interface (pure core, no offscreen) ---
+wits_add_qttest(tst_mockprovider
+    SOURCES
+        tst_mockprovider.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/mockprovider.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/mockprovider.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/iaccessprovider.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.h
+    INCLUDES ${CMAKE_SOURCE_DIR}/core)
