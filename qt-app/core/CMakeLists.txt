@@ -43,6 +43,14 @@ add_library(witscore STATIC
     rfidscandetector.h rfidscandetector.cpp
     loginparser.h loginparser.cpp
     rfideventfilterbase.h rfideventfilterbase.cpp
+    accesscontrol/accesstypes.h accesscontrol/accesstypes.cpp
+    accesscontrol/eventbus.h accesscontrol/eventbus.cpp
+    accesscontrol/iaccessprovider.h
+    accesscontrol/mockprovider.h accesscontrol/mockprovider.cpp
+    accesscontrol/accessproviderfactory.h accesscontrol/accessproviderfactory.cpp
+    accesscontrol/accessdecisionservice.h accesscontrol/accessdecisionservice.cpp
+    accesscontrol/healthmonitor.h accesscontrol/healthmonitor.cpp
+    accesscontrol/accesscontrolservice.h accesscontrol/accesscontrolservice.cpp
 )
 
 # AUTOMOC required (7 Q_OBJECT classes: the five *Controller + BrandingController
