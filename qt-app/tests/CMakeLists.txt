@@ -313,3 +313,16 @@ wits_add_qttest(tst_accessproviderfactory
         ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.cpp
         ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.h
     INCLUDES ${CMAKE_SOURCE_DIR}/core)
+
+# --- Access Control: decision service (Network; no offscreen) ---
+wits_add_qttest(tst_accessdecisionservice
+    SOURCES
+        tst_accessdecisionservice.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accessdecisionservice.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accessdecisionservice.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.h
+        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
+        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
+    LIBS Qt${QT_VERSION_MAJOR}::Network
+    INCLUDES ${CMAKE_SOURCE_DIR}/core ${CMAKE_SOURCE_DIR}/testsupport)
