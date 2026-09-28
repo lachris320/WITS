@@ -256,11 +256,22 @@ function httpGet(string $hp, string $p): array { return httpReq($hp, $p); }
 function httpPostForm(string $hp, string $p, array $form): array {
     return httpReq($hp, $p, [CURLOPT_POST => true, CURLOPT_POSTFIELDS => http_build_query($form)]);
 }
-// Method override, optionally carrying a form body (for "valid key in GET body -> still 405").
-function httpMethod(string $hp, string $method, string $p, array $form = []): array {
+// Method override, optionally carrying a JSON body. JSON (not urlencoded) because
+// extractAdminKey() reads $_POST or a JSON php://input body — PHP does not populate
+// $_POST for a GET, so a urlencoded GET body would look like a MISSING key and the
+// test would not actually carry a valid key. This proves method-before-auth.
+function httpMethod(string $hp, string $method, string $p, array $jsonBody = []): array {
     $opt = [CURLOPT_CUSTOMREQUEST => $method];
-    if ($form) { $opt[CURLOPT_POSTFIELDS] = http_build_query($form); }
+    if ($jsonBody) {
+        $opt[CURLOPT_POSTFIELDS] = json_encode($jsonBody);
+        $opt[CURLOPT_HTTPHEADER] = ['Content-Type: application/json'];
+    }
     return httpReq($hp, $p, $opt);
+}
+// A plain ($x['k'] ?? 'x') === null is ALWAYS false (?? treats null as absent), so
+// null assertions must check key-existence + identity explicitly.
+function isJsonNull($arr, string $key): bool {
+    return is_array($arr) && array_key_exists($key, $arr) && $arr[$key] === null;
 }
 
 // Throwaway schema + synthetic rows.
@@ -305,23 +316,50 @@ file_put_contents($docroot . '/uploads/default.jpg', 'DEFAULT');   // fallback
 file_put_contents($docroot . '/uploads-evil/x.jpg', 'EVIL');       // real file, but OUTSIDE uploads/
 file_put_contents($docroot . '/config.php',
     "<?php define('DB_HOST','localhost');define('DB_USER','root');define('DB_PASS','');define('DB_NAME','" . $TEST_DB . "');\n");
+// Test-only wrapper: spoof a non-loopback REMOTE_ADDR, then run the REAL endpoint,
+// so its 403 branch is exercised end to end (a loopback-bound php -S cannot
+// otherwise deliver a non-loopback request). Not shipped — lives only in the docroot.
+file_put_contents($docroot . '/__force_remote.php',
+    "<?php \$_SERVER['REMOTE_ADDR']='203.0.113.9'; require __DIR__ . '/turnstile_display.php';\n");
 foreach (['access_helpers.php','turnstile_display.php'] as $f) {
     copy($apiDir . '/' . $f, $docroot . '/' . $f);
 }
 
+$proc = null;
+$cleanup = function () use ($root, $TEST_DB, $docroot, &$proc) {
+    if (is_resource($proc)) { proc_terminate($proc); proc_close($proc); }
+    if ($root instanceof mysqli) { @$root->query('DROP DATABASE IF EXISTS ' . $TEST_DB); }
+    foreach (['uploads','uploads-evil'] as $d) {
+        array_map('unlink', glob($docroot . '/' . $d . '/*') ?: []);
+        @rmdir($docroot . '/' . $d);
+    }
+    array_map('unlink', glob($docroot . '/*') ?: []);
+    @rmdir($docroot);
+};
+
 $descr = [0 => ['pipe','r'], 1 => ['file', $docroot . '/server.log', 'a'], 2 => ['file', $docroot . '/server.log', 'a']];
 $proc = proc_open([PHP_BINARY, '-S', $HOSTPORT, '-t', $docroot], $descr, $pipes);
-if (!is_resource($proc)) { fwrite(STDERR, "FATAL: proc_open failed\n"); exit(2); }
-// Bounded readiness probe instead of a fixed sleep.
+if (!is_resource($proc)) { $cleanup(); fwrite(STDERR, "FATAL: proc_open failed\n"); exit(2); }
+// Bounded readiness probe instead of a fixed sleep. (A freed-port bind race is
+// still theoretically possible; the probe just confirms *something* is listening,
+// and the first real request below returns our JSON, so a wrong process surfaces
+// as a test failure rather than a hang.)
 $ready = false;
 for ($i = 0; $i < 50; $i++) { // up to ~5s
     $c = @stream_socket_client('tcp://' . $HOSTPORT, $en, $es, 0.1);
     if ($c) { fclose($c); $ready = true; break; }
     usleep(100000);
 }
-if (!$ready) { proc_terminate($proc); fwrite(STDERR, "FATAL: php -S never came up on $HOSTPORT\n"); exit(2); }
+if (!$ready) { $cleanup(); fwrite(STDERR, "FATAL: php -S never came up on $HOSTPORT\n"); exit(2); }
 
 try {
+    // 0. Endpoint-level 403: the REAL endpoint via the wrapper that spoofs a
+    // non-loopback REMOTE_ADDR. Proves the endpoint wires isLoopback() and 403s
+    // (with generic JSON) before any DB access.
+    $r = httpGet($HOSTPORT, '/__force_remote.php');
+    ok('display: non-loopback REMOTE_ADDR -> 403', $r['code'] === 403);
+    ok('display: 403 -> generic error json',       ($r['json']['status'] ?? null) === 'error');
+
     // 1. Method enforcement: non-GET -> 405.
     ok('display: non-GET -> 405', httpMethod($HOSTPORT, 'POST', '/turnstile_display.php')['code'] === 405);
 
@@ -338,7 +376,7 @@ try {
 
     $r = httpGet($HOSTPORT, '/turnstile_display.php?since=102');
     ok('display: since=102 -> entry 103 present, student null (orphaned)',
-        ($r['json']['entry']['id'] ?? null) === 103 && ($r['json']['entry']['student'] ?? 'x') === null);
+        ($r['json']['entry']['id'] ?? null) === 103 && isJsonNull($r['json']['entry'] ?? null, 'student'));
 
     $r = httpGet($HOSTPORT, '/turnstile_display.php?since=103');
     ok('display: absent-file photo -> default.jpg', ($r['json']['entry']['student']['photo_path'] ?? null) === 'uploads/default.jpg');
@@ -347,7 +385,7 @@ try {
     ok('display: sibling uploads-evil/ photo -> default.jpg', ($r['json']['entry']['student']['photo_path'] ?? null) === 'uploads/default.jpg');
 
     $r = httpGet($HOSTPORT, '/turnstile_display.php?since=106');
-    ok('display: since=106 -> entry null (nothing newer)', ($r['json']['entry'] ?? 'x') === null);
+    ok('display: since=106 -> entry null (nothing newer)', isJsonNull($r['json'] ?? null, 'entry'));
     ok('display: latest_id still 106 when entry null',     ($r['json']['latest_id'] ?? null) === 106);
 
     // 3. No mutation: turnstile_events / library_visits / visits unchanged.
@@ -367,7 +405,7 @@ try {
     $root->query('TRUNCATE TABLE turnstile_events');
     $r = httpGet($HOSTPORT, '/turnstile_display.php?since=0');
     ok('display: empty table -> latest_id 0', ($r['json']['latest_id'] ?? 'x') === 0);
-    ok('display: empty table -> entry null',  ($r['json']['entry'] ?? 'x') === null);
+    ok('display: empty table -> entry null',  isJsonNull($r['json'] ?? null, 'entry'));
 
     // 6. Forced DB failure -> generic 500, no leaked SQL/DB detail. Point the
     // copied config at a nonexistent schema (php -S re-includes config per
@@ -382,15 +420,8 @@ try {
         && stripos($r['raw'], 'Unknown database') === false
         && strpos($r['raw'], $TEST_DB) === false);
 } finally {
-    if (is_resource($proc)) { proc_terminate($proc); proc_close($proc); }
-    $root->query('DROP DATABASE IF EXISTS ' . $TEST_DB);
+    $cleanup();       // same teardown as the early-exit failure paths
     $root->close();
-    foreach (['uploads','uploads-evil'] as $d) {
-        array_map('unlink', glob($docroot . '/' . $d . '/*') ?: []);
-        @rmdir($docroot . '/' . $d);
-    }
-    array_map('unlink', glob($docroot . '/*') ?: []);
-    @rmdir($docroot);
 }
 ```
 
@@ -425,7 +456,8 @@ require_once __DIR__ . '/access_helpers.php';
 
 function displayError(int $code, string $msg): void {
     http_response_code($code);
-    echo json_encode(['status' => 'error', 'message' => $msg]);
+    $out = json_encode(['status' => 'error', 'message' => $msg]);
+    echo $out !== false ? $out : '{"status":"error","message":"Internal server error"}';
     exit;
 }
 
@@ -544,8 +576,9 @@ Replace the marker line `// --- Task 2 (access_recent.php) assertions are insert
 
 ```php
     // ---- access_recent.php ----
-    // Method BEFORE auth: a GET carrying a VALID admin_key body is still 405.
-    ok('recent: GET+valid-key body -> 405 (method before auth)',
+    // Method BEFORE auth: a GET carrying a VALID admin_key in a JSON body (which
+    // extractAdminKey() WOULD accept) is still 405 — method is checked first.
+    ok('recent: GET+valid-key JSON body -> 405 (method before auth)',
         httpMethod($HOSTPORT, 'GET', '/access_recent.php', ['admin_key' => $ADMIN_KEY])['code'] === 405);
 
     // Missing / wrong key on POST -> 401.
@@ -563,7 +596,7 @@ Replace the marker line `// --- Task 2 (access_recent.php) assertions are insert
         is_array($st107) && array_keys($st107) === ['name','school_id','course','department','photo_path']);
     // Orphaned row (103, CARD_GONE) present with student null.
     $has103Null = false;
-    foreach ($entries as $e) { if (($e['id'] ?? null) === 103) { $has103Null = ($e['student'] ?? 'x') === null; } }
+    foreach ($entries as $e) { if (($e['id'] ?? null) === 103) { $has103Null = isJsonNull($e, 'student'); } }
     ok('recent: orphaned row present with student null', $has103Null);
 
     // 50-entry cap: bulk-insert past 50 (ids 300..359) and assert exactly 50, newest kept.
@@ -574,22 +607,30 @@ Replace the marker line `// --- Task 2 (access_recent.php) assertions are insert
     ok('recent: 50-entry cap',                 count($r['json']['entries'] ?? []) === 50);
     ok('recent: cap keeps newest (359 first)', ($r['json']['entries'][0]['id'] ?? null) === 359);
 
-    // Counts: entries_today via the DB clock across midnight; last_entry_at = EXACT MAX(created_at).
+    // Counts: entries_today via the DB clock. Seed BOTH midnight boundaries with
+    // the DB's own clock — one row at exactly CURDATE() (today 00:00:00, the
+    // INCLUSIVE lower bound) and one at CURDATE() - 1s (yesterday 23:59:59, must be
+    // excluded). last_entry_at = EXACT MAX(created_at).
     $root->query("INSERT INTO turnstile_events (id, card, reader, created_at)
-                  VALUES (400,'CARD_A',0, CURDATE() - INTERVAL 1 SECOND)"); // yesterday 23:59:59
+                  VALUES (400,'CARD_A',0, CURDATE() - INTERVAL 1 SECOND)"); // yesterday 23:59:59 -> excluded
+    $root->query("INSERT INTO turnstile_events (id, card, reader, created_at)
+                  VALUES (401,'CARD_A',0, CURDATE())");                     // today 00:00:00 -> included
     $r = httpPostForm($HOSTPORT, '/access_recent.php', ['admin_key' => $ADMIN_KEY]);
     $todayCount = (int) $root->query("SELECT COUNT(*) c FROM turnstile_events
         WHERE created_at >= CURDATE() AND created_at < CURDATE() + INTERVAL 1 DAY")->fetch_assoc()['c'];
+    $midnightIncluded = (int) $root->query("SELECT COUNT(*) c FROM turnstile_events
+        WHERE id = 401 AND created_at >= CURDATE() AND created_at < CURDATE() + INTERVAL 1 DAY")->fetch_assoc()['c'];
     $maxAt = $root->query('SELECT MAX(created_at) m FROM turnstile_events')->fetch_assoc()['m'];
-    ok('recent: entries_today excludes yesterday-boundary row', ($r['json']['entries_today'] ?? null) === $todayCount);
-    ok('recent: last_entry_at = exact MAX(created_at)',         ($r['json']['last_entry_at'] ?? null) === $maxAt);
+    ok('recent: entries_today matches DB range count',           ($r['json']['entries_today'] ?? null) === $todayCount);
+    ok('recent: exact-midnight (CURDATE()) row is counted',      $midnightIncluded === 1);
+    ok('recent: last_entry_at = exact MAX(created_at)',          ($r['json']['last_entry_at'] ?? null) === $maxAt);
 
     // Empty table -> entries [], entries_today 0, last_entry_at null. (Own TRUNCATE.)
     $root->query('TRUNCATE TABLE turnstile_events');
     $r = httpPostForm($HOSTPORT, '/access_recent.php', ['admin_key' => $ADMIN_KEY]);
     ok('recent: empty -> entries []',          ($r['json']['entries'] ?? 'x') === []);
     ok('recent: empty -> entries_today 0',     ($r['json']['entries_today'] ?? 'x') === 0);
-    ok('recent: empty -> last_entry_at null',  ($r['json']['last_entry_at'] ?? 'x') === null);
+    ok('recent: empty -> last_entry_at null',  isJsonNull($r['json'] ?? null, 'last_entry_at'));
 ```
 
 - [ ] **Step 3: Run to verify they fail**
@@ -618,7 +659,8 @@ header('Cache-Control: no-store');
 
 function recentError(int $code, string $msg): void {
     http_response_code($code);
-    echo json_encode(['status' => 'error', 'message' => $msg]);
+    $out = json_encode(['status' => 'error', 'message' => $msg]);
+    echo $out !== false ? $out : '{"status":"error","message":"Internal server error"}';
     exit;
 }
 
@@ -704,7 +746,7 @@ Concern: "feat(accesscontrol): access_recent admin endpoint + harness auth". Sta
 ## Self-Review
 
 **1. Spec coverage** (against `2026-09-28-…-design.md`):
-- `turnstile_display.php` GET/loopback/405/403, oldest-next cursor, `latest_id`=MAX, enumerated display projection, `student:null` orphaned fallback, read-only → Task 1. Endpoint-level 403 is covered by the `isLoopback()` **unit** tests (a non-loopback request cannot reach a loopback-bound `php -S`); the endpoint just wires `isLoopback($_SERVER['REMOTE_ADDR'])`. ✅
+- `turnstile_display.php` GET/loopback/405/403, oldest-next cursor, `latest_id`=MAX, enumerated display projection, `student:null` orphaned fallback, read-only → Task 1. Endpoint-level 403 is tested end-to-end via a test-only `__force_remote.php` wrapper that spoofs a non-loopback `REMOTE_ADDR` before `require`-ing the real endpoint (asserts 403 + generic JSON, no DB touched); the `isLoopback()` unit tests back it. ✅
 - `access_recent.php` POST-only-before-auth (GET-with-valid-key-body → 405), admin_key, newest-50 id DESC + 50-cap, resolved slim projection, `entries_today` half-open range, exact `last_entry_at`, empty→[]/0/null → Task 2. ✅
 - `access_helpers.php` with `resolveStudentByCard` + contained `normalizeStudentPhotoPath` (traversal/absent/sibling cases tested) + `isLoopback` + `parseSinceParam` (incl. leading-zeros + overflow) → Task 1 Step 3. ✅
 - config.php connection (not db.php) + utf8mb4 + display_errors off + generic error writer + Cache-Control: no-store + class/code-only logging + `JSON_THROW_ON_ERROR` (encode failure → sanitized catch) → both endpoints. ✅
