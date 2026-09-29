@@ -320,7 +320,10 @@ public:
     void enqueueStall();
     int requestCount() const { return m_requestCount; }
     int abortCount() const { return m_abortCount; }
+    int maxActive() const { return m_maxActive; }   // peak concurrent in-flight replies
     void noteAbort() { ++m_abortCount; }
+    void noteActive() { if (++m_active > m_maxActive) m_maxActive = m_active; }
+    void noteFinished() { if (m_active > 0) --m_active; }
     QUrl lastUrl;
 
 protected:
@@ -332,6 +335,8 @@ private:
     QQueue<Canned> m_queue;
     int m_requestCount = 0;
     int m_abortCount = 0;
+    int m_active = 0;
+    int m_maxActive = 0;
 };
 
 #endif // SEQUENCEDNAM_H
@@ -366,10 +371,12 @@ public:
                      error == QNetworkReply::NoError ? 200 : 500);
         if (!stall) {                          // auto-finish next tick
             QTimer::singleShot(0, this, [this, error]() {
+                if (isFinished()) return;      // already aborted — don't double-finish
                 if (error != QNetworkReply::NoError) {
                     setError(error, QStringLiteral("canned error"));
                     emit errorOccurred(error);
                 }
+                if (m_owner) m_owner->noteFinished();
                 setFinished(true);
                 emit finished();
             });
@@ -379,7 +386,7 @@ public:
     void abort() override
     {
         if (isFinished()) return;
-        if (m_owner) m_owner->noteAbort();
+        if (m_owner) { m_owner->noteAbort(); m_owner->noteFinished(); }
         setError(QNetworkReply::OperationCanceledError, QStringLiteral("aborted"));
         emit errorOccurred(QNetworkReply::OperationCanceledError);
         setFinished(true);
@@ -407,6 +414,7 @@ QNetworkReply *SequencedNam::createRequest(Operation op, const QNetworkRequest &
                                            QIODevice *)
 {
     ++m_requestCount;
+    noteActive();                       // track peak concurrency (must stay 1)
     lastUrl = request.url();
     Canned c = m_queue.isEmpty()
                    ? Canned{QByteArrayLiteral("{\"status\":\"success\",\"latest_id\":0,\"entry\":null}"),
@@ -545,6 +553,7 @@ private slots:
     void timeoutAbortsAndDegrades();
     void stopAbortsInFlightNoEmit();
     void restartDropsInFlightGeneration();
+    void failureStopsTimerAndPreservesCursor();
 
 private:
     static QVariantMap cfg(int pollMs = 250, const QString &gate = QStringLiteral("g1"))
@@ -643,9 +652,10 @@ void TestTurnstileProvider::drainsEntriesOldestFirst()
     QCOMPARE(e1.gateId, QStringLiteral("g1"));
     QCOMPARE(e1.subject.value("name").toString(), QStringLiteral("A"));
     QCOMPARE(qvariant_cast<AccessEvent>(events.at(1).at(0)).correlationId, QStringLiteral("2"));
-    // One-in-flight: requests happen strictly in sequence (baseline + 2 entries
-    // + drain-end empty == 4); more than one reply active would break ordering.
+    // One-in-flight: baseline + 2 entries + drain-end empty == 4 requests, and
+    // peak concurrency stayed at exactly one (overlap would push maxActive >= 2).
     QTRY_COMPARE_WITH_TIMEOUT(nam.requestCount(), 4, 3000);
+    QCOMPARE(nam.maxActive(), 1);
     p.stop();
 }
 
@@ -725,13 +735,17 @@ void TestTurnstileProvider::stopAbortsInFlightNoEmit()
     nam.enqueueStall();                            // baseline in flight, never auto-finishes
     TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
     QSignalSpy events(&p, &IAccessProvider::accessEvent);
+    QSignalSpy states(&p, &IAccessProvider::stateChanged);
     p.start();
     QTRY_COMPARE_WITH_TIMEOUT(nam.requestCount(), 1, 3000);
     p.stop();                                      // aborts the in-flight reply
     QCOMPARE(nam.abortCount(), 1);
     QTest::qWait(100);                             // let the aborted reply's finished fire
     QCOMPARE(events.count(), 0);                   // stale (generation-bumped) reply dropped
-    QVERIFY(p.state() != ConnectionState::Connected);
+    // The dropped reply must NOT run the failure path: zero Degraded proves the
+    // stop() generation bump suppressed it (without the guard, abort->fail()
+    // would emit Degraded here).
+    QCOMPARE(degradedCount(states), 0);
 }
 
 void TestTurnstileProvider::restartDropsInFlightGeneration()
@@ -745,13 +759,40 @@ void TestTurnstileProvider::restartDropsInFlightGeneration()
     nam.enqueue(emptyPayload(9));   // steady poll after baseline
     TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
     QSignalSpy events(&p, &IAccessProvider::accessEvent);
+    QSignalSpy states(&p, &IAccessProvider::stateChanged);
     p.start();
     QTRY_COMPARE_WITH_TIMEOUT(nam.requestCount(), 1, 3000);   // reply-1 in flight
     p.start();                                                // restart: gen bump + abort reply-1
     QVERIFY(nam.abortCount() >= 1);
     QTRY_VERIFY_WITH_TIMEOUT(p.state() == ConnectionState::Connected, 3000);  // baselined from reply-2
     QCOMPARE(events.count(), 0);                              // reply-1 never produced an effect
+    // The aborted reply-1 must be DROPPED by the generation guard, not run
+    // through fail(): assert zero Degraded transitions. Without the start()
+    // generation bump, reply-1's abort would emit a transient Degraded that
+    // reply-2 then hides — this assertion is what actually detects that.
+    QCOMPARE(degradedCount(states), 0);
     QTRY_VERIFY_WITH_TIMEOUT(nam.lastUrl.query().contains(QStringLiteral("since=9")), 3000);
+    p.stop();
+}
+
+void TestTurnstileProvider::failureStopsTimerAndPreservesCursor()
+{
+    // After a failure the provider must (a) leave the cursor untouched and
+    // (b) stop its own timer — reconnect is the service's job, not a
+    // provider-owned retry.
+    SequencedNam nam;
+    nam.enqueue(emptyPayload(5));                                  // baseline: cursor = 5
+    nam.enqueue(QByteArray(), QNetworkReply::HostNotFoundError);   // steady poll fails
+    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
+    p.start();
+    QTRY_VERIFY_WITH_TIMEOUT(p.state() == ConnectionState::Degraded, 3000);
+    const int afterFailure = nam.requestCount();                  // baseline + failed poll == 2
+    QTest::qWait(600);                                            // > 2 * pollInterval(250)
+    QCOMPARE(nam.requestCount(), afterFailure);                   // NO provider self-retry
+    // Cursor preserved: a service-triggered restart resumes from since=5.
+    nam.enqueue(emptyPayload(5));
+    p.start();
+    QTRY_VERIFY_WITH_TIMEOUT(nam.lastUrl.query().contains(QStringLiteral("since=5")), 3000);
     p.stop();
 }
 
@@ -952,7 +993,7 @@ void TurnstileProvider::onFinished(QNetworkReply *reply, quint64 gen)
 cmake --build C:/b/loams-sp3 --target tst_turnstileprovider
 ctest --test-dir C:/b/loams-sp3 -R tst_turnstileprovider --output-on-failure
 ```
-Expected: PASS (12/12).
+Expected: PASS (13/13).
 
 - [ ] **Step 8: Update the unknown-subject convention comment in `accesstypes.h`**
 
@@ -1586,7 +1627,7 @@ Flag off (default): launch `WITSQuick`, confirm the kiosk behaves exactly as bef
 
 **1. Spec coverage:**
 - §1 parser (`EntryEventResult`, photo composition, local→UTC, strict validity incl. `latest_id >= 0`) → Task 1. ✅
-- §2 provider: baseline-once, reconnect-preserves-cursor + processes response, drain oldest-first, `eventId>since` guard, timeout+abort, generation guard, single `Degraded`, provider-owned reply, `gateId` config + fallback, `pollIntervalMs` clamp, never-runtime-`Error` → Task 2 (tests cover baseline-then-poll, empty-poll-re-arms, drain-oldest-first + one-in-flight sequencing, reconnect-emits-once, non-advancing, malformed, transport→one-Degraded, timeout→abort, stop→abort→no-emit, restart-drops-in-flight-generation, clampPollMs, blank-gateId). ✅
+- §2 provider: baseline-once, reconnect-preserves-cursor + processes response, drain oldest-first, `eventId>since` guard, timeout+abort, generation guard, single `Degraded`, provider-owned reply, `gateId` config + fallback, `pollIntervalMs` clamp, never-runtime-`Error` → Task 2 (tests cover baseline-then-poll, empty-poll-re-arms, drain-oldest-first + one-in-flight sequencing, reconnect-emits-once, non-advancing, malformed, transport→one-Degraded, timeout→abort, stop→abort→no-emit-no-Degraded, restart-drops-in-flight-generation-zero-Degraded, failure-stops-timer-and-preserves-cursor, clampPollMs, blank-gateId). ✅
 - §3 unknown-subject convention → `toAccessEntry` (Task 3) + provider emit + `accesstypes.h` comment (Task 2 Step 8). ✅
 - §4 hub ownership/teardown order, owned-vs-injected NAM seam, register-when-disabled, event→`QVariantMap` → Task 3. ✅
 - §5 `QML_FOREIGN` wrapper + `create()` fail-fast + `main.cpp` order + CMake SOURCES + existing-QML-test install → Tasks 3 & 5. ✅
