@@ -10,12 +10,14 @@
 
 ## Global Constraints
 
-- **Feature flag:** every runtime effect is behind `accessControl.enabled` (default **false**). Flag off ⇒ no provider built, no polling, no bus traffic, inert singleton — zero behavior change. Copied verbatim from the spec.
-- **Read-only:** the provider **never** POSTs. `turnstile.php` remains the sole authoritative attendance writer. The kiosk display path issues no backend writes.
-- **Privacy:** raw `card` and `reader` never leave the adapter — they are never placed on `AccessEvent`, the `EventBus`, or the QML signal.
+- **Feature flag:** every runtime effect is behind `accessControl.enabled` (default **false**). Flag off ⇒ no provider built, no polling, no bus traffic, inert singleton — zero behavior change.
+- **Read-only:** the provider **never** POSTs. `turnstile.php` remains the sole authoritative attendance writer.
+- **Privacy:** raw `card` and `reader` never leave the adapter — never on `AccessEvent`, the `EventBus`, or the QML signal.
 - **Settings:** all reads go through **`AppSettings`** (never raw `QSettings`) so tests isolate via `AppSettings::isolateForTesting()`. Keys: `accessControl/enabled` (bool), `accessControl/pollIntervalMs` (int), `accessControl/gateId` (string).
-- **Enablement precedence:** `WITS_ACCESS_CONTROL` = `1`/`true` (case-insensitive) force-on for the process → else `accessControl/enabled` → else false. `WITS_ACCESS_CONTROL=0` is **not** a force-off in this slice.
-- **Integer widths:** `latest_id`, `eventId`, and the poll cursor are `qint64` throughout.
+- **Enablement precedence:** `WITS_ACCESS_CONTROL` = `1`/`true` (case-insensitive) force-on → else `accessControl/enabled` → else false. `WITS_ACCESS_CONTROL=0` is **not** a force-off (it falls through to the setting).
+- **`pollIntervalMs` normalization (single owner = `TurnstileProvider::clampPollMs`):** a value `<= 0` (absent/invalid) → `1500`; a valid positive value below the `250` ms floor → clamped to `250`; otherwise used as-is.
+- **`gateId` normalization (single owner = the provider):** trimmed; empty/whitespace → `"turnstile"`.
+- **Integer widths:** `latest_id`, `eventId`, and the poll cursor are `qint64`.
 - **No Claude/Anthropic attribution** in any commit message (standing user rule).
 - **QObject/ownership:** parent every `QObject`; smart pointers only for the deliberately non-parented hub members (the sanctioned exception). Function-pointer `connect` syntax.
 
@@ -40,8 +42,9 @@ Ignore the harmless `LF will be replaced by CRLF` and the pre-existing `QXlsx ..
 |---|---|---|
 | `qt-app/core/loginparser.h` / `.cpp` | Add `EntryEventResult` + pure `parseEntryEvent(QByteArray, QUrl)` | 1 |
 | `qt-app/tests/tst_loginparser.cpp` | Add `parseEntryEvent` cases | 1 |
-| `qt-app/core/accesscontrol/turnstileprovider.h` / `.cpp` | Server-observed `IAccessProvider`: poll/cursor/timeout/generation | 2 |
-| `qt-app/testsupport/sequencednam.h` / `.cpp` | Reusable multi-response fake NAM for tests | 2 |
+| `qt-app/core/accesscontrol/turnstileprovider.h` / `.cpp` | Server-observed `IAccessProvider`: poll/cursor/timeout/generation; `clampPollMs` | 2 |
+| `qt-app/core/accesscontrol/accesstypes.h` | Update the `subject` comment to state the empty-subject convention | 2 |
+| `qt-app/testsupport/sequencednam.h` / `.cpp` | Reusable multi-response fake NAM (auto-finish, stall, abort count) | 2 |
 | `qt-app/tests/tst_turnstileprovider.cpp` | Provider behavior tests | 2 |
 | `qt-app/core/CMakeLists.txt` | Add `turnstileprovider.*` to `witscore` | 2 |
 | `qt-app/tests/CMakeLists.txt` | Register `tst_turnstileprovider` | 2 |
@@ -70,7 +73,7 @@ Ignore the harmless `LF will be replaced by CRLF` and the pre-existing `QXlsx ..
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `qt-app/tests/tst_loginparser.cpp` — add these declarations under the existing `private slots:` block and the implementations below the existing ones. Add `#include <QUrl>` near the top if not present.
+Append to `qt-app/tests/tst_loginparser.cpp` — add these under the existing `private slots:` block, and the implementations below the existing ones. Add `#include <QUrl>` near the top if absent.
 
 ```cpp
 // --- in the private slots: block ---
@@ -146,7 +149,6 @@ void TestLoginParser::parseEntryEvent_localTimeConvertedToUtc()
     const auto r = LoginParser::parseEntryEvent(body, QUrl("http://localhost/loams_api/"));
     QVERIFY(r.at.isValid());
     QCOMPARE(r.at.timeSpec(), Qt::UTC);
-    // Same instant as the local wall-clock string reinterpreted as local time.
     QDateTime local(QDate(2026, 9, 29), QTime(8, 30, 0));   // Qt::LocalTime
     QCOMPARE(r.at, local.toUTC());
 }
@@ -156,19 +158,14 @@ void TestLoginParser::parseEntryEvent_malformedIsInvalid()
     const QUrl base("http://localhost/loams_api/");
     QVERIFY(!LoginParser::parseEntryEvent("not json", base).valid);
     QVERIFY(!LoginParser::parseEntryEvent(R"({"status":"error"})", base).valid);
-    // entry present but neither null nor object
     QVERIFY(!LoginParser::parseEntryEvent(
         R"({"status":"success","latest_id":1,"entry":3})", base).valid);
-    // non-positive id
     QVERIFY(!LoginParser::parseEntryEvent(
         R"({"status":"success","latest_id":1,"entry":{"id":0,"created_at":"2026-09-29 08:30:00","student":null}})", base).valid);
-    // unparseable created_at
     QVERIFY(!LoginParser::parseEntryEvent(
         R"({"status":"success","latest_id":1,"entry":{"id":1,"created_at":"nope","student":null}})", base).valid);
-    // negative latest_id
     QVERIFY(!LoginParser::parseEntryEvent(
         R"({"status":"success","latest_id":-1,"entry":null})", base).valid);
-    // student present but not null/object
     QVERIFY(!LoginParser::parseEntryEvent(
         R"({"status":"success","latest_id":1,"entry":{"id":1,"created_at":"2026-09-29 08:30:00","student":5}})", base).valid);
 }
@@ -180,7 +177,7 @@ void TestLoginParser::parseEntryEvent_malformedIsInvalid()
 cmake --build C:/b/loams-sp3 --target tst_loginparser
 ctest --test-dir C:/b/loams-sp3 -R tst_loginparser --output-on-failure
 ```
-Expected: FAIL to compile (`parseEntryEvent`/`EntryEventResult` undeclared).
+Expected: FAIL to compile (`parseEntryEvent`/`EntryEventResult` undeclared). `loginparser.cpp` is compiled directly by the test target, so this is a clean compile error, not a CMake-configure error.
 
 - [ ] **Step 3: Declare the result type + function in `loginparser.h`**
 
@@ -205,7 +202,7 @@ EntryEventResult parseEntryEvent(const QByteArray &body, const QUrl &baseUrl);
 
 - [ ] **Step 4: Implement in `loginparser.cpp`**
 
-Add `#include <QJsonValue>` if not present (`QJsonDocument`/`QJsonObject` are already used). Append:
+Add `#include <QJsonValue>` if absent. Append:
 
 ```cpp
 LoginParser::EntryEventResult
@@ -277,9 +274,7 @@ ctest --test-dir C:/b/loams-sp3 -R tst_loginparser --output-on-failure
 ```
 Expected: PASS (all `parseEntryEvent_*` plus the pre-existing cases).
 
-- [ ] **Step 6: Commit** (via the `commit` skill)
-
-Message subject: `feat(accesscontrol): add pure parseEntryEvent decoder for turnstile_display`.
+- [ ] **Step 6: Commit** (via the `commit` skill) — `feat(accesscontrol): add pure parseEntryEvent decoder for turnstile_display`.
 
 ---
 
@@ -289,13 +284,13 @@ Message subject: `feat(accesscontrol): add pure parseEntryEvent decoder for turn
 - Create: `qt-app/core/accesscontrol/turnstileprovider.h`, `qt-app/core/accesscontrol/turnstileprovider.cpp`
 - Create: `qt-app/testsupport/sequencednam.h`, `qt-app/testsupport/sequencednam.cpp`
 - Create: `qt-app/tests/tst_turnstileprovider.cpp`
-- Modify: `qt-app/core/CMakeLists.txt` (add sources to `witscore`), `qt-app/tests/CMakeLists.txt` (register test)
+- Modify: `qt-app/core/accesscontrol/accesstypes.h` (comment only), `qt-app/core/CMakeLists.txt`, `qt-app/tests/CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: `LoginParser::parseEntryEvent` (Task 1); `IAccessProvider`, `AccessEvent`, `ProviderDescriptor`, `ConnectionState` (`accesstypes.h`).
+- Consumes: `LoginParser::parseEntryEvent` (Task 1); `IAccessProvider`, `AccessEvent`, `ProviderDescriptor`, `ConnectionState`.
 - Produces:
-  - `class TurnstileProvider : public AccessControl::IAccessProvider` with ctor `TurnstileProvider(QNetworkAccessManager *nam, QUrl baseUrl, const QVariantMap &config, QObject *parent = nullptr)` (reads `config["pollIntervalMs"]` int, `config["gateId"]` string) and `static AccessControl::ProviderDescriptor defaultDescriptor();` (`providerId == "turnstile"`).
-  - `SequencedNam` (test util): `explicit SequencedNam(QObject *parent = nullptr);` + `void enqueue(const QByteArray &body, QNetworkReply::NetworkError error = QNetworkReply::NoError);` + `int requestCount() const;`. Each `get()` pops the next queued response (finishes immediately); an empty queue yields an empty successful body.
+  - `class TurnstileProvider : public AccessControl::IAccessProvider` with ctor `TurnstileProvider(QNetworkAccessManager *nam, QUrl baseUrl, const QVariantMap &config, QObject *parent = nullptr)` (reads `config["pollIntervalMs"]` int, `config["gateId"]` string, both normalized inside the provider), `void setTimeoutMs(int)`, `static ProviderDescriptor defaultDescriptor()` (`providerId == "turnstile"`), `static int clampPollMs(int raw)`.
+  - `SequencedNam` (test util): `explicit SequencedNam(QObject *parent = nullptr);` · `void enqueue(const QByteArray &body, QNetworkReply::NetworkError error = QNetworkReply::NoError);` (auto-finishes next tick) · `void enqueueStall();` (a reply that finishes only when aborted) · `int requestCount() const;` · `int abortCount() const;` · `QUrl lastUrl;`.
 
 - [ ] **Step 1: Create the reusable `SequencedNam` test double**
 
@@ -309,10 +304,12 @@ Message subject: `feat(accesscontrol): add pure parseEntryEvent decoder for turn
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QQueue>
+#include <QUrl>
 
 // Test-only NAM that answers each request with the NEXT enqueued canned
-// response, finishing immediately. Unlike CapturingNam (one fixed payload),
-// this drives multi-request flows (baseline -> poll -> poll ...). No live net.
+// response. enqueue() finishes on the next event-loop turn; enqueueStall()
+// finishes only when the reply is aborted (drives timeout/stop/generation
+// paths). Tracks request + abort counts. No live network.
 class SequencedNam : public QNetworkAccessManager
 {
     Q_OBJECT
@@ -320,7 +317,10 @@ public:
     explicit SequencedNam(QObject *parent = nullptr);
     void enqueue(const QByteArray &body,
                  QNetworkReply::NetworkError error = QNetworkReply::NoError);
+    void enqueueStall();
     int requestCount() const { return m_requestCount; }
+    int abortCount() const { return m_abortCount; }
+    void noteAbort() { ++m_abortCount; }
     QUrl lastUrl;
 
 protected:
@@ -328,9 +328,10 @@ protected:
                                  QIODevice *outgoingData) override;
 
 private:
-    struct Canned { QByteArray body; QNetworkReply::NetworkError error; };
+    struct Canned { QByteArray body; QNetworkReply::NetworkError error; bool stall; };
     QQueue<Canned> m_queue;
     int m_requestCount = 0;
+    int m_abortCount = 0;
 };
 
 #endif // SEQUENCEDNAM_H
@@ -345,16 +346,14 @@ private:
 #include <QTimer>
 #include <QNetworkRequest>
 
-// Minimal QNetworkReply that finishes on the next event-loop turn with a fixed
-// body + error code. Body is served from an internal buffer.
 namespace {
 class CannedReply : public QNetworkReply
 {
 public:
     CannedReply(QNetworkAccessManager::Operation op, const QNetworkRequest &req,
                 const QByteArray &body, QNetworkReply::NetworkError error,
-                QObject *parent)
-        : QNetworkReply(parent), m_body(body)
+                bool stall, SequencedNam *owner)
+        : QNetworkReply(owner), m_body(body), m_owner(owner)
     {
         setRequest(req);
         setUrl(req.url());
@@ -364,36 +363,44 @@ public:
         m_buffer.open(QIODevice::ReadOnly);
         setAttribute(QNetworkRequest::HttpStatusCodeAttribute,
                      error == QNetworkReply::NoError ? 200 : 500);
-        QTimer::singleShot(0, this, [this, error]() {
-            if (error != QNetworkReply::NoError) {
-                setError(error, QStringLiteral("canned error"));
-                emit errorOccurred(error);
-            }
-            setFinished(true);
-            emit finished();
-        });
+        if (!stall) {                          // auto-finish next tick
+            QTimer::singleShot(0, this, [this, error]() {
+                if (error != QNetworkReply::NoError) {
+                    setError(error, QStringLiteral("canned error"));
+                    emit errorOccurred(error);
+                }
+                setFinished(true);
+                emit finished();
+            });
+        }
+        // stall: finishes only via abort()
     }
-    void abort() override {
+    void abort() override
+    {
+        if (isFinished()) return;
+        if (m_owner) m_owner->noteAbort();
         setError(QNetworkReply::OperationCanceledError, QStringLiteral("aborted"));
+        emit errorOccurred(QNetworkReply::OperationCanceledError);
         setFinished(true);
         emit finished();
     }
     qint64 readData(char *data, qint64 maxlen) override { return m_buffer.read(data, maxlen); }
-    qint64 bytesAvailable() const override {
-        return m_buffer.bytesAvailable() + QNetworkReply::bytesAvailable();
-    }
+    qint64 bytesAvailable() const override
+    { return m_buffer.bytesAvailable() + QNetworkReply::bytesAvailable(); }
 private:
     QByteArray m_body;
     QBuffer m_buffer;
+    QPointer<SequencedNam> m_owner;
 };
 } // namespace
 
 SequencedNam::SequencedNam(QObject *parent) : QNetworkAccessManager(parent) {}
 
 void SequencedNam::enqueue(const QByteArray &body, QNetworkReply::NetworkError error)
-{
-    m_queue.enqueue({body, error});
-}
+{ m_queue.enqueue({body, error, false}); }
+
+void SequencedNam::enqueueStall()
+{ m_queue.enqueue({QByteArray(), QNetworkReply::NoError, true}); }
 
 QNetworkReply *SequencedNam::createRequest(Operation op, const QNetworkRequest &request,
                                            QIODevice *)
@@ -402,181 +409,19 @@ QNetworkReply *SequencedNam::createRequest(Operation op, const QNetworkRequest &
     lastUrl = request.url();
     Canned c = m_queue.isEmpty()
                    ? Canned{QByteArrayLiteral("{\"status\":\"success\",\"latest_id\":0,\"entry\":null}"),
-                            QNetworkReply::NoError}
+                            QNetworkReply::NoError, false}
                    : m_queue.dequeue();
-    return new CannedReply(op, request, c.body, c.error, this);
+    return new CannedReply(op, request, c.body, c.error, c.stall, this);
 }
 ```
 
-- [ ] **Step 2: Write the failing provider tests**
+Add `#include <QPointer>` to `sequencednam.cpp` if the compiler flags `QPointer` (it is used in the anonymous namespace).
 
-`qt-app/tests/tst_turnstileprovider.cpp`:
+- [ ] **Step 2: Create the provider header + a skeleton `.cpp`**
 
-```cpp
-#include <QtTest>
-#include <QSignalSpy>
-#include "sequencednam.h"
-#include "accesscontrol/turnstileprovider.h"
-#include "accesscontrol/accesstypes.h"
+Creating both files now (before touching CMake) keeps the red step a runtime assertion failure, not a CMake-configure failure over a missing source.
 
-using namespace AccessControl;
-
-class TestTurnstileProvider : public QObject
-{
-    Q_OBJECT
-private slots:
-    void initTestCase() { registerMetaTypes(); }
-    void baselineSkipsHistoryThenPolls();
-    void drainsEntriesOldestFirst();
-    void reconnectPreservesCursorAndEmitsReconnectEntry();
-    void nonAdvancingEntryDegrades();
-    void transportFailureDegradesCursorUnmoved();
-
-private:
-    static QVariantMap cfg(int pollMs = 100, const QString &gate = QStringLiteral("g1"))
-    { return QVariantMap{{"pollIntervalMs", pollMs}, {"gateId", gate}}; }
-    static QByteArray entryPayload(qint64 latest, qint64 id)
-    {
-        return QStringLiteral(
-            "{\"status\":\"success\",\"latest_id\":%1,\"entry\":{\"id\":%2,"
-            "\"card\":\"C\",\"created_at\":\"2026-09-29 08:30:00\",\"reader\":0,"
-            "\"student\":{\"name\":\"A\",\"photo_path\":\"uploads/a.jpg\"}}}")
-            .arg(latest).arg(id).toUtf8();
-    }
-    static QByteArray emptyPayload(qint64 latest)
-    {
-        return QStringLiteral("{\"status\":\"success\",\"latest_id\":%1,\"entry\":null}")
-            .arg(latest).toUtf8();
-    }
-};
-
-void TestTurnstileProvider::baselineSkipsHistoryThenPolls()
-{
-    SequencedNam nam;
-    nam.enqueue(entryPayload(5, 5));   // baseline: has history, must NOT be emitted
-    nam.enqueue(emptyPayload(5));      // first steady poll: empty
-    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
-    QSignalSpy events(&p, &IAccessProvider::accessEvent);
-    QSignalSpy states(&p, &IAccessProvider::stateChanged);
-    p.start();
-    QTRY_COMPARE_WITH_TIMEOUT(nam.requestCount(), 2, 3000);  // baseline + one steady poll
-    QCOMPARE(events.count(), 0);                              // history not emitted
-    QCOMPARE(p.state(), ConnectionState::Connected);
-    QVERIFY(nam.lastUrl.query().contains(QStringLiteral("since=5")));
-    p.stop();
-}
-
-void TestTurnstileProvider::drainsEntriesOldestFirst()
-{
-    SequencedNam nam;
-    nam.enqueue(emptyPayload(0));       // baseline: empty, cursor = 0
-    nam.enqueue(entryPayload(2, 1));    // poll -> entry 1
-    nam.enqueue(entryPayload(2, 2));    // drain -> entry 2
-    nam.enqueue(emptyPayload(2));       // drain end
-    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
-    QSignalSpy events(&p, &IAccessProvider::accessEvent);
-    p.start();
-    QTRY_COMPARE_WITH_TIMEOUT(events.count(), 2, 3000);
-    const auto e1 = qvariant_cast<AccessEvent>(events.at(0).at(0));
-    QCOMPARE(e1.type, AccessEvent::Type::EntryObserved);
-    QCOMPARE(e1.correlationId, QStringLiteral("1"));
-    QCOMPARE(e1.gateId, QStringLiteral("g1"));
-    QCOMPARE(e1.subject.value("name").toString(), QStringLiteral("A"));
-    const auto e2 = qvariant_cast<AccessEvent>(events.at(1).at(0));
-    QCOMPARE(e2.correlationId, QStringLiteral("2"));
-    p.stop();
-}
-
-void TestTurnstileProvider::reconnectPreservesCursorAndEmitsReconnectEntry()
-{
-    SequencedNam nam;
-    nam.enqueue(emptyPayload(3));       // baseline: cursor = 3
-    nam.enqueue(emptyPayload(3));       // steady poll: empty (arms timer)
-    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
-    QSignalSpy events(&p, &IAccessProvider::accessEvent);
-    p.start();
-    QTRY_COMPARE_WITH_TIMEOUT(nam.requestCount(), 2, 3000);
-    p.stop();
-
-    // Reconnect: the service calls start() again. Cursor must stay 3, and an
-    // entry returned by the reconnect response must be emitted exactly once.
-    nam.enqueue(entryPayload(4, 4));    // reconnect ?since=3 -> entry 4
-    nam.enqueue(emptyPayload(4));       // drain end
-    p.start();
-    QTRY_COMPARE_WITH_TIMEOUT(events.count(), 1, 3000);
-    const auto e = qvariant_cast<AccessEvent>(events.at(0).at(0));
-    QCOMPARE(e.correlationId, QStringLiteral("4"));
-    QVERIFY(nam.lastUrl.query().contains(QStringLiteral("since=4")));
-    p.stop();
-}
-
-void TestTurnstileProvider::nonAdvancingEntryDegrades()
-{
-    SequencedNam nam;
-    nam.enqueue(emptyPayload(7));       // baseline: cursor = 7
-    nam.enqueue(entryPayload(7, 7));    // poll returns id == cursor (non-advancing)
-    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
-    QSignalSpy events(&p, &IAccessProvider::accessEvent);
-    QSignalSpy states(&p, &IAccessProvider::stateChanged);
-    p.start();
-    QTRY_VERIFY_WITH_TIMEOUT(p.state() == ConnectionState::Degraded, 3000);
-    QCOMPARE(events.count(), 0);
-    p.stop();
-}
-
-void TestTurnstileProvider::transportFailureDegradesCursorUnmoved()
-{
-    SequencedNam nam;
-    nam.enqueue(QByteArray(), QNetworkReply::HostNotFoundError);   // baseline fails
-    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
-    QSignalSpy events(&p, &IAccessProvider::accessEvent);
-    p.start();
-    QTRY_VERIFY_WITH_TIMEOUT(p.state() == ConnectionState::Degraded, 3000);
-    QCOMPARE(events.count(), 0);
-    p.stop();
-}
-
-QTEST_MAIN(TestTurnstileProvider)
-#include "tst_turnstileprovider.moc"
-```
-
-- [ ] **Step 3: Register the sources + test (so the red step compiles/links)**
-
-In `qt-app/core/CMakeLists.txt`, add to the `witscore` source list (after `accesscontrol/accesscontrolservice.*`):
-
-```cmake
-    accesscontrol/turnstileprovider.h accesscontrol/turnstileprovider.cpp
-```
-
-In `qt-app/tests/CMakeLists.txt`, after the `tst_accesscontrolservice` block:
-
-```cmake
-# --- Access Control: turnstile provider (Network; no offscreen) ---
-wits_add_qttest(tst_turnstileprovider
-    SOURCES
-        tst_turnstileprovider.cpp
-        ${CMAKE_SOURCE_DIR}/core/accesscontrol/turnstileprovider.cpp
-        ${CMAKE_SOURCE_DIR}/core/accesscontrol/turnstileprovider.h
-        ${CMAKE_SOURCE_DIR}/core/loginparser.cpp
-        ${CMAKE_SOURCE_DIR}/core/loginparser.h
-        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.cpp
-        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.h
-        ${CMAKE_SOURCE_DIR}/core/accesscontrol/iaccessprovider.h
-        ${CMAKE_SOURCE_DIR}/testsupport/sequencednam.cpp
-        ${CMAKE_SOURCE_DIR}/testsupport/sequencednam.h
-    LIBS Qt${QT_VERSION_MAJOR}::Network
-    INCLUDES ${CMAKE_SOURCE_DIR}/core ${CMAKE_SOURCE_DIR}/testsupport)
-```
-
-- [ ] **Step 4: Run the tests to verify they fail**
-
-```
-cmake -S qt-app -B C:/b/loams-sp3 -G Ninja -DCMAKE_PREFIX_PATH="C:/Qt/6.11.1/mingw_64"
-cmake --build C:/b/loams-sp3 --target tst_turnstileprovider
-```
-Expected: FAIL to compile (`turnstileprovider.h` does not exist).
-
-- [ ] **Step 5: Create `turnstileprovider.h`**
+`qt-app/core/accesscontrol/turnstileprovider.h`:
 
 ```cpp
 #ifndef ACCESSCONTROL_TURNSTILEPROVIDER_H
@@ -597,7 +442,6 @@ namespace AccessControl {
 // through an INJECTED, not-owned NAM and emits EntryObserved AccessEvents.
 // Baselines the cursor to latest_id on the FIRST start only; reconnect starts
 // preserve the cursor. Failures emit Degraded (the service owns reconnect).
-// See design spec 2026-09-29-access-control-provider-kiosk-design.md.
 class TurnstileProvider : public IAccessProvider
 {
     Q_OBJECT
@@ -607,6 +451,7 @@ public:
     ~TurnstileProvider() override;
 
     static ProviderDescriptor defaultDescriptor();
+    static int clampPollMs(int raw);   // <=0 -> 1500; positive -> max(raw, 250)
 
     ProviderDescriptor descriptor() const override;
     void start() override;
@@ -641,7 +486,278 @@ private:
 #endif // ACCESSCONTROL_TURNSTILEPROVIDER_H
 ```
 
-- [ ] **Step 6: Implement `turnstileprovider.cpp`**
+`qt-app/core/accesscontrol/turnstileprovider.cpp` — **skeleton** (compiles + links; behaviour deliberately absent so the tests go red):
+
+```cpp
+#include "accesscontrol/turnstileprovider.h"
+#include <QTimer>
+
+namespace AccessControl {
+
+TurnstileProvider::TurnstileProvider(QNetworkAccessManager *nam, QUrl baseUrl,
+                                     const QVariantMap &config, QObject *parent)
+    : IAccessProvider(parent), m_nam(nam), m_baseUrl(std::move(baseUrl))
+    , m_pollTimer(new QTimer(this))
+{
+    Q_UNUSED(config);
+}
+TurnstileProvider::~TurnstileProvider() {}
+int TurnstileProvider::clampPollMs(int) { return 1500; }               // stub
+ProviderDescriptor TurnstileProvider::defaultDescriptor() { return {}; } // stub
+ProviderDescriptor TurnstileProvider::descriptor() const { return {}; }
+void TurnstileProvider::start() {}                                      // stub
+void TurnstileProvider::stop() {}
+void TurnstileProvider::sendPoll() {}
+void TurnstileProvider::onFinished(QNetworkReply *, quint64) {}
+void TurnstileProvider::armTimer() {}
+void TurnstileProvider::setState(ConnectionState) {}
+void TurnstileProvider::fail() {}
+
+} // namespace AccessControl
+```
+
+- [ ] **Step 3: Write the provider tests**
+
+`qt-app/tests/tst_turnstileprovider.cpp`:
+
+```cpp
+#include <QtTest>
+#include <QSignalSpy>
+#include "sequencednam.h"
+#include "accesscontrol/turnstileprovider.h"
+#include "accesscontrol/accesstypes.h"
+
+using namespace AccessControl;
+
+class TestTurnstileProvider : public QObject
+{
+    Q_OBJECT
+private slots:
+    void initTestCase() { registerMetaTypes(); }
+    void clampPollMs_rules();
+    void blankGateIdFallsBack();
+    void baselineSkipsHistoryThenPolls();
+    void drainsEntriesOldestFirst();
+    void reconnectPreservesCursorAndEmitsReconnectEntry();
+    void nonAdvancingEntryDegrades();
+    void malformedResponseDegrades();
+    void transportFailureEmitsExactlyOneDegraded();
+    void timeoutAbortsAndDegrades();
+    void stopAbortsInFlightNoEmit();
+
+private:
+    static QVariantMap cfg(int pollMs = 250, const QString &gate = QStringLiteral("g1"))
+    { return QVariantMap{{"pollIntervalMs", pollMs}, {"gateId", gate}}; }
+    static QByteArray entryPayload(qint64 latest, qint64 id)
+    {
+        return QStringLiteral(
+            "{\"status\":\"success\",\"latest_id\":%1,\"entry\":{\"id\":%2,"
+            "\"card\":\"C\",\"created_at\":\"2026-09-29 08:30:00\",\"reader\":0,"
+            "\"student\":{\"name\":\"A\",\"photo_path\":\"uploads/a.jpg\"}}}")
+            .arg(latest).arg(id).toUtf8();
+    }
+    static QByteArray emptyPayload(qint64 latest)
+    {
+        return QStringLiteral("{\"status\":\"success\",\"latest_id\":%1,\"entry\":null}")
+            .arg(latest).toUtf8();
+    }
+    static int degradedCount(const QSignalSpy &states)
+    {
+        int n = 0;
+        for (const auto &args : states)
+            if (qvariant_cast<ConnectionState>(args.at(0)) == ConnectionState::Degraded) ++n;
+        return n;
+    }
+};
+
+void TestTurnstileProvider::clampPollMs_rules()
+{
+    QCOMPARE(TurnstileProvider::clampPollMs(0), 1500);      // absent/invalid
+    QCOMPARE(TurnstileProvider::clampPollMs(-5), 1500);
+    QCOMPARE(TurnstileProvider::clampPollMs(100), 250);     // below floor -> clamp
+    QCOMPARE(TurnstileProvider::clampPollMs(2000), 2000);   // valid -> as-is
+}
+
+void TestTurnstileProvider::blankGateIdFallsBack()
+{
+    SequencedNam nam;
+    nam.enqueue(emptyPayload(0));                 // baseline
+    nam.enqueue(entryPayload(1, 1));              // poll -> entry 1
+    nam.enqueue(emptyPayload(1));
+    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"),
+                        cfg(250, QStringLiteral("  ")));   // whitespace gateId
+    QSignalSpy events(&p, &IAccessProvider::accessEvent);
+    p.start();
+    QTRY_COMPARE_WITH_TIMEOUT(events.count(), 1, 3000);
+    QCOMPARE(qvariant_cast<AccessEvent>(events.at(0).at(0)).gateId,
+             QStringLiteral("turnstile"));         // fell back
+    p.stop();
+}
+
+void TestTurnstileProvider::baselineSkipsHistoryThenPolls()
+{
+    SequencedNam nam;
+    nam.enqueue(entryPayload(5, 5));   // baseline: has history, must NOT be emitted
+    nam.enqueue(emptyPayload(5));      // first steady poll: empty
+    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
+    QSignalSpy events(&p, &IAccessProvider::accessEvent);
+    p.start();
+    QTRY_COMPARE_WITH_TIMEOUT(nam.requestCount(), 2, 3000);  // baseline + one steady poll
+    QCOMPARE(events.count(), 0);                              // history not emitted
+    QCOMPARE(p.state(), ConnectionState::Connected);
+    QVERIFY(nam.lastUrl.query().contains(QStringLiteral("since=5")));
+    p.stop();
+}
+
+void TestTurnstileProvider::drainsEntriesOldestFirst()
+{
+    SequencedNam nam;
+    nam.enqueue(emptyPayload(0));       // baseline: cursor = 0
+    nam.enqueue(entryPayload(2, 1));    // poll -> entry 1
+    nam.enqueue(entryPayload(2, 2));    // drain -> entry 2
+    nam.enqueue(emptyPayload(2));       // drain end
+    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
+    QSignalSpy events(&p, &IAccessProvider::accessEvent);
+    p.start();
+    QTRY_COMPARE_WITH_TIMEOUT(events.count(), 2, 3000);
+    const auto e1 = qvariant_cast<AccessEvent>(events.at(0).at(0));
+    QCOMPARE(e1.type, AccessEvent::Type::EntryObserved);
+    QCOMPARE(e1.correlationId, QStringLiteral("1"));
+    QCOMPARE(e1.gateId, QStringLiteral("g1"));
+    QCOMPARE(e1.subject.value("name").toString(), QStringLiteral("A"));
+    QCOMPARE(qvariant_cast<AccessEvent>(events.at(1).at(0)).correlationId, QStringLiteral("2"));
+    p.stop();
+}
+
+void TestTurnstileProvider::reconnectPreservesCursorAndEmitsReconnectEntry()
+{
+    SequencedNam nam;
+    nam.enqueue(emptyPayload(3));       // baseline: cursor = 3
+    nam.enqueue(emptyPayload(3));       // steady poll: empty (arms timer)
+    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
+    QSignalSpy events(&p, &IAccessProvider::accessEvent);
+    p.start();
+    QTRY_COMPARE_WITH_TIMEOUT(nam.requestCount(), 2, 3000);
+    p.stop();
+
+    nam.enqueue(entryPayload(4, 4));    // reconnect ?since=3 -> entry 4 (must emit once)
+    nam.enqueue(emptyPayload(4));       // drain end
+    p.start();
+    QTRY_COMPARE_WITH_TIMEOUT(events.count(), 1, 3000);
+    QCOMPARE(qvariant_cast<AccessEvent>(events.at(0).at(0)).correlationId, QStringLiteral("4"));
+    QVERIFY(nam.lastUrl.query().contains(QStringLiteral("since=4")));
+    p.stop();
+}
+
+void TestTurnstileProvider::nonAdvancingEntryDegrades()
+{
+    SequencedNam nam;
+    nam.enqueue(emptyPayload(7));       // baseline: cursor = 7
+    nam.enqueue(entryPayload(7, 7));    // poll returns id == cursor (non-advancing)
+    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
+    QSignalSpy events(&p, &IAccessProvider::accessEvent);
+    p.start();
+    QTRY_VERIFY_WITH_TIMEOUT(p.state() == ConnectionState::Degraded, 3000);
+    QCOMPARE(events.count(), 0);
+    p.stop();
+}
+
+void TestTurnstileProvider::malformedResponseDegrades()
+{
+    SequencedNam nam;
+    nam.enqueue(emptyPayload(1));                  // baseline ok, cursor = 1
+    nam.enqueue(QByteArrayLiteral("not json"));    // poll: malformed -> protocol failure
+    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
+    QSignalSpy events(&p, &IAccessProvider::accessEvent);
+    p.start();
+    QTRY_VERIFY_WITH_TIMEOUT(p.state() == ConnectionState::Degraded, 3000);
+    QCOMPARE(events.count(), 0);
+    p.stop();
+}
+
+void TestTurnstileProvider::transportFailureEmitsExactlyOneDegraded()
+{
+    SequencedNam nam;
+    nam.enqueue(QByteArray(), QNetworkReply::HostNotFoundError);   // baseline fails
+    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
+    QSignalSpy states(&p, &IAccessProvider::stateChanged);
+    p.start();
+    QTRY_VERIFY_WITH_TIMEOUT(p.state() == ConnectionState::Degraded, 3000);
+    QCOMPARE(degradedCount(states), 1);            // exactly one Degraded per failure
+    p.stop();
+}
+
+void TestTurnstileProvider::timeoutAbortsAndDegrades()
+{
+    SequencedNam nam;
+    nam.enqueueStall();                            // baseline never finishes on its own
+    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
+    p.setTimeoutMs(50);
+    p.start();
+    QTRY_VERIFY_WITH_TIMEOUT(p.state() == ConnectionState::Degraded, 3000);
+    QVERIFY(nam.abortCount() >= 1);                // timeout timer aborted the reply
+    p.stop();
+}
+
+void TestTurnstileProvider::stopAbortsInFlightNoEmit()
+{
+    SequencedNam nam;
+    nam.enqueueStall();                            // baseline in flight, never auto-finishes
+    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
+    QSignalSpy events(&p, &IAccessProvider::accessEvent);
+    p.start();
+    QTRY_COMPARE_WITH_TIMEOUT(nam.requestCount(), 1, 3000);
+    p.stop();                                      // aborts the in-flight reply
+    QCOMPARE(nam.abortCount(), 1);
+    QTest::qWait(100);                             // let the aborted reply's finished fire
+    QCOMPARE(events.count(), 0);                   // stale (generation-bumped) reply dropped
+    QVERIFY(p.state() != ConnectionState::Connected);
+}
+
+QTEST_MAIN(TestTurnstileProvider)
+#include "tst_turnstileprovider.moc"
+```
+
+- [ ] **Step 4: Register the sources + test in CMake**
+
+In `qt-app/core/CMakeLists.txt`, add to the `witscore` source list (after `accesscontrol/accesscontrolservice.*`):
+
+```cmake
+    accesscontrol/turnstileprovider.h accesscontrol/turnstileprovider.cpp
+```
+
+In `qt-app/tests/CMakeLists.txt`, after the `tst_accesscontrolservice` block:
+
+```cmake
+# --- Access Control: turnstile provider (Network; no offscreen) ---
+wits_add_qttest(tst_turnstileprovider
+    SOURCES
+        tst_turnstileprovider.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/turnstileprovider.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/turnstileprovider.h
+        ${CMAKE_SOURCE_DIR}/core/loginparser.cpp
+        ${CMAKE_SOURCE_DIR}/core/loginparser.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/iaccessprovider.h
+        ${CMAKE_SOURCE_DIR}/testsupport/sequencednam.cpp
+        ${CMAKE_SOURCE_DIR}/testsupport/sequencednam.h
+    LIBS Qt${QT_VERSION_MAJOR}::Network
+    INCLUDES ${CMAKE_SOURCE_DIR}/core ${CMAKE_SOURCE_DIR}/testsupport)
+```
+
+- [ ] **Step 5: Build + run to verify the tests fail (RED)**
+
+```
+cmake -S qt-app -B C:/b/loams-sp3 -G Ninja -DCMAKE_PREFIX_PATH="C:/Qt/6.11.1/mingw_64"
+cmake --build C:/b/loams-sp3 --target tst_turnstileprovider
+ctest --test-dir C:/b/loams-sp3 -R tst_turnstileprovider --output-on-failure
+```
+Expected: configure + build succeed (skeleton links), tests **FAIL** at assertions (`clampPollMs` returns 1500 for 100; no events; state never `Connected`/`Degraded`).
+
+- [ ] **Step 6: Implement the real `turnstileprovider.cpp`**
+
+Replace the skeleton with:
 
 ```cpp
 #include "accesscontrol/turnstileprovider.h"
@@ -655,16 +771,22 @@ private:
 
 namespace AccessControl {
 
+int TurnstileProvider::clampPollMs(int raw)
+{
+    if (raw <= 0) return 1500;              // absent/invalid -> default
+    return raw < 250 ? 250 : raw;          // clamp valid values to the floor
+}
+
 TurnstileProvider::TurnstileProvider(QNetworkAccessManager *nam, QUrl baseUrl,
                                      const QVariantMap &config, QObject *parent)
     : IAccessProvider(parent)
     , m_nam(nam)
     , m_baseUrl(std::move(baseUrl))
-    , m_gateId(config.value(QStringLiteral("gateId"), QStringLiteral("turnstile")).toString())
+    , m_pollIntervalMs(clampPollMs(config.value(QStringLiteral("pollIntervalMs"), 1500).toInt()))
     , m_pollTimer(new QTimer(this))
 {
-    const int poll = config.value(QStringLiteral("pollIntervalMs"), 1500).toInt();
-    m_pollIntervalMs = poll >= 250 ? poll : 1500;   // guard against a hot loop
+    QString gate = config.value(QStringLiteral("gateId")).toString().trimmed();
+    m_gateId = gate.isEmpty() ? QStringLiteral("turnstile") : gate;
     m_pollTimer->setSingleShot(true);
     connect(m_pollTimer, &QTimer::timeout, this, &TurnstileProvider::sendPoll);
 }
@@ -698,9 +820,7 @@ void TurnstileProvider::armTimer() { m_pollTimer->start(m_pollIntervalMs); }
 
 void TurnstileProvider::start()
 {
-    // A restart (including a service-triggered reconnect) invalidates any reply
-    // still in flight, so a stale response can never mutate the cursor.
-    ++m_generation;
+    ++m_generation;                 // invalidate any in-flight reply from a prior run
     m_pollTimer->stop();
     setState(ConnectionState::Connecting);
     sendPoll();
@@ -785,17 +905,25 @@ void TurnstileProvider::onFinished(QNetworkReply *reply, quint64 gen)
 } // namespace AccessControl
 ```
 
-- [ ] **Step 7: Run the tests to verify they pass**
+- [ ] **Step 7: Build + run to verify the tests pass (GREEN)**
 
 ```
 cmake --build C:/b/loams-sp3 --target tst_turnstileprovider
 ctest --test-dir C:/b/loams-sp3 -R tst_turnstileprovider --output-on-failure
 ```
-Expected: PASS (5/5).
+Expected: PASS (10/10).
 
-- [ ] **Step 8: Commit** (via the `commit` skill)
+- [ ] **Step 8: Update the unknown-subject convention comment in `accesstypes.h`**
 
-Subject: `feat(accesscontrol): add server-observed TurnstileProvider`.
+The empty-subject-means-unresolved convention is now realized by this provider, so update the `subject` field comment ([accesstypes.h:43](../../../qt-app/core/accesscontrol/accesstypes.h)):
+
+```cpp
+    QJsonObject subject;   // resolved subject/student JSON. For EntryObserved,
+                           // EMPTY means "entry observed, subject unresolved"
+                           // (orphaned/deleted student); non-empty == resolved.
+```
+
+- [ ] **Step 9: Commit** (via the `commit` skill) — `feat(accesscontrol): add server-observed TurnstileProvider`.
 
 ---
 
@@ -804,16 +932,139 @@ Subject: `feat(accesscontrol): add server-observed TurnstileProvider`.
 **Files:**
 - Create: `qt-app/quick/AccessControlHub.h`, `qt-app/quick/AccessControlHub.cpp`, `qt-app/quick/AccessControlSingleton.h`
 - Create: `qt-app/quick/tests/tst_accesscontrolhub.cpp`
-- Modify: `qt-app/quick/CMakeLists.txt` (SOURCES + register test)
+- Modify: `qt-app/quick/CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: `TurnstileProvider` (Task 2); `EventBus`, `AccessProviderFactory`, `AccessControlService`, `AccessEvent` (`witscore`); `ApiConfig::baseUrl()`; `AppSettings`.
+- Consumes: `TurnstileProvider` (Task 2); `EventBus`, `AccessProviderFactory`, `AccessControlService`, `AccessEvent`; `ApiConfig::baseUrl()`; `AppSettings`.
 - Produces:
   - `class AccessControlHub : public QObject` with `explicit AccessControlHub(QNetworkAccessManager *injectedNam = nullptr, QObject *parent = nullptr);`, `void initialize();`, `bool isAccessEnabled() const;`, `Q_SIGNAL void entryObserved(const QVariantMap &entry);`, `static QVariantMap toAccessEntry(const AccessControl::AccessEvent &e);`, `static AccessControlHub *instance();`, `static void setInstance(AccessControlHub *);`.
   - `AccessEntry` map keys: `hasStudent` (bool), `student` (QVariantMap), `eventId` (QString), `at` (QDateTime).
   - `struct AccessControlSingleton` — `QML_FOREIGN(AccessControlHub)` + `QML_SINGLETON` + `QML_NAMED_ELEMENT(AccessControl)`, `static AccessControlHub *create(QQmlEngine *, QJSEngine *)`.
+  - The hub reads settings and passes `pollIntervalMs`/`gateId` **raw** into the provider config — the provider owns normalization (Task 2).
 
-- [ ] **Step 1: Write the failing hub tests**
+- [ ] **Step 1: Create the hub header + a skeleton `.cpp` + the singleton wrapper**
+
+Create these before touching CMake so the red step is a runtime assertion failure, not a configure failure over a missing source.
+
+`qt-app/quick/AccessControlHub.h`:
+
+```cpp
+#ifndef ACCESSCONTROLHUB_H
+#define ACCESSCONTROLHUB_H
+
+#include <QObject>
+#include <QVariantMap>
+#include <memory>
+
+#include "accesscontrol/accessproviderfactory.h"
+#include "accesscontrol/accesstypes.h"
+
+class QNetworkAccessManager;
+namespace AccessControl { class EventBus; class AccessControlService; }
+
+// Application-owned composition root for Access Control. Owns EventBus +
+// AccessProviderFactory + AccessControlService (the service owns HealthMonitor
+// and the provider). Maps EntryObserved bus events to entryObserved(QVariantMap).
+// Exposed to QML as "AccessControl" via AccessControlSingleton (QML_FOREIGN).
+class AccessControlHub : public QObject
+{
+    Q_OBJECT
+public:
+    explicit AccessControlHub(QNetworkAccessManager *injectedNam = nullptr,
+                              QObject *parent = nullptr);
+    ~AccessControlHub() override;
+
+    void initialize();
+    bool isAccessEnabled() const;
+    static QVariantMap toAccessEntry(const AccessControl::AccessEvent &e);
+
+    static AccessControlHub *instance();
+    static void setInstance(AccessControlHub *hub);
+
+signals:
+    void entryObserved(const QVariantMap &entry);
+
+private:
+    void onBusEvent(const AccessControl::AccessEvent &e);
+
+    // Declaration order fixes teardown order: reverse destruction is
+    // service -> factory -> owned NAM -> bus, so the service tears down the
+    // provider (which aborts its reply) while the NAM is still alive.
+    std::unique_ptr<AccessControl::EventBus> m_bus;
+    std::unique_ptr<QNetworkAccessManager> m_ownedNam;   // only when self-created
+    AccessControl::AccessProviderFactory m_factory;      // plain value member
+    std::unique_ptr<AccessControl::AccessControlService> m_service;
+
+    QNetworkAccessManager *m_nam = nullptr;   // owned-or-injected; non-owning ptr
+};
+
+#endif // ACCESSCONTROLHUB_H
+```
+
+`qt-app/quick/AccessControlHub.cpp` — **skeleton** (compiles + links; behaviour absent so the tests go red):
+
+```cpp
+#include "AccessControlHub.h"
+#include <QNetworkAccessManager>
+#include "accesscontrol/accesscontrolservice.h"
+#include "accesscontrol/eventbus.h"
+
+using namespace AccessControl;
+namespace { AccessControlHub *g_instance = nullptr; }
+
+AccessControlHub *AccessControlHub::instance() { return g_instance; }
+void AccessControlHub::setInstance(AccessControlHub *hub) { g_instance = hub; }
+
+AccessControlHub::AccessControlHub(QNetworkAccessManager *injectedNam, QObject *parent)
+    : QObject(parent)
+    , m_bus(std::make_unique<EventBus>())
+    , m_service(std::make_unique<AccessControlService>(m_bus.get(), &m_factory))
+{
+    if (injectedNam) m_nam = injectedNam;
+    else { m_ownedNam = std::make_unique<QNetworkAccessManager>(); m_nam = m_ownedNam.get(); }
+}
+AccessControlHub::~AccessControlHub() { if (g_instance == this) g_instance = nullptr; }
+QVariantMap AccessControlHub::toAccessEntry(const AccessEvent &) { return {}; }   // stub
+void AccessControlHub::onBusEvent(const AccessEvent &) {}                          // stub
+bool AccessControlHub::isAccessEnabled() const { return false; }                  // stub
+void AccessControlHub::initialize() {}                                            // stub
+```
+
+`qt-app/quick/AccessControlSingleton.h` (final — no stub needed):
+
+```cpp
+#ifndef ACCESSCONTROLSINGLETON_H
+#define ACCESSCONTROLSINGLETON_H
+
+#include <QQmlEngine>
+#include "AccessControlHub.h"
+
+// Registration shim only — never instantiated by QML. Exposes the app-owned
+// AccessControlHub instance as the "AccessControl" QML singleton. A QML_FOREIGN
+// wrapper (not QML_SINGLETON on the hub directly) because the hub is
+// default-constructible in main(); Qt would otherwise prefer the default ctor
+// over create() and hand QML a separate, uninitialized instance.
+struct AccessControlSingleton
+{
+    Q_GADGET
+    QML_FOREIGN(AccessControlHub)
+    QML_SINGLETON
+    QML_NAMED_ELEMENT(AccessControl)
+public:
+    static AccessControlHub *create(QQmlEngine *, QJSEngine *)
+    {
+        AccessControlHub *inst = AccessControlHub::instance();
+        Q_ASSERT_X(inst, "AccessControlSingleton::create",
+                   "AccessControlHub::setInstance() must run before the engine loads");
+        QQmlEngine::setObjectOwnership(inst, QQmlEngine::CppOwnership);
+        return inst;
+    }
+};
+
+#endif // ACCESSCONTROLSINGLETON_H
+```
+
+- [ ] **Step 2: Write the hub tests**
 
 `qt-app/quick/tests/tst_accesscontrolhub.cpp`:
 
@@ -831,13 +1082,21 @@ class TestAccessControlHub : public QObject
 {
     Q_OBJECT
 private slots:
-    void initTestCase() { registerMetaTypes(); AppSettings::isolateForTesting(); }
-    void init() { qunsetenv("WITS_ACCESS_CONTROL"); }
+    void initTestCase() { registerMetaTypes(); }
+    void init()
+    {
+        AppSettings::isolateForTesting();       // fresh throwaway INI each test
+        qunsetenv("WITS_ACCESS_CONTROL");
+        AppSettings s; s.clear(); s.sync();
+    }
     void toAccessEntry_knownStudent();
     void toAccessEntry_unknownStudent();
     void disabledByDefault_inert();
+    void settingEnables();
+    void envZeroDoesNotForceOff_settingWins();
     void envForceEnablesAndEmitsEntry();
 
+private:
     static QByteArray entryPayload(qint64 latest, qint64 id)
     {
         return QStringLiteral(
@@ -889,9 +1148,29 @@ void TestAccessControlHub::disabledByDefault_inert()
     QCOMPARE(spy.count(), 0);
 }
 
+void TestAccessControlHub::settingEnables()
+{
+    { AppSettings s; s.setValue("accessControl/enabled", true); s.sync(); }
+    SequencedNam nam;
+    AccessControlHub hub(&nam);
+    hub.initialize();
+    QVERIFY(hub.isAccessEnabled());         // enabled by setting, no env
+}
+
+void TestAccessControlHub::envZeroDoesNotForceOff_settingWins()
+{
+    qputenv("WITS_ACCESS_CONTROL", "0");    // 0 is NOT a force-off
+    { AppSettings s; s.setValue("accessControl/enabled", true); s.sync(); }
+    SequencedNam nam;
+    AccessControlHub hub(&nam);
+    hub.initialize();
+    QVERIFY(hub.isAccessEnabled());         // falls through to the (true) setting
+}
+
 void TestAccessControlHub::envForceEnablesAndEmitsEntry()
 {
     qputenv("WITS_ACCESS_CONTROL", "1");
+    { AppSettings s; s.setValue("accessControl/pollIntervalMs", 250); s.sync(); }
     SequencedNam nam;
     nam.enqueue(emptyPayload(3));           // baseline: cursor = 3
     nam.enqueue(entryPayload(4, 4));        // poll -> entry 4
@@ -910,7 +1189,7 @@ QTEST_MAIN(TestAccessControlHub)
 #include "tst_accesscontrolhub.moc"
 ```
 
-- [ ] **Step 2: Register the sources + test (so the red step compiles/links)**
+- [ ] **Step 3: Register the sources + test in CMake**
 
 In `qt-app/quick/CMakeLists.txt`, add to the `witsquickmodule` `SOURCES` list (after the `viewmodels/...` lines):
 
@@ -919,12 +1198,12 @@ In `qt-app/quick/CMakeLists.txt`, add to the `witsquickmodule` `SOURCES` list (a
         AccessControlSingleton.h
 ```
 
-Then, after the `tst_qml_kiosk` block, register the hub test (it needs `witscore` symbols, `Network`, `capturingnam`/`sequencednam`, and `testsupport` on the include path):
+After the `tst_qml_kiosk` block, register the hub test:
 
 ```cmake
-# --- AccessControlHub unit test (C++ QtTest, offscreen). Uses a SequencedNam so
-# the provider drains with no live network; AppSettings isolation is compiled in
-# by wits_add_qttest. ---
+# --- AccessControlHub unit test (C++ QtTest, offscreen). SequencedNam drives
+# the provider with no live network; AppSettings isolation is compiled in by
+# wits_add_qttest. ---
 wits_add_qttest(tst_accesscontrolhub
     SOURCES
         tests/tst_accesscontrolhub.cpp
@@ -935,77 +1214,18 @@ wits_add_qttest(tst_accesscontrolhub
     OFFSCREEN)
 ```
 
-- [ ] **Step 3: Run the test to verify it fails**
+- [ ] **Step 4: Build + run to verify the tests fail (RED)**
 
 ```
 cmake -S qt-app -B C:/b/loams-sp3 -G Ninja -DCMAKE_PREFIX_PATH="C:/Qt/6.11.1/mingw_64"
 cmake --build C:/b/loams-sp3 --target tst_accesscontrolhub
+ctest --test-dir C:/b/loams-sp3 -R tst_accesscontrolhub --output-on-failure
 ```
-Expected: FAIL to compile (`AccessControlHub.h` does not exist).
+Expected: configure + build succeed (skeleton links), tests **FAIL** (stub `toAccessEntry` returns `{}`; `isAccessEnabled()` returns false; no emission).
 
-- [ ] **Step 4: Create `AccessControlHub.h`**
+- [ ] **Step 5: Implement the real `AccessControlHub.cpp`**
 
-```cpp
-#ifndef ACCESSCONTROLHUB_H
-#define ACCESSCONTROLHUB_H
-
-#include <QObject>
-#include <QVariantMap>
-#include <memory>
-
-#include "accesscontrol/accessproviderfactory.h"
-#include "accesscontrol/accesstypes.h"
-
-class QNetworkAccessManager;
-
-namespace AccessControl { class EventBus; class AccessControlService; }
-
-// Application-owned composition root for Access Control. Owns EventBus +
-// AccessProviderFactory + AccessControlService (the service owns HealthMonitor
-// and the provider). Maps EntryObserved bus events to a QML-facing
-// entryObserved(QVariantMap). Exposed to QML as the "AccessControl" singleton
-// via AccessControlSingleton (QML_FOREIGN). See the design spec.
-class AccessControlHub : public QObject
-{
-    Q_OBJECT
-public:
-    explicit AccessControlHub(QNetworkAccessManager *injectedNam = nullptr,
-                              QObject *parent = nullptr);
-    ~AccessControlHub() override;
-
-    // Reads enablement (WITS_ACCESS_CONTROL > accessControl/enabled > false),
-    // registers the TurnstileProvider, and enables the service iff on.
-    void initialize();
-    bool isAccessEnabled() const;
-
-    // Pure map: EntryObserved AccessEvent -> AccessEntry QVariantMap.
-    static QVariantMap toAccessEntry(const AccessControl::AccessEvent &e);
-
-    // The app-owned instance the QML singleton factory hands out.
-    static AccessControlHub *instance();
-    static void setInstance(AccessControlHub *hub);
-
-signals:
-    void entryObserved(const QVariantMap &entry);
-
-private:
-    void onBusEvent(const AccessControl::AccessEvent &e);
-
-    // Declaration order fixes teardown order: reverse destruction is
-    // service -> factory -> owned NAM -> bus, so the service tears down the
-    // provider (which aborts its reply) while the NAM is still alive.
-    std::unique_ptr<AccessControl::EventBus> m_bus;
-    std::unique_ptr<QNetworkAccessManager> m_ownedNam;   // only when self-created
-    AccessControl::AccessProviderFactory m_factory;      // plain value member
-    std::unique_ptr<AccessControl::AccessControlService> m_service;
-
-    QNetworkAccessManager *m_nam = nullptr;   // owned-or-injected; non-owning ptr
-};
-
-#endif // ACCESSCONTROLHUB_H
-```
-
-- [ ] **Step 5: Implement `AccessControlHub.cpp`**
+Replace the skeleton with:
 
 ```cpp
 #include "AccessControlHub.h"
@@ -1039,10 +1259,7 @@ AccessControlHub::AccessControlHub(QNetworkAccessManager *injectedNam, QObject *
     connect(m_bus.get(), &EventBus::eventPublished, this, &AccessControlHub::onBusEvent);
 }
 
-AccessControlHub::~AccessControlHub()
-{
-    if (g_instance == this) g_instance = nullptr;
-}
+AccessControlHub::~AccessControlHub() { if (g_instance == this) g_instance = nullptr; }
 
 QVariantMap AccessControlHub::toAccessEntry(const AccessEvent &e)
 {
@@ -1065,13 +1282,7 @@ bool AccessControlHub::isAccessEnabled() const { return m_service->isEnabled(); 
 
 void AccessControlHub::initialize()
 {
-    // Config (through AppSettings so tests isolate via isolateForTesting()).
-    AppSettings settings;
-    const int rawPoll = settings.value(QStringLiteral("accessControl/pollIntervalMs"), 1500).toInt();
-    const int pollMs = rawPoll >= 250 ? rawPoll : 1500;
-    QString gateId = settings.value(QStringLiteral("accessControl/gateId"),
-                                    QStringLiteral("turnstile")).toString().trimmed();
-    if (gateId.isEmpty()) gateId = QStringLiteral("turnstile");
+    AppSettings settings;   // through AppSettings so tests isolate
 
     // Register the provider (whether or not enabled) so a later runtime toggle
     // can enable without re-registering. Creator captures the hub's NAM+baseUrl.
@@ -1091,59 +1302,26 @@ void AccessControlHub::initialize()
                          || settings.value(QStringLiteral("accessControl/enabled"), false).toBool();
     if (!enabled) return;
 
+    // Pass config RAW — the provider owns pollIntervalMs/gateId normalization.
     m_service->enable(descriptor, QVariantMap{
-        {QStringLiteral("pollIntervalMs"), pollMs},
-        {QStringLiteral("gateId"), gateId},
+        {QStringLiteral("pollIntervalMs"),
+         settings.value(QStringLiteral("accessControl/pollIntervalMs"), 1500)},
+        {QStringLiteral("gateId"),
+         settings.value(QStringLiteral("accessControl/gateId"), QStringLiteral("turnstile"))},
     });
 }
 ```
 
-- [ ] **Step 6: Create `AccessControlSingleton.h`**
-
-```cpp
-#ifndef ACCESSCONTROLSINGLETON_H
-#define ACCESSCONTROLSINGLETON_H
-
-#include <QQmlEngine>
-#include "AccessControlHub.h"
-
-// Registration shim only — never instantiated by QML. Exposes the app-owned
-// AccessControlHub instance as the "AccessControl" QML singleton. A QML_FOREIGN
-// wrapper (not QML_SINGLETON on the hub directly) because the hub is
-// default-constructible in main(); Qt would otherwise prefer the default
-// constructor over create() and hand QML a separate, uninitialized instance.
-struct AccessControlSingleton
-{
-    Q_GADGET
-    QML_FOREIGN(AccessControlHub)
-    QML_SINGLETON
-    QML_NAMED_ELEMENT(AccessControl)
-public:
-    static AccessControlHub *create(QQmlEngine *, QJSEngine *)
-    {
-        AccessControlHub *inst = AccessControlHub::instance();
-        Q_ASSERT_X(inst, "AccessControlSingleton::create",
-                   "AccessControlHub::setInstance() must run before the engine loads");
-        QQmlEngine::setObjectOwnership(inst, QQmlEngine::CppOwnership);
-        return inst;
-    }
-};
-
-#endif // ACCESSCONTROLSINGLETON_H
-```
-
-- [ ] **Step 7: Run the test to verify it passes**
+- [ ] **Step 6: Build + run to verify the tests pass (GREEN)**
 
 ```
 cmake -S qt-app -B C:/b/loams-sp3 -G Ninja -DCMAKE_PREFIX_PATH="C:/Qt/6.11.1/mingw_64"
 cmake --build C:/b/loams-sp3 --target tst_accesscontrolhub
 ctest --test-dir C:/b/loams-sp3 -R tst_accesscontrolhub --output-on-failure
 ```
-Expected: PASS (4/4).
+Expected: PASS (6/6).
 
-- [ ] **Step 8: Commit** (via the `commit` skill)
-
-Subject: `feat(accesscontrol): add AccessControlHub composition root + QML singleton`.
+- [ ] **Step 7: Commit** (via the `commit` skill) — `feat(accesscontrol): add AccessControlHub composition root + QML singleton`.
 
 ---
 
@@ -1159,7 +1337,7 @@ Subject: `feat(accesscontrol): add AccessControlHub composition root + QML singl
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `qt-app/quick/tests/tst_kioskviewmodel.cpp` — add to the `private slots:` block and implement:
+Append to `qt-app/quick/tests/tst_kioskviewmodel.cpp` — add to `private slots:` and implement:
 
 ```cpp
 void onEntryObserved_knownStudentDisplaysAndCounts();
@@ -1205,11 +1383,11 @@ void TestKioskViewModel::onEntryObserved_unknownShowsNeutralToastNoCount()
 cmake --build C:/b/loams-sp3 --target tst_kioskviewmodel
 ctest --test-dir C:/b/loams-sp3 -R tst_kioskviewmodel --output-on-failure
 ```
-Expected: FAIL to compile (`onEntryObserved` not a member).
+Expected: FAIL to compile (`onEntryObserved` not a member) — `KioskViewModel` compiles into `witsquickmodule`, which the test links.
 
 - [ ] **Step 3: Declare the members in `KioskViewModel.h`**
 
-After `Q_INVOKABLE void requestGuest();` in the public QML entry points:
+Add `#include <QVariantMap>`. After `Q_INVOKABLE void requestGuest();`:
 
 ```cpp
     // Access Control (Sub-plan 3): a confirmed gate entry from the
@@ -1222,8 +1400,6 @@ And in the private helpers (near `setStatus`):
 ```cpp
     void showUnknownEntry();
 ```
-
-Add `#include <QVariantMap>` to the header includes.
 
 - [ ] **Step 4: Implement in `KioskViewModel.cpp`**
 
@@ -1256,41 +1432,25 @@ ctest --test-dir C:/b/loams-sp3 -R tst_kioskviewmodel --output-on-failure
 ```
 Expected: PASS (new cases + all pre-existing).
 
-- [ ] **Step 6: Commit** (via the `commit` skill)
-
-Subject: `feat(kiosk): route observed gate entries to the kiosk display`.
+- [ ] **Step 6: Commit** (via the `commit` skill) — `feat(kiosk): route observed gate entries to the kiosk display`.
 
 ---
 
-## Task 5: App wiring + existing-test fixup
+## Task 5: App wiring + existing-test fixup (integration)
 
 **Files:**
-- Modify: `qt-app/quick/main.cpp`, `qt-app/quick/qml/kiosk/KioskScreen.qml`
+- Modify: `qt-app/quick/qml/kiosk/KioskScreen.qml`, `qt-app/quick/main.cpp`
 - Modify: `qt-app/quick/tests/tst_appshell.cpp`, `qt-app/quick/tests/tst_qml_kiosk.cpp`
 
 **Interfaces:**
-- Consumes: `AccessControlHub` (Task 3), the `AccessControl` QML singleton (Task 3), `KioskViewModel::onEntryObserved` (Task 4).
+- Consumes: `AccessControlHub` + the `AccessControl` QML singleton (Task 3), `KioskViewModel::onEntryObserved` (Task 4).
 - Produces: the fully wired app (flag-gated) and green QML harnesses.
 
-This task's deliverable is verified by the **existing** QML suites staying green with the singleton present, plus a clean `WITSQuick` build. The `Connections` block breaks `tst_appshell`/`tst_qml_kiosk` the moment it is added (the singleton must resolve), so the harness fixes and the wiring land together.
+This task has a genuine red: adding the `Connections { target: AccessControl }` to the kiosk surface makes `tst_appshell` load `AppShell` (whose default surface is `KioskScreen`) with **no hub installed**, so `AccessControlSingleton::create()` hits its `Q_ASSERT_X` / QML fails to resolve the singleton and the test fails. Installing a disabled hub in the harnesses (and wiring `main.cpp`) turns it green.
 
-- [ ] **Step 1: Add the failing wiring to `tst_appshell.cpp` first (red)**
+- [ ] **Step 1: Add the `Connections` to `KioskScreen.qml` (this is the red trigger)**
 
-Update `TestAppShell::loadsWithZeroWarnings()` to construct and install a **disabled** hub before loading, but do **not** yet touch `KioskScreen.qml` — run it to confirm the harness still passes (baseline), then in Step 2 add the QML `Connections` that requires the hub. Concretely, add the include and instance:
-
-```cpp
-#include "AccessControlHub.h"
-// ... inside loadsWithZeroWarnings(), before creating the engine:
-    AccessControlHub hub;              // default settings, no WITS_ACCESS_CONTROL -> disabled
-    AccessControlHub::setInstance(&hub);
-    // (hub is a stack local; it outlives `engine` below by declaration order)
-```
-
-Move the `QQmlApplicationEngine engine;` declaration to **after** `setInstance(&hub)` so the hub outlives the engine.
-
-- [ ] **Step 2: Add the QML `Connections` to `KioskScreen.qml`**
-
-Inside the root `Rectangle` (e.g. right after the `GuestViewModel { id: guestVm }` line), add:
+Inside the root `Rectangle`, right after `GuestViewModel { id: guestVm }`:
 
 ```qml
     // Access Control (Sub-plan 3): a confirmed gate entry surfaces natively.
@@ -1302,9 +1462,30 @@ Inside the root `Rectangle` (e.g. right after the `GuestViewModel { id: guestVm 
     }
 ```
 
-- [ ] **Step 3: Fix `tst_qml_kiosk.cpp` to install a disabled hub**
+- [ ] **Step 2: Build + run the QML suites to verify they fail (RED)**
 
-The `Setup::qmlEngineAvailable` runs before the QML fixtures instantiate `KioskScreen`, so install the hub there:
+```
+cmake -S qt-app -B C:/b/loams-sp3 -G Ninja -DCMAKE_PREFIX_PATH="C:/Qt/6.11.1/mingw_64"
+cmake --build C:/b/loams-sp3 --target tst_appshell
+ctest --test-dir C:/b/loams-sp3 -R "tst_appshell|tst_qml_kiosk" --output-on-failure
+```
+Expected: **FAIL** — `AccessControlSingleton::create()` asserts (no instance installed) / `AppShell` logs a singleton-resolution warning, failing `tst_appshell`'s zero-warning check.
+
+- [ ] **Step 3: Install a disabled hub in `tst_appshell.cpp`**
+
+Add `#include "AccessControlHub.h"`, and in `loadsWithZeroWarnings()` construct + install the hub **before** the engine, declared so it outlives it:
+
+```cpp
+    AccessControlHub hub;                 // default settings, no env -> disabled
+    AccessControlHub::setInstance(&hub);
+
+    QQmlApplicationEngine engine;         // declared AFTER hub -> engine dies first
+    engine.loadFromModule("LOAMS", "AppShell");
+```
+
+(Move the existing `QQmlApplicationEngine engine;` line down so it follows `setInstance`.)
+
+- [ ] **Step 4: Install a disabled hub in `tst_qml_kiosk.cpp`**
 
 ```cpp
 #include <QtQuickTest/quicktest.h>
@@ -1318,8 +1499,8 @@ public slots:
     void qmlEngineAvailable(QQmlEngine *engine)
     {
         engine->addImportPath(QStringLiteral("qrc:/qt/qml"));
-        // Robust against an inherited WITS_ACCESS_CONTROL: never initialize(),
-        // so the hub is a live-but-disabled singleton (no polling).
+        // Live-but-disabled singleton (never initialize() -> no polling), robust
+        // against an inherited WITS_ACCESS_CONTROL.
         static AccessControlHub hub;
         AccessControlHub::setInstance(&hub);
     }
@@ -1329,15 +1510,13 @@ QUICK_TEST_MAIN_WITH_SETUP(tst_qml_kiosk, Setup)
 #include "tst_qml_kiosk.moc"
 ```
 
-`tst_qml_kiosk` and `tst_appshell` already link `witsquickmodule` (which now contains `AccessControlHub.cpp`), so no CMake change is needed for them.
+`tst_appshell` and `tst_qml_kiosk` already link `witsquickmodule` (which now contains `AccessControlHub.cpp`), so no CMake change is needed for them.
 
-- [ ] **Step 4: Wire `main.cpp`**
+- [ ] **Step 5: Wire `main.cpp`**
 
-Add the include and, after the cached-branding block and **before** `QQmlApplicationEngine engine;`:
+Add `#include "AccessControlHub.h"` and, after the cached-branding block and **before** `QQmlApplicationEngine engine;`:
 
 ```cpp
-#include "AccessControlHub.h"
-// ...
     AccessControlHub accessControl;      // stack-owned; outlives `engine`
     accessControl.initialize();          // reads the flag; polls only if enabled
     AccessControlHub::setInstance(&accessControl);
@@ -1345,41 +1524,38 @@ Add the include and, after the cached-branding block and **before** `QQmlApplica
     QQmlApplicationEngine engine;
 ```
 
-- [ ] **Step 5: Build everything and run the full quick suite**
+- [ ] **Step 6: Build everything and run the full suite (GREEN)**
 
 ```
 cmake -S qt-app -B C:/b/loams-sp3 -G Ninja -DCMAKE_PREFIX_PATH="C:/Qt/6.11.1/mingw_64"
 cmake --build C:/b/loams-sp3
 ctest --test-dir C:/b/loams-sp3 --output-on-failure
 ```
-Expected: clean build (no new warnings); **all** tests pass, including `tst_appshell` (zero-QML-warnings) and `tst_qml_kiosk` with the `AccessControl` singleton resolving.
+Expected: clean build (no new warnings); **all** tests pass, including `tst_appshell` (zero QML warnings) and `tst_qml_kiosk` with the `AccessControl` singleton resolving.
 
-- [ ] **Step 6: Manual smoke (documented, run once)**
+- [ ] **Step 7: Manual smoke (documented, run once)**
 
-With the app flag off (default), launch `WITSQuick` and confirm the kiosk behaves exactly as before (no Access Control effect). Then, with a seeded `turnstile_events` row and `WITS_ACCESS_CONTROL=1`, confirm the student surfaces natively (see spec §Verification). Record the result in the commit/PR body.
+Flag off (default): launch `WITSQuick`, confirm the kiosk behaves exactly as before (no Access Control effect). Then with a seeded `turnstile_events` row and `WITS_ACCESS_CONTROL=1`, confirm the student surfaces natively (spec §Verification). Record the result in the PR body.
 
-- [ ] **Step 7: Commit** (via the `commit` skill)
-
-Subject: `feat(accesscontrol): wire the hub singleton into main + the kiosk surface`.
+- [ ] **Step 8: Commit** (via the `commit` skill) — `feat(accesscontrol): wire the hub singleton into main + the kiosk surface`.
 
 ---
 
 ## Self-Review
 
 **1. Spec coverage:**
-- §1 parser + `EntryEventResult` + photo composition + local→UTC + strict validity → Task 1. ✅
-- §2 provider: baseline-once, reconnect-preserves-cursor + processes response, drain oldest-first, `eventId>since` guard, timeout+abort, generation guard, single `Degraded`, provider-owned reply, `gateId` config, never-Error-at-runtime → Task 2. ✅
-- §3 unknown-student convention (empty subject) → encoded in `toAccessEntry` (Task 3) + provider emit (Task 2). ✅
-- §4 hub ownership/teardown order, NAM owned-vs-injected seam, register-when-disabled, event→`QVariantMap` map → Task 3. ✅
-- §5 `QML_FOREIGN` singleton wrapper + `create()` fail-fast + `main.cpp` order + CMake SOURCES + existing-QML-test install → Tasks 3 & 5. ✅
-- §6 kiosk `onEntryObserved` (hasStudent branch / `showUnknownEntry`) + presentation-scoped `Connections` (`kioskVm`) → Tasks 4 & 5. ✅
-- §7 enablement precedence + `AppSettings` + `pollIntervalMs` clamp + `gateId` default → Task 3. ✅
-- Testing section (baseline→next-poll, reconnect-emits-once, drain-loop guard, transport failure, unknown/known kiosk branch, disabled-inert, env precedence) → Tasks 1–5. ✅
-- Forward-note (per-poll comm-health deferred to Sub-plan 4): intentionally **not** implemented; the provider does not touch `HealthMonitor`. ✅
+- §1 parser (`EntryEventResult`, photo composition, local→UTC, strict validity incl. `latest_id >= 0`) → Task 1. ✅
+- §2 provider: baseline-once, reconnect-preserves-cursor + processes response, drain oldest-first, `eventId>since` guard, timeout+abort, generation guard, single `Degraded`, provider-owned reply, `gateId` config + fallback, `pollIntervalMs` clamp, never-runtime-`Error` → Task 2 (tests cover baseline, drain, reconnect-emits-once, non-advancing, malformed, transport→one-Degraded, timeout→abort, stop→abort→no-emit, clampPollMs, blank-gateId). ✅
+- §3 unknown-subject convention → `toAccessEntry` (Task 3) + provider emit + `accesstypes.h` comment (Task 2 Step 8). ✅
+- §4 hub ownership/teardown order, owned-vs-injected NAM seam, register-when-disabled, event→`QVariantMap` → Task 3. ✅
+- §5 `QML_FOREIGN` wrapper + `create()` fail-fast + `main.cpp` order + CMake SOURCES + existing-QML-test install → Tasks 3 & 5. ✅
+- §6 kiosk `onEntryObserved`/`showUnknownEntry` + presentation-scoped `Connections` (`kioskVm`) → Tasks 4 & 5. ✅
+- §7 enablement precedence (incl. `WITS_ACCESS_CONTROL=0` ⇒ setting wins) + `AppSettings` + normalization → Tasks 2 & 3. ✅
+- Forward-note (per-poll comm-health deferred to Sub-plan 4): provider does **not** touch `HealthMonitor`. ✅
 
-**2. Placeholder scan:** No TBD/TODO/"handle edge cases"/"similar to". Every code step shows full code. ✅
+**2. Placeholder scan:** No TBD/TODO/"handle edge cases"/"similar to". Skeleton `.cpp`s are explicitly labelled and shown in full; real bodies shown in full. ✅
 
-**3. Type consistency:** `EntryEventResult`/`parseEntryEvent(QByteArray, QUrl)` (Task 1) is consumed with the same signature in Task 2. `TurnstileProvider(nam, QUrl, QVariantMap, parent)` + `defaultDescriptor()` (Task 2) match the creator lambda in Task 3. `AccessControlHub(QNetworkAccessManager*, QObject*)`, `initialize()`, `isAccessEnabled()`, `toAccessEntry`, `instance()/setInstance()`, `entryObserved(QVariantMap)` (Task 3) match Tasks 4/5 usage. `AccessEntry` keys (`hasStudent`/`student`/`eventId`/`at`) are identical in Task 3 (`toAccessEntry`), Task 3 tests, and Task 4 (`onEntryObserved`). ✅
+**3. Type consistency:** `parseEntryEvent(QByteArray, QUrl)`/`EntryEventResult` (T1) consumed identically in T2. `TurnstileProvider(nam, QUrl, QVariantMap, parent)` + `defaultDescriptor()` + `clampPollMs` (T2) match T3's creator lambda + T2 tests. `AccessControlHub(QNetworkAccessManager*, QObject*)`, `initialize()`, `isAccessEnabled()`, `toAccessEntry`, `instance()/setInstance()`, `entryObserved(QVariantMap)` (T3) match T3 tests + T5 wiring. `AccessEntry` keys `hasStudent`/`student`/`eventId`/`at` identical across `toAccessEntry` (T3) and `onEntryObserved` (T4). `SequencedNam` API (`enqueue`/`enqueueStall`/`requestCount`/`abortCount`) consistent between its definition (T2) and both consumers (T2, T3). ✅
 
 ---
 
