@@ -17,8 +17,8 @@ The deployed legacy `WITS.exe` (Widgets) and its PowerShell bridge / `turnstile_
 - **Scope:** full vertical slice (provider + parser + app-level wiring + kiosk subscription), flag-gated.
 - **Ownership:** `AccessControlHub` is an application-owned composition root for Access Control **only**, owning `EventBus` + `AccessProviderFactory` + `AccessControlService`. Per Sub-plan 1, the service owns `HealthMonitor` and the `IAccessProvider` (the `TurnstileProvider`) — there is **no** separate provider `unique_ptr` in the hub (no double ownership).
 - **QML boundary:** the hub emits a `QVariantMap` (`AccessEntry`), never `QJsonObject`. JSON does not cross past the hub. No raw `card` and no `reader` on the bus or the signal (raw credential stays inside the adapter; public-display privacy).
-- **Lifetime:** C++ owns the lifecycle; QML sees the instance via `qmlRegisterSingletonInstance` and never deletes it. Provider / polling cursor / health are application-lifetime; the kiosk↔presentation connection lives and dies with the QML surface.
-- **Config:** `QSettings accessControl.enabled` (default false), `accessControl.pollIntervalMs` (default 1500); default/only v1 provider is `TurnstileProvider`; base URL from `ApiConfig::baseUrl()`. `WITS_ACCESS_CONTROL=1`/`true` force-enables for the current process (non-persistent). Config read once at app init; runtime mutation deferred to Sub-plan 4.
+- **Lifetime:** C++ owns the lifecycle; the app-owned instance is exposed as a declarative `QML_SINGLETON` via a create-function (not `qmlRegisterSingletonInstance` — that fights the declaratively-built `LOAMS` module; see §5) with `CppOwnership` so QML never deletes it. Provider / polling cursor / health are application-lifetime; the kiosk↔presentation connection lives and dies with the QML surface.
+- **Config:** via `AppSettings` — `accessControl.enabled` (default false), `accessControl.pollIntervalMs` (default 1500, validated), `accessControl.gateId` (default `"turnstile"`); default/only v1 provider is `TurnstileProvider`; base URL from `ApiConfig::baseUrl()`. `WITS_ACCESS_CONTROL=1`/`true` force-enables for the current process (non-persistent). Config read once at app init; runtime mutation deferred to Sub-plan 4.
 
 ### The four sign-off corrections (binding)
 
@@ -43,37 +43,48 @@ struct EntryEventResult {
     qint64      eventId   = 0;      // the returned entry's id (cursor advance target)
     bool        hasStudent = false; // entry present && student resolved
     QJsonObject student;            // normalized student incl. composed photo_url; empty if unresolved
-    QDateTime   at;                 // entry timestamp (UTC-parsed)
+    QDateTime   at;                 // entry timestamp (UTC, converted from server-local — see below)
     QString     error;              // human-readable reason when !valid
 };
 
 EntryEventResult parseEntryEvent(const QByteArray &body, const QUrl &baseUrl);
 ```
 
+The endpoint's actual entry shape (verified on master, [turnstile_display.php:61-76](../../../deliverables/loams_api/turnstile_display.php)) is `{ id:int, card:string, created_at:string, reader:int, student:object|null }` inside `{ status:"success", latest_id:int, entry:object|null }`. The parser reads `id`, `created_at`, and `student`; it ignores `card` and `reader` (raw credential/reader never leave the adapter).
+
 **Rules (unambiguous):**
 - Well-formed `{"status":"success","latest_id":N,"entry":null}` → `valid=true, hasEntry=false` (healthy empty poll).
-- Well-formed with an `entry` object → `valid=true, hasEntry=true`, `eventId`/`at`/`latestId` populated; `student` normalized when the entry's `student` is a non-null object (`hasStudent=true`), else `hasStudent=false` and `student` empty (the merged endpoint's defensive orphaned-row case).
-- Not JSON, wrong top-level shape, `status!="success"`, or a present-but-non-object `entry` → `valid=false`, `error` set, everything else default. **Never fabricates an entry.**
-- **Photo composition (tolerant, pure):** in the student object, if `photo_url` is present and non-empty → keep it; else if `photo_path` (relative) is present → set `photo_url = baseUrl` resolved against `photo_path` (`QUrl::resolved`); else leave `photo_url` empty. `baseUrl` is passed in — the parser never reads `ApiConfig`. Output student always carries `photo_url` (the key `KioskViewModel::applyStudentLogin` reads at `KioskViewModel.cpp:123`).
+- Well-formed with an `entry` object → `valid=true, hasEntry=true`, with **all** of: `latest_id` a valid integer; `entry.id` a **positive** integer (→ `eventId`); `entry.created_at` a timestamp parseable in the exact form below (→ `at`); `entry.student` either `null` (→ `hasStudent=false`, empty `student`, the merged endpoint's defensive orphaned-row case) or a JSON **object** (→ `hasStudent=true`, normalized). Any of these malformed → the whole result is **invalid** (see below).
+- Not JSON; wrong top-level shape; `status != "success"`; `entry` present but neither `null` nor an object; missing/non-positive `entry.id`; unparseable `latest_id` or `created_at`; `entry.student` present but neither `null` nor an object → `valid=false`, `error` set, everything else default. **Never fabricates an entry**, and a malformed HTTP-200 body is a protocol failure, not a healthy empty poll.
+- **Timestamp (server-local, not UTC):** `created_at` is a MySQL `DATETIME` in server-local time, exact form `yyyy-MM-dd HH:mm:ss` (same form the legacy bridge parses — `deliverables/loams_api/bridge/loams-turnstile-bridge.ps1`). Parse it with `QDateTime::fromString(created_at, "yyyy-MM-dd HH:mm:ss")` as `Qt::LocalTime` (same-host deployment assumption), then `.toUTC()` for `at`. An unparseable value makes the result invalid.
+- **Photo composition (tolerant, pure):** in the student object, if `photo_url` is present and non-empty → keep it; else if `photo_path` (relative) is present → set `photo_url = baseUrl.resolved(QUrl(photo_path)).toString()`; else leave `photo_url` empty. `baseUrl` is passed in — the parser never reads `ApiConfig`. Output student always carries a `photo_url` key (the key `KioskViewModel::applyStudentLogin` reads at [KioskViewModel.cpp:123](../../../qt-app/quick/viewmodels/KioskViewModel.cpp)).
 
 ### 2. `TurnstileProvider` — server-observed `IAccessProvider`
 
 **Files:** `qt-app/core/accesscontrol/turnstileprovider.h` / `.cpp` (new, folded into `witscore`), `qt-app/tests/tst_turnstileprovider*` (new).
 
-Implements `IAccessProvider` (`descriptor()`, `start()`, `stop()`, `state()`; signals `accessEvent`, `stateChanged`, `hardwareError`). Mirrors the `AccessDecisionService` idiom: **injected** `QNetworkAccessManager` (not owned), a pure static/`parseEntryEvent`-based decode, and a **generation counter** so a stale in-flight reply cannot mutate state.
+Implements `IAccessProvider` (`descriptor()`, `start()`, `stop()`, `state()`; signals `accessEvent`, `stateChanged`, `hardwareError`). Mirrors the `AccessDecisionService` idiom ([accessdecisionservice.cpp:70-115](../../../qt-app/core/accesscontrol/accessdecisionservice.cpp)): an **injected, not-owned** `QNetworkAccessManager`, a pure `parseEntryEvent`-based decode, a per-reply **timeout** that `abort()`s a stalled GET, and a **generation counter** so a stale in-flight reply cannot mutate state.
 
-- **Construction/config:** `pollIntervalMs` (from descriptor config), `baseUrl` (`ApiConfig::baseUrl()`, supplied by the hub at construction). `providerId = "turnstile"`, human name "Turnstile (server-observed)". `descriptor()` advertises a `pollIntervalMs` int in its config schema.
-- **Cursor:** a `qint64 m_since` (also `latestId`/`eventId` are `qint64` throughout).
-- **Start = baseline:** issue one GET to `turnstile_display.php` (no `?since` or `?since=0`). On a `valid` response: `m_since = latestId` (skip history — do **not** emit the returned historical entry), state → `Connected`, and `HealthMonitor.recordCommTime()`. On transport/protocol failure: `Degraded`/`Error` (see retry split).
+- **Construction/config:** `pollIntervalMs` and `gateId` (from descriptor config), `baseUrl` (`ApiConfig::baseUrl()`, supplied by the hub at construction), and the injected `QNetworkAccessManager*`. `providerId = "turnstile"`, human name "Turnstile (server-observed)".
+- **NAM ownership/affinity:** the app-lifetime `QNetworkAccessManager` is **owned by the hub** (parented to it) and injected into the provider via the factory `CreatorFn` closure (see §4 — the registered creator captures the hub's NAM). v1 is single-threaded: the poll timer, the NAM, and the provider share the main-thread affinity (matching the service's affinity note in `accesscontrolservice.cpp`).
+- **Descriptor config schema:** advertises `pollIntervalMs` (int) and `gateId` (string, default `"turnstile"`). `AccessEvent.gateId` is stamped from this config value — **not** derived from the backend's `reader` field (which is a lane index, not a stable gate identity).
+- **Cursor:** a `qint64 m_since` plus a `bool m_baselined` (see start()). `latestId`/`eventId`/cursor are `qint64` throughout.
+- **In-flight ownership + timeout:** at most one GET is outstanding. Each request's `QNetworkReply` is tracked (`m_reply`); a per-reply single-shot `QTimer` (default 5000 ms) `abort()`s it on timeout so a stalled GET can never wedge the drain or hide a failure from the service. `stop()`/restart abort the tracked reply. On `finished`, the reply is `deleteLater`d and the generation is checked before any state change.
+- **Start (baseline only once per process):** issue one GET to `turnstile_display.php`.
+  - **First application-lifetime start** (`!m_baselined`): on a `valid` response set `m_since = latestId`, `m_baselined = true`, state → `Connected` — do **not** emit the returned historical entry (skip process-start history). The service records comm-time on the `Connected` transition (see health note).
+  - **Subsequent (service-triggered reconnect) start** (`m_baselined`): **preserve** `m_since` and resume steady-state polling with `?since=<m_since>` — never re-baseline, or a transient outage would silently discard every swipe accumulated during it. (Cross-*process* cursor persistence is out of scope: each process re-baselines on its first start; entries between process exit and next start are an accepted display-only miss — attendance stays authoritative on the backend.)
+  - On transport/protocol failure during either: `Degraded`/`Error` (see retry split), cursor unmoved.
 - **Steady-state poll (healthy-only, this provider's sole retry surface):** GET `turnstile_display.php?since=<m_since>`.
-  - `valid && hasEntry` → build and emit `AccessEvent{type=EntryObserved, subject=<student or empty>, gateId, correlationId=QString::number(eventId), at}`, set `m_since = eventId`, `recordCommTime()`, then **immediately** issue the next GET (async, one-at-a-time drain — never more than one request in flight).
-  - `valid && !hasEntry` (empty poll) → `recordCommTime()` (a healthy empty poll is still comm evidence) and **arm the `pollIntervalMs` timer** for the next poll.
+  - `valid && hasEntry` with **`eventId > m_since`** → emit `AccessEvent{type=EntryObserved, subject=<student or empty>, gateId, correlationId=QString::number(eventId), at}`, set `m_since = eventId`, then **immediately** issue the next GET (async, one-at-a-time drain — never more than one request in flight).
+  - `valid && hasEntry` but **`eventId <= m_since`** → a protocol anomaly (a well-formed body that fails to advance would otherwise infinite-drain): treat as protocol failure → stop, `Degraded`, cursor unmoved, no event.
+  - `valid && !hasEntry` (empty poll) → **arm the single-shot `pollIntervalMs` timer** for the next poll.
   - `!valid` (protocol failure) or transport failure/timeout → **stop the poll timer**, emit `stateChanged(Degraded/Error)`; do **not** move the cursor, do **not** fabricate an event. Reconnect is the service's job.
-- **`stop()`** halts the timer and bumps the generation so any in-flight reply is ignored.
-- **Generation guard** applies to `stop()` **and** service-triggered restarts: a reply tagged generation N is dropped once N+1 has begun, so a stale reply can never advance the cursor or emit after a restart.
+- **Generation guard** applies to `stop()` **and** service-triggered restarts: a reply tagged generation N is dropped once N+1 has begun, so a stale reply can never advance the cursor or emit after a restart. `stop()` also aborts the tracked reply and halts the timer.
 - **Read-only:** never POSTs; the backend stays the sole attendance writer.
 
-**Retry ownership (the one-layer rule):** the provider only ever re-arms its timer after a *successful empty* poll. Every failure path stops that timer and defers to `AccessControlService`'s existing state machine + exponential backoff reconnect (Sub-plan 1). The two mechanisms are mutually exclusive by construction.
+**Retry ownership (the one-layer rule):** the provider re-arms its single-shot timer **only** after a successful empty poll (and chains immediately only while draining real entries). Every failure path stops that timer and defers to `AccessControlService`'s existing state machine + exponential backoff reconnect ([accesscontrolservice.cpp:139-146](../../../qt-app/core/accesscontrol/accesscontrolservice.cpp), which calls `provider->start()` on the reconnect timer). The two mechanisms are mutually exclusive by construction.
+
+**Health accounting (single owner):** comm-time is recorded **only** by `AccessControlService`, on the `Connected` transition (existing merged behavior, [accesscontrolservice.cpp:129-131](../../../qt-app/core/accesscontrol/accesscontrolservice.cpp)). The provider does **not** call the service-owned `HealthMonitor` — the `CreatorFn` gives it no handle to the service's monitor, and a provider-side baseline record would double-count against the `Connected` transition. **Forward-note (deferred):** per-poll comm-health freshness (updating last-comm on every successful empty/entry poll, as originally requested) is deferred until a `HealthMonitor` injection seam exists, to avoid coupling the provider to a service-owned monitor or changing the merged factory/interface in this slice.
 
 ### 3. `AccessEvent` unknown-student convention
 
@@ -85,9 +96,9 @@ For an `EntryObserved` event: **empty `subject`** = "entry observed, subject unr
 
 **Files:** `qt-app/quick/AccessControlHub.h` / `.cpp` (new), registered in `qt-app/quick/CMakeLists.txt`; `qt-app/tests/tst_accesscontrolhub*` (new).
 
-`QObject` subclass named **`AccessControlHub`** (the QML singleton is registered under the name **`AccessControl`**; the class is not named `AccessControl` to avoid clashing with the existing `AccessControl` C++ namespace). Owns `EventBus`, `AccessProviderFactory`, `AccessControlService` (all parented). Public surface:
+`QObject` subclass named **`AccessControlHub`** (the QML singleton is registered under the name **`AccessControl`**; the class is not named `AccessControl` to avoid clashing with the existing `AccessControl` C++ namespace). Ownership: `EventBus` and `AccessControlService` are `QObject`s parented to the hub; `AccessProviderFactory` is a **plain (non-QObject) value member** of the hub (it is not a `QObject`, [accessproviderfactory.h:18](../../../qt-app/core/accesscontrol/accessproviderfactory.h)) and so outlives the service by construction order. The hub also owns an app-lifetime `QNetworkAccessManager` (parented) that it injects into the provider via the factory creator. Public surface:
 
-- `void initialize()` — reads enablement (see §7). Registers `TurnstileProvider` with the factory. If enabled, calls `service.enable(descriptor, {pollIntervalMs})` (the service builds + owns + starts the provider). If disabled, builds nothing and stays inert.
+- `void initialize()` — reads enablement (see §7). Registers `TurnstileProvider` with the factory via a `CreatorFn` **lambda that captures the hub's NAM, `gateId`, and `baseUrl`** and returns `new TurnstileProvider(nam, config, parent)` (the `CreatorFn` signature is fixed at `(descriptor, config, parent)`, [accessproviderfactory.h:21-22](../../../qt-app/core/accesscontrol/accessproviderfactory.h), so the NAM must enter via the closure, not a new parameter). Registration happens **whether or not** the feature is enabled (so a later Sub-plan-4 runtime toggle can enable without re-registering). If enabled, calls `service.enable(descriptor, {pollIntervalMs, gateId})` (the service builds + owns + starts the provider). If disabled, registers only and stays inert.
 - `Q_SIGNAL void entryObserved(const QVariantMap &entry)` — the QML-facing signal.
 
 The hub subscribes to the bus's `EntryObserved` and maps each event to an `AccessEntry` `QVariantMap` at its boundary (the JSON→variant conversion happens here, once):
@@ -102,23 +113,42 @@ AccessEntry (QVariantMap):
 
 Empty `subject` → `{ hasStudent:false, student:{}, eventId, at }`. No `card`/`reader` field is ever populated.
 
-### 5. `main.cpp` wiring
+### 5. QML registration + `main.cpp` wiring
 
-**Files:** `qt-app/quick/main.cpp` (extend).
+**Files:** `qt-app/quick/AccessControlHub.h` (registration macros), `qt-app/quick/main.cpp` (extend).
 
-Construct the stack-owned hub **before** the `QQmlApplicationEngine` and register that exact instance, so ordinary reverse-stack destruction tears the engine down first and the hub second (QML never deletes it):
+The `LOAMS` module is registered **declaratively** via `qt_add_qml_module` ([quick/CMakeLists.txt:33](../../../qt-app/quick/CMakeLists.txt)), and its singletons use declarative `QML_SINGLETON` (e.g. [Navigator.h:13](../../../qt-app/quick/viewmodels/Navigator.h)). `qmlRegisterSingletonInstance` (procedural registration into that same declaratively-built URI) is therefore **not** used — it fights the generated `qmldir`. Instead the hub is a **declarative `QML_SINGLETON` with a create-function** that hands QML the application-owned instance:
+
+```cpp
+// AccessControlHub.h
+class AccessControlHub : public QObject {
+    Q_OBJECT
+    QML_ELEMENT
+    QML_SINGLETON
+public:
+    // The engine calls this to obtain the singleton; return the app-owned
+    // instance and mark it CppOwnership so QML never deletes it.
+    static AccessControlHub *create(QQmlEngine *, QJSEngine *);
+    static void setInstance(AccessControlHub *);   // set by main before the engine loads
+    // ...
+};
+```
+
+`create()` returns the `main`-owned instance (via a narrowly-scoped `setInstance`, set before `loadFromModule`) and calls `QQmlEngine::setObjectOwnership(inst, QQmlEngine::CppOwnership)`. This keeps registration consistent with the declarative module **and** gives C++ the lifecycle. `main.cpp` constructs the hub **before** the `QQmlApplicationEngine` so ordinary reverse-stack destruction tears the engine down first and the hub second:
 
 ```cpp
 QApplication app(argc, argv);
 // ... existing --software / QQuickStyle / cached-branding setup ...
 
 AccessControlHub accessControl;
-accessControl.initialize();                     // reads flag; builds+starts provider iff enabled
-qmlRegisterSingletonInstance("LOAMS", 1, 0, "AccessControl", &accessControl);
+accessControl.initialize();                 // reads flag; registers provider; builds+starts iff enabled
+AccessControlHub::setInstance(&accessControl);
 
-QQmlApplicationEngine engine;                   // dies before accessControl
+QQmlApplicationEngine engine;               // dies before accessControl
 // ... existing objectCreationFailed + loadFromModule("LOAMS","AppShell") ...
 ```
+
+QML references it as the `AccessControl` singleton from `import LOAMS` (the class registers under its own name; expose it as `AccessControl` via `QML_NAMED_ELEMENT(AccessControl)` to avoid the `AccessControl` C++-namespace clash while keeping the QML name the kiosk expects).
 
 ### 6. Kiosk subscription + `showUnknownEntry`
 
@@ -126,17 +156,17 @@ QQmlApplicationEngine engine;                   // dies before accessControl
 
 - `KioskViewModel` gains `Q_INVOKABLE void onEntryObserved(const QVariantMap &entry)`: if `entry["hasStudent"].toBool()` → `applyStudentLogin(QJsonObject::fromVariantMap(entry["student"].toMap()))` (the existing welcome-display + counter-bump + recent-feed seam, no backend POST); else → `showUnknownEntry()`.
 - `KioskViewModel::showUnknownEntry()` sets a neutral status/toast ("Card not recognized") with **no** counter bump and **no** recent-feed entry.
-- The kiosk screen QML adds `Connections { target: AccessControl; function onEntryObserved(entry) { vm.onEntryObserved(entry) } }`, so the subscription is scoped to the kiosk surface (torn down when admin shows). The provider keeps running while admin is shown; entries during that window are an accepted at-most-once display miss (attendance stays authoritative on the backend).
+- The kiosk screen QML adds `Connections { target: AccessControl; function onEntryObserved(entry) { kioskVm.onEntryObserved(entry) } }` — the VM's local id in [KioskScreen.qml:11](../../../qt-app/quick/qml/kiosk/KioskScreen.qml) is `kioskVm`, not `vm`. The subscription is scoped to the kiosk surface (torn down when admin shows). The provider keeps running while admin is shown; entries during that window are an accepted at-most-once display miss (attendance stays authoritative on the backend).
 
 ### 7. Enablement precedence
 
 `AccessControlHub::initialize()` resolves enablement once, in this order:
 
 1. `WITS_ACCESS_CONTROL` set to `1`/`true` (case-insensitive) → **force on** for this process (non-persistent dev override).
-2. else `QSettings` `accessControl.enabled` (default `false`).
+2. else `accessControl.enabled` (default `false`).
 3. else `false`.
 
-`WITS_ACCESS_CONTROL=0` is **not** a production force-off in this slice (only force-on is honored). `accessControl.pollIntervalMs` (default 1500) is read from `QSettings`. Runtime mutation of these is deferred to the Sub-plan 4 settings UI.
+`WITS_ACCESS_CONTROL=0` is **not** a production force-off in this slice (only force-on is honored). Settings are read through **`AppSettings`** ([appsettings.h](../../../qt-app/core/appsettings.h)), the repository's mandatory `QSettings` subclass — **not** a raw `QSettings` — so hub tests use `AppSettings::isolateForTesting()` and never touch the developer's real `HKCU` hive. `accessControl.pollIntervalMs` (default 1500) is read and **validated**: a non-integer, zero, or negative value (which would busy-loop the poller) falls back to 1500, and a sane floor (e.g. 250 ms) is clamped. `gateId` (default `"turnstile"`) is read the same way. Runtime mutation of these is deferred to the Sub-plan 4 settings UI.
 
 ## Backward compatibility
 
@@ -146,9 +176,9 @@ Flag off (the default) → `initialize()` registers the provider with the factor
 
 All via `wits_add_qttest()`; `OFFSCREEN` for any Quick/VM test. No live network — feed synthetic `QByteArray` payloads and a `CapturingNam` (the AccessDecisionService test idiom). Synthetic data only (no real PII).
 
-- **`parseEntryEvent`** (pure): entry present maps all fields + composes `photo_url` from `photo_path`+`baseUrl`; `photo_url`-present passthrough; `photo`-absent → empty `photo_url`; `entry:null` → `valid,!hasEntry`; `student:null` → `!hasStudent`, empty student; `latest_id` parsed as `qint64`; malformed JSON / wrong shape / `status!="success"` / non-object entry → `!valid` with `error`, no fabricated entry.
-- **`TurnstileProvider`** (CapturingNam): baseline-on-start sets `m_since=latestId` and emits nothing for history, state→Connected, `recordCommTime` called; steady-state drains oldest-first, one `EntryObserved` per entry with normalized subject, cursor advances, never >1 in-flight; empty poll re-arms the timer + records comm; transport failure and protocol-invalid both → `Degraded`/`Error`, timer stopped, cursor unmoved, no event; `stop()` and a simulated restart drop a stale generation-N reply.
-- **`AccessControlHub`**: flag-on builds + enables and maps `EntryObserved`→`entryObserved(QVariantMap)` with correct `hasStudent`; empty-subject event → `hasStudent:false, student:{}`; flag-off → inert (no signal, no polling). `WITS_ACCESS_CONTROL` precedence over `QSettings`.
+- **`parseEntryEvent`** (pure): entry present maps `id`/`created_at`/`student` + composes `photo_url` from `photo_path`+`baseUrl`; `photo_url`-present passthrough; `photo`-absent → empty `photo_url`; `created_at` parsed as server-local then converted to UTC (assert the offset conversion, not a raw-UTC reinterpretation); `entry:null` → `valid,!hasEntry`; `student:null` → `!hasStudent`, empty student; `latest_id`/`id` parsed as `qint64`; malformed JSON / wrong shape / `status!="success"` / non-object-non-null entry / missing-or-non-positive `id` / unparseable `latest_id` or `created_at` / non-object-non-null `student` → `!valid` with `error`, no fabricated entry.
+- **`TurnstileProvider`** (CapturingNam): first start sets `m_since=latestId` and emits nothing for history, state→Connected; **a second (reconnect) start preserves `m_since` and resumes `?since=<m_since>` — does NOT re-baseline** (regression test for the discarded-during-outage bug); steady-state drains oldest-first, one `EntryObserved` per entry with normalized subject + `gateId` from config, cursor advances, never >1 in-flight; a `valid` entry with `eventId<=m_since` → `Degraded`, no event, no advance (drain-loop guard); empty poll re-arms the single-shot timer; transport failure, timeout (simulated stalled reply → abort), and protocol-invalid all → `Degraded`/`Error`, timer stopped, cursor unmoved, no event; `stop()` aborts the in-flight reply, and a simulated restart drops a stale generation-N reply.
+- **`AccessControlHub`** (`AppSettings::isolateForTesting()`, injected/captured `CapturingNam`): flag-on builds + enables and maps `EntryObserved`→`entryObserved(QVariantMap)` with correct `hasStudent`; empty-subject event → `hasStudent:false, student:{}`; flag-off → registered-but-inert (no signal, no polling); `WITS_ACCESS_CONTROL` precedence over the setting; `pollIntervalMs` of 0/negative/non-integer falls back to 1500.
 - **`KioskViewModel`**: `onEntryObserved` with `hasStudent:true` drives the existing `applyStudentLogin` seam (student Q_PROPERTYs + counters); `hasStudent:false` calls `showUnknownEntry` (status only, no counter bump, no feed entry).
 
 ## Verification
