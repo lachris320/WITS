@@ -343,6 +343,7 @@ private:
 #include "sequencednam.h"
 
 #include <QBuffer>
+#include <QPointer>
 #include <QTimer>
 #include <QNetworkRequest>
 
@@ -414,8 +415,6 @@ QNetworkReply *SequencedNam::createRequest(Operation op, const QNetworkRequest &
     return new CannedReply(op, request, c.body, c.error, c.stall, this);
 }
 ```
-
-Add `#include <QPointer>` to `sequencednam.cpp` if the compiler flags `QPointer` (it is used in the anonymous namespace).
 
 - [ ] **Step 2: Create the provider header + a skeleton `.cpp`**
 
@@ -537,6 +536,7 @@ private slots:
     void clampPollMs_rules();
     void blankGateIdFallsBack();
     void baselineSkipsHistoryThenPolls();
+    void emptyPollReArmsNextPoll();
     void drainsEntriesOldestFirst();
     void reconnectPreservesCursorAndEmitsReconnectEntry();
     void nonAdvancingEntryDegrades();
@@ -544,6 +544,7 @@ private slots:
     void transportFailureEmitsExactlyOneDegraded();
     void timeoutAbortsAndDegrades();
     void stopAbortsInFlightNoEmit();
+    void restartDropsInFlightGeneration();
 
 private:
     static QVariantMap cfg(int pollMs = 250, const QString &gate = QStringLiteral("g1"))
@@ -609,6 +610,22 @@ void TestTurnstileProvider::baselineSkipsHistoryThenPolls()
     p.stop();
 }
 
+void TestTurnstileProvider::emptyPollReArmsNextPoll()
+{
+    // A steady-state empty poll must re-arm the timer for the NEXT poll (not
+    // stop after one). Baseline empty + two steady empties => >= 3 requests.
+    SequencedNam nam;
+    nam.enqueue(emptyPayload(5));   // baseline
+    nam.enqueue(emptyPayload(5));   // steady poll #1 (empty -> re-arm)
+    nam.enqueue(emptyPayload(5));   // steady poll #2 (only reached if #1 re-armed)
+    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
+    QSignalSpy events(&p, &IAccessProvider::accessEvent);
+    p.start();
+    QTRY_VERIFY_WITH_TIMEOUT(nam.requestCount() >= 3, 3000);
+    QCOMPARE(events.count(), 0);
+    p.stop();
+}
+
 void TestTurnstileProvider::drainsEntriesOldestFirst()
 {
     SequencedNam nam;
@@ -626,6 +643,9 @@ void TestTurnstileProvider::drainsEntriesOldestFirst()
     QCOMPARE(e1.gateId, QStringLiteral("g1"));
     QCOMPARE(e1.subject.value("name").toString(), QStringLiteral("A"));
     QCOMPARE(qvariant_cast<AccessEvent>(events.at(1).at(0)).correlationId, QStringLiteral("2"));
+    // One-in-flight: requests happen strictly in sequence (baseline + 2 entries
+    // + drain-end empty == 4); more than one reply active would break ordering.
+    QTRY_COMPARE_WITH_TIMEOUT(nam.requestCount(), 4, 3000);
     p.stop();
 }
 
@@ -712,6 +732,27 @@ void TestTurnstileProvider::stopAbortsInFlightNoEmit()
     QTest::qWait(100);                             // let the aborted reply's finished fire
     QCOMPARE(events.count(), 0);                   // stale (generation-bumped) reply dropped
     QVERIFY(p.state() != ConnectionState::Connected);
+}
+
+void TestTurnstileProvider::restartDropsInFlightGeneration()
+{
+    // A restart (e.g. the service reconnect) while a reply is in flight bumps
+    // the generation: the stalled reply-1 must be aborted and its late finish
+    // dropped, while the provider baselines from reply-2 exactly once.
+    SequencedNam nam;
+    nam.enqueueStall();             // start #1: baseline stalls in flight (gen 1)
+    nam.enqueue(emptyPayload(9));   // start #2: baseline responds (gen 2), cursor = 9
+    nam.enqueue(emptyPayload(9));   // steady poll after baseline
+    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
+    QSignalSpy events(&p, &IAccessProvider::accessEvent);
+    p.start();
+    QTRY_COMPARE_WITH_TIMEOUT(nam.requestCount(), 1, 3000);   // reply-1 in flight
+    p.start();                                                // restart: gen bump + abort reply-1
+    QVERIFY(nam.abortCount() >= 1);
+    QTRY_VERIFY_WITH_TIMEOUT(p.state() == ConnectionState::Connected, 3000);  // baselined from reply-2
+    QCOMPARE(events.count(), 0);                              // reply-1 never produced an effect
+    QTRY_VERIFY_WITH_TIMEOUT(nam.lastUrl.query().contains(QStringLiteral("since=9")), 3000);
+    p.stop();
 }
 
 QTEST_MAIN(TestTurnstileProvider)
@@ -911,7 +952,7 @@ void TurnstileProvider::onFinished(QNetworkReply *reply, quint64 gen)
 cmake --build C:/b/loams-sp3 --target tst_turnstileprovider
 ctest --test-dir C:/b/loams-sp3 -R tst_turnstileprovider --output-on-failure
 ```
-Expected: PASS (10/10).
+Expected: PASS (12/12).
 
 - [ ] **Step 8: Update the unknown-subject convention comment in `accesstypes.h`**
 
@@ -1466,10 +1507,10 @@ Inside the root `Rectangle`, right after `GuestViewModel { id: guestVm }`:
 
 ```
 cmake -S qt-app -B C:/b/loams-sp3 -G Ninja -DCMAKE_PREFIX_PATH="C:/Qt/6.11.1/mingw_64"
-cmake --build C:/b/loams-sp3 --target tst_appshell
+cmake --build C:/b/loams-sp3 --target tst_appshell tst_qml_kiosk
 ctest --test-dir C:/b/loams-sp3 -R "tst_appshell|tst_qml_kiosk" --output-on-failure
 ```
-Expected: **FAIL** — `AccessControlSingleton::create()` asserts (no instance installed) / `AppShell` logs a singleton-resolution warning, failing `tst_appshell`'s zero-warning check.
+Expected: **FAIL** — `AccessControlSingleton::create()` asserts (no instance installed) / `AppShell` logs a singleton-resolution warning, failing `tst_appshell`'s zero-warning check. (Both targets are built first so the failure is real, not a "Not Run" from a missing executable.)
 
 - [ ] **Step 3: Install a disabled hub in `tst_appshell.cpp`**
 
@@ -1545,7 +1586,7 @@ Flag off (default): launch `WITSQuick`, confirm the kiosk behaves exactly as bef
 
 **1. Spec coverage:**
 - §1 parser (`EntryEventResult`, photo composition, local→UTC, strict validity incl. `latest_id >= 0`) → Task 1. ✅
-- §2 provider: baseline-once, reconnect-preserves-cursor + processes response, drain oldest-first, `eventId>since` guard, timeout+abort, generation guard, single `Degraded`, provider-owned reply, `gateId` config + fallback, `pollIntervalMs` clamp, never-runtime-`Error` → Task 2 (tests cover baseline, drain, reconnect-emits-once, non-advancing, malformed, transport→one-Degraded, timeout→abort, stop→abort→no-emit, clampPollMs, blank-gateId). ✅
+- §2 provider: baseline-once, reconnect-preserves-cursor + processes response, drain oldest-first, `eventId>since` guard, timeout+abort, generation guard, single `Degraded`, provider-owned reply, `gateId` config + fallback, `pollIntervalMs` clamp, never-runtime-`Error` → Task 2 (tests cover baseline-then-poll, empty-poll-re-arms, drain-oldest-first + one-in-flight sequencing, reconnect-emits-once, non-advancing, malformed, transport→one-Degraded, timeout→abort, stop→abort→no-emit, restart-drops-in-flight-generation, clampPollMs, blank-gateId). ✅
 - §3 unknown-subject convention → `toAccessEntry` (Task 3) + provider emit + `accesstypes.h` comment (Task 2 Step 8). ✅
 - §4 hub ownership/teardown order, owned-vs-injected NAM seam, register-when-disabled, event→`QVariantMap` → Task 3. ✅
 - §5 `QML_FOREIGN` wrapper + `create()` fail-fast + `main.cpp` order + CMake SOURCES + existing-QML-test install → Tasks 3 & 5. ✅
