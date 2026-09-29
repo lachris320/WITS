@@ -67,18 +67,19 @@ Implements `IAccessProvider` (`descriptor()`, `start()`, `stop()`, `state()`; si
 
 - **Construction/config:** `pollIntervalMs` and `gateId` (from descriptor config), `baseUrl` (`ApiConfig::baseUrl()`, supplied by the hub at construction), and the injected `QNetworkAccessManager*`. `providerId = "turnstile"`, human name "Turnstile (server-observed)".
 - **NAM ownership/affinity:** the app-lifetime `QNetworkAccessManager` is **owned by the hub** (parented to it) and injected into the provider via the factory `CreatorFn` closure (see §4 — the registered creator captures the hub's NAM). v1 is single-threaded: the poll timer, the NAM, and the provider share the main-thread affinity (matching the service's affinity note in `accesscontrolservice.cpp`).
-- **Descriptor config schema:** advertises `pollIntervalMs` (int) and `gateId` (string, default `"turnstile"`). `AccessEvent.gateId` is stamped from this config value — **not** derived from the backend's `reader` field (which is a lane index, not a stable gate identity).
+- **Descriptor config schema:** advertises `pollIntervalMs` (int) and `gateId` (string) fields. `ConfigFieldDescriptor` carries only `key`/`displayName`/`type`/`required` ([accesstypes.h:53-58](../../../qt-app/core/accesscontrol/accesstypes.h)) — it has **no** default-value member — so the **hub** supplies the defaults when reading config (`gateId` default `"turnstile"`; an empty/whitespace value falls back to `"turnstile"`). `AccessEvent.gateId` is stamped from the resolved config value — **not** derived from the backend's `reader` field (a lane index, not a stable gate identity).
 - **Cursor:** a `qint64 m_since` plus a `bool m_baselined` (see start()). `latestId`/`eventId`/cursor are `qint64` throughout.
 - **In-flight ownership + timeout:** at most one GET is outstanding. Each request's `QNetworkReply` is tracked (`m_reply`); a per-reply single-shot `QTimer` (default 5000 ms) `abort()`s it on timeout so a stalled GET can never wedge the drain or hide a failure from the service. `stop()`/restart abort the tracked reply. On `finished`, the reply is `deleteLater`d and the generation is checked before any state change.
-- **Start (baseline only once per process):** issue one GET to `turnstile_display.php`.
-  - **First application-lifetime start** (`!m_baselined`): on a `valid` response set `m_since = latestId`, `m_baselined = true`, state → `Connected` — do **not** emit the returned historical entry (skip process-start history). The service records comm-time on the `Connected` transition (see health note).
-  - **Subsequent (service-triggered reconnect) start** (`m_baselined`): **preserve** `m_since` and resume steady-state polling with `?since=<m_since>` — never re-baseline, or a transient outage would silently discard every swipe accumulated during it. (Cross-*process* cursor persistence is out of scope: each process re-baselines on its first start; entries between process exit and next start are an accepted display-only miss — attendance stays authoritative on the backend.)
-  - On transport/protocol failure during either: `Degraded`/`Error` (see retry split), cursor unmoved.
+- **Start (baseline only once per process):** on start, state → `Connecting`, then issue one GET to `turnstile_display.php`.
+  - **First application-lifetime start** (`!m_baselined`): on a `valid` response set `m_since = latestId`, `m_baselined = true`, state → `Connected` — do **not** emit the returned historical entry (skip process-start history) — **and then arm the steady-state poll** (below): the baseline immediately transitions into normal polling (schedule a `?since=<m_since>` poll), otherwise the provider would make one startup request and never observe a live swipe. The service records comm-time on the `Connected` transition (see health note).
+  - **Subsequent (service-triggered reconnect) start** (`m_baselined`): **preserve** `m_since`, state → `Connected` on the first `valid` response, and resume steady-state polling with `?since=<m_since>` — never re-baseline, or a transient outage would silently discard every swipe accumulated during it. (Cross-*process* cursor persistence is out of scope: each process re-baselines on its first start; entries between process exit and next start are an accepted display-only miss — attendance stays authoritative on the backend.)
+  - On failure during either: a single failure transition (see failure rule below), cursor unmoved.
 - **Steady-state poll (healthy-only, this provider's sole retry surface):** GET `turnstile_display.php?since=<m_since>`.
   - `valid && hasEntry` with **`eventId > m_since`** → emit `AccessEvent{type=EntryObserved, subject=<student or empty>, gateId, correlationId=QString::number(eventId), at}`, set `m_since = eventId`, then **immediately** issue the next GET (async, one-at-a-time drain — never more than one request in flight).
-  - `valid && hasEntry` but **`eventId <= m_since`** → a protocol anomaly (a well-formed body that fails to advance would otherwise infinite-drain): treat as protocol failure → stop, `Degraded`, cursor unmoved, no event.
+  - `valid && hasEntry` but **`eventId <= m_since`** → a protocol anomaly (a well-formed body that fails to advance would otherwise infinite-drain): failure transition, cursor unmoved, no event.
   - `valid && !hasEntry` (empty poll) → **arm the single-shot `pollIntervalMs` timer** for the next poll.
-  - `!valid` (protocol failure) or transport failure/timeout → **stop the poll timer**, emit `stateChanged(Degraded/Error)`; do **not** move the cursor, do **not** fabricate an event. Reconnect is the service's job.
+  - `!valid` (protocol failure) or transport failure/timeout → **stop the poll timer**, failure transition; do **not** move the cursor, do **not** fabricate an event. Reconnect is the service's job.
+- **Failure transition (exactly one per failed request):** every recoverable poll failure — transport error, timeout, `!valid` protocol failure, or a non-advancing `eventId<=m_since` — emits **`stateChanged(Degraded)`** and nothing else. `Error` is reserved for a defined terminal/configuration condition (e.g. an unparseable configured base URL surfaced at start). This matters because the service maps **both** `Degraded` and `Error` to `scheduleReconnect()` ([accesscontrolservice.cpp:140-143](../../../qt-app/core/accesscontrol/accesscontrolservice.cpp)): emitting both for one failure would arm the reconnect backoff twice.
 - **Generation guard** applies to `stop()` **and** service-triggered restarts: a reply tagged generation N is dropped once N+1 has begun, so a stale reply can never advance the cursor or emit after a restart. `stop()` also aborts the tracked reply and halts the timer.
 - **Read-only:** never POSTs; the backend stays the sole attendance writer.
 
@@ -96,9 +97,12 @@ For an `EntryObserved` event: **empty `subject`** = "entry observed, subject unr
 
 **Files:** `qt-app/quick/AccessControlHub.h` / `.cpp` (new), registered in `qt-app/quick/CMakeLists.txt`; `qt-app/tests/tst_accesscontrolhub*` (new).
 
-`QObject` subclass named **`AccessControlHub`** (the QML singleton is registered under the name **`AccessControl`**; the class is not named `AccessControl` to avoid clashing with the existing `AccessControl` C++ namespace). Ownership: `EventBus` and `AccessControlService` are `QObject`s parented to the hub; `AccessProviderFactory` is a **plain (non-QObject) value member** of the hub (it is not a `QObject`, [accessproviderfactory.h:18](../../../qt-app/core/accesscontrol/accessproviderfactory.h)) and so outlives the service by construction order. The hub also owns an app-lifetime `QNetworkAccessManager` (parented) that it injects into the provider via the factory creator. Public surface:
+`QObject` subclass named **`AccessControlHub`** (exposed to QML as **`AccessControl`** via the §5 wrapper; the class is not named `AccessControl` to avoid clashing with the existing `AccessControl` C++ namespace).
 
-- `void initialize()` — reads enablement (see §7). Registers `TurnstileProvider` with the factory via a `CreatorFn` **lambda that captures the hub's NAM, `gateId`, and `baseUrl`** and returns `new TurnstileProvider(nam, config, parent)` (the `CreatorFn` signature is fixed at `(descriptor, config, parent)`, [accessproviderfactory.h:21-22](../../../qt-app/core/accesscontrol/accessproviderfactory.h), so the NAM must enter via the closure, not a new parameter). Registration happens **whether or not** the feature is enabled (so a later Sub-plan-4 runtime toggle can enable without re-registering). If enabled, calls `service.enable(descriptor, {pollIntervalMs, gateId})` (the service builds + owns + starts the provider). If disabled, registers only and stays inert.
+**Ownership & teardown order.** Parenting `EventBus`/`AccessControlService` as `QObject` children of the hub is **wrong here**: `QObject`-child deletion runs in the `QObject` base destructor, *after* the hub's own value/`unique_ptr` members are already gone — so a service child could outlive the NAM/factory it uses. Instead the hub holds them as explicitly ordered members (`std::unique_ptr`, `parent=nullptr`; the factory a value member), declared **bus → factory → NAM → service** so reverse-order destruction is **service → NAM → factory → bus**: the service's dtor tears down the provider (which aborts its in-flight reply) while the NAM is still alive, and the bus outlives every publisher. The provider is parented to the *service* (via `create(descriptor, config, service)`), so it dies with the service, before the NAM.
+
+- **NAM injection seam:** the hub's constructor takes an **optional externally-owned `QNetworkAccessManager*`**; when null (production) the hub creates and owns one. Tests pass a `CapturingNam` so the hub never issues a real localhost request. The hub injects whichever NAM it holds into the provider via the factory creator.
+- `void initialize()` — reads enablement (see §7). Registers `TurnstileProvider` with the factory via a `CreatorFn` **lambda that captures the hub's NAM, `gateId`, and `baseUrl`** and returns `new TurnstileProvider(nam, config, parent)` (the `CreatorFn` signature is fixed at `(descriptor, config, parent)`, [accessproviderfactory.h:21-22](../../../qt-app/core/accesscontrol/accessproviderfactory.h), so the NAM enters via the closure, not a new parameter). Registration happens **whether or not** the feature is enabled (so a later Sub-plan-4 runtime toggle can enable without re-registering). If enabled, calls `service.enable(descriptor, {pollIntervalMs, gateId})` (the service builds + owns + starts the provider). If disabled, registers only and stays inert.
 - `Q_SIGNAL void entryObserved(const QVariantMap &entry)` — the QML-facing signal.
 
 The hub subscribes to the bus's `EntryObserved` and maps each event to an `AccessEntry` `QVariantMap` at its boundary (the JSON→variant conversion happens here, once):
@@ -117,24 +121,27 @@ Empty `subject` → `{ hasStudent:false, student:{}, eventId, at }`. No `card`/`
 
 **Files:** `qt-app/quick/AccessControlHub.h` (registration macros), `qt-app/quick/main.cpp` (extend).
 
-The `LOAMS` module is registered **declaratively** via `qt_add_qml_module` ([quick/CMakeLists.txt:33](../../../qt-app/quick/CMakeLists.txt)), and its singletons use declarative `QML_SINGLETON` (e.g. [Navigator.h:13](../../../qt-app/quick/viewmodels/Navigator.h)). `qmlRegisterSingletonInstance` (procedural registration into that same declaratively-built URI) is therefore **not** used — it fights the generated `qmldir`. Instead the hub is a **declarative `QML_SINGLETON` with a create-function** that hands QML the application-owned instance:
+The `LOAMS` module is registered **declaratively** via `qt_add_qml_module` ([quick/CMakeLists.txt:33](../../../qt-app/quick/CMakeLists.txt)), and its singletons use declarative `QML_SINGLETON` (e.g. [Navigator.h:13](../../../qt-app/quick/viewmodels/Navigator.h)). `qmlRegisterSingletonInstance` (procedural registration into that same declaratively-built URI) is therefore **not** used — it fights the generated `qmldir`.
+
+`AccessControlHub` is a normal `QObject` **without** QML macros on it. Because `main` constructs `AccessControlHub accessControl;` (default-constructible), putting `QML_SINGLETON` + `create()` directly on it is unreliable — Qt can pick the accessible default constructor over `create()` and hand QML a *separate, uninitialized, engine-owned* instance (never applying `CppOwnership`). Instead expose the app-owned instance via a dedicated **`QML_FOREIGN` singleton wrapper** whose `create()` is the only construction path QML sees:
 
 ```cpp
-// AccessControlHub.h
-class AccessControlHub : public QObject {
-    Q_OBJECT
-    QML_ELEMENT
+// AccessControlSingleton.h — a registration shim, never instantiated by QML.
+struct AccessControlSingleton {
+    Q_GADGET
+    QML_FOREIGN(AccessControlHub)
     QML_SINGLETON
+    QML_NAMED_ELEMENT(AccessControl)   // QML name "AccessControl"; C++ type stays AccessControlHub
 public:
-    // The engine calls this to obtain the singleton; return the app-owned
-    // instance and mark it CppOwnership so QML never deletes it.
-    static AccessControlHub *create(QQmlEngine *, QJSEngine *);
-    static void setInstance(AccessControlHub *);   // set by main before the engine loads
-    // ...
+    static AccessControlHub *create(QQmlEngine *, QJSEngine *) {
+        AccessControlHub *inst = AccessControlHub::instance();   // the main-owned instance
+        QQmlEngine::setObjectOwnership(inst, QQmlEngine::CppOwnership);
+        return inst;
+    }
 };
 ```
 
-`create()` returns the `main`-owned instance (via a narrowly-scoped `setInstance`, set before `loadFromModule`) and calls `QQmlEngine::setObjectOwnership(inst, QQmlEngine::CppOwnership)`. This keeps registration consistent with the declarative module **and** gives C++ the lifecycle. `main.cpp` constructs the hub **before** the `QQmlApplicationEngine` so ordinary reverse-stack destruction tears the engine down first and the hub second:
+`AccessControlHub` exposes a narrowly-scoped `static AccessControlHub *instance()` / `static void setInstance(AccessControlHub *)`, set by `main` before `loadFromModule`. `main.cpp` constructs the hub **before** the `QQmlApplicationEngine` so ordinary reverse-stack destruction tears the engine down first and the hub second:
 
 ```cpp
 QApplication app(argc, argv);
@@ -148,7 +155,7 @@ QQmlApplicationEngine engine;               // dies before accessControl
 // ... existing objectCreationFailed + loadFromModule("LOAMS","AppShell") ...
 ```
 
-QML references it as the `AccessControl` singleton from `import LOAMS` (the class registers under its own name; expose it as `AccessControl` via `QML_NAMED_ELEMENT(AccessControl)` to avoid the `AccessControl` C++-namespace clash while keeping the QML name the kiosk expects).
+QML then references it as the `AccessControl` singleton from `import LOAMS`, backed by the C++-owned instance (the `QML_NAMED_ELEMENT` name also sidesteps the `AccessControl` C++-namespace clash).
 
 ### 6. Kiosk subscription + `showUnknownEntry`
 
@@ -177,8 +184,8 @@ Flag off (the default) → `initialize()` registers the provider with the factor
 All via `wits_add_qttest()`; `OFFSCREEN` for any Quick/VM test. No live network — feed synthetic `QByteArray` payloads and a `CapturingNam` (the AccessDecisionService test idiom). Synthetic data only (no real PII).
 
 - **`parseEntryEvent`** (pure): entry present maps `id`/`created_at`/`student` + composes `photo_url` from `photo_path`+`baseUrl`; `photo_url`-present passthrough; `photo`-absent → empty `photo_url`; `created_at` parsed as server-local then converted to UTC (assert the offset conversion, not a raw-UTC reinterpretation); `entry:null` → `valid,!hasEntry`; `student:null` → `!hasStudent`, empty student; `latest_id`/`id` parsed as `qint64`; malformed JSON / wrong shape / `status!="success"` / non-object-non-null entry / missing-or-non-positive `id` / unparseable `latest_id` or `created_at` / non-object-non-null `student` → `!valid` with `error`, no fabricated entry.
-- **`TurnstileProvider`** (CapturingNam): first start sets `m_since=latestId` and emits nothing for history, state→Connected; **a second (reconnect) start preserves `m_since` and resumes `?since=<m_since>` — does NOT re-baseline** (regression test for the discarded-during-outage bug); steady-state drains oldest-first, one `EntryObserved` per entry with normalized subject + `gateId` from config, cursor advances, never >1 in-flight; a `valid` entry with `eventId<=m_since` → `Degraded`, no event, no advance (drain-loop guard); empty poll re-arms the single-shot timer; transport failure, timeout (simulated stalled reply → abort), and protocol-invalid all → `Degraded`/`Error`, timer stopped, cursor unmoved, no event; `stop()` aborts the in-flight reply, and a simulated restart drops a stale generation-N reply.
-- **`AccessControlHub`** (`AppSettings::isolateForTesting()`, injected/captured `CapturingNam`): flag-on builds + enables and maps `EntryObserved`→`entryObserved(QVariantMap)` with correct `hasStudent`; empty-subject event → `hasStudent:false, student:{}`; flag-off → registered-but-inert (no signal, no polling); `WITS_ACCESS_CONTROL` precedence over the setting; `pollIntervalMs` of 0/negative/non-integer falls back to 1500.
+- **`TurnstileProvider`** (CapturingNam): first start sets `m_since=latestId`, emits nothing for history, state→Connected, **and issues/schedules the next `?since=<m_since>` poll** (regression assertion — baseline must transition into steady polling, not stop after one request); **a second (reconnect) start preserves `m_since` and resumes `?since=<m_since>` — does NOT re-baseline** (regression test for the discarded-during-outage bug); steady-state drains oldest-first, one `EntryObserved` per entry with normalized subject + `gateId` from config, cursor advances, never >1 in-flight; a `valid` entry with `eventId<=m_since` → `Degraded`, no event, no advance (drain-loop guard); empty poll re-arms the single-shot timer; transport failure, timeout (simulated stalled reply → abort), and protocol-invalid each → **exactly one `Degraded`** transition, timer stopped, cursor unmoved, no event; `stop()` aborts the in-flight reply, and a simulated restart drops a stale generation-N reply.
+- **`AccessControlHub`** (`AppSettings::isolateForTesting()` + a `CapturingNam` passed to the hub constructor so no real request is issued): flag-on builds + enables and maps `EntryObserved`→`entryObserved(QVariantMap)` with correct `hasStudent`; empty-subject event → `hasStudent:false, student:{}`; flag-off → registered-but-inert (no signal, no polling); `WITS_ACCESS_CONTROL` precedence over the setting; `pollIntervalMs` of 0/negative/non-integer falls back to 1500; empty/whitespace `gateId` falls back to `"turnstile"`.
 - **`KioskViewModel`**: `onEntryObserved` with `hasStudent:true` drives the existing `applyStudentLogin` seam (student Q_PROPERTYs + counters); `hasStudent:false` calls `showUnknownEntry` (status only, no counter bump, no feed entry).
 
 ## Verification
