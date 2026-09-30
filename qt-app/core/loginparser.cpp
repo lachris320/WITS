@@ -3,6 +3,31 @@
 #include <QJsonDocument>
 #include <QJsonValue>
 #include <QTimeZone>
+#include <QUrl>
+
+namespace {
+
+// Constrain an untrusted photo reference to baseUrl's origin. QUrl::resolved()
+// on an *absolute* reference (RFC 3986) returns that reference unchanged, so a
+// backend/MITM-supplied absolute URL (foreign host, file://, UNC path) would
+// otherwise escape the intended host/scheme and bind straight to the kiosk
+// Image.source. Accept only same-origin http(s); drop anything else to empty.
+QString sameOriginPhotoUrl(const QString &candidate, const QUrl &baseUrl)
+{
+    if (candidate.isEmpty())
+        return QString();
+    const QUrl resolved = baseUrl.resolved(QUrl(candidate));
+    const QString scheme = resolved.scheme().toLower();
+    if (scheme != QLatin1String("http") && scheme != QLatin1String("https"))
+        return QString();
+    if (resolved.host().compare(baseUrl.host(), Qt::CaseInsensitive) != 0)
+        return QString();
+    if (resolved.port() != baseUrl.port())
+        return QString();
+    return resolved.toString();
+}
+
+} // namespace
 
 namespace LoginParser {
 
@@ -114,12 +139,13 @@ EntryEventResult parseEntryEvent(const QByteArray &body, const QUrl &baseUrl)
     if (studentVal.isObject()) {
         hasStudent = true;
         student = studentVal.toObject();
-        QString photoUrl = student.value(QStringLiteral("photo_url")).toString();
+        // Both the passthrough and the fallback are constrained to baseUrl's
+        // origin (see sameOriginPhotoUrl) — the response is untrusted input.
+        QString photoUrl =
+            sameOriginPhotoUrl(student.value(QStringLiteral("photo_url")).toString(), baseUrl);
         if (photoUrl.isEmpty()) {
-            const QString photoPath = student.value(QStringLiteral("photo_path")).toString();
-            photoUrl = photoPath.isEmpty()
-                           ? QString()
-                           : baseUrl.resolved(QUrl(photoPath)).toString();
+            photoUrl =
+                sameOriginPhotoUrl(student.value(QStringLiteral("photo_path")).toString(), baseUrl);
         }
         student.insert(QStringLiteral("photo_url"), photoUrl);   // always present
     } else if (!studentVal.isNull()) {

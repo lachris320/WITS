@@ -23,7 +23,9 @@ private slots:
     void debounceAllowsSameCodeAfterWindow();
     void parseEntryEvent_emptyPoll();
     void parseEntryEvent_entryWithStudentComposesPhotoUrl();
-    void parseEntryEvent_photoUrlPassthrough();
+    void parseEntryEvent_foreignHostPhotoUrlDropped();
+    void parseEntryEvent_fileSchemePhotoUrlDropped();
+    void parseEntryEvent_sameHostAbsolutePhotoUrlAccepted();
     void parseEntryEvent_noPhotoYieldsEmptyPhotoUrl();
     void parseEntryEvent_orphanedStudentNull();
     void parseEntryEvent_localTimeConvertedToUtc();
@@ -142,13 +144,42 @@ void TestLoginParser::parseEntryEvent_entryWithStudentComposesPhotoUrl()
     QVERIFY(!r.student.contains("card"));   // raw card never surfaced
 }
 
-void TestLoginParser::parseEntryEvent_photoUrlPassthrough()
+void TestLoginParser::parseEntryEvent_foreignHostPhotoUrlDropped()
 {
+    // A backend/MITM-supplied absolute photo_url on a foreign host must NOT be
+    // bound to the kiosk Image.source. It is dropped to empty (QML falls back to
+    // initials). The photo_path fallback is ALSO foreign here, so it stays empty.
     const QByteArray body = R"({"status":"success","latest_id":1,"entry":{
         "id":1,"created_at":"2026-09-29 08:30:00",
-        "student":{"name":"A","photo_url":"http://cdn/x.jpg","photo_path":"uploads/y.jpg"}}})";
+        "student":{"name":"A","photo_url":"http://evil.example/x.png","photo_path":"http://evil.example/y.jpg"}}})";
     const auto r = LoginParser::parseEntryEvent(body, QUrl("http://localhost/loams_api/"));
-    QCOMPARE(r.student.value("photo_url").toString(), QStringLiteral("http://cdn/x.jpg"));
+    QVERIFY(r.hasStudent);
+    QVERIFY(r.student.contains("photo_url"));   // key always present
+    QVERIFY(r.student.value("photo_url").toString().isEmpty());
+}
+
+void TestLoginParser::parseEntryEvent_fileSchemePhotoUrlDropped()
+{
+    // A file:// URL escapes the http(s) transport entirely (local disclosure).
+    const QByteArray body = R"({"status":"success","latest_id":1,"entry":{
+        "id":1,"created_at":"2026-09-29 08:30:00",
+        "student":{"name":"A","photo_url":"file:///C:/Users/secret.png"}}})";
+    const auto r = LoginParser::parseEntryEvent(body, QUrl("http://localhost/loams_api/"));
+    QVERIFY(r.hasStudent);
+    QVERIFY(r.student.contains("photo_url"));
+    QVERIFY(r.student.value("photo_url").toString().isEmpty());
+}
+
+void TestLoginParser::parseEntryEvent_sameHostAbsolutePhotoUrlAccepted()
+{
+    // An absolute photo_url matching baseUrl scheme + host + port is legitimate.
+    const QByteArray body = R"({"status":"success","latest_id":1,"entry":{
+        "id":1,"created_at":"2026-09-29 08:30:00",
+        "student":{"name":"A","photo_url":"http://localhost/loams_api/uploads/ok.png"}}})";
+    const auto r = LoginParser::parseEntryEvent(body, QUrl("http://localhost/loams_api/"));
+    QVERIFY(r.hasStudent);
+    QCOMPARE(r.student.value("photo_url").toString(),
+             QStringLiteral("http://localhost/loams_api/uploads/ok.png"));
 }
 
 void TestLoginParser::parseEntryEvent_noPhotoYieldsEmptyPhotoUrl()
