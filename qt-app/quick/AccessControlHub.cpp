@@ -5,6 +5,7 @@
 #include "apiconfig.h"
 #include "appsettings.h"
 #include "accesscontrol/accesscontrolservice.h"
+#include "accesscontrol/contactage.h"
 #include "accesscontrol/eventbus.h"
 #include "accesscontrol/healthmonitor.h"
 #include "accesscontrol/turnstileprovider.h"
@@ -148,4 +149,10 @@ void AccessControlHub::initialize()
         return;
 
     m_service->enable(m_descriptor, m_config);
+}
+
+QString AccessControlHub::contactAgeText(bool monitoringOn, const QVariant &lastContact,
+                                         const QVariant &now) const
+{
+    return formatContactAge(monitoringOn, lastContact.toDateTime(), now.toDateTime());
 }

@@ -379,3 +379,11 @@ wits_add_qttest(tst_turnstileprovider
         ${CMAKE_SOURCE_DIR}/testsupport/sequencednam.h
     LIBS Qt${QT_VERSION_MAJOR}::Network
     INCLUDES ${CMAKE_SOURCE_DIR}/core ${CMAKE_SOURCE_DIR}/testsupport)
+
+# --- Access Control: pure contact-age formatter (pure core, no offscreen) ---
+wits_add_qttest(tst_contactage
+    SOURCES
+        tst_contactage.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/contactage.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/contactage.h
+    INCLUDES ${CMAKE_SOURCE_DIR}/core)

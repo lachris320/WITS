@@ -52,6 +52,7 @@ add_library(witscore STATIC
     accesscontrol/healthmonitor.h accesscontrol/healthmonitor.cpp
     accesscontrol/accesscontrolservice.h accesscontrol/accesscontrolservice.cpp
     accesscontrol/turnstileprovider.h accesscontrol/turnstileprovider.cpp
+    accesscontrol/contactage.h accesscontrol/contactage.cpp
 )
 
 # AUTOMOC required (7 Q_OBJECT classes: the five *Controller + BrandingController

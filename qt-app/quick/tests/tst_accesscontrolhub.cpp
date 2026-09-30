@@ -33,6 +33,7 @@ private slots:
     void connectionStateRelaysService();
     void lastContactAdvancesPerPoll();
     void stateOnlyHealthChangeDoesNotEmitLastContact();
+    void contactAgeText_delegatesToPureFormatter();
 
 private:
     static QByteArray entryPayload(qint64 latest, qint64 id)
@@ -244,6 +245,18 @@ void TestAccessControlHub::stateOnlyHealthChangeDoesNotEmitLastContact()
     QVERIFY(state.count() >= 1);             // state-only HealthMonitor updates happened...
     QCOMPARE(contact.count(), 0);            // ...but lastCommTime never changed
     QVERIFY(!hub.lastContactAt().isValid());
+}
+
+void TestAccessControlHub::contactAgeText_delegatesToPureFormatter()
+{
+    AccessControlHub hub;                    // never initialized: stateless helper still works
+    const QDateTime t(QDate(2026, 9, 30), QTime(8, 0, 0), QTimeZone::UTC);
+    QCOMPARE(hub.contactAgeText(true, QVariant(t), QVariant(t.addSecs(5))),
+             QStringLiteral("Last contact 5 s ago"));
+    QCOMPARE(hub.contactAgeText(true, QVariant(), QVariant(t)),
+             QStringLiteral("No contact yet"));
+    QCOMPARE(hub.contactAgeText(false, QVariant(t), QVariant(t)),
+             QStringLiteral("Monitoring off"));
 }
 
 QTEST_MAIN(TestAccessControlHub)

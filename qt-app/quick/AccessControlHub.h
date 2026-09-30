@@ -46,6 +46,11 @@ public:
     // Idempotent; persist-first; refuses disable when enableLocked.
     Q_INVOKABLE void setAccessEnabled(bool on);
 
+    // Stateless QML entry point for the pure contact-age formatter. QVariant
+    // params so a JS null / Invalid Date becomes an invalid QDateTime.
+    Q_INVOKABLE QString contactAgeText(bool monitoringOn, const QVariant &lastContact,
+                                       const QVariant &now) const;
+
     static QVariantMap toAccessEntry(const AccessControl::AccessEvent &e);
 
     static AccessControlHub *instance();
