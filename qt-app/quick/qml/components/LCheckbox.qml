@@ -14,6 +14,19 @@ Item {
     // the inherited value.
     signal toggled(bool checked)
 
+    // Keyboard-operable: Tab reaches it (an Item is not tab-focusable by
+    // default) and Space/Enter/Return toggle exactly like a click. A disabled
+    // item never takes or acts on focus, so keys can't toggle it either.
+    activeFocusOnTab: true
+
+    // Single toggle path shared by the mouse, the keyboard and assistive tech.
+    function toggle() {
+        if (!root.enabled)
+            return;
+        root.checked = !root.checked;
+        root.toggled(root.checked);
+    }
+
     implicitHeight: Math.max(box.implicitHeight, labelText.implicitHeight)
     implicitWidth: row.implicitWidth
 
@@ -29,6 +42,16 @@ Item {
             border.width: 2
             border.color: root.checked ? Theme.brand.base : Theme.border
             opacity: root.enabled ? 1 : 0.5
+            // Focus ring: an outline just outside the box, brand token only.
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: -4
+                radius: Theme.radius.sm2 + 2
+                color: "transparent"
+                border.width: 2
+                border.color: Theme.brand.base
+                visible: root.activeFocus
+            }
             Text {
                 anchors.centerIn: parent
                 visible: root.checked
@@ -52,9 +75,21 @@ Item {
     MouseArea {
         anchors.fill: parent
         enabled: root.enabled
-        onClicked: { root.checked = !root.checked; root.toggled(root.checked); }
+        onClicked: root.toggle()
+    }
+    Keys.onPressed: function(event) {
+        if (!root.enabled)
+            return;
+        if (event.key === Qt.Key_Space || event.key === Qt.Key_Return
+                || event.key === Qt.Key_Enter) {
+            root.toggle();
+            event.accepted = true;
+        }
     }
     Accessible.role: Accessible.CheckBox
     Accessible.name: root.label
     Accessible.checked: root.checked
+    Accessible.focusable: true
+    Accessible.onPressAction: root.toggle()
+    Accessible.onToggleAction: root.toggle()
 }

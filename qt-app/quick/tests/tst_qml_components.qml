@@ -1530,6 +1530,38 @@ Item {
             compare(chk.checked, false);
             chk.enabled = true;
         }
+        // Keyboard operability: focusable, Space/Enter/Return toggle like a click.
+        function test_keyboardSpaceAndReturnToggle() {
+            var spy = signalSpy.createObject(chk, { target: chk, signalName: "toggled" });
+            chk.forceActiveFocus();
+            verify(chk.activeFocus);
+            keyClick(Qt.Key_Space);
+            compare(chk.checked, true);
+            compare(spy.count, 1);
+            compare(spy.signalArguments[0][0], true);
+            keyClick(Qt.Key_Return);
+            compare(chk.checked, false);
+            compare(spy.count, 2);
+            compare(spy.signalArguments[1][0], false);
+            keyClick(Qt.Key_Enter);
+            compare(chk.checked, true);
+            compare(spy.count, 3);
+            spy.destroy();
+        }
+        function test_keyboardIgnoredWhenDisabled() {
+            var spy = signalSpy.createObject(chk, { target: chk, signalName: "toggled" });
+            chk.enabled = false;
+            chk.forceActiveFocus();
+            keyClick(Qt.Key_Space);
+            keyClick(Qt.Key_Return);
+            compare(chk.checked, false);
+            compare(spy.count, 0);
+            chk.enabled = true;
+            spy.destroy();
+        }
+        function test_isTabFocusable() {
+            verify(chk.activeFocusOnTab);
+        }
     }
     Component { id: signalSpy; SignalSpy {} }
 

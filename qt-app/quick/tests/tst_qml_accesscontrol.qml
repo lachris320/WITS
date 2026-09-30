@@ -229,6 +229,43 @@ Item {
             hubStub.accessEnabled = true;             // and the binding is still live
             compare(toggle.checked, true);
         }
+        function test_keyboardSpaceTogglesHub() {
+            var toggle = findChild(ac, "monitorToggle");
+            toggle.forceActiveFocus();
+            verify(toggle.activeFocus);
+            keyClick(Qt.Key_Space);
+            compare(hubStub.setCalls, 1);
+            compare(hubStub.accessEnabled, true);
+            compare(toggle.checked, true);
+            keyClick(Qt.Key_Return);
+            compare(hubStub.setCalls, 2);
+            compare(hubStub.accessEnabled, false);
+            compare(toggle.checked, false);
+        }
+        function test_refusedKeyboardToggleSnapsBackAndKeepsBinding() {
+            var toggle = findChild(ac, "monitorToggle");
+            hubStub.refuse = true;
+            toggle.forceActiveFocus();
+            keyClick(Qt.Key_Space);
+            compare(hubStub.setCalls, 1);
+            compare(toggle.checked, false);
+            hubStub.accessEnabled = true;
+            compare(toggle.checked, true);
+        }
+        function test_lockedIgnoresKeyboardToggle() {
+            var toggle = findChild(ac, "monitorToggle");
+            hubStub.enableLocked = true;
+            toggle.forceActiveFocus();
+            keyClick(Qt.Key_Space);
+            compare(hubStub.setCalls, 0);
+            compare(toggle.checked, false);
+        }
+        // The hit area is the box + label, not the whole card width.
+        function test_toggleHitAreaIsBoundedToBoxAndLabel() {
+            var toggle = findChild(ac, "monitorToggle");
+            var card = findChild(ac, "monitoringCard");
+            verify(toggle.width < card.width / 2);
+        }
         function test_lockedDisablesToggleAndShowsNote() {
             var toggle = findChild(ac, "monitorToggle");
             hubStub.accessEnabled = true;

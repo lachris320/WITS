@@ -95,7 +95,6 @@ Rectangle {
                 LCheckbox {
                     id: monitorToggle
                     objectName: "monitorToggle"
-                    Layout.fillWidth: true
                     label: qsTr("Enable turnstile monitoring")
                     // The control never holds its own diverging state: it
                     // mirrors the hub's persisted INTENT.
@@ -104,7 +103,7 @@ Rectangle {
                     onToggled: function(checked) {
                         if (screen.hub)
                             screen.hub.setAccessEnabled(checked)
-                        // LCheckbox's MouseArea assigns `checked` imperatively,
+                        // LCheckbox (mouse or keyboard) assigns `checked` imperatively,
                         // which destroys the binding above. Re-assert it so a
                         // refused/locked call snaps back to the hub's value and
                         // later hub changes keep flowing in.
