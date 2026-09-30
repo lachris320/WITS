@@ -19,6 +19,7 @@ private slots:
     void showAdminResetsPageToDashboard();
     void showAdminPageRoutesToSettings();
     void newEnumValuesAreDistinct();
+    void accessControlAppendedLast();
     void showKioskClearsTheHeldAdminKey();
     void showKioskClearsEvenWhenAlreadyOnKiosk();
     void enteringAdminDoesNotClearTheHeldKey();
@@ -141,6 +142,18 @@ void TestNavigator::enteringAdminDoesNotClearTheHeldKey()
     nav.showAdminPage(Navigator::Settings);
 
     QCOMPARE(AdminSession::instance().key(), QStringLiteral("SECRET-1"));
+}
+
+void TestNavigator::accessControlAppendedLast()
+{
+    // Appended LAST so no existing AdminPage value shifts.
+    QCOMPARE(int(Navigator::Settings), 5);
+    QCOMPARE(int(Navigator::AccessControl), 6);
+    Navigator nav;
+    QSignalSpy spy(&nav, &Navigator::adminPageChanged);
+    nav.showAdminPage(Navigator::AccessControl);
+    QCOMPARE(nav.adminPage(), Navigator::AccessControl);
+    QCOMPARE(spy.count(), 1);
 }
 
 QTEST_MAIN(TestNavigator)

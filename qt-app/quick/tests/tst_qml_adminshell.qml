@@ -160,13 +160,13 @@ Item {
             compare(loader.item.objectName, "visitLogsPage");
         }
 
-        // All six admin items are enabled as of Phase 4c; the disabled-item
+        // All seven admin items are enabled (Access Control added in Sub-plan 4); the disabled-item
         // guard is now exercised by tst_qml_components.qml's LSideNav fixture
         // (which keeps a disabled "database" item). Here, assert every item
         // activates.
         function test_allSidebarItemsActivate() {
             var nav = findChild(shell, "sideNav");
-            var keys = ["dashboard","search","visitlogs","database","reporting","settings"];
+            var keys = ["dashboard","search","visitlogs","database","reporting","settings","accesscontrol"];
             for (var i = 0; i < keys.length; i++) {
                 activationSpy.clear();
                 nav.activate(keys[i]);
@@ -292,6 +292,21 @@ Item {
             compare(header.title, "Reporting");
             Navigator.showAdminPage(Navigator.Settings);
             compare(header.title, "Settings");
+        }
+        // Sub-plan 4: the Access Control page is fully wired through the real
+        // sidebar, Navigator, header title and Loader — and the autoLoad gate
+        // keeps its real AccessControlViewModel offline.
+        function test_accessControlItemRoutesToAccessControlScreen() {
+            var nav = findChild(shell, "sideNav");
+            var loader = findChild(shell, "pageLoader");
+            var header = findChild(shell, "pageHeader");
+            nav.activate("accesscontrol");
+            compare(Navigator.adminPage, Navigator.AccessControl);
+            compare(loader.item.objectName, "accessControlPage");
+            compare(header.title, "Access Control");
+            compare(nav.currentPage, "accesscontrol");
+            compare(loader.item.vm.loading, false);    // no refresh() under autoLoad: false
+            compare(loader.item.hub, AccessControl);   // production default binding
         }
     }
 }

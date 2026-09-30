@@ -52,6 +52,7 @@ qt_add_qml_module(witsquickmodule
         qml/admin/BulkEditDialog.qml
         qml/admin/ReportingScreen.qml
         qml/admin/SettingsScreen.qml
+        qml/admin/AccessControlScreen.qml
         qml/components/LButton.qml
         qml/components/LCard.qml
         qml/components/LTable.qml

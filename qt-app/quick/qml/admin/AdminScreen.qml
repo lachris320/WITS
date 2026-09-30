@@ -29,6 +29,7 @@ Rectangle {
     DatabaseViewModel  { id: databaseVm }
     SettingsViewModel  { id: settingsVm }
     ReportingViewModel { id: reportingVm }
+    AccessControlViewModel { id: accessControlVm }
 
     // Read-only school identity (logo + name) for the sidebar brand block.
     // Reads QSettings at construction and again on demand via reload().
@@ -69,6 +70,7 @@ Rectangle {
         case Navigator.Database:   return qsTr("Database");
         case Navigator.Reporting:  return qsTr("Reporting");
         case Navigator.Settings:   return qsTr("Settings");
+        case Navigator.AccessControl: return qsTr("Access Control");
         default:                   return qsTr("Dashboard");
         }
     }
@@ -90,19 +92,21 @@ Rectangle {
             // `page` key, so no row would ever highlight. Map to string keys
             // here instead — LSideNav itself stays untouched, and this
             // matches the string keys Task 9 already built/tested it with.
-            currentPage: Navigator.adminPage === Navigator.Search    ? "search"
-                       : Navigator.adminPage === Navigator.VisitLogs ? "visitlogs"
-                       : Navigator.adminPage === Navigator.Database  ? "database"
-                       : Navigator.adminPage === Navigator.Reporting ? "reporting"
-                       : Navigator.adminPage === Navigator.Settings  ? "settings"
+            currentPage: Navigator.adminPage === Navigator.Search        ? "search"
+                       : Navigator.adminPage === Navigator.VisitLogs     ? "visitlogs"
+                       : Navigator.adminPage === Navigator.Database      ? "database"
+                       : Navigator.adminPage === Navigator.Reporting     ? "reporting"
+                       : Navigator.adminPage === Navigator.Settings      ? "settings"
+                       : Navigator.adminPage === Navigator.AccessControl ? "accesscontrol"
                        : "dashboard"
             items: [
-                { page: "dashboard", label: qsTr("Dashboard"),  enabled: true },
-                { page: "search",    label: qsTr("Search"),     enabled: true },
-                { page: "visitlogs", label: qsTr("Visit Logs"), enabled: true },
-                { page: "database",  label: qsTr("Database"),   enabled: true },
-                { page: "reporting", label: qsTr("Reporting"),  enabled: true },
-                { page: "settings",  label: qsTr("Settings"),   enabled: true }
+                { page: "dashboard",     label: qsTr("Dashboard"),      enabled: true },
+                { page: "search",        label: qsTr("Search"),         enabled: true },
+                { page: "visitlogs",     label: qsTr("Visit Logs"),     enabled: true },
+                { page: "database",      label: qsTr("Database"),       enabled: true },
+                { page: "reporting",     label: qsTr("Reporting"),      enabled: true },
+                { page: "settings",      label: qsTr("Settings"),       enabled: true },
+                { page: "accesscontrol", label: qsTr("Access Control"), enabled: true }
             ]
             // Every key is matched explicitly, including "dashboard". A bare
             // `else -> Dashboard` fallthrough would silently route ANY
@@ -123,6 +127,8 @@ Rectangle {
                     Navigator.showAdminPage(Navigator.Reporting)
                 else if (page === "settings")
                     Navigator.showAdminPage(Navigator.Settings)
+                else if (page === "accesscontrol")
+                    Navigator.showAdminPage(Navigator.AccessControl)
                 else
                     console.warn("AdminScreen: no route for page key", page)
             }
@@ -166,6 +172,7 @@ Rectangle {
                     case Navigator.Database:  return databaseComponent;
                     case Navigator.Reporting: return reportingComponent;
                     case Navigator.Settings:  return settingsComponent;
+                    case Navigator.AccessControl: return accessControlComponent;
                     default:                  return dashboardComponent;
                     }
                 }
@@ -196,4 +203,5 @@ Rectangle {
     Component { id: databaseComponent;  DatabaseScreen  { objectName: "databasePage"; vm: databaseVm } }
     Component { id: reportingComponent; ReportingScreen { objectName: "reportingPage"; vm: reportingVm } }
     Component { id: settingsComponent;  SettingsScreen  { objectName: "settingsPage";  vm: settingsVm } }
+    Component { id: accessControlComponent; AccessControlScreen { objectName: "accessControlPage"; vm: accessControlVm } }
 }

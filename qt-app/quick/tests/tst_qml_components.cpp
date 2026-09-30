@@ -1,5 +1,6 @@
 #include <QtQuickTest/quicktest.h>
 #include <QQmlEngine>
+#include "AccessControlHub.h"
 
 class Setup : public QObject
 {
@@ -13,6 +14,11 @@ public slots:
         // lives only in this test's .qml data file, which qmlimportscanner
         // never sees, so the automatic static-plugin import never fires.
         engine->addImportPath(QStringLiteral("qrc:/qt/qml"));
+        // Every QuickTest target runs every tst_*.qml in QUICK_TEST_SOURCE_DIR,
+        // so the AccessControl singleton must resolve here too. Live-but-
+        // disabled hub (never initialize() -> no polling).
+        static AccessControlHub hub;
+        AccessControlHub::setInstance(&hub);
     }
 };
 
