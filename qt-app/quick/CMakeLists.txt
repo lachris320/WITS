@@ -104,6 +104,7 @@ qt_add_qml_module(witsquickmodule
         viewmodels/SettingsViewModel.h viewmodels/SettingsViewModel.cpp
         viewmodels/ImportViewModel.cpp viewmodels/ImportViewModel.h
         viewmodels/ReportingViewModel.h viewmodels/ReportingViewModel.cpp
+        viewmodels/AccessControlViewModel.h viewmodels/AccessControlViewModel.cpp
         AccessControlHub.h AccessControlHub.cpp
         AccessControlSingleton.h
 )
@@ -323,6 +324,17 @@ wits_add_qttest(tst_dashboardviewmodel
 # (qt-app/testsupport) — mirrors tst_databaseviewmodel's approach. ---
 wits_add_qttest(tst_visitlogsviewmodel
     SOURCES tests/tst_visitlogsviewmodel.cpp
+        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
+        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
+    OFFSCREEN)
+
+# --- AccessControlViewModel unit test (C++ QtTest, offscreen). admin_key in
+# the POST body, 401/5xx/transport paths and the generation guard, all via the
+# CapturingNam harness (qt-app/testsupport) — no live network. ---
+wits_add_qttest(tst_accesscontrolviewmodel
+    SOURCES tests/tst_accesscontrolviewmodel.cpp
         ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
         ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
