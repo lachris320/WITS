@@ -2,8 +2,10 @@
 #define LOGINPARSER_H
 
 #include <QByteArray>
+#include <QDateTime>
 #include <QJsonObject>
 #include <QString>
+#include <QUrl>
 
 // Pure, widget-free, network-free decode + decision logic for the kiosk login
 // flows (student / admin / RFID / debounce). Extracted from mainwindow.cpp so
@@ -26,12 +28,27 @@ struct RfidResult {
     QString message;
 };
 
+struct EntryEventResult {
+    bool        valid      = false;   // false = malformed JSON/schema (protocol failure)
+    bool        hasEntry   = false;   // valid && an entry row was returned
+    qint64      latestId   = 0;       // MAX(id); 0 on empty table
+    qint64      eventId    = 0;       // the returned entry's id (cursor advance target)
+    bool        hasStudent = false;   // entry present && student resolved
+    QJsonObject student;              // normalized student incl. photo_url; empty if unresolved
+    QDateTime   at;                   // entry time, UTC (converted from server-local)
+    QString     error;                // reason when !valid
+};
+
 // Numeric (QString::toLongLong succeeds) -> StudentId, else AdminKey.
 // Mirrors mainwindow.cpp:193 exactly, including the dashed-ID quirk.
 LoginKind classify(const QString &input);
 
 LoginResult parseLoginResponse(const QByteArray &json);
 RfidResult  parseRfidResponse(const QByteArray &json);
+
+// Pure decode of turnstile_display.php. photo_url is composed from a relative
+// photo_path against baseUrl (parser stays ApiConfig-free). See design spec §1.
+EntryEventResult parseEntryEvent(const QByteArray &body, const QUrl &baseUrl);
 
 // Charset/length gate before POSTing a scanned code to rfid_login.php:
 // non-empty, 3..64 chars, ASCII alphanumeric only.

@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QJsonObject>
+#include <QUrl>
 #include "loginparser.h"
 
 class TestLoginParser : public QObject
@@ -20,6 +21,13 @@ private slots:
     void debounceIgnoresSameCodeInWindow();
     void debounceAllowsDifferentCode();
     void debounceAllowsSameCodeAfterWindow();
+    void parseEntryEvent_emptyPoll();
+    void parseEntryEvent_entryWithStudentComposesPhotoUrl();
+    void parseEntryEvent_photoUrlPassthrough();
+    void parseEntryEvent_noPhotoYieldsEmptyPhotoUrl();
+    void parseEntryEvent_orphanedStudentNull();
+    void parseEntryEvent_localTimeConvertedToUtc();
+    void parseEntryEvent_malformedIsInvalid();
 };
 
 void TestLoginParser::classifyPureDigitsIsStudent()
@@ -108,6 +116,88 @@ void TestLoginParser::debounceAllowsDifferentCode()
 void TestLoginParser::debounceAllowsSameCodeAfterWindow()
 {
     QVERIFY(!LoginParser::shouldDebounceRfid("ABC1", 1000, "ABC1", 4000, 2500));
+}
+
+void TestLoginParser::parseEntryEvent_emptyPoll()
+{
+    const QByteArray body = R"({"status":"success","latest_id":5,"entry":null})";
+    const auto r = LoginParser::parseEntryEvent(body, QUrl("http://localhost/loams_api/"));
+    QVERIFY(r.valid);
+    QVERIFY(!r.hasEntry);
+    QCOMPARE(r.latestId, Q_INT64_C(5));
+}
+
+void TestLoginParser::parseEntryEvent_entryWithStudentComposesPhotoUrl()
+{
+    const QByteArray body = R"({"status":"success","latest_id":11,"entry":{
+        "id":11,"card":"ABC","created_at":"2026-09-29 08:30:00","reader":0,
+        "student":{"name":"Jane Cruz","photo_path":"uploads/jane.jpg"}}})";
+    const auto r = LoginParser::parseEntryEvent(body, QUrl("http://localhost/loams_api/"));
+    QVERIFY(r.valid);
+    QVERIFY(r.hasEntry);
+    QCOMPARE(r.eventId, Q_INT64_C(11));
+    QVERIFY(r.hasStudent);
+    QCOMPARE(r.student.value("photo_url").toString(),
+             QStringLiteral("http://localhost/loams_api/uploads/jane.jpg"));
+    QVERIFY(!r.student.contains("card"));   // raw card never surfaced
+}
+
+void TestLoginParser::parseEntryEvent_photoUrlPassthrough()
+{
+    const QByteArray body = R"({"status":"success","latest_id":1,"entry":{
+        "id":1,"created_at":"2026-09-29 08:30:00",
+        "student":{"name":"A","photo_url":"http://cdn/x.jpg","photo_path":"uploads/y.jpg"}}})";
+    const auto r = LoginParser::parseEntryEvent(body, QUrl("http://localhost/loams_api/"));
+    QCOMPARE(r.student.value("photo_url").toString(), QStringLiteral("http://cdn/x.jpg"));
+}
+
+void TestLoginParser::parseEntryEvent_noPhotoYieldsEmptyPhotoUrl()
+{
+    const QByteArray body = R"({"status":"success","latest_id":1,"entry":{
+        "id":1,"created_at":"2026-09-29 08:30:00","student":{"name":"A"}}})";
+    const auto r = LoginParser::parseEntryEvent(body, QUrl("http://localhost/loams_api/"));
+    QVERIFY(r.hasStudent);
+    QVERIFY(r.student.contains("photo_url"));
+    QVERIFY(r.student.value("photo_url").toString().isEmpty());
+}
+
+void TestLoginParser::parseEntryEvent_orphanedStudentNull()
+{
+    const QByteArray body = R"({"status":"success","latest_id":9,"entry":{
+        "id":9,"created_at":"2026-09-29 08:30:00","student":null}})";
+    const auto r = LoginParser::parseEntryEvent(body, QUrl("http://localhost/loams_api/"));
+    QVERIFY(r.valid);
+    QVERIFY(r.hasEntry);
+    QVERIFY(!r.hasStudent);
+    QVERIFY(r.student.isEmpty());
+}
+
+void TestLoginParser::parseEntryEvent_localTimeConvertedToUtc()
+{
+    const QByteArray body = R"({"status":"success","latest_id":2,"entry":{
+        "id":2,"created_at":"2026-09-29 08:30:00","student":null}})";
+    const auto r = LoginParser::parseEntryEvent(body, QUrl("http://localhost/loams_api/"));
+    QVERIFY(r.at.isValid());
+    QCOMPARE(r.at.timeSpec(), Qt::UTC);
+    QDateTime local(QDate(2026, 9, 29), QTime(8, 30, 0));   // Qt::LocalTime
+    QCOMPARE(r.at, local.toUTC());
+}
+
+void TestLoginParser::parseEntryEvent_malformedIsInvalid()
+{
+    const QUrl base("http://localhost/loams_api/");
+    QVERIFY(!LoginParser::parseEntryEvent("not json", base).valid);
+    QVERIFY(!LoginParser::parseEntryEvent(R"({"status":"error"})", base).valid);
+    QVERIFY(!LoginParser::parseEntryEvent(
+        R"({"status":"success","latest_id":1,"entry":3})", base).valid);
+    QVERIFY(!LoginParser::parseEntryEvent(
+        R"({"status":"success","latest_id":1,"entry":{"id":0,"created_at":"2026-09-29 08:30:00","student":null}})", base).valid);
+    QVERIFY(!LoginParser::parseEntryEvent(
+        R"({"status":"success","latest_id":1,"entry":{"id":1,"created_at":"nope","student":null}})", base).valid);
+    QVERIFY(!LoginParser::parseEntryEvent(
+        R"({"status":"success","latest_id":-1,"entry":null})", base).valid);
+    QVERIFY(!LoginParser::parseEntryEvent(
+        R"({"status":"success","latest_id":1,"entry":{"id":1,"created_at":"2026-09-29 08:30:00","student":5}})", base).valid);
 }
 
 QTEST_MAIN(TestLoginParser)
