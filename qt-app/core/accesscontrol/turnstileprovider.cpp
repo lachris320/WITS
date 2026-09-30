@@ -2,6 +2,7 @@
 #include "accesscontrol/replylifecycle.h"
 #include "loginparser.h"
 
+#include <QDateTime>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -102,14 +103,27 @@ void TurnstileProvider::fail()
 
 void TurnstileProvider::onFinished(QNetworkReply *reply, quint64 gen)
 {
-    if (gen != m_generation) return;   // stale (stopped/restarted since) — drop
+    if (gen != m_generation) return;   // stale (stopped/restarted since) — drop, never emit
     m_reply.clear();
 
-    if (reply->error() != QNetworkReply::NoError) { fail(); return; }
+    if (reply->error() != QNetworkReply::NoError) { fail(); return; }   // transport / non-2xx
 
     const LoginParser::EntryEventResult r =
         LoginParser::parseEntryEvent(reply->readAll(), m_baseUrl);
-    if (!r.valid) { fail(); return; }
+    if (!r.valid) { fail(); return; }  // malformed / failed schema validation
+
+    // A non-advancing entry is a protocol anomaly (failed validation), checked
+    // BEFORE the freshness report so an anomalous poll never bumps comm age and
+    // a bad reconnect response goes Connecting -> Degraded with no transient
+    // Connected.
+    if (m_baselined && r.hasEntry && r.eventId <= m_since) { fail(); return; }
+
+    // Validated successful poll (incl. a valid empty poll AND the baseline):
+    // report the raw freshness fact. The SERVICE records it into HealthMonitor.
+    // For the baseline this precedes the Connected transition, which the
+    // service also records — same instant, harmless double record (pinned).
+    emit polled(QDateTime::currentDateTimeUtc());
+    if (gen != m_generation) return;   // a polled subscriber stopped/restarted us
 
     if (!m_baselined) {                    // first start: baseline, skip history
         m_since = r.latestId;
@@ -120,9 +134,6 @@ void TurnstileProvider::onFinished(QNetworkReply *reply, quint64 gen)
     }
 
     if (r.hasEntry) {
-        if (r.eventId <= m_since) { fail(); return; }   // non-advancing: protocol anomaly
-        // Confirm Connected only AFTER the anomaly guard so a bad reconnect
-        // response goes Connecting -> Degraded with no transient Connected.
         setState(ConnectionState::Connected);
         if (gen != m_generation) return;   // a state subscriber stopped/restarted us
         AccessEvent e;

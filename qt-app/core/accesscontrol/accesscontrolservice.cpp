@@ -75,6 +75,16 @@ void AccessControlService::enable(const ProviderDescriptor &descriptor,
             &AccessControlService::onProviderState);
     connect(m_provider, &IAccessProvider::hardwareError, this,
             &AccessControlService::onHardwareError);
+    // Per-poll freshness (Sub-plan 4): the provider reports each validated
+    // successful poll; the SERVICE owns recording it (the provider never touches
+    // HealthMonitor). Pinned to this provider instance and dropped once
+    // disabled, so a late callback from a torn-down provider records nothing.
+    connect(m_provider, &IAccessProvider::polled, this,
+            [this, p, providerId](const QDateTime &at) {
+                if (!m_enabled || p != m_provider)
+                    return;
+                m_health->recordCommTime(providerId, at);
+            });
 
     m_enabled = true;
     m_reconnectNextMs = m_reconnectBaseMs;
@@ -124,9 +134,13 @@ void AccessControlService::onProviderState(ConnectionState state)
     case ConnectionState::Connected:
         m_reconnectNextMs = m_reconnectBaseMs;   // reset backoff on success
         m_reconnectTimer->stop();                // cancel any pending reconnect
-        // A successful connect IS a real comm moment — record the time. Latency
-        // stays -1 (unknown) until the verify/decision path measures a real one;
-        // never fabricate a zero.
+        // A successful connect IS a real comm moment — record the time. This is
+        // one of TWO service-owned freshness sources (the other is the per-poll
+        // polled(at) connection in enable()); it is kept deliberately: it is the
+        // only source for providers that never emit polled (MockProvider), and
+        // for TurnstileProvider it coincides with the baseline's own polled
+        // record (same instant, harmless overwrite). Latency stays -1 (unknown)
+        // until the verify/decision path measures a real one; never fabricate.
         m_health->recordCommTime(m_provider->descriptor().providerId,
                                  QDateTime::currentDateTimeUtc());
         publishControllerEvent(AccessEvent::Type::ControllerConnected);

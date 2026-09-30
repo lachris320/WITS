@@ -26,6 +26,7 @@ public:
     void simulateEntryObserved(const QString &gateId);
     void simulateHardwareError(const QString &message);
     void simulateDisconnect();
+    void simulatePolled(const QDateTime &at);
 
     static ProviderDescriptor defaultDescriptor();
 

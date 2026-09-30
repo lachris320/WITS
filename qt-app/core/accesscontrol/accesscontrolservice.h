@@ -19,7 +19,8 @@ class HealthMonitor;
 // enable() is called. enable() builds the provider via the factory, republishes
 // its accessEvents onto the EventBus, and drives a per-provider connection
 // state machine (Disconnected -> Connecting -> Connected -> Degraded/Error)
-// with exponential backoff reconnect. Owns its HealthMonitor.
+// with exponential backoff reconnect. Owns its HealthMonitor and records each
+// provider-reported polled(at) into it (per-poll comm freshness).
 class AccessControlService : public QObject
 {
     Q_OBJECT

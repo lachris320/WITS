@@ -16,6 +16,7 @@ private slots:
     void simulateEmitsEachEventTypeIndependently();
     void simulateHardwareErrorEmitsSignal();
     void descriptorRoundTrips();
+    void simulatePolledEmitsPolled();
 };
 
 void TestMockProvider::startsIntoConnectedState()
@@ -86,6 +87,16 @@ void TestMockProvider::descriptorRoundTrips()
     MockProvider p(d);
     QCOMPARE(p.descriptor().providerId, d.providerId);
     QCOMPARE(p.descriptor().providerId, QStringLiteral("mock"));
+}
+
+void TestMockProvider::simulatePolledEmitsPolled()
+{
+    MockProvider p(MockProvider::defaultDescriptor());
+    QSignalSpy polled(&p, &IAccessProvider::polled);
+    const QDateTime at = QDateTime::currentDateTimeUtc();
+    p.simulatePolled(at);
+    QCOMPARE(polled.count(), 1);
+    QCOMPARE(polled.at(0).at(0).toDateTime(), at);
 }
 
 QTEST_MAIN(TestMockProvider)
