@@ -23,6 +23,7 @@ private slots:
     void refresh_http5xxAfterSuccessIsStale();
     void refresh_repeatedIdenticalFailureReEmitsErrorText();
     void refresh_clearsErrorButKeepsStaleAuthAndUpdatedAtWhileLoading();
+    void refresh_afterFailedFirstLoad_notifiesInitialLoadFailedClearedWithLoading();
     void refresh_http401_setsAuthFailureAndClearsProtectedData();
     void refresh_http401WithEmptyOrMalformedBodyIsStillAuthFailure();
     void authFailure_resetByLaterSuccess();
@@ -208,6 +209,32 @@ void TestAccessControlViewModel::refresh_clearsErrorButKeepsStaleAuthAndUpdatedA
     QVERIFY(authVm.errorText().isEmpty());
     QVERIFY(!authVm.initialLoadFailed());
     QTRY_VERIFY_WITH_TIMEOUT(!authVm.loading(), 1000);
+}
+
+void TestAccessControlViewModel::refresh_afterFailedFirstLoad_notifiesInitialLoadFailedClearedWithLoading()
+{
+    // initialLoadFailed is derived from errorText and NOTIFYs via dataChanged.
+    // Clearing the error on refresh() flips it true -> false, so QML must be told
+    // (dataChanged), and by the time loadingChanged fires the cleared state must
+    // already be visible, or the table keeps the failure text for the whole retry.
+    CapturingNam nam(QByteArray(), QNetworkReply::HostNotFoundError, 0);
+    AccessControlViewModel vm(nullptr, &nam);
+    vm.refresh();
+    QTRY_VERIFY_WITH_TIMEOUT(!vm.loading(), 1000);
+    QVERIFY(vm.initialLoadFailed());                          // failed FIRST load
+
+    QSignalSpy data(&vm, &AccessControlViewModel::dataChanged);
+    bool failedWhenLoadingStarted = true;
+    connect(&vm, &AccessControlViewModel::loadingChanged, &vm, [&]() {
+        if (vm.loading())
+            failedWhenLoadingStarted = vm.initialLoadFailed();
+    });
+    vm.refresh();
+    QVERIFY(vm.loading());
+    QVERIFY(!vm.initialLoadFailed());
+    QVERIFY(data.count() >= 1);                               // QML told initialLoadFailed changed
+    QVERIFY(!failedWhenLoadingStarted);                       // loading=true seen with it already false
+    QTRY_VERIFY_WITH_TIMEOUT(!vm.loading(), 1000);
 }
 
 void TestAccessControlViewModel::refresh_http401_setsAuthFailureAndClearsProtectedData()

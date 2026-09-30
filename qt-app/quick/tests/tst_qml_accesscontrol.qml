@@ -125,7 +125,7 @@ Item {
             // Not a successful empty load (emptyFeed false) -> no "No entries yet".
             acVmStub.emptyFeed = false;
             var neutral = findChild(table, "tableEmptyState").text;
-            verify(neutral !== "No entries yet");
+            compare(neutral, "");
             acVmStub.emptyFeed = true;
             compare(findChild(table, "tableEmptyState").text, "No entries yet");
         }

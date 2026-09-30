@@ -66,7 +66,7 @@ Rectangle {
         interval: 1000
         repeat: true
         triggeredOnStart: true
-        running:screen.visible && screen.monitoringOn
+        running: screen.visible && screen.monitoringOn
         onTriggered: screen.now = new Date()
     }
 

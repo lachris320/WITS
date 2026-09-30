@@ -29,11 +29,18 @@ bool AccessControlViewModel::initialLoadFailed() const
 
 void AccessControlViewModel::refresh()
 {
-    setLoading(true);
     // Clear ONLY the error text when a request starts, so a repeated identical
     // failure re-emits errorTextChanged (the view toasts on it). Rows, stale,
     // updatedAt and authFailure are deliberately left as-is until the reply.
+    // Done BEFORE setLoading(true) so the loadingChanged-driven re-evaluation
+    // already sees the cleared state, and dataChanged is raised when the clear
+    // flips the derived initialLoadFailed (it NOTIFYs via dataChanged, which
+    // setError alone does not emit).
+    const bool wasInitialLoadFailed = initialLoadFailed();
     setError(QString());
+    if (wasInitialLoadFailed)
+        emit dataChanged();
+    setLoading(true);
     // admin_key rides the urlencoded POST body ONLY (never the query string):
     // the backend's extractAdminKey() reads $_POST, and a secret in the URL
     // would leak into access logs.
