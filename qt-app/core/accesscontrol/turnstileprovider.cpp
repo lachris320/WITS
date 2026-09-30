@@ -1,4 +1,5 @@
 #include "accesscontrol/turnstileprovider.h"
+#include "accesscontrol/replylifecycle.h"
 #include "loginparser.h"
 
 #include <QNetworkAccessManager>
@@ -86,11 +87,7 @@ void TurnstileProvider::sendPoll()
     reply->setParent(this);           // provider owns its reply lifecycle
     m_reply = reply;
 
-    connect(reply, &QNetworkReply::finished, reply, &QObject::deleteLater);
-    QTimer *timer = new QTimer(reply);
-    timer->setSingleShot(true);
-    connect(timer, &QTimer::timeout, reply, [reply]() { reply->abort(); });
-    timer->start(m_timeoutMs);
+    armReplyLifecycle(reply, m_timeoutMs);
 
     connect(reply, &QNetworkReply::finished, this,
             [this, reply, gen]() { onFinished(reply, gen); });

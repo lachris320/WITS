@@ -1,4 +1,5 @@
 #include "accesscontrol/accessdecisionservice.h"
+#include "accesscontrol/replylifecycle.h"
 #include "apiconfig.h"
 
 #include <QJsonDocument>
@@ -82,21 +83,13 @@ void AccessDecisionService::verify(const Credential &credential)
     QNetworkReply *reply =
         m_nam->post(request, form.query(QUrl::FullyEncoded).toUtf8());
 
-    // Lifecycle: verify() is fire-and-forget. The reply's cleanup is bound to
-    // the REPLY itself (not to `this`), so it is always deleted when it finishes
-    // even if this service is destroyed while the request is in flight — no leak
-    // against the long-lived injected NAM. The decode handler below uses `this`
-    // as its context object, so Qt auto-disconnects it if the service dies first;
-    // a late reply is then simply dropped (no use-after-free, no spurious emit).
-    connect(reply, &QNetworkReply::finished, reply, &QObject::deleteLater);
-
-    // Timeout timer parented to the reply so it dies with the reply (no leak,
-    // no manual delete). On timeout it aborts the reply, which finishes it with
-    // OperationCanceledError and routes to the Error branch below.
-    QTimer *timer = new QTimer(reply);
-    timer->setSingleShot(true);
-    connect(timer, &QTimer::timeout, reply, [reply]() { reply->abort(); });
-    timer->start(m_timeoutMs);
+    // Reply self-cleanup + single-shot timeout are wired by armReplyLifecycle()
+    // (see replylifecycle.h): fire-and-forget, bound to the reply itself so it is
+    // always deleted on finish and a timeout aborts it into the Error branch below.
+    // The decode handler below uses `this` as its context object, so Qt
+    // auto-disconnects it if the service dies first; a late reply is then simply
+    // dropped (no use-after-free, no spurious emit).
+    armReplyLifecycle(reply, m_timeoutMs);
 
     connect(reply, &QNetworkReply::finished, this, [this, reply, correlationId, gen]() {
         if (gen != m_generation)
