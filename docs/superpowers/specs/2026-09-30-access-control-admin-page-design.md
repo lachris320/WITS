@@ -79,9 +79,12 @@ Mirrors `DashboardViewModel` (admin-key POST to a read endpoint) and
   never a query string** (security-hygiene).
 - Properties: `entriesToday:int`, `lastEntryAt:QString`, `updatedAt:QString`
   ("Updated …" source), `loading:bool`, `stale:bool`, `errorText:QString`,
-  `AccessEntriesModel *entries`.
-- Signals: standard `*Changed`, plus `authFailed()` (401 → existing
-  session-expiry flow, refinement 6).
+  `authFailure:bool`, `AccessEntriesModel *entries`.
+- Signals: standard `*Changed` only. Auth loss is surfaced through the
+  `authFailure` property, mirroring `DatabaseViewModel` / `ImportViewModel`
+  (`Q_PROPERTY(bool authFailure …)` + a fixed "re-enter via admin login"
+  message) — see refinement 6. There is **no** app-wide session-expiry flow in
+  the codebase today, and this slice does not invent one.
 - Generation guard (`nextRequestSeq()` / `isCurrentRequest(seq)`) so a superseded
   refresh reply is dropped — same idiom as `VisitLogsViewModel`.
 - Network-free seam `void applyRecent(const QByteArray &raw)` for tests and the
@@ -107,8 +110,34 @@ status → `valid=false` with `error` set (feeds the refresh-failure path).
 
 ## Hub extensions — `AccessControlHub` (the `AccessControl` singleton)
 
-The hub retains the `ProviderDescriptor` + config it builds in `initialize()` so
-it can re-enable the service live.
+Today the hub exposes only `isAccessEnabled()` (a plain method returning
+`m_service->isEnabled()`) and `entryObserved`; the descriptor and config are
+locals inside `initialize()` (`AccessControlHub.cpp`). This slice adds, as
+explicit implementation requirements:
+
+- **Retained state:** `m_descriptor` (`ProviderDescriptor`), `m_config`
+  (`QVariantMap`, the same raw pollIntervalMs/gateId map `initialize()` builds
+  today), `m_providerId` (= `m_descriptor.id`), `m_intentEnabled` (bool) and
+  `m_enableLocked` (bool). `initialize()` fills all five on **every** path —
+  including the flag-off early return, so a later runtime enable has a
+  descriptor + config to pass.
+- **Q_PROPERTYs + NOTIFY signals:** `accessEnabled`/`accessEnabledChanged`,
+  `enableLocked` (CONSTANT), `connectionState`/`connectionStateChanged`,
+  `lastContactAt`/`lastContactChanged`, plus `Q_INVOKABLE setAccessEnabled`.
+  `isAccessEnabled()` now returns `m_intentEnabled` (intent), not the service
+  flag — existing callers (`main.cpp`, `tst_accesscontrolhub`) must keep
+  passing, which holds because intent == service-enabled on every path except a
+  refused disable.
+- **Signal plumbing (constructor):** `AccessControlService::connectionStateChanged`
+  → hub re-emits `connectionStateChanged`; `HealthMonitor::healthChanged`
+  (via `m_service->healthMonitor()`) → hub emits `lastContactChanged` **only**
+  when the snapshot's `providerId == m_providerId` and its `lastCommTime`
+  actually changed (so state-only health updates don't churn the view).
+  `lastContactAt()` reads `healthMonitor()->snapshot(m_providerId).lastCommTime`.
+- `connectionState` is exposed as `int` (the `ConnectionState` enum value);
+  the QML maps ints to labels. `ConnectionState` is a plain `enum class` with no
+  `Q_ENUM`, so the mapping order (Disconnected=0 … Error=4) is pinned by a
+  hub test rather than a QML enum import.
 
 ### Enable = requested intent, separate from connection outcome (refinement 5)
 
@@ -180,9 +209,13 @@ arrives (e.g. during an outage the age must keep climbing). So:
 
 ### `AccessControlScreen.qml` (`qt-app/quick/qml/admin/`, `property var vm`)
 
-- Header **LCard** with the **Enable turnstile monitoring** `LSwitch` bound to
-  `AccessControl.accessEnabled` (calls `AccessControl.setAccessEnabled(...)`),
-  disabled when `AccessControl.enableLocked`, with helper text: *"Controls this
+- Header **LCard** with an **Enable turnstile monitoring** toggle built from
+  the existing `LCheckbox` component (there is no `LSwitch`; adding a new
+  switch primitive is out of scope). `checked` binds to
+  `AccessControl.accessEnabled`; `onToggled(checked)` calls
+  `AccessControl.setAccessEnabled(checked)` (the control must not hold its own
+  diverging state — after a refused/locked call the binding re-asserts the
+  hub's value). `enabled: !AccessControl.enableLocked`. Helper text: *"Controls this
   app's turnstile event polling and kiosk display. It does not disable the
   physical gate or stop server-side attendance recording."* When locked, an
   inline note explains the environment override.
@@ -198,9 +231,19 @@ arrives (e.g. during an outage the age must keep climbing). So:
 
 ### Nav + registration
 
-- `Navigator::AdminPage` — append `AccessControl` to the enum.
-- `AdminScreen.qml` — VM instance + page title + `LSideNav` item + `when` branch
-  + `Loader`/`Component`.
+- `Navigator::AdminPage` (`Navigator.h`) — append `AccessControl` to the enum
+  (appended last so existing enum values don't shift).
+- `AdminScreen.qml` — every place that enumerates pages must gain the new
+  entry, or the page is half-wired:
+  1. the `AccessControlViewModel` instance (alongside the other page VMs);
+  2. `pageTitle` switch → `qsTr("Access Control")`;
+  3. `LSideNav.currentPage` string mapping → `"accesscontrol"`;
+  4. `LSideNav.items` → `{ page: "accesscontrol", label: qsTr("Access Control"), enabled: true }`;
+  5. `onPageActivated` explicit key branch → `Navigator.showAdminPage(Navigator.AccessControl)`;
+  6. `pageLoader.sourceComponent` switch → `accessControlComponent`, plus the
+     `Component { AccessControlScreen { vm: … } }` definition; the Loader's
+     existing feature-detected `refresh()` on page show provides the
+     auto-load-on-open (so stub-VM QuickTests stay offline).
 - `qt-app/quick/CMakeLists.txt` — register the new VM, model, screen.
 
 ## Refresh-failure behavior (refinement 6)
@@ -211,10 +254,14 @@ arrives (e.g. during an outage the age must keep climbing). So:
   malformed): **keep** the previously loaded rows, set `stale = true`, set
   `errorText`, and **freeze** `updatedAt` at the last success. The user still sees
   the last-known feed, clearly marked stale.
-- **Auth loss (HTTP 401):** emit `authFailed()` → the **existing session-expiry
-  flow** (same as other admin VMs), and **clear** the protected page data
-  (empty the model, reset counts) so stale protected rows aren't shown after
-  logout.
+- **Auth loss (HTTP 401):** set `authFailure = true` and `errorText` to the
+  same fixed message `DatabaseViewModel` uses ("Admin authentication failed —
+  re-enter via admin login."), and **clear** the protected page data (empty the
+  model, reset counts, clear `updatedAt`, `stale = false`) so protected rows
+  aren't left on screen under a rejected key. The page renders this as an
+  inline auth-error state. It does **not** clear `AdminSession` or navigate
+  away — no admin page does that today; an app-wide session-expiry flow is a
+  separate follow-up. A later successful refresh resets `authFailure = false`.
 - **Empty feed** (valid `success`, `entries: []`): a distinct **"No entries yet"**
   state — never conflated with a **failed initial load** (no prior rows +
   error).
@@ -223,7 +270,7 @@ arrives (e.g. during an outage the age must keep climbing). So:
 
 - **VM** (`CapturingNam`): `refresh()` puts `admin_key` in the POST body (not the
   URL); `applyRecent` fills model + `entriesToday`/`lastEntryAt`/`updatedAt`;
-  `authFailed` on 401 + protected data cleared; ordinary failure keeps rows +
+  `authFailure` set on 401 + protected data cleared (and reset by a later success); ordinary failure keeps rows +
   sets `stale` + freezes `updatedAt`; empty feed → empty state (not error);
   generation guard drops a superseded reply.
 - **Parser**: `parseRecentFeed` valid list / null-student row / empty-but-valid /
@@ -256,8 +303,8 @@ the page = drop the nav entry + the three files + the `polled` wiring (leaf).
 
 ## Security notes
 
-- `admin_key` in the POST body only, never a query string; 401 → session-expiry
-  flow + clear protected data.
+- `admin_key` in the POST body only, never a query string; 401 → `authFailure`
+  + clear protected data.
 - Cleartext HTTP + admin-key remains the accepted debt closed by the parallel
   TLS/RBAC go-live track — not a new finding for this slice.
 - No real student PII in fixtures/tests; synthetic data only.
