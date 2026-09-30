@@ -40,7 +40,9 @@ struct AccessEvent {
         ControllerConnected, ControllerDisconnected, HardwareError
     };
     Type type = Type::AccessError;
-    QJsonObject subject;   // resolved subject/student JSON (empty until a later sub-plan resolves it)
+    QJsonObject subject;   // resolved subject/student JSON. For EntryObserved,
+                           // EMPTY means "entry observed, subject unresolved"
+                           // (orphaned/deleted student); non-empty == resolved.
     QString gateId;        // physical gate id — set for gate-scoped events (e.g. EntryObserved)
     QString providerId;    // emitting provider/controller id — set for Controller*/HardwareError
     CredentialKind credentialKind = CredentialKind::Rfid;

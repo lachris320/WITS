@@ -355,3 +355,19 @@ wits_add_qttest(tst_accesscontrolservice
         ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.cpp
         ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.h
     INCLUDES ${CMAKE_SOURCE_DIR}/core)
+
+# --- Access Control: turnstile provider (Network; no offscreen) ---
+wits_add_qttest(tst_turnstileprovider
+    SOURCES
+        tst_turnstileprovider.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/turnstileprovider.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/turnstileprovider.h
+        ${CMAKE_SOURCE_DIR}/core/loginparser.cpp
+        ${CMAKE_SOURCE_DIR}/core/loginparser.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.cpp
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/accesstypes.h
+        ${CMAKE_SOURCE_DIR}/core/accesscontrol/iaccessprovider.h
+        ${CMAKE_SOURCE_DIR}/testsupport/sequencednam.cpp
+        ${CMAKE_SOURCE_DIR}/testsupport/sequencednam.h
+    LIBS Qt${QT_VERSION_MAJOR}::Network
+    INCLUDES ${CMAKE_SOURCE_DIR}/core ${CMAKE_SOURCE_DIR}/testsupport)
