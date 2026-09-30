@@ -45,8 +45,9 @@ Rectangle {
     function tableEmptyText() {
         if (!vm)
             return "";
+        // Auth loss is announced ONCE, in the inline authError element.
         if (vm.authFailure)
-            return qsTr("Admin authentication failed — re-enter via admin login.");
+            return "";
         if (vm.initialLoadFailed)
             return qsTr("Could not load the access feed. Use Refresh to retry.");
         if (vm.loading && vm.updatedAt === "")
@@ -222,7 +223,8 @@ Rectangle {
             visible: screen.vm ? screen.vm.authFailure === true : false
             wrapMode: Text.WordWrap
             textFormat: Text.PlainText
-            text: qsTr("Admin authentication failed — re-enter via admin login.")
+            // Single source: the VM's constant (errorText clears on refresh start).
+            text: screen.vm && screen.vm.authFailureText ? screen.vm.authFailureText : ""
             color: Theme.error
             font.family: Theme.typography.sans
             font.pixelSize: Theme.typography.body
@@ -263,7 +265,9 @@ Rectangle {
     Connections {
         target: screen.vm ? screen.vm : null
         function onErrorTextChanged() {
-            if (screen.vm.errorText !== "")
+            // Auth loss is shown inline (authError) — no duplicate toast. The VM
+            // sets authFailure BEFORE errorText, so this check is deterministic.
+            if (screen.vm.errorText !== "" && screen.vm.authFailure !== true)
                 accessToast.message = screen.vm.errorText
         }
     }

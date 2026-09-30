@@ -31,6 +31,15 @@ Item {
         // error when the request starts, then the failure (if any) sets it again.
         // With `failWith` set, every refresh() fails with that SAME message.
         property string failWith: ""
+        // The real VM exposes the auth sentence as a CONSTANT property so the
+        // view never hard-codes it (errorText is cleared when a refresh starts).
+        readonly property string authFailureText: "Admin authentication failed — re-enter via admin login."
+        // Mimics the REAL VM's 401 signal ORDER: authFailure is set BEFORE
+        // errorText, so errorTextChanged handlers already see authFailure true.
+        function failAuth() {
+            authFailure = true
+            errorText = authFailureText
+        }
         function refresh() {
             refreshCount++
             errorText = ""
@@ -138,13 +147,37 @@ Item {
             compare(findChild(table, "tableEmptyState").text,
                     "Could not load the access feed. Use Refresh to retry.");
         }
-        function test_authFailureShowsInlineErrorState() {
+        // The auth sentence is shown ONCE: inline in authError only — not in
+        // the table's empty state, and not as a toast.
+        function test_authFailureShowsMessageOnceInline() {
             acRows.clear();
-            acVmStub.authFailure = true;
-            compare(findChild(ac, "authError").visible, true);
+            var toast = findChild(ac, "accessToast");
+            var authError = findChild(ac, "authError");
             var table = findChild(ac, "entriesTable");
-            compare(findChild(table, "tableEmptyState").text,
-                    "Admin authentication failed — re-enter via admin login.");
+            compare(authError.visible, false);
+            acVmStub.failAuth();
+            compare(authError.visible, true);
+            compare(authError.text, "Admin authentication failed — re-enter via admin login.");
+            compare(findChild(table, "tableEmptyState").text, "");
+            compare(toast.message, "");
+        }
+        // A refresh start clears errorText while authFailure persists: the
+        // inline prompt must not blank out (it binds the constant, not errorText).
+        function test_authErrorSurvivesRefreshStartClearingErrorText() {
+            var authError = findChild(ac, "authError");
+            acVmStub.failAuth();
+            acVmStub.errorText = "";                  // refresh() start
+            compare(authError.visible, true);
+            compare(authError.text, "Admin authentication failed — re-enter via admin login.");
+            compare(findChild(findChild(ac, "entriesTable"), "tableEmptyState").text, "");
+            compare(findChild(ac, "accessToast").message, "");
+        }
+        // Ordinary failures still toast (authFailure false).
+        function test_ordinaryErrorStillToastsAndNoAuthPrompt() {
+            var toast = findChild(ac, "accessToast");
+            acVmStub.errorText = "Network error. Please try again.";
+            compare(toast.message, "Network error. Please try again.");
+            compare(findChild(ac, "authError").visible, false);
         }
         // LToast's auto-dismiss sets message="" imperatively, so the screen
         // must raise it imperatively too (the DatabaseScreen idiom).

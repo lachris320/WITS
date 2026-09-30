@@ -34,6 +34,9 @@ class AccessControlViewModel : public QObject
     Q_PROPERTY(bool stale READ stale NOTIFY staleChanged)
     Q_PROPERTY(QString errorText READ errorText NOTIFY errorTextChanged)
     Q_PROPERTY(bool authFailure READ authFailure NOTIFY authFailureChanged)
+    // The auth-loss sentence as a constant: errorText is cleared when a refresh
+    // starts, so the view binds THIS for its persistent inline prompt.
+    Q_PROPERTY(QString authFailureText READ authFailureText CONSTANT)
     Q_PROPERTY(AccessEntriesModel *entries READ entries CONSTANT)
 
 public:
@@ -50,6 +53,7 @@ public:
     bool stale() const { return m_stale; }
     QString errorText() const { return m_errorText; }
     bool authFailure() const { return m_authFailure; }
+    QString authFailureText() const { return authFailureMessage(); }
     AccessEntriesModel *entries() { return &m_entries; }
 
     Q_INVOKABLE void refresh();

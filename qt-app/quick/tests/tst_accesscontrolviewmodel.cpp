@@ -28,6 +28,7 @@ private slots:
     void refresh_http401WithEmptyOrMalformedBodyIsStillAuthFailure();
     void authFailure_resetByLaterSuccess();
     void authFailure_survivesOrdinaryFailureUntilLaterSuccess();
+    void authFailureText_isConstantAndMatchesAuthErrorText();
     void supersededRequestSeqIsNotCurrent();
     void refresh_supersededReplyIsDropped();
 
@@ -322,6 +323,25 @@ void TestAccessControlViewModel::authFailure_survivesOrdinaryFailureUntilLaterSu
     QCOMPARE(authSpy.count(), 1);
     QVERIFY(vm.errorText().isEmpty());
     QCOMPARE(vm.entries()->rowCount(), 2);
+}
+
+void TestAccessControlViewModel::authFailureText_isConstantAndMatchesAuthErrorText()
+{
+    AccessControlViewModel vm;
+    const QString authMsg = QStringLiteral("Admin authentication failed — re-enter via admin login.");
+    QCOMPARE(vm.authFailureText(), authMsg);                  // available before any failure
+    vm.applyRecent(R"({"status":"error","message":"Invalid admin key"})");
+    QCOMPARE(vm.errorText(), vm.authFailureText());
+    // errorText clears when a refresh starts; the constant does not.
+    CapturingNam nam(QByteArray(), QNetworkReply::HostNotFoundError, 0);
+    AccessControlViewModel vm2(nullptr, &nam);
+    vm2.applyRecent(R"({"status":"error","message":"Invalid admin key"})");
+    vm2.refresh();
+    QVERIFY(vm2.errorText().isEmpty());
+    QCOMPARE(vm2.authFailureText(), authMsg);
+    QTRY_VERIFY_WITH_TIMEOUT(!vm2.loading(), 1000);
+    QVERIFY(vm2.authFailure());                               // transport failure kept the flag
+    QCOMPARE(vm2.errorText(), authMsg);
 }
 
 void TestAccessControlViewModel::supersededRequestSeqIsNotCurrent()
