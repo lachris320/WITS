@@ -26,6 +26,7 @@ public:
     void noteActive() { if (++m_active > m_maxActive) m_maxActive = m_active; }
     void noteFinished() { if (m_active > 0) --m_active; }
     QUrl lastUrl;
+    QList<QUrl> urls;   // every request URL, in order
 
 protected:
     QNetworkReply *createRequest(Operation op, const QNetworkRequest &request,

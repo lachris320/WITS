@@ -122,9 +122,12 @@ void TurnstileProvider::onFinished(QNetworkReply *reply, quint64 gen)
         return;
     }
 
-    setState(ConnectionState::Connected);  // (re)confirm after a reconnect start
     if (r.hasEntry) {
         if (r.eventId <= m_since) { fail(); return; }   // non-advancing: protocol anomaly
+        // Confirm Connected only AFTER the anomaly guard so a bad reconnect
+        // response goes Connecting -> Degraded with no transient Connected.
+        setState(ConnectionState::Connected);
+        if (gen != m_generation) return;   // a state subscriber stopped/restarted us
         AccessEvent e;
         e.type = AccessEvent::Type::EntryObserved;
         e.subject = r.student;             // empty => unresolved (see convention)
@@ -132,10 +135,13 @@ void TurnstileProvider::onFinished(QNetworkReply *reply, quint64 gen)
         e.credentialKind = CredentialKind::Rfid;
         e.correlationId = QString::number(r.eventId);
         e.at = r.at;
+        m_since = r.eventId;               // advance cursor BEFORE the synchronous emit
         emit accessEvent(e);
-        m_since = r.eventId;
+        if (gen != m_generation) return;   // subscriber called stop()/start(): halt the drain
         sendPoll();                        // drain: immediately request the next
     } else {
+        setState(ConnectionState::Connected);   // (re)confirm after a reconnect start
+        if (gen != m_generation) return;
         armTimer();                        // empty poll: wait one interval
     }
 }

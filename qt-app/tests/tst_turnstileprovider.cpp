@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QSignalSpy>
+#include <QUrlQuery>
 #include "sequencednam.h"
 #include "accesscontrol/turnstileprovider.h"
 #include "accesscontrol/accesstypes.h"
@@ -24,8 +25,19 @@ private slots:
     void stopAbortsInFlightNoEmit();
     void restartDropsInFlightGeneration();
     void failureStopsTimerAndPreservesCursor();
+    void stopHaltsSteadyStateTimer();
+    void stopFromEntrySlotHaltsDrain();
 
 private:
+    static QString sinceOf(const QUrl &url)
+    { return QUrlQuery(url).queryItemValue(QStringLiteral("since")); }
+    static int connectedCount(const QSignalSpy &states)
+    {
+        int n = 0;
+        for (const auto &args : states)
+            if (qvariant_cast<ConnectionState>(args.at(0)) == ConnectionState::Connected) ++n;
+        return n;
+    }
     static QVariantMap cfg(int pollMs = 250, const QString &gate = QStringLiteral("g1"))
     { return QVariantMap{{"pollIntervalMs", pollMs}, {"gateId", gate}}; }
     static QByteArray entryPayload(qint64 latest, qint64 id)
@@ -85,7 +97,7 @@ void TestTurnstileProvider::baselineSkipsHistoryThenPolls()
     QTRY_COMPARE_WITH_TIMEOUT(nam.requestCount(), 2, 3000);  // baseline + one steady poll
     QCOMPARE(events.count(), 0);                              // history not emitted
     QCOMPARE(p.state(), ConnectionState::Connected);
-    QVERIFY(nam.lastUrl.query().contains(QStringLiteral("since=5")));
+    QCOMPARE(sinceOf(nam.lastUrl), QStringLiteral("5"));
     p.stop();
 }
 
@@ -126,6 +138,7 @@ void TestTurnstileProvider::drainsEntriesOldestFirst()
     // peak concurrency stayed at exactly one (overlap would push maxActive >= 2).
     QTRY_COMPARE_WITH_TIMEOUT(nam.requestCount(), 4, 3000);
     QCOMPARE(nam.maxActive(), 1);
+    QCOMPARE(nam.abortCount(), 0);     // an overlap masked as maxActive==1 would abort
     p.stop();
 }
 
@@ -140,12 +153,17 @@ void TestTurnstileProvider::reconnectPreservesCursorAndEmitsReconnectEntry()
     QTRY_COMPARE_WITH_TIMEOUT(nam.requestCount(), 2, 3000);
     p.stop();
 
+    const int beforeRestart = nam.requestCount();   // == 2
     nam.enqueue(entryPayload(4, 4));    // reconnect ?since=3 -> entry 4 (must emit once)
     nam.enqueue(emptyPayload(4));       // drain end
     p.start();
     QTRY_COMPARE_WITH_TIMEOUT(events.count(), 1, 3000);
     QCOMPARE(qvariant_cast<AccessEvent>(events.at(0).at(0)).correlationId, QStringLiteral("4"));
-    QVERIFY(nam.lastUrl.query().contains(QStringLiteral("since=4")));
+    // The reconnect request ITSELF used the preserved cursor (no re-baseline).
+    QCOMPARE(sinceOf(nam.urls.at(beforeRestart)), QStringLiteral("3"));
+    // The following drain request advanced the cursor to 4.
+    QTRY_VERIFY_WITH_TIMEOUT(nam.urls.size() > beforeRestart + 1, 3000);
+    QCOMPARE(sinceOf(nam.urls.at(beforeRestart + 1)), QStringLiteral("4"));
     p.stop();
 }
 
@@ -159,6 +177,21 @@ void TestTurnstileProvider::nonAdvancingEntryDegrades()
     p.start();
     QTRY_VERIFY_WITH_TIMEOUT(p.state() == ConnectionState::Degraded, 3000);
     QCOMPARE(events.count(), 0);
+    QCOMPARE(nam.requestCount(), 2);    // baseline + the anomalous poll; no drain
+
+    // Reconnect anomaly: the FIRST response after a restart is non-advancing.
+    // It must go Connecting -> Degraded with NO transient Connected (which
+    // would reset the service's backoff every cycle).
+    nam.enqueue(entryPayload(7, 7));
+    QSignalSpy states(&p, &IAccessProvider::stateChanged);
+    p.start();
+    QTRY_COMPARE_WITH_TIMEOUT(nam.requestCount(), 3, 3000);
+    QTRY_VERIFY_WITH_TIMEOUT(p.state() == ConnectionState::Degraded, 3000);
+    QCOMPARE(connectedCount(states), 0);
+    QCOMPARE(degradedCount(states), 1);
+    QCOMPARE(events.count(), 0);
+    QTest::qWait(600);                  // > 2 * pollInterval(250): no runaway polling
+    QCOMPARE(nam.requestCount(), 3);
     p.stop();
 }
 
@@ -241,7 +274,7 @@ void TestTurnstileProvider::restartDropsInFlightGeneration()
     // generation bump, reply-1's abort would emit a transient Degraded that
     // reply-2 then hides — this assertion is what actually detects that.
     QCOMPARE(degradedCount(states), 0);
-    QTRY_VERIFY_WITH_TIMEOUT(nam.lastUrl.query().contains(QStringLiteral("since=9")), 3000);
+    QTRY_COMPARE_WITH_TIMEOUT(sinceOf(nam.lastUrl), QStringLiteral("9"), 3000);
     p.stop();
 }
 
@@ -262,8 +295,44 @@ void TestTurnstileProvider::failureStopsTimerAndPreservesCursor()
     // Cursor preserved: a service-triggered restart resumes from since=5.
     nam.enqueue(emptyPayload(5));
     p.start();
-    QTRY_VERIFY_WITH_TIMEOUT(nam.lastUrl.query().contains(QStringLiteral("since=5")), 3000);
+    // A real NEW request must have been issued (not the stale lastUrl)...
+    QTRY_VERIFY_WITH_TIMEOUT(nam.requestCount() > afterFailure, 3000);
+    // ...and that reconnect request (index == afterFailure) carried the preserved cursor.
+    QCOMPARE(sinceOf(nam.urls.at(afterFailure)), QStringLiteral("5"));
     p.stop();
+}
+
+void TestTurnstileProvider::stopHaltsSteadyStateTimer()
+{
+    SequencedNam nam;
+    nam.enqueue(emptyPayload(0));       // baseline (arms the steady timer)
+    nam.enqueue(emptyPayload(0));       // steady empty poll (re-arms the timer)
+    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
+    p.start();
+    QTRY_COMPARE_WITH_TIMEOUT(nam.requestCount(), 2, 3000);
+    QTest::qWait(20);                   // let the steady empty reply's finished() run (timer re-armed)
+    p.stop();                           // must kill the armed pollInterval timer
+    const int atStop = nam.requestCount();
+    QTest::qWait(600);                  // > 2 * pollInterval(250)
+    QCOMPARE(nam.requestCount(), atStop);
+}
+
+void TestTurnstileProvider::stopFromEntrySlotHaltsDrain()
+{
+    // accessEvent is emitted synchronously; a subscriber that calls stop() from
+    // its slot must halt the drain (no further request, no further emit).
+    SequencedNam nam;
+    nam.enqueue(emptyPayload(0));       // baseline
+    nam.enqueue(entryPayload(2, 1));    // entry 1 -> subscriber stops the provider
+    nam.enqueue(entryPayload(2, 2));    // would-be next entry: must never be requested
+    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
+    QSignalSpy events(&p, &IAccessProvider::accessEvent);
+    connect(&p, &IAccessProvider::accessEvent, &p, [&p]() { p.stop(); });
+    p.start();
+    QTRY_COMPARE_WITH_TIMEOUT(events.count(), 1, 3000);
+    QTest::qWait(600);                  // > 2 * pollInterval(250)
+    QCOMPARE(events.count(), 1);
+    QCOMPARE(nam.requestCount(), 2);    // baseline + entry 1 only; no drain request
 }
 
 QTEST_MAIN(TestTurnstileProvider)
