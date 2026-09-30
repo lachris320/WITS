@@ -135,6 +135,23 @@ void KioskViewModel::applyStudentLogin(const QJsonObject &student)
     setStatus(QString(), QString());   // clear any prior error toast
 }
 
+void KioskViewModel::onEntryObserved(const QVariantMap &entry)
+{
+    if (entry.value(QStringLiteral("hasStudent")).toBool()) {
+        applyStudentLogin(QJsonObject::fromVariantMap(
+            entry.value(QStringLiteral("student")).toMap()));
+    } else {
+        showUnknownEntry();
+    }
+}
+
+void KioskViewModel::showUnknownEntry()
+{
+    // Gate already admitted the person; the card just didn't resolve to a
+    // student. Neutral notice only — no welcome, no counter bump, no feed row.
+    setStatus(QStringLiteral("Card not recognized"), QStringLiteral("Info"));
+}
+
 void KioskViewModel::applyLoginResponse(const QByteArray &body, const QString &heldKey)
 {
     const LoginParser::LoginResult r = LoginParser::parseLoginResponse(body);

@@ -7,6 +7,7 @@
 #include <QElapsedTimer>
 #include <QDateTime>
 #include <QUrl>
+#include <QVariantMap>
 #include <qqml.h>
 #include "RecentLoginsModel.h"
 
@@ -95,6 +96,10 @@ public:
     Q_INVOKABLE void installRfid(QQuickWindow *window);
     Q_INVOKABLE void requestGuest();
 
+    // Access Control (Sub-plan 3): a confirmed gate entry from the
+    // AccessControl singleton. hasStudent -> display + count; else neutral toast.
+    Q_INVOKABLE void onEntryObserved(const QVariantMap &entry);
+
     // Re-read the school-identity keys (school/name, school/address,
     // school/libraryHours, school/logoPath) and emit schoolInfoChanged if any
     // of them actually moved. The kiosk twin of SchoolInfoViewModel::reload():
@@ -138,6 +143,7 @@ private:
 
     void tickClock();
     void setStatus(const QString &message, const QString &severity);
+    void showUnknownEntry();
     void postForm(const QUrl &url, const QString &key, const QString &value,
                   bool rfid);
 

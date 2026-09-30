@@ -53,6 +53,8 @@ private slots:
     // photo_url + initials — precomputed in C++ for the kiosk avatar.
     void test_applyStudentLoginSetsPhotoUrlAndInitials();
     void test_applyStudentLoginEmptyPhotoUrlStaysEmpty();
+    void onEntryObserved_knownStudentDisplaysAndCounts();
+    void onEntryObserved_unknownShowsNeutralToastNoCount();
 
 private:
     // AppSettings is process-isolated onto a throwaway INI by
@@ -361,6 +363,37 @@ void TestKioskViewModel::test_applyStudentLoginEmptyPhotoUrlStaysEmpty()
     vm.applyStudentLogin(s);
     QCOMPARE(vm.currentPhotoUrl(), QString());
     QCOMPARE(vm.currentInitials(), QStringLiteral("AC"));
+}
+
+void TestKioskViewModel::onEntryObserved_knownStudentDisplaysAndCounts()
+{
+    KioskViewModel vm;
+    const int before = vm.visitorsToday();
+    QVariantMap entry{
+        {"hasStudent", true},
+        {"student", QVariantMap{{"name", "Jane Cruz"}, {"course", "BSCS"},
+                                {"photo_url", "http://x/j.jpg"}}},
+        {"eventId", "11"}, {"at", QDateTime::currentDateTimeUtc()}};
+    vm.onEntryObserved(entry);
+    QVERIFY(vm.hasStudent());
+    QCOMPARE(vm.currentFullName(), QStringLiteral("Jane Cruz"));
+    QCOMPARE(vm.currentPhotoUrl(), QStringLiteral("http://x/j.jpg"));
+    QCOMPARE(vm.visitorsToday(), before + 1);
+}
+
+void TestKioskViewModel::onEntryObserved_unknownShowsNeutralToastNoCount()
+{
+    KioskViewModel vm;
+    const int before = vm.visitorsToday();
+    QSignalSpy status(&vm, &KioskViewModel::statusChanged);
+    QVariantMap entry{{"hasStudent", false}, {"student", QVariantMap{}},
+                      {"eventId", "12"}, {"at", QDateTime::currentDateTimeUtc()}};
+    vm.onEntryObserved(entry);
+    QVERIFY(status.count() >= 1);
+    QVERIFY(!vm.statusMessage().isEmpty());
+    QCOMPARE(vm.statusSeverity(), QStringLiteral("Info"));   // neutral, not Error
+    QCOMPARE(vm.visitorsToday(), before);                    // no count bump
+    QVERIFY(!vm.hasStudent());
 }
 
 QTEST_MAIN(TestKioskViewModel)
