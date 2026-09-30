@@ -27,7 +27,16 @@ Item {
         property bool authFailure: false
         property var entries: acRows
         property int refreshCount: 0
-        function refresh() { refreshCount++ }
+        // Mimics the REAL AccessControlViewModel contract: refresh() clears the
+        // error when the request starts, then the failure (if any) sets it again.
+        // With `failWith` set, every refresh() fails with that SAME message.
+        property string failWith: ""
+        function refresh() {
+            refreshCount++
+            errorText = ""
+            if (failWith !== "")
+                errorText = failWith
+        }
     }
 
     QtObject {
@@ -64,6 +73,8 @@ Item {
             acVmStub.errorText = "";
             acVmStub.authFailure = false;
             acVmStub.refreshCount = 0;
+            acVmStub.failWith = "";
+            findChild(ac, "accessToast").message = "";
             hubStub.accessEnabled = false;
             hubStub.enableLocked = false;
             hubStub.connectionState = 0;
@@ -109,9 +120,13 @@ Item {
         }
         function test_emptyFeedShowsNoEntriesYet() {
             acRows.clear();
-            acVmStub.emptyFeed = true;
             var table = findChild(ac, "entriesTable");
             tryCompare(table, "rowCount", 0);
+            // Not a successful empty load (emptyFeed false) -> no "No entries yet".
+            acVmStub.emptyFeed = false;
+            var neutral = findChild(table, "tableEmptyState").text;
+            verify(neutral !== "No entries yet");
+            acVmStub.emptyFeed = true;
             compare(findChild(table, "tableEmptyState").text, "No entries yet");
         }
         function test_failedInitialLoadIsDistinctFromEmpty() {
@@ -133,12 +148,29 @@ Item {
         }
         // LToast's auto-dismiss sets message="" imperatively, so the screen
         // must raise it imperatively too (the DatabaseScreen idiom).
-        function test_toastShowsSecondErrorAfterFirstDismissed() {
+        // The realistic regression: backend down, Refresh, toast, auto-dismiss,
+        // Refresh again -> the SAME message must toast again. Works only because
+        // the (real-VM-mimicking) refresh() clears the error before re-setting it.
+        function test_toastRepeatsSameErrorAfterDismissAndRefresh() {
+            var toast = findChild(ac, "accessToast");
+            var btn = findChild(ac, "refreshButton");
+            acVmStub.failWith = "Network error. Please try again.";
+            mouseClick(btn);
+            compare(toast.message, "Network error. Please try again.");
+            toast.message = "";                       // simulate auto-dismiss
+            mouseClick(btn);                          // SAME message again
+            compare(toast.message, "Network error. Please try again.");
+            compare(acVmStub.refreshCount, 2);
+        }
+        // Clearing the error (refresh start / success) must not blank a toast
+        // that is still showing, nor break the imperative raise path.
+        function test_toastSurvivesErrorClear() {
             var toast = findChild(ac, "accessToast");
             acVmStub.errorText = "First error";
             compare(toast.message, "First error");
-            toast.message = "";                       // simulate auto-dismiss
             acVmStub.errorText = "";
+            compare(toast.message, "First error");
+            toast.message = "";                       // simulate auto-dismiss
             acVmStub.errorText = "Second error";
             compare(toast.message, "Second error");
         }
@@ -175,7 +207,8 @@ Item {
             compare(toggle.checked, true);
         }
         function test_helperTextExplainsScope() {
-            verify(findChild(ac, "monitoringHelp").text.indexOf("does not disable the physical gate") >= 0);
+            compare(findChild(ac, "monitoringHelp").text,
+                    "Controls this app's turnstile event polling and kiosk display. It does not disable the physical gate or stop server-side attendance recording.");
             compare(findChild(ac, "lockedNote").visible, false);
         }
         function test_connectionStateLabels() {

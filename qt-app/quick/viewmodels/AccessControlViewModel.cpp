@@ -30,6 +30,10 @@ bool AccessControlViewModel::initialLoadFailed() const
 void AccessControlViewModel::refresh()
 {
     setLoading(true);
+    // Clear ONLY the error text when a request starts, so a repeated identical
+    // failure re-emits errorTextChanged (the view toasts on it). Rows, stale,
+    // updatedAt and authFailure are deliberately left as-is until the reply.
+    setError(QString());
     // admin_key rides the urlencoded POST body ONLY (never the query string):
     // the backend's extractAdminKey() reads $_POST, and a secret in the URL
     // would leak into access logs.

@@ -21,6 +21,8 @@ private slots:
     void ordinaryFailure_keepsRowsMarksStaleFreezesUpdatedAt();
     void refresh_transportFailureAfterSuccessIsStale();
     void refresh_http5xxAfterSuccessIsStale();
+    void refresh_repeatedIdenticalFailureReEmitsErrorText();
+    void refresh_clearsErrorButKeepsStaleAuthAndUpdatedAtWhileLoading();
     void refresh_http401_setsAuthFailureAndClearsProtectedData();
     void refresh_http401WithEmptyOrMalformedBodyIsStillAuthFailure();
     void authFailure_resetByLaterSuccess();
@@ -156,6 +158,56 @@ void TestAccessControlViewModel::refresh_http5xxAfterSuccessIsStale()
     QCOMPARE(vm.errorText(), QStringLiteral("Could not refresh the access feed."));
     QCOMPARE(vm.entries()->rowCount(), 2);
     QVERIFY(!vm.authFailure());
+}
+
+void TestAccessControlViewModel::refresh_repeatedIdenticalFailureReEmitsErrorText()
+{
+    // Backend down -> Refresh -> same error again. The view raises its toast on
+    // errorTextChanged, so refresh() must clear the error on start or the second
+    // identical failure would be swallowed by setError's unchanged-string guard.
+    CapturingNam nam(QByteArray(), QNetworkReply::HostNotFoundError, 0);
+    AccessControlViewModel vm(nullptr, &nam);
+    QSignalSpy err(&vm, &AccessControlViewModel::errorTextChanged);
+    vm.refresh();
+    QTRY_COMPARE_WITH_TIMEOUT(err.count(), 1, 1000);          // "" -> message
+    QCOMPARE(vm.errorText(), QStringLiteral("Network error. Please try again."));
+    vm.refresh();
+    QVERIFY(vm.errorText().isEmpty());                        // cleared when the request starts
+    QCOMPARE(err.count(), 2);
+    QTRY_COMPARE_WITH_TIMEOUT(err.count(), 3, 1000);          // same message raised AGAIN
+    QCOMPARE(vm.errorText(), QStringLiteral("Network error. Please try again."));
+}
+
+void TestAccessControlViewModel::refresh_clearsErrorButKeepsStaleAuthAndUpdatedAtWhileLoading()
+{
+    // Starting a refresh clears ONLY the error text. Rows, stale, updatedAt and
+    // authFailure are untouched until the reply lands.
+    CapturingNam nam(QByteArray(), QNetworkReply::HostNotFoundError, 0);
+    AccessControlViewModel vm(nullptr, &nam);
+    vm.applyRecent(feedBody());
+    const QString firstUpdated = vm.updatedAt();
+    vm.applyRecent("not json");                               // stale + error
+    QVERIFY(vm.stale());
+    QVERIFY(!vm.errorText().isEmpty());
+    vm.refresh();
+    QVERIFY(vm.loading());
+    QVERIFY(vm.errorText().isEmpty());
+    QVERIFY(vm.stale());                                      // stays stale while loading
+    QCOMPARE(vm.updatedAt(), firstUpdated);
+    QCOMPARE(vm.entries()->rowCount(), 2);
+    QVERIFY(!vm.emptyFeed());
+    QVERIFY(!vm.initialLoadFailed());
+    QTRY_VERIFY_WITH_TIMEOUT(!vm.loading(), 1000);
+
+    // authFailure survives the start of a refresh (only a later success resets it).
+    AccessControlViewModel authVm(nullptr, &nam);
+    authVm.applyRecent(R"({"status":"error","message":"Invalid admin key"})");
+    QVERIFY(authVm.authFailure());
+    authVm.refresh();
+    QVERIFY(authVm.authFailure());
+    QVERIFY(authVm.errorText().isEmpty());
+    QVERIFY(!authVm.initialLoadFailed());
+    QTRY_VERIFY_WITH_TIMEOUT(!authVm.loading(), 1000);
 }
 
 void TestAccessControlViewModel::refresh_http401_setsAuthFailureAndClearsProtectedData()

@@ -44,14 +44,18 @@ Rectangle {
     // (refinement 6) — never conflate them in the table's empty text.
     function tableEmptyText() {
         if (!vm)
-            return qsTr("No entries yet");
+            return "";
         if (vm.authFailure)
             return qsTr("Admin authentication failed — re-enter via admin login.");
         if (vm.initialLoadFailed)
             return qsTr("Could not load the access feed. Use Refresh to retry.");
         if (vm.loading && vm.updatedAt === "")
             return qsTr("Loading…");
-        return qsTr("No entries yet");
+        // Only a SUCCESSFUL load that returned zero rows is "No entries yet";
+        // before any load (or with rows present) there is nothing to announce.
+        if (vm.emptyFeed)
+            return qsTr("No entries yet");
+        return "";
     }
 
     color: Theme.appBackground
@@ -61,7 +65,8 @@ Rectangle {
         objectName: "ageTimer"
         interval: 1000
         repeat: true
-        running: screen.visible && screen.monitoringOn
+        triggeredOnStart: true
+        running:screen.visible && screen.monitoringOn
         onTriggered: screen.now = new Date()
     }
 
