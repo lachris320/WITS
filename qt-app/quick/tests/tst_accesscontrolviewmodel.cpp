@@ -27,6 +27,7 @@ private slots:
     void refresh_http401_setsAuthFailureAndClearsProtectedData();
     void refresh_http401WithEmptyOrMalformedBodyIsStillAuthFailure();
     void authFailure_resetByLaterSuccess();
+    void authFailure_survivesOrdinaryFailureUntilLaterSuccess();
     void supersededRequestSeqIsNotCurrent();
     void refresh_supersededReplyIsDropped();
 
@@ -290,6 +291,35 @@ void TestAccessControlViewModel::authFailure_resetByLaterSuccess()
     QVERIFY(vm.authFailure());
     vm.applyRecent(feedBody());
     QVERIFY(!vm.authFailure());
+    QVERIFY(vm.errorText().isEmpty());
+    QCOMPARE(vm.entries()->rowCount(), 2);
+}
+
+void TestAccessControlViewModel::authFailure_survivesOrdinaryFailureUntilLaterSuccess()
+{
+    // A transport/parse failure says nothing new about the key: after a 401 it
+    // must NOT hide the re-login prompt or flip the page to failed-initial-load.
+    const QString authMsg = QStringLiteral("Admin authentication failed — re-enter via admin login.");
+    AccessControlViewModel vm;
+    vm.applyRecent(feedBody());
+    vm.applyRecent(R"({"status":"error","message":"Invalid admin key"})");
+    QVERIFY(vm.authFailure());
+
+    QSignalSpy authSpy(&vm, &AccessControlViewModel::authFailureChanged);
+    vm.applyRecent("not json");                               // ordinary failure
+    QVERIFY(vm.authFailure());
+    QCOMPARE(authSpy.count(), 0);
+    QVERIFY(!vm.initialLoadFailed());
+    QVERIFY(!vm.stale());
+    QCOMPARE(vm.errorText(), authMsg);                        // actionable prompt kept
+    QCOMPARE(vm.entries()->rowCount(), 0);                    // protected data stays cleared
+    QCOMPARE(vm.entriesToday(), 0);
+    QVERIFY(vm.lastEntryAt().isEmpty());
+    QVERIFY(vm.updatedAt().isEmpty());
+
+    vm.applyRecent(feedBody());                               // only a success clears it
+    QVERIFY(!vm.authFailure());
+    QCOMPARE(authSpy.count(), 1);
     QVERIFY(vm.errorText().isEmpty());
     QCOMPARE(vm.entries()->rowCount(), 2);
 }

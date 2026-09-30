@@ -95,8 +95,10 @@ void AccessControlViewModel::applyFailure(const QString &message)
     // Keep the last-known rows + counts and FREEZE updatedAt; the view marks
     // them stale. Only stale when there is a prior successful load on screen.
     setStale(m_hasLoaded);
-    setAuthFailure(false);
-    setError(message);
+    // A transport/parse failure says nothing new about the key, so it must NOT
+    // clear authFailure (only a later SUCCESS does). While the key is still
+    // known-bad, keep the actionable re-login message instead of the network one.
+    setError(m_authFailure ? authFailureMessage() : message);
     emit dataChanged();
 }
 
@@ -111,8 +113,13 @@ void AccessControlViewModel::applyAuthFailure()
     m_hasLoaded = false;
     setStale(false);
     setAuthFailure(true);
-    setError(tr("Admin authentication failed — re-enter via admin login."));
+    setError(authFailureMessage());
     emit dataChanged();
+}
+
+QString AccessControlViewModel::authFailureMessage()
+{
+    return tr("Admin authentication failed — re-enter via admin login.");
 }
 
 void AccessControlViewModel::setLoading(bool v)

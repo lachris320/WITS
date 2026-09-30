@@ -16,7 +16,9 @@ class QNetworkAccessManager;
 // singleton, never here. Failure contract (spec refinement 6):
 //  - ordinary failure after a success: keep rows, stale = true, freeze updatedAt;
 //  - auth loss (401 / "Invalid admin key"): authFailure = true + clear the
-//    protected data (rows, counts, updatedAt), stale = false;
+//    protected data (rows, counts, updatedAt), stale = false. authFailure is
+//    cleared ONLY by a later success — an ordinary failure keeps it (and keeps
+//    the auth message as errorText) rather than hiding the re-login prompt;
 //  - empty-but-valid feed (emptyFeed) is distinct from a failed initial load
 //    (initialLoadFailed).
 class AccessControlViewModel : public QObject
@@ -70,6 +72,7 @@ signals:
 private:
     void applyFailure(const QString &message);
     void applyAuthFailure();
+    static QString authFailureMessage();
     void setLoading(bool v);
     void setStale(bool v);
     void setError(const QString &e);
