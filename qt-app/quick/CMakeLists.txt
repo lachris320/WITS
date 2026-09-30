@@ -103,6 +103,8 @@ qt_add_qml_module(witsquickmodule
         viewmodels/SettingsViewModel.h viewmodels/SettingsViewModel.cpp
         viewmodels/ImportViewModel.cpp viewmodels/ImportViewModel.h
         viewmodels/ReportingViewModel.h viewmodels/ReportingViewModel.cpp
+        AccessControlHub.h AccessControlHub.cpp
+        AccessControlSingleton.h
 )
 
 target_link_libraries(witsquickmodule PUBLIC
@@ -284,6 +286,18 @@ wits_add_qttest(tst_qml_kiosk
     LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
          Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
     DEFINES QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
+    OFFSCREEN)
+
+# --- AccessControlHub unit test (C++ QtTest, offscreen). SequencedNam drives
+# the provider with no live network; AppSettings isolation is compiled in by
+# wits_add_qttest. ---
+wits_add_qttest(tst_accesscontrolhub
+    SOURCES
+        tests/tst_accesscontrolhub.cpp
+        ${CMAKE_SOURCE_DIR}/testsupport/sequencednam.cpp
+        ${CMAKE_SOURCE_DIR}/testsupport/sequencednam.h
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
     OFFSCREEN)
 
 # --- DashboardViewModel unit test (C++ QtTest, offscreen). Phase 6a threads
