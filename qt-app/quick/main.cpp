@@ -4,6 +4,7 @@
 #include <QQuickWindow>
 #include <QSettings>
 
+#include "AccessControlHub.h"
 #include "appsettings.h"
 #include <QSGRendererInterface>
 #include "brandtheme.h"
@@ -35,6 +36,10 @@ int main(int argc, char *argv[])
         AppSettings brandingStore;
         BrandTheme::setCurrent(BrandTheme::loadCachedConfig(brandingStore).palette);
     }
+
+    AccessControlHub accessControl;      // stack-owned; outlives `engine`
+    accessControl.initialize();          // reads the flag; polls only if enabled
+    AccessControlHub::setInstance(&accessControl);
 
     QQmlApplicationEngine engine;
     QObject::connect(

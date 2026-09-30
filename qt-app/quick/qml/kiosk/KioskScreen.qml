@@ -27,6 +27,14 @@ Rectangle {
     }
     GuestViewModel { id: guestVm }
 
+    // Access Control (Sub-plan 3): a confirmed gate entry surfaces natively.
+    // Presentation-scoped — this Connections lives and dies with the kiosk
+    // surface. The AccessControl singleton is inert unless accessControl.enabled.
+    Connections {
+        target: AccessControl
+        function onEntryObserved(entry) { kioskVm.onEntryObserved(entry) }
+    }
+
     // Pick up school/name, school/address, school/libraryHours and
     // school/logoPath written by the admin Settings screen. The kiosk cannot
     // see SettingsViewModel (it lives inside AdminScreen, which is torn down

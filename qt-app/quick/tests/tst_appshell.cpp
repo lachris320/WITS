@@ -4,6 +4,8 @@
 #include <QtGlobal>
 #include <vector>
 
+#include "AccessControlHub.h"
+
 // Capture QML warnings so a load that "succeeds" but logs binding/type
 // warnings still fails the test (premium-shell discipline: zero warnings).
 static std::vector<QString> g_messages;
@@ -25,7 +27,10 @@ void TestAppShell::loadsWithZeroWarnings()
     g_messages.clear();
     QtMessageHandler prev = qInstallMessageHandler(captureHandler);
 
-    QQmlApplicationEngine engine;
+    AccessControlHub hub;                 // default settings, no env -> disabled
+    AccessControlHub::setInstance(&hub);
+
+    QQmlApplicationEngine engine;         // declared AFTER hub -> engine dies first
     engine.loadFromModule("LOAMS", "AppShell");
 
     qInstallMessageHandler(prev);
