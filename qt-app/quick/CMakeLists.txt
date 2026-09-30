@@ -98,6 +98,7 @@ qt_add_qml_module(witsquickmodule
         models/ReportRowsModel.h models/ReportRowsModel.cpp
         models/RankingModel.cpp
         models/RankingModel.h
+        models/AccessEntriesModel.h models/AccessEntriesModel.cpp
         viewmodels/SearchViewModel.h viewmodels/SearchViewModel.cpp
         viewmodels/DatabaseViewModel.cpp viewmodels/DatabaseViewModel.h
         viewmodels/SettingsViewModel.h viewmodels/SettingsViewModel.cpp
@@ -264,6 +265,12 @@ wits_add_qttest(tst_searchresultsmodel
 # JSON rows, no NAM -> QTEST_APPLESS_MAIN, no OFFSCREEN. ---
 wits_add_qttest(tst_reportrowsmodel
     SOURCES tests/tst_reportrowsmodel.cpp
+    LIBS witsquickmodule)
+
+# --- AccessEntriesModel unit test (C++ QtTest). Pure QAbstractListModel over
+# LoginParser::RecentEntry, no NAM -> QTEST_APPLESS_MAIN, no OFFSCREEN. ---
+wits_add_qttest(tst_accessentriesmodel
+    SOURCES tests/tst_accessentriesmodel.cpp
     LIBS witsquickmodule)
 
 # --- L* component skeletons Quick test (offscreen) ---
