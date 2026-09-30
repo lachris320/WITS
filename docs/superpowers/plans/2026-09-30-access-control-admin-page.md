@@ -97,6 +97,8 @@ Task order is dependency order: 1 → 2 → 3 → 4 → 5 → 6 → 7 (T4 needs 
   - `void AccessControl::MockProvider::simulatePolled(const QDateTime &at);`
   - Service behavior: every `polled(at)` from the **current** provider while enabled → `m_health->recordCommTime(providerId, at)` (→ `HealthMonitor::healthChanged`).
 
+**Two recording paths, both service-owned (decision: keep both).** `AccessControlService::onProviderState` already calls `m_health->recordCommTime(providerId, QDateTime::currentDateTimeUtc())` on every `Connected` transition (`accesscontrolservice.cpp`, the `case ConnectionState::Connected:` branch). That record **stays**: a Connected transition is itself a successful communication (for `TurnstileProvider` it is the validated baseline response), it is the *only* freshness source for providers that never emit `polled` (`MockProvider`, Sub-plan 1 behaviour), and existing tests rely on it. This task **adds** the per-poll path next to it; the provider still touches neither. **Pinned baseline behaviour:** `TurnstileProvider`'s baseline success **does** emit `polled` (exactly once, immediately before its `Connected` transition), so on (re)connect the same instant is recorded twice — once by `polled`, once by the Connected transition, milliseconds apart. That double record is harmless (`recordCommTime` is an idempotent overwrite with a monotonically non-decreasing client time) and is stated here so nobody "fixes" it. Tests pin all of it: `baselineSuccessEmitsPolledOnce` (provider), `connectedTransitionAndPolledAreBothServiceRecorded` (Connected records alone; a later `polled` advances further), `turnstileValidEmptyPollAdvancesFreshness` (steady valid polls advance beyond the Connected record), `turnstileInvalidPollDoesNotAdvanceFreshness` (invalid polls don't).
+
 - [ ] **Step 1: Declare the signal + the mock driver (stub-first, so the red is a runtime failure)**
 
 In `qt-app/core/accesscontrol/iaccessprovider.h`, add `#include <QDateTime>` next to `#include <QObject>`, and extend the `signals:` block:
@@ -136,6 +138,7 @@ void MockProvider::simulatePolled(const QDateTime &at)
 In `qt-app/tests/tst_turnstileprovider.cpp`, add to the `private slots:` block (after `void stopFromEntrySlotHaltsDrain();`):
 
 ```cpp
+    void baselineSuccessEmitsPolledOnce();
     void polledOnValidEmptyPolls();
     void polledOnEntryPolls();
     void noPolledOnTransportError();
@@ -148,6 +151,22 @@ In `qt-app/tests/tst_turnstileprovider.cpp`, add to the `private slots:` block (
 Append the implementations above `QTEST_MAIN(TestTurnstileProvider)`:
 
 ```cpp
+void TestTurnstileProvider::baselineSuccessEmitsPolledOnce()
+{
+    // Pinned behaviour: the BASELINE response is a validated successful poll,
+    // so it emits polled exactly once (before the Connected transition).
+    SequencedNam nam;
+    nam.enqueue(emptyPayload(5));   // baseline: valid
+    nam.enqueueStall();             // first steady poll: stays in flight (never completes here)
+    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
+    QSignalSpy polled(&p, &IAccessProvider::polled);
+    p.start();
+    QTRY_COMPARE_WITH_TIMEOUT(nam.requestCount(), 2, 3000);   // baseline done, steady in flight
+    QCOMPARE(p.state(), ConnectionState::Connected);
+    QCOMPARE(polled.count(), 1);                                // the baseline, once
+    p.stop();
+}
+
 void TestTurnstileProvider::polledOnValidEmptyPolls()
 {
     SequencedNam nam;
@@ -260,6 +279,7 @@ Add to `private slots:` (after `void unexpectedDisconnectPublishesAndReconnects(
 
 ```cpp
     void polledRecordsCommTimeForActiveProvider();
+    void connectedTransitionAndPolledAreBothServiceRecorded();
     void polledFromTornDownProviderIsIgnored();
     void turnstileValidEmptyPollAdvancesFreshness();
     void turnstileInvalidPollDoesNotAdvanceFreshness_data();
@@ -322,6 +342,27 @@ void TestAccessControlService::polledRecordsCommTimeForActiveProvider()
     mock->simulatePolled(at);
     QCOMPARE(svc.healthMonitor()->snapshot(QStringLiteral("mock")).lastCommTime, at);
     QVERIFY(health.count() >= 1);
+}
+
+void TestAccessControlService::connectedTransitionAndPolledAreBothServiceRecorded()
+{
+    // Two service-owned recording paths, both kept (see "Two recording paths"
+    // above): (1) the Connected transition records the comm time on its own —
+    // MockProvider never emits polled, yet lastCommTime is set; (2) a later
+    // polled(at) advances it further. The provider touches neither.
+    EventBus bus;
+    MockProvider *mock = nullptr;
+    AccessProviderFactory f = factoryCapturing(&mock);
+    AccessControlService svc(&bus, &f);
+    const QDateTime beforeEnable = QDateTime::currentDateTimeUtc();
+    svc.enable(MockProvider::defaultDescriptor(), {});       // Mock: Connecting -> Connected
+    const QDateTime onConnected = svc.healthMonitor()->snapshot(QStringLiteral("mock")).lastCommTime;
+    QVERIFY(onConnected.isValid());                           // path (1), no polled involved
+    QVERIFY(onConnected >= beforeEnable);
+
+    const QDateTime later = onConnected.addSecs(30);
+    mock->simulatePolled(later);                              // path (2)
+    QCOMPARE(svc.healthMonitor()->snapshot(QStringLiteral("mock")).lastCommTime, later);
 }
 
 void TestAccessControlService::polledFromTornDownProviderIsIgnored()
@@ -473,7 +514,7 @@ cmake --build C:/b/loams-sp4 --target tst_turnstileprovider tst_accesscontrolser
 ctest --test-dir C:/b/loams-sp4 -R "tst_turnstileprovider|tst_accesscontrolservice|tst_mockprovider" --output-on-failure
 ```
 
-Expected: configure + build succeed. `tst_mockprovider` PASSES (the driver is real). **FAIL** at assertions: `tst_turnstileprovider::polledOnValidEmptyPolls` / `polledOnEntryPolls` / `noPolledOnMalformed` / `noPolledOnNonAdvancingEntry` (provider never emits — counts stay 0, expected ≥2 / ≥3 / 1 / 1); `tst_accesscontrolservice::polledRecordsCommTimeForActiveProvider` (lastCommTime stays invalid) and `turnstileValidEmptyPollAdvancesFreshness` (QTRY timeout — freshness frozen at the Connected transition). The remaining `noPolled*` / invalid / late cases pass vacuously now and act as regression guards once emission exists.
+Expected: configure + build succeed. `tst_mockprovider` PASSES (the driver is real). **FAIL** at assertions: `tst_turnstileprovider::baselineSuccessEmitsPolledOnce` / `polledOnValidEmptyPolls` / `polledOnEntryPolls` / `noPolledOnMalformed` / `noPolledOnNonAdvancingEntry` (provider never emits — counts stay 0, expected 1 / ≥2 / ≥3 / 1 / 1); `tst_accesscontrolservice::polledRecordsCommTimeForActiveProvider` (lastCommTime stays invalid), `connectedTransitionAndPolledAreBothServiceRecorded` (the Connected record passes, but `simulatePolled(later)` doesn't advance it) and `turnstileValidEmptyPollAdvancesFreshness` (QTRY timeout — freshness frozen at the Connected transition). The remaining `noPolled*` / invalid / late cases pass vacuously now and act as regression guards once emission exists.
 
 - [ ] **Step 6: Implement — provider emission**
 
@@ -497,8 +538,10 @@ void TurnstileProvider::onFinished(QNetworkReply *reply, quint64 gen)
     // Connected.
     if (m_baselined && r.hasEntry && r.eventId <= m_since) { fail(); return; }
 
-    // Validated successful poll (incl. a valid empty poll): report the raw
-    // freshness fact. The SERVICE records it into HealthMonitor.
+    // Validated successful poll (incl. a valid empty poll AND the baseline):
+    // report the raw freshness fact. The SERVICE records it into HealthMonitor.
+    // For the baseline this precedes the Connected transition, which the
+    // service also records — same instant, harmless double record (pinned).
     emit polled(QDateTime::currentDateTimeUtc());
     if (gen != m_generation) return;   // a polled subscriber stopped/restarted us
 
@@ -549,6 +592,25 @@ In `qt-app/core/accesscontrol/accesscontrolservice.cpp`, inside `enable()`, dire
             });
 ```
 
+In the same file, in `onProviderState`, replace the comment above the existing `Connected` record (keep the call itself unchanged) with:
+
+```cpp
+    case ConnectionState::Connected:
+        m_reconnectNextMs = m_reconnectBaseMs;   // reset backoff on success
+        m_reconnectTimer->stop();                // cancel any pending reconnect
+        // A successful connect IS a real comm moment — record the time. This is
+        // one of TWO service-owned freshness sources (the other is the per-poll
+        // polled(at) connection in enable()); it is kept deliberately: it is the
+        // only source for providers that never emit polled (MockProvider), and
+        // for TurnstileProvider it coincides with the baseline's own polled
+        // record (same instant, harmless overwrite). Latency stays -1 (unknown)
+        // until the verify/decision path measures a real one; never fabricate.
+        m_health->recordCommTime(m_provider->descriptor().providerId,
+                                 QDateTime::currentDateTimeUtc());
+        publishControllerEvent(AccessEvent::Type::ControllerConnected);
+        break;
+```
+
 In `qt-app/core/accesscontrol/accesscontrolservice.h`, extend the class comment's last sentence to: `... with exponential backoff reconnect. Owns its HealthMonitor and records each provider-reported polled(at) into it (per-poll comm freshness).`
 
 - [ ] **Step 8: Build + run to verify GREEN**
@@ -558,7 +620,7 @@ cmake --build C:/b/loams-sp4 --target tst_turnstileprovider tst_accesscontrolser
 ctest --test-dir C:/b/loams-sp4 -R "tst_turnstileprovider|tst_accesscontrolservice|tst_mockprovider" --output-on-failure
 ```
 
-Expected: PASS — `tst_turnstileprovider` 22/22 (15 existing + 7), `tst_accesscontrolservice` 13 functions (7 existing + 6; the `_data` test runs 4 rows), `tst_mockprovider` 7/7.
+Expected: PASS — `tst_turnstileprovider` 23/23 (15 existing + 8), `tst_accesscontrolservice` 14 functions (7 existing + 7; the `_data` test runs 4 rows), `tst_mockprovider` 7/7.
 
 - [ ] **Step 9: Commit** (via the `commit` skill) — `feat(accesscontrol): service-owned per-poll comm freshness via IAccessProvider::polled`.
 
@@ -575,7 +637,7 @@ Expected: PASS — `tst_turnstileprovider` 22/22 (15 existing + 7), `tst_accessc
 - Produces:
   - `struct LoginParser::RecentEntry { qint64 id; QString card; QString createdAt; int reader; bool known; QString name; QString schoolId; QString course; QString department; };`
   - `struct LoginParser::RecentFeedResult { bool valid; QVector<RecentEntry> entries; int entriesToday; QString lastEntryAt; QString error; };`
-  - `RecentFeedResult LoginParser::parseRecentFeed(const QByteArray &body);` — `valid` for well-formed `status:"success"` **including `entries: []`**; `lastEntryAt` is `""` when the server sends `null`; on `status != success` the server `message` (if any) is carried in `error` so the VM can classify auth failures.
+  - `RecentFeedResult LoginParser::parseRecentFeed(const QByteArray &body);` — `valid` for well-formed `status:"success"` **including `entries: []`**; `lastEntryAt` is `""` when the server sends `null`; on `status != success` the server `message` (if any) is carried in `error` so the VM can classify auth failures. **Strict row shape:** `id` must be a positive JSON number, `created_at` a JSON string, `card` a JSON string, `reader` a JSON number, `student` an object or `null` — a missing or wrong-typed field makes the whole result `valid=false` with `error` set (never silently defaulted to `""`/`0`).
 
 - [ ] **Step 1: Declare the types + a stub (stub-first)**
 
@@ -628,6 +690,7 @@ In `qt-app/tests/tst_loginparser.cpp`, add to `private slots:` (after `void pars
     void parseRecentFeed_emptyButValid();
     void parseRecentFeed_serverErrorCarriesMessage();
     void parseRecentFeed_malformedIsInvalid();
+    void parseRecentFeed_cardAndReaderAreStrict();
 ```
 
 Append above `QTEST_MAIN(TestLoginParser)`:
@@ -713,6 +776,41 @@ void TestLoginParser::parseRecentFeed_malformedIsInvalid()
         R"({"status":"success","entries":[{"id":1,"card":"C","created_at":5,"reader":0,"student":null}],"entries_today":1,"last_entry_at":null})").valid);
     QVERIFY(!LoginParser::parseRecentFeed(       // student wrong type
         R"({"status":"success","entries":[{"id":1,"card":"C","created_at":"2026-09-30 08:00:00","reader":0,"student":5}],"entries_today":1,"last_entry_at":null})").valid);
+    QVERIFY(!LoginParser::parseRecentFeed(       // id missing
+        R"({"status":"success","entries":[{"card":"C","created_at":"2026-09-30 08:00:00","reader":0,"student":null}],"entries_today":1,"last_entry_at":null})").valid);
+    QVERIFY(!LoginParser::parseRecentFeed(       // id non-number
+        R"({"status":"success","entries":[{"id":"1","card":"C","created_at":"2026-09-30 08:00:00","reader":0,"student":null}],"entries_today":1,"last_entry_at":null})").valid);
+    QVERIFY(!LoginParser::parseRecentFeed(       // created_at missing
+        R"({"status":"success","entries":[{"id":1,"card":"C","reader":0,"student":null}],"entries_today":1,"last_entry_at":null})").valid);
+}
+
+void TestLoginParser::parseRecentFeed_cardAndReaderAreStrict()
+{
+    // card must be a JSON string and reader a JSON number — never silently
+    // defaulted to ""/0 (a shape drift must fail loudly, not render blanks).
+    const auto cardMissing = LoginParser::parseRecentFeed(
+        R"({"status":"success","entries":[{"id":1,"created_at":"2026-09-30 08:00:00","reader":0,"student":null}],"entries_today":1,"last_entry_at":null})");
+    QVERIFY(!cardMissing.valid);
+    QVERIFY(!cardMissing.error.isEmpty());
+
+    const auto cardNonString = LoginParser::parseRecentFeed(
+        R"({"status":"success","entries":[{"id":1,"card":1234,"created_at":"2026-09-30 08:00:00","reader":0,"student":null}],"entries_today":1,"last_entry_at":null})");
+    QVERIFY(!cardNonString.valid);
+    QVERIFY(!cardNonString.error.isEmpty());
+
+    const auto readerMissing = LoginParser::parseRecentFeed(
+        R"({"status":"success","entries":[{"id":1,"card":"C","created_at":"2026-09-30 08:00:00","student":null}],"entries_today":1,"last_entry_at":null})");
+    QVERIFY(!readerMissing.valid);
+    QVERIFY(!readerMissing.error.isEmpty());
+
+    const auto readerNonNumber = LoginParser::parseRecentFeed(
+        R"({"status":"success","entries":[{"id":1,"card":"C","created_at":"2026-09-30 08:00:00","reader":"1","student":null}],"entries_today":1,"last_entry_at":null})");
+    QVERIFY(!readerNonNumber.valid);
+    QVERIFY(!readerNonNumber.error.isEmpty());
+
+    // Control: the same row with a string card and numeric reader is valid.
+    QVERIFY(LoginParser::parseRecentFeed(
+        R"({"status":"success","entries":[{"id":1,"card":"C","created_at":"2026-09-30 08:00:00","reader":0,"student":null}],"entries_today":1,"last_entry_at":null})").valid);
 }
 ```
 
@@ -723,7 +821,7 @@ cmake --build C:/b/loams-sp4 --target tst_loginparser
 ctest --test-dir C:/b/loams-sp4 -R tst_loginparser --output-on-failure
 ```
 
-Expected: builds; **FAIL** at assertions — `parseRecentFeed_validListWithCounts`, `_nullStudentIsUnknownRow`, `_emptyButValid` (`r.valid` false from the stub), `_serverErrorCarriesMessage` (`error` empty). `_malformedIsInvalid` passes vacuously (guard).
+Expected: builds; **FAIL** at assertions — `parseRecentFeed_validListWithCounts`, `_nullStudentIsUnknownRow`, `_emptyButValid` (`r.valid` false from the stub), `_serverErrorCarriesMessage` (`error` empty), `_cardAndReaderAreStrict` (the stub returns an empty `error` and fails the valid control row). `_malformedIsInvalid` passes vacuously (guard).
 
 - [ ] **Step 4: Implement `parseRecentFeed`**
 
@@ -771,12 +869,18 @@ LoginParser::RecentFeedResult LoginParser::parseRecentFeed(const QByteArray &bod
         }
         const QJsonValue createdVal = e.value(QStringLiteral("created_at"));
         if (!createdVal.isString()) { r.error = QStringLiteral("created_at not a string"); return r; }
+        // Strict: missing (Undefined) or wrong-typed card/reader is a shape
+        // failure, never silently defaulted to ""/0.
+        const QJsonValue cardVal = e.value(QStringLiteral("card"));
+        if (!cardVal.isString()) { r.error = QStringLiteral("card not a string"); return r; }
+        const QJsonValue readerVal = e.value(QStringLiteral("reader"));
+        if (!readerVal.isDouble()) { r.error = QStringLiteral("reader not a number"); return r; }
 
         RecentEntry out;
         out.id = idVal.toInteger();
-        out.card = e.value(QStringLiteral("card")).toString();
+        out.card = cardVal.toString();
         out.createdAt = createdVal.toString();
-        out.reader = e.value(QStringLiteral("reader")).toInt();
+        out.reader = readerVal.toInt();
 
         const QJsonValue studentVal = e.value(QStringLiteral("student"));
         if (studentVal.isObject()) {
@@ -807,7 +911,7 @@ cmake --build C:/b/loams-sp4 --target tst_loginparser
 ctest --test-dir C:/b/loams-sp4 -R tst_loginparser --output-on-failure
 ```
 
-Expected: PASS (all `parseRecentFeed_*` plus the pre-existing cases).
+Expected: PASS (all six `parseRecentFeed_*` cases plus the pre-existing cases).
 
 - [ ] **Step 6: Commit** (via the `commit` skill) — `feat(accesscontrol): add pure parseRecentFeed decoder for access_recent`.
 
@@ -1253,6 +1357,7 @@ private slots:
     void refresh_transportFailureAfterSuccessIsStale();
     void refresh_http5xxAfterSuccessIsStale();
     void refresh_http401_setsAuthFailureAndClearsProtectedData();
+    void refresh_http401WithEmptyOrMalformedBodyIsStillAuthFailure();
     void authFailure_resetByLaterSuccess();
     void supersededRequestSeqIsNotCurrent();
     void refresh_supersededReplyIsDropped();
@@ -1411,6 +1516,29 @@ void TestAccessControlViewModel::refresh_http401_setsAuthFailureAndClearsProtect
     QCOMPARE(AdminSession::instance().key(), QStringLiteral("sp4-test-key"));   // not cleared here
 }
 
+void TestAccessControlViewModel::refresh_http401WithEmptyOrMalformedBodyIsStillAuthFailure()
+{
+    // HTTP 401 is AUTHORITATIVE: it must not depend on parsing the body. The
+    // in-band "Invalid admin key" message match is only a secondary path.
+    const QList<QByteArray> bodies{ QByteArray(), QByteArrayLiteral("<html>401</html>") };
+    for (const QByteArray &body : bodies) {
+        CapturingNam nam(body, QNetworkReply::AuthenticationRequiredError, 401);
+        AccessControlViewModel vm(nullptr, &nam);
+        vm.applyRecent(feedBody());             // protected rows on screen
+        QSignalSpy auth(&vm, &AccessControlViewModel::authFailureChanged);
+        vm.refresh();
+        QVERIFY(auth.wait(1000));
+        QVERIFY(vm.authFailure());
+        QCOMPARE(vm.errorText(),
+                 QStringLiteral("Admin authentication failed — re-enter via admin login."));
+        QCOMPARE(vm.entries()->rowCount(), 0);  // protected data cleared
+        QCOMPARE(vm.entriesToday(), 0);
+        QVERIFY(vm.lastEntryAt().isEmpty());
+        QVERIFY(vm.updatedAt().isEmpty());
+        QVERIFY(!vm.stale());
+    }
+}
+
 void TestAccessControlViewModel::authFailure_resetByLaterSuccess()
 {
     AccessControlViewModel vm;
@@ -1535,6 +1663,9 @@ void AccessControlViewModel::refresh()
         reply->deleteLater();
         if (!isCurrentRequest(seq)) return;   // superseded — drop
         setLoading(false);
+        // HTTP 401 is authoritative and checked BEFORE any body handling, so
+        // an empty/non-JSON 401 still clears protected data. The in-band
+        // "Invalid admin key" message (applyRecent) is only a secondary path.
         if (httpStatus == 401) { applyAuthFailure(); return; }
         if (!HttpForm::isServerAnswer(hadError, httpStatus, body)) {
             applyFailure(tr("Network error. Please try again."));
@@ -1636,7 +1767,7 @@ cmake --build C:/b/loams-sp4 --target tst_accesscontrolviewmodel
 ctest --test-dir C:/b/loams-sp4 -R tst_accesscontrolviewmodel --output-on-failure
 ```
 
-Expected: PASS (12/12).
+Expected: PASS (13/13).
 
 - [ ] **Step 7: Commit** (via the `commit` skill) — `feat(accesscontrol): add AccessControlViewModel for the admin recent feed`.
 
@@ -3113,13 +3244,13 @@ Run `C:/b/loams-sp4/quick/WITSQuick.exe` against the local backend and record re
 | Architecture: two data sources (singleton = live, VM = admin endpoint data) | T4 (VM), T5 (hub), T7 (`vm` + `hub` bindings) |
 | Refinement 1 — two timestamps ("Updated" VM, frozen on failure; "Last contact" hub) | T4 (`updatedAt` + freeze test), T5 (`lastContactAt`), T7 (`updatedLabel` separate from `contactTile`) |
 | Refinement 2 — `enableLocked` read-only switch + inline override note | T5 (`enableLocked_refusesDisable`), T7 (`test_lockedDisablesToggleAndShowsNote`) |
-| Refinement 3 — per-poll freshness; provider emits only on validated success incl. `entry:null`; never on transport/non-2xx/malformed; late reply after disable ignored; service records | T1 (provider + service tests incl. `_data` rows and `turnstileLateResponseAfterDisableIsIgnored`) |
+| Refinement 3 — per-poll freshness; provider emits only on validated success incl. `entry:null`; never on transport/non-2xx/malformed; late reply after disable ignored; service records | T1 (provider + service tests incl. `_data` rows and `turnstileLateResponseAfterDisableIsIgnored`); the pre-existing Connected-transition record is deliberately KEPT as a second service-owned source, and baseline-emits-`polled`-once is pinned (`baselineSuccessEmitsPolledOnce`, `connectedTransitionAndPolledAreBothServiceRecorded`) |
 | Refinement 4 — contact age advances on a presentation timer; pure 3-state formatter | T6 (`formatContactAge` + `ageIncreasesWithNowForSameContact`), T7 (`ageTimer`, `test_contactAgeAdvancesWithoutNewEvents`) |
 | Refinement 5 — intent ≠ outcome; idempotent; persist-first; refuse disable when locked; failed startup doesn't revert | T5 |
-| Refinement 6 — stale keep-rows / 401 clear + `authFailure` / empty vs failed-initial | T4 (VM tests), T7 (empty/failed/auth QML tests) |
+| Refinement 6 — stale keep-rows / 401 clear + `authFailure` (HTTP 401 authoritative even with an empty/non-JSON body; in-band message secondary) / empty vs failed-initial | T4 (VM tests incl. `refresh_http401WithEmptyOrMalformedBodyIsStillAuthFailure`), T7 (empty/failed/auth QML tests) |
 | `AccessControlViewModel` ctor/NAM seam, `refresh()` POST body, props, generation guard, `applyRecent` seam | T4 |
 | `AccessEntriesModel` roles + "Unknown card", text-only | T3 |
-| `LoginParser::parseRecentFeed` + `RecentFeedResult` | T2 |
+| `LoginParser::parseRecentFeed` + `RecentFeedResult` (strict row shape: `id`/`created_at`/`card`/`reader`/`student` types enforced) | T2 (`_malformedIsInvalid`, `_cardAndReaderAreStrict`) |
 | Hub retained state on every `initialize()` path; Q_PROPERTYs + NOTIFY; relays filtered by providerId + changed `lastCommTime`; `connectionState` int order pinned | T5 |
 | Screen: LCard + LCheckbox toggle (binding re-asserted), helper text, tiles, Updated + stale badge, LTable, Refresh, LToast, Theme-only colors | T7 |
 | Nav + registration: enum appended; all six `AdminScreen.qml` touch points; CMake | T7 (+ T3/T4 CMake) |
