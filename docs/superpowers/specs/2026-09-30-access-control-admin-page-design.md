@@ -1,6 +1,6 @@
 # Access Control Admin Page (Sub-plan 4) — Design
 
-**Status:** design approved 2026-09-30 (owner), pending codex-review.
+**Status:** design approved 2026-09-30 (owner); codex-review APPROVE (2 rounds).
 **Predecessor:** Sub-plan 3 (TurnstileProvider + native kiosk display), merged to
 master (PR #58, squash `13d072a`). This sub-plan consumes the already-merged
 `access_recent.php` (Sub-plan 2) and the already-built Access Control seam
@@ -117,7 +117,7 @@ explicit implementation requirements:
 
 - **Retained state:** `m_descriptor` (`ProviderDescriptor`), `m_config`
   (`QVariantMap`, the same raw pollIntervalMs/gateId map `initialize()` builds
-  today), `m_providerId` (= `m_descriptor.id`), `m_intentEnabled` (bool) and
+  today), `m_providerId` (= `m_descriptor.providerId`), `m_intentEnabled` (bool) and
   `m_enableLocked` (bool). `initialize()` fills all five on **every** path —
   including the flag-off early return, so a later runtime enable has a
   descriptor + config to pass.
