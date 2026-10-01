@@ -1,20 +1,32 @@
 #include <QtTest>
 #include <QTemporaryDir>
 #include <QFile>
+#include <QRegularExpression>
 #include <QTextStream>
 #include "apiconfig.h"
 #include "apiconfigloader.h"
+
+using ApiConfigLoader::Source;
 
 class TestApiConfigLoader : public QObject
 {
     Q_OBJECT
 private slots:
+    void init();
     void cleanup();
     void envWinsOverIni();
     void iniUsedWhenEnvEmpty();
     void defaultWhenNeitherPresent();
+    void missingIniUsesEnv();
     void malformedIniFallsThrough();
+    void validEnvDoesNotConsultInvalidIni();
+    void invalidEnvFallsThroughToIni();
+    void invalidEnvAndInvalidIniGivesEmpty();
+    void invalidEnvAndMissingIniGivesEmpty();
+    void rejectedCredentialsAreRedacted();
     void fullChainSetsEndpoint();
+    void applyFromRuntimeWarnsOnInvalidEnvAndUsesIni();
+    void applyFromRuntimeKeepsDefaultWhenAllInvalid();
 
 private:
     // Write an ini with the given BaseURL line and return its path.
@@ -22,57 +34,176 @@ private:
     {
         const QString path = dir.path() + QStringLiteral("/config.ini");
         QFile f(path);
-        f.open(QIODevice::WriteOnly | QIODevice::Text);
+        if (!f.open(QIODevice::WriteOnly | QIODevice::Text))
+            return QString();
         QTextStream(&f) << "[Server]\n" << baseUrlLine << "\n";
         f.close();
         return path;
     }
+
+    static QString missingIni() { return QStringLiteral("C:/no/such/config.ini"); }
 };
+
+void TestApiConfigLoader::init()
+{
+    qunsetenv("WITS_API_BASE_URL");
+}
 
 void TestApiConfigLoader::cleanup()
 {
-    ApiConfig::setBaseUrl(QStringLiteral("http://localhost/loams_api/"));
+    // Process-global state: restore the localhost default and the env so no
+    // later case (or target) observes this case's configuration.
+    qunsetenv("WITS_API_BASE_URL");
+    QVERIFY(ApiConfig::setBaseUrl(ApiConfig::defaultBaseUrl()));
+    QCOMPARE(ApiConfig::baseUrl(), QString("http://localhost/loams_api/"));
 }
 
 void TestApiConfigLoader::envWinsOverIni()
 {
     QTemporaryDir dir;
-    const QString ini = writeIni(dir, QStringLiteral("BaseURL=http://from-ini/loams_api"));
-    QCOMPARE(ApiConfigLoader::resolveBaseUrl(QStringLiteral("http://from-env/loams_api"), ini),
-             QString("http://from-env/loams_api"));
+    const QString ini = writeIni(dir, QStringLiteral("BaseURL=http://ini.test/loams_api"));
+    QVERIFY(!ini.isEmpty());
+    const auto r = ApiConfigLoader::resolveBaseUrl(QStringLiteral("http://env.test/loams_api"), ini);
+    QCOMPARE(r.url, QString("http://env.test/loams_api/"));
+    QVERIFY(r.source == Source::Environment);
+    QVERIFY(r.rejected.isEmpty());
 }
 
 void TestApiConfigLoader::iniUsedWhenEnvEmpty()
 {
     QTemporaryDir dir;
-    const QString ini = writeIni(dir, QStringLiteral("BaseURL=http://from-ini/loams_api"));
-    QCOMPARE(ApiConfigLoader::resolveBaseUrl(QString(), ini),
-             QString("http://from-ini/loams_api"));
+    const QString ini = writeIni(dir, QStringLiteral("BaseURL=http://ini.test/loams_api"));
+    QVERIFY(!ini.isEmpty());
+    const auto r = ApiConfigLoader::resolveBaseUrl(QString(), ini);
+    QCOMPARE(r.url, QString("http://ini.test/loams_api/"));
+    QVERIFY(r.source == Source::ConfigIni);
+    QVERIFY(r.rejected.isEmpty());
 }
 
 void TestApiConfigLoader::defaultWhenNeitherPresent()
 {
     // No env, and a path to a file that does not exist -> empty (caller keeps default).
-    QCOMPARE(ApiConfigLoader::resolveBaseUrl(QString(),
-                 QStringLiteral("C:/no/such/config.ini")),
-             QString());
+    const auto r = ApiConfigLoader::resolveBaseUrl(QString(), missingIni());
+    QCOMPARE(r.url, QString());
+    QVERIFY(r.source == Source::Default);
+    QVERIFY(r.rejected.isEmpty());
+}
+
+void TestApiConfigLoader::missingIniUsesEnv()
+{
+    const auto r = ApiConfigLoader::resolveBaseUrl(QStringLiteral("https://env.test/loams_api/"),
+                                                   missingIni());
+    QCOMPARE(r.url, QString("https://env.test/loams_api/"));
+    QVERIFY(r.source == Source::Environment);
 }
 
 void TestApiConfigLoader::malformedIniFallsThrough()
 {
     QTemporaryDir dir;
-    // Right group, empty value -> treated as not configured.
+    // Right group, empty value -> treated as not configured (not a rejection).
     const QString ini = writeIni(dir, QStringLiteral("BaseURL="));
-    QCOMPARE(ApiConfigLoader::resolveBaseUrl(QString(), ini), QString());
+    QVERIFY(!ini.isEmpty());
+    const auto r = ApiConfigLoader::resolveBaseUrl(QString(), ini);
+    QCOMPARE(r.url, QString());
+    QVERIFY(r.rejected.isEmpty());
+}
+
+void TestApiConfigLoader::validEnvDoesNotConsultInvalidIni()
+{
+    QTemporaryDir dir;
+    const QString ini = writeIni(dir, QStringLiteral("BaseURL=ftp://ini.test/loams_api/"));
+    QVERIFY(!ini.isEmpty());
+    const auto r = ApiConfigLoader::resolveBaseUrl(QStringLiteral("http://env.test/loams_api/"), ini);
+    QCOMPARE(r.url, QString("http://env.test/loams_api/"));
+    QVERIFY(r.rejected.isEmpty());   // lower-precedence source never reached
+}
+
+void TestApiConfigLoader::invalidEnvFallsThroughToIni()
+{
+    QTemporaryDir dir;
+    const QString ini = writeIni(dir, QStringLiteral("BaseURL=http://ini.test/loams_api"));
+    QVERIFY(!ini.isEmpty());
+    const auto r = ApiConfigLoader::resolveBaseUrl(QStringLiteral("ftp://env.test/loams_api/"), ini);
+    QCOMPARE(r.url, QString("http://ini.test/loams_api/"));
+    QVERIFY(r.source == Source::ConfigIni);
+    QCOMPARE(r.rejected.size(), 1);
+    QVERIFY(r.rejected.at(0).source == Source::Environment);
+    QCOMPARE(r.rejected.at(0).value, QString("ftp://env.test/loams_api/"));
+}
+
+void TestApiConfigLoader::invalidEnvAndInvalidIniGivesEmpty()
+{
+    QTemporaryDir dir;
+    const QString ini = writeIni(dir, QStringLiteral("BaseURL=localhost/loams_api"));
+    QVERIFY(!ini.isEmpty());
+    const auto r = ApiConfigLoader::resolveBaseUrl(QStringLiteral("//evil.example/loams_api"), ini);
+    QCOMPARE(r.url, QString());
+    QVERIFY(r.source == Source::Default);
+    QCOMPARE(r.rejected.size(), 2);
+    QVERIFY(r.rejected.at(0).source == Source::Environment);
+    QCOMPARE(r.rejected.at(0).value, QString("//evil.example/loams_api"));
+    QVERIFY(r.rejected.at(1).source == Source::ConfigIni);
+    QCOMPARE(r.rejected.at(1).value, QString("localhost/loams_api"));
+}
+
+void TestApiConfigLoader::invalidEnvAndMissingIniGivesEmpty()
+{
+    const auto r = ApiConfigLoader::resolveBaseUrl(QStringLiteral("javascript:alert(1)"),
+                                                   missingIni());
+    QCOMPARE(r.url, QString());
+    QCOMPARE(r.rejected.size(), 1);
+    QVERIFY(r.rejected.at(0).source == Source::Environment);
+}
+
+void TestApiConfigLoader::rejectedCredentialsAreRedacted()
+{
+    // A rejected value is reported for diagnostics, but embedded credentials
+    // must never reach the log.
+    const auto r = ApiConfigLoader::resolveBaseUrl(
+        QStringLiteral("http://user:s3cret@env.test/loams_api/"), missingIni());
+    QCOMPARE(r.url, QString());
+    QCOMPARE(r.rejected.size(), 1);
+    QVERIFY(!r.rejected.at(0).value.contains(QStringLiteral("s3cret")));
+    QVERIFY(!r.rejected.at(0).value.contains(QStringLiteral("user")));
+    QVERIFY(r.rejected.at(0).value.contains(QStringLiteral("env.test")));
 }
 
 void TestApiConfigLoader::fullChainSetsEndpoint()
 {
     QTemporaryDir dir;
     const QString ini = writeIni(dir, QStringLiteral("BaseURL=http://192.168.1.100/loams_api"));
-    ApiConfig::setBaseUrl(ApiConfigLoader::resolveBaseUrl(QString(), ini));
+    QVERIFY(!ini.isEmpty());
+    QVERIFY(ApiConfig::setBaseUrl(ApiConfigLoader::resolveBaseUrl(QString(), ini).url));
     QCOMPARE(ApiConfig::endpoint("student_login.php").toString(),
              QString("http://192.168.1.100/loams_api/student_login.php"));
+}
+
+void TestApiConfigLoader::applyFromRuntimeWarnsOnInvalidEnvAndUsesIni()
+{
+    QTemporaryDir dir;
+    QVERIFY(!writeIni(dir, QStringLiteral("BaseURL=http://ini.test/loams_api")).isEmpty());
+    qputenv("WITS_API_BASE_URL", "ftp://env.test/loams_api/");
+
+    QTest::ignoreMessage(QtWarningMsg,
+                         QRegularExpression(QStringLiteral("ftp://env\\.test.*WITS_API_BASE_URL")));
+    ApiConfigLoader::applyFromRuntime(dir.path());
+    QCOMPARE(ApiConfig::baseUrl(), QString("http://ini.test/loams_api/"));
+}
+
+void TestApiConfigLoader::applyFromRuntimeKeepsDefaultWhenAllInvalid()
+{
+    QTemporaryDir dir;
+    QVERIFY(!writeIni(dir, QStringLiteral("BaseURL=file:///C:/loams_api/")).isEmpty());
+    qputenv("WITS_API_BASE_URL", "http://host.test/?q=1");
+
+    QTest::ignoreMessage(QtWarningMsg,
+                         QRegularExpression(QStringLiteral("WITS_API_BASE_URL")));
+    QTest::ignoreMessage(QtWarningMsg,
+                         QRegularExpression(QStringLiteral("config\\.ini")));
+    QTest::ignoreMessage(QtWarningMsg,
+                         QRegularExpression(QStringLiteral("default")));
+    ApiConfigLoader::applyFromRuntime(dir.path());
+    QCOMPARE(ApiConfig::baseUrl(), QString("http://localhost/loams_api/"));
 }
 
 QTEST_MAIN(TestApiConfigLoader)

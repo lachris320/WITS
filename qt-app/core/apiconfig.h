@@ -13,12 +13,20 @@
 // into both the app and the unit-test target and stays trivially testable.
 namespace ApiConfig {
 
+// The compiled-in default, used when no valid runtime value is configured.
+// This is the one place the default lives; tests also use it to restore the
+// process-global after overriding it.
+inline QString defaultBaseUrl()
+{
+    return QStringLiteral("http://localhost/loams_api/");
+}
+
 namespace detail {
 // Single shared instance across all translation units (inline function-local
-// static, guaranteed unique in C++17). This is the one place the default lives.
+// static, guaranteed unique in C++17).
 inline QString &mutableBaseUrl()
 {
-    static QString value = QStringLiteral("http://localhost/loams_api/");
+    static QString value = defaultBaseUrl();
     return value;
 }
 } // namespace detail
@@ -30,18 +38,49 @@ inline QString baseUrl()
     return detail::mutableBaseUrl();
 }
 
-// Override the base URL at runtime (resolved from config.ini / env at startup;
-// see core/apiconfigloader). Normalizes to exactly one trailing slash. Empty or
-// whitespace-only input is ignored so a blank config line can't blank the base.
-inline void setBaseUrl(const QString &url)
+// Validate + normalize a candidate base URL. Every API request -- including the
+// ones carrying the admin key -- is built on this base, so only an absolute
+// http(s) URL with a host is accepted: no other scheme, no userinfo
+// (credentials), no query, no fragment. Port and path are allowed. Returns the
+// URL with a lowercase scheme and exactly one trailing slash, or an EMPTY
+// string when the input is blank or invalid.
+inline QString normalizedBaseUrl(const QString &raw)
 {
-    const QString trimmed = url.trimmed();
+    const QString trimmed = raw.trimmed();
     if (trimmed.isEmpty())
-        return;
-    QString v = trimmed;
-    while (v.endsWith(QLatin1Char('/')))
-        v.chop(1);
-    detail::mutableBaseUrl() = v + QLatin1Char('/');
+        return QString();
+
+    QUrl url(trimmed, QUrl::StrictMode);
+    if (!url.isValid() || url.isRelative())
+        return QString();
+
+    const QString scheme = url.scheme().toLower();
+    if (scheme != QLatin1String("http") && scheme != QLatin1String("https"))
+        return QString();
+    if (url.host().isEmpty())
+        return QString();
+    if (!url.userInfo().isEmpty() || url.hasQuery() || url.hasFragment())
+        return QString();
+
+    url.setScheme(scheme);
+    QString normalized = url.toString(QUrl::FullyEncoded);
+    while (normalized.endsWith(QLatin1Char('/')))
+        normalized.chop(1);
+    return normalized + QLatin1Char('/');
+}
+
+// Override the base URL at runtime (resolved from config.ini / env at startup;
+// see core/apiconfigloader). Applies only a value that passes
+// normalizedBaseUrl(); anything else (blank, malformed, wrong scheme,
+// credentials, query, fragment) leaves the current base UNCHANGED and returns
+// false, so bad configuration can never redirect API traffic.
+inline bool setBaseUrl(const QString &url)
+{
+    const QString normalized = normalizedBaseUrl(url);
+    if (normalized.isEmpty())
+        return false;
+    detail::mutableBaseUrl() = normalized;
+    return true;
 }
 
 // Build a full endpoint URL from a relative path (e.g. "get_departments.php"
