@@ -37,6 +37,10 @@ private slots:
     void unreadableIniFileIsReported();
     void applyFromRuntimeWarnsOnUnreadableIni();
     void rejectedCredentialsAreRedacted();
+    void rejectedQueryAndFragmentAreRedacted_data();
+    void rejectedQueryAndFragmentAreRedacted();
+    void rejectedValueHasNoControlCharacters_data();
+    void rejectedValueHasNoControlCharacters();
     void fullChainSetsEndpoint();
     void applyFromRuntimeWarnsOnInvalidEnvAndUsesIni();
     void applyFromRuntimeKeepsDefaultWhenAllInvalid();
@@ -320,6 +324,49 @@ void TestApiConfigLoader::rejectedCredentialsAreRedacted()
     QVERIFY(!r.rejected.at(0).value.contains(QStringLiteral("user")));
     QVERIFY(r.rejected.at(0).value.contains(QStringLiteral("env.test")));
     QVERIFY(r.rejected.at(0).value.contains(QStringLiteral("credentials removed")));
+}
+
+void TestApiConfigLoader::rejectedQueryAndFragmentAreRedacted_data()
+{
+    QTest::addColumn<QString>("raw");
+    QTest::newRow("query secret") << "http://srv.test/loams_api/x.php?admin_key=SECRET";
+    QTest::newRow("fragment secret") << "http://srv.test/loams_api/#SECRET";
+    QTest::newRow("unparseable with query") << "ht!tp://srv.test/?admin_key=SECRET";
+    QTest::newRow("unparseable with fragment") << "ht!tp://srv.test/#SECRET";
+    QTest::newRow("scheme-relative with query") << "//srv.test/x?admin_key=SECRET";
+}
+
+void TestApiConfigLoader::rejectedQueryAndFragmentAreRedacted()
+{
+    QFETCH(QString, raw);
+    const auto r = ApiConfigLoader::resolveBaseUrl(raw, missingIni());
+    QCOMPARE(r.url, QString());
+    QCOMPARE(r.rejected.size(), 1);
+    QVERIFY2(!r.rejected.at(0).value.contains(QStringLiteral("SECRET")),
+             qPrintable(r.rejected.at(0).value));
+}
+
+void TestApiConfigLoader::rejectedValueHasNoControlCharacters_data()
+{
+    QTest::addColumn<QString>("raw");
+    QTest::newRow("CRLF in parseable URL")
+        << QStringLiteral("http://srv.test/a\r\nWARNING: forged line");
+    QTest::newRow("LF in unparseable value")
+        << QStringLiteral("not a url\nWARNING: forged line");
+    QTest::newRow("tab and bell") << QStringLiteral("ftp://srv.test/\t\a");
+}
+
+void TestApiConfigLoader::rejectedValueHasNoControlCharacters()
+{
+    QFETCH(QString, raw);
+    const auto r = ApiConfigLoader::resolveBaseUrl(raw, missingIni());
+    QCOMPARE(r.url, QString());
+    QCOMPARE(r.rejected.size(), 1);
+    const QString logged = r.rejected.at(0).value;
+    for (const QChar c : logged)
+        QVERIFY2(c.category() != QChar::Other_Control, qPrintable(logged));
+    QVERIFY(!logged.contains(QLatin1Char('\n')));
+    QVERIFY(!logged.contains(QLatin1Char('\r')));
 }
 
 void TestApiConfigLoader::fullChainSetsEndpoint()

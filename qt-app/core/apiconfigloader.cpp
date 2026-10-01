@@ -13,18 +13,45 @@ namespace ApiConfigLoader {
 
 namespace {
 
-// A rejected value is logged for diagnostics; strip any userinfo so a
-// credential typed into the URL never reaches the log.
+// Replace control and line/paragraph-separator characters so a configured
+// value can never forge extra log lines (it is logged via noquote()).
+QString withoutControlChars(QString s)
+{
+    for (QChar &c : s) {
+        const QChar::Category cat = c.category();
+        if (cat == QChar::Other_Control || cat == QChar::Separator_Line
+            || cat == QChar::Separator_Paragraph)
+            c = QLatin1Char('?');
+    }
+    return s;
+}
+
+// A rejected value is logged for diagnostics only. Log at most
+// scheme://host[:port]/path: userinfo, query and fragment can carry secrets
+// (e.g. a pasted "...?admin_key=..."), so they are removed; a value that does
+// not parse to scheme + host but contains '@', '?' or '#' is withheld.
 QString redactedForLog(const QString &value)
 {
-    if (!value.contains(QLatin1Char('@')))
-        return value;
     const QUrl parsed(value, QUrl::TolerantMode);
-    if (parsed.isValid() && !parsed.userInfo().isEmpty())
-        return parsed.toString(QUrl::RemoveUserInfo)
-               + QStringLiteral(" [credentials removed]");
-    // Unparseable but contains '@': it may still embed a credential.
-    return QStringLiteral("<withheld: value contains '@'>");
+    if (parsed.isValid() && !parsed.scheme().isEmpty() && !parsed.host().isEmpty()) {
+        QStringList removed;
+        if (!parsed.userInfo().isEmpty()
+            || parsed.authority(QUrl::FullyEncoded).contains(QLatin1Char('@')))
+            removed << QStringLiteral("credentials");
+        if (parsed.hasQuery())
+            removed << QStringLiteral("query");
+        if (parsed.hasFragment())
+            removed << QStringLiteral("fragment");
+        QString out = parsed.toString(QUrl::RemoveUserInfo | QUrl::RemoveQuery
+                                      | QUrl::RemoveFragment);
+        if (!removed.isEmpty())
+            out += QStringLiteral(" [%1 removed]").arg(removed.join(QStringLiteral(", ")));
+        return withoutControlChars(out);
+    }
+    if (value.contains(QLatin1Char('@')) || value.contains(QLatin1Char('?'))
+        || value.contains(QLatin1Char('#')))
+        return QStringLiteral("<withheld: value contains '@', '?' or '#'>");
+    return withoutControlChars(value);
 }
 
 // Try one PRESENT source (env var set / ini key present). A blank value is a
