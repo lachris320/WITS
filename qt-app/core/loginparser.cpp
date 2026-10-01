@@ -8,6 +8,18 @@
 
 namespace {
 
+// Effective port: the explicit port, or the scheme's default (80 http, 443
+// https). The base URL is normalized with its default port stripped (-1), so
+// raw port() values would wrongly mismatch "http://srv/" vs "http://srv:80/".
+int effectivePort(const QUrl &url)
+{
+    const QString scheme = url.scheme().toLower();
+    const int fallback = scheme == QLatin1String("https") ? 443
+                         : scheme == QLatin1String("http") ? 80
+                                                          : -1;
+    return url.port(fallback);
+}
+
 // Constrain an untrusted photo reference to baseUrl's origin. QUrl::resolved()
 // on an *absolute* reference (RFC 3986) returns that reference unchanged, so a
 // backend/MITM-supplied absolute URL (foreign host, file://, UNC path) would
@@ -23,7 +35,10 @@ QString sameOriginPhotoUrl(const QString &candidate, const QUrl &baseUrl)
         return QString();
     if (resolved.host().compare(baseUrl.host(), Qt::CaseInsensitive) != 0)
         return QString();
-    if (resolved.port() != baseUrl.port())
+    // Effective-port comparison. Scheme equality is deliberately NOT enforced
+    // (deferred to the TLS track), but an https base (443) vs an http photo
+    // (80) on the same host now mismatches on port -- stricter, not looser.
+    if (effectivePort(resolved) != effectivePort(baseUrl))
         return QString();
     return resolved.toString();
 }
