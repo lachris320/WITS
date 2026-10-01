@@ -25,6 +25,15 @@ private slots:
     void settingEnables();
     void envZeroDoesNotForceOff_settingWins();
     void envForceEnablesAndEmitsEntry();
+    void connectionStateEnumOrderPinned();
+    void setAccessEnabled_persistsTogglesAndIsIdempotent();
+    void notLockedWhenEnabledBySetting();
+    void enableLocked_refusesDisable();
+    void failedStartupKeepsIntent();
+    void connectionStateRelaysService();
+    void lastContactAdvancesPerPoll();
+    void stateOnlyHealthChangeDoesNotEmitLastContact();
+    void contactAgeText_delegatesToPureFormatter();
 
 private:
     static QByteArray entryPayload(qint64 latest, qint64 id)
@@ -113,6 +122,141 @@ void TestAccessControlHub::envForceEnablesAndEmitsEntry()
     const QVariantMap m = spy.at(0).at(0).toMap();
     QCOMPARE(m.value("hasStudent").toBool(), true);
     QCOMPARE(m.value("eventId").toString(), QStringLiteral("4"));
+}
+
+void TestAccessControlHub::connectionStateEnumOrderPinned()
+{
+    // QML maps these ints to labels (ConnectionState has no Q_ENUM).
+    QCOMPARE(int(ConnectionState::Disconnected), 0);
+    QCOMPARE(int(ConnectionState::Connecting), 1);
+    QCOMPARE(int(ConnectionState::Connected), 2);
+    QCOMPARE(int(ConnectionState::Degraded), 3);
+    QCOMPARE(int(ConnectionState::Error), 4);
+}
+
+void TestAccessControlHub::setAccessEnabled_persistsTogglesAndIsIdempotent()
+{
+    SequencedNam nam;                        // unqueued requests: valid empty polls
+    AccessControlHub hub(&nam);
+    hub.initialize();                        // flag off: descriptor/config still retained
+    QVERIFY(!hub.isAccessEnabled());
+    QSignalSpy spy(&hub, &AccessControlHub::accessEnabledChanged);
+
+    hub.setAccessEnabled(true);
+    QVERIFY(hub.isAccessEnabled());
+    QCOMPARE(spy.count(), 1);
+    { AppSettings s; QCOMPARE(s.value("accessControl/enabled").toBool(), true); }
+    QTRY_VERIFY_WITH_TIMEOUT(nam.requestCount() >= 1, 3000);   // service really started
+    QVERIFY(nam.lastUrl.path().endsWith(QStringLiteral("turnstile_display.php")));
+
+    hub.setAccessEnabled(true);              // idempotent: no churn, no re-persist signal
+    QCOMPARE(spy.count(), 1);
+
+    hub.setAccessEnabled(false);
+    QVERIFY(!hub.isAccessEnabled());
+    QCOMPARE(spy.count(), 2);
+    { AppSettings s; QCOMPARE(s.value("accessControl/enabled").toBool(), false); }
+    QCOMPARE(hub.connectionState(), int(ConnectionState::Disconnected));
+
+    hub.setAccessEnabled(false);             // idempotent
+    QCOMPARE(spy.count(), 2);
+}
+
+void TestAccessControlHub::notLockedWhenEnabledBySetting()
+{
+    { AppSettings s; s.setValue("accessControl/enabled", true); s.sync(); }
+    SequencedNam nam;
+    AccessControlHub hub(&nam);
+    hub.initialize();
+    QVERIFY(hub.isAccessEnabled());
+    QVERIFY(!hub.isEnableLocked());          // only the env var locks
+    hub.setAccessEnabled(false);             // so disabling is allowed
+    QVERIFY(!hub.isAccessEnabled());
+}
+
+void TestAccessControlHub::enableLocked_refusesDisable()
+{
+    qputenv("WITS_ACCESS_CONTROL", "1");
+    SequencedNam nam;
+    AccessControlHub hub(&nam);
+    hub.initialize();
+    QVERIFY(hub.isEnableLocked());
+    QVERIFY(hub.isAccessEnabled());
+    QSignalSpy spy(&hub, &AccessControlHub::accessEnabledChanged);
+
+    hub.setAccessEnabled(false);             // refused
+    QVERIFY(hub.isAccessEnabled());
+    QCOMPARE(spy.count(), 0);
+    { AppSettings s; QVERIFY(!s.contains("accessControl/enabled")); }   // nothing persisted
+    QTRY_VERIFY_WITH_TIMEOUT(nam.requestCount() >= 1, 3000);            // still monitoring
+}
+
+void TestAccessControlHub::failedStartupKeepsIntent()
+{
+    SequencedNam nam;
+    for (int i = 0; i < 4; ++i)              // baseline + backoff retries all fail
+        nam.enqueue(QByteArray(), QNetworkReply::HostNotFoundError);
+    AccessControlHub hub(&nam);
+    hub.initialize();                        // flag off
+    hub.setAccessEnabled(true);
+    QTRY_COMPARE_WITH_TIMEOUT(hub.connectionState(), int(ConnectionState::Degraded), 3000);
+    QVERIFY(hub.isAccessEnabled());          // intent NOT reverted by the failed connect
+    { AppSettings s; QCOMPARE(s.value("accessControl/enabled").toBool(), true); }
+}
+
+void TestAccessControlHub::connectionStateRelaysService()
+{
+    { AppSettings s; s.setValue("accessControl/enabled", true);
+      s.setValue("accessControl/pollIntervalMs", 250); s.sync(); }
+    SequencedNam nam;
+    AccessControlHub hub(&nam);
+    QSignalSpy spy(&hub, &AccessControlHub::connectionStateChanged);
+    hub.initialize();
+    QTRY_COMPARE_WITH_TIMEOUT(hub.connectionState(), int(ConnectionState::Connected), 3000);
+    QVERIFY(spy.count() >= 2);               // Connecting, then Connected
+}
+
+void TestAccessControlHub::lastContactAdvancesPerPoll()
+{
+    { AppSettings s; s.setValue("accessControl/enabled", true);
+      s.setValue("accessControl/pollIntervalMs", 250); s.sync(); }
+    SequencedNam nam;                        // every poll is a valid empty poll
+    AccessControlHub hub(&nam);
+    hub.initialize();
+    QTRY_COMPARE_WITH_TIMEOUT(hub.connectionState(), int(ConnectionState::Connected), 3000);
+    QTRY_VERIFY_WITH_TIMEOUT(hub.lastContactAt().isValid(), 3000);
+    const QDateTime first = hub.lastContactAt();
+    QSignalSpy spy(&hub, &AccessControlHub::lastContactChanged);
+    QTRY_VERIFY_WITH_TIMEOUT(hub.lastContactAt() > first, 3000);   // steady empty poll
+    QVERIFY(spy.count() >= 1);
+}
+
+void TestAccessControlHub::stateOnlyHealthChangeDoesNotEmitLastContact()
+{
+    SequencedNam nam;
+    for (int i = 0; i < 4; ++i)
+        nam.enqueue(QByteArray(), QNetworkReply::HostNotFoundError);
+    AccessControlHub hub(&nam);
+    hub.initialize();
+    QSignalSpy contact(&hub, &AccessControlHub::lastContactChanged);
+    QSignalSpy state(&hub, &AccessControlHub::connectionStateChanged);
+    hub.setAccessEnabled(true);
+    QTRY_COMPARE_WITH_TIMEOUT(hub.connectionState(), int(ConnectionState::Degraded), 3000);
+    QVERIFY(state.count() >= 1);             // state-only HealthMonitor updates happened...
+    QCOMPARE(contact.count(), 0);            // ...but lastCommTime never changed
+    QVERIFY(!hub.lastContactAt().isValid());
+}
+
+void TestAccessControlHub::contactAgeText_delegatesToPureFormatter()
+{
+    AccessControlHub hub;                    // never initialized: stateless helper still works
+    const QDateTime t(QDate(2026, 9, 30), QTime(8, 0, 0), QTimeZone::UTC);
+    QCOMPARE(hub.contactAgeText(true, QVariant(t), QVariant(t.addSecs(5))),
+             QStringLiteral("Last contact 5 s ago"));
+    QCOMPARE(hub.contactAgeText(true, QVariant(), QVariant(t)),
+             QStringLiteral("No contact yet"));
+    QCOMPARE(hub.contactAgeText(false, QVariant(t), QVariant(t)),
+             QStringLiteral("Monitoring off"));
 }
 
 QTEST_MAIN(TestAccessControlHub)

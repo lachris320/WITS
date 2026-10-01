@@ -217,7 +217,7 @@ void DatabaseViewModel::applyServerRejection(const QString &message,
     // SAME predicate SettingsViewModel uses (§Error Taxonomy).
     if (SettingsViewModel::isAuthFailureMessage(message)) {
         setAuthFailure(true);
-        setStatusMessage(tr("Admin authentication failed — re-enter via admin login."));
+        setStatusMessage(SettingsViewModel::adminAuthFailureMessage());
     } else {
         setAuthFailure(false);
         setStatusMessage(message.isEmpty() ? genericFallback : message);

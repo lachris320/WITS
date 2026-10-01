@@ -6,6 +6,7 @@
 #include <QJsonObject>
 #include <QString>
 #include <QUrl>
+#include <QVector>
 
 // Pure, widget-free, network-free decode + decision logic for the kiosk login
 // flows (student / admin / RFID / debounce). Extracted from mainwindow.cpp so
@@ -38,6 +39,32 @@ struct EntryEventResult {
     QDateTime   at;                   // entry time, UTC (converted from server-local)
     QString     error;                // reason when !valid
 };
+
+// One row of access_recent.php (admin Access Control feed). Text only — the
+// endpoint's photo_path is deliberately NOT carried (no thumbnails this slice).
+struct RecentEntry {
+    qint64  id       = 0;
+    QString card;              // raw card (admin-authenticated feed only)
+    QString createdAt;         // server-local "yyyy-MM-dd HH:mm:ss", verbatim
+    int     reader   = 0;      // gate/lane number
+    bool    known    = false;  // false when the endpoint's student is null
+    QString name;
+    QString schoolId;
+    QString course;
+    QString department;
+};
+
+struct RecentFeedResult {
+    bool                 valid        = false;  // false = malformed / wrong shape / non-success
+    QVector<RecentEntry> entries;               // newest first, as served
+    int                  entriesToday = 0;
+    QString              lastEntryAt;           // "" when the server sent null (no entries ever)
+    QString              error;                 // reason when !valid (server message if any)
+};
+
+// Pure decode of access_recent.php. valid is true for a well-formed
+// status:"success" response INCLUDING an empty entries array.
+RecentFeedResult parseRecentFeed(const QByteArray &body);
 
 // Numeric (QString::toLongLong succeeds) -> StudentId, else AdminKey.
 // Mirrors mainwindow.cpp:193 exactly, including the dashed-ID quirk.

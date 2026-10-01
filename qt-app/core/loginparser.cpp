@@ -1,5 +1,6 @@
 #include "loginparser.h"
 
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonValue>
 #include <QTimeZone>
@@ -159,6 +160,81 @@ EntryEventResult parseEntryEvent(const QByteArray &body, const QUrl &baseUrl)
     r.hasStudent = hasStudent;
     r.student = student;
     r.at = at.toUTC();
+    return r;
+}
+
+RecentFeedResult parseRecentFeed(const QByteArray &body)
+{
+    RecentFeedResult r;
+    const QJsonDocument doc = QJsonDocument::fromJson(body);
+    if (!doc.isObject()) { r.error = QStringLiteral("Not a JSON object"); return r; }
+    const QJsonObject obj = doc.object();
+
+    if (obj.value(QStringLiteral("status")).toString() != QLatin1String("success")) {
+        // Carry the server's message (e.g. requireAdminAuth's "Invalid admin
+        // key") so the caller can tell an auth rejection from a generic error.
+        const QString msg = obj.value(QStringLiteral("message")).toString();
+        r.error = msg.isEmpty() ? QStringLiteral("status != success") : msg;
+        return r;
+    }
+
+    const QJsonValue entriesVal = obj.value(QStringLiteral("entries"));
+    if (!entriesVal.isArray()) { r.error = QStringLiteral("entries not an array"); return r; }
+
+    const QJsonValue todayVal = obj.value(QStringLiteral("entries_today"));
+    if (!todayVal.isDouble() || todayVal.toInteger(-1) < 0) {
+        r.error = QStringLiteral("entries_today not a non-negative number"); return r;
+    }
+
+    const QJsonValue lastVal = obj.value(QStringLiteral("last_entry_at"));
+    if (!lastVal.isString() && !lastVal.isNull()) {
+        r.error = QStringLiteral("last_entry_at not string/null"); return r;
+    }
+
+    const QJsonArray arr = entriesVal.toArray();
+    QVector<RecentEntry> entries;
+    entries.reserve(arr.size());
+    for (const QJsonValue &v : arr) {
+        if (!v.isObject()) { r.error = QStringLiteral("entry not an object"); return r; }
+        const QJsonObject e = v.toObject();
+
+        const QJsonValue idVal = e.value(QStringLiteral("id"));
+        if (!idVal.isDouble() || idVal.toInteger(-1) <= 0) {
+            r.error = QStringLiteral("entry.id not positive"); return r;
+        }
+        const QJsonValue createdVal = e.value(QStringLiteral("created_at"));
+        if (!createdVal.isString()) { r.error = QStringLiteral("created_at not a string"); return r; }
+        // Strict: missing (Undefined) or wrong-typed card/reader is a shape
+        // failure, never silently defaulted to ""/0.
+        const QJsonValue cardVal = e.value(QStringLiteral("card"));
+        if (!cardVal.isString()) { r.error = QStringLiteral("card not a string"); return r; }
+        const QJsonValue readerVal = e.value(QStringLiteral("reader"));
+        if (!readerVal.isDouble()) { r.error = QStringLiteral("reader not a number"); return r; }
+
+        RecentEntry out;
+        out.id = idVal.toInteger();
+        out.card = cardVal.toString();
+        out.createdAt = createdVal.toString();
+        out.reader = readerVal.toInt();
+
+        const QJsonValue studentVal = e.value(QStringLiteral("student"));
+        if (studentVal.isObject()) {
+            const QJsonObject s = studentVal.toObject();
+            out.known = true;
+            out.name = s.value(QStringLiteral("name")).toString();
+            out.schoolId = s.value(QStringLiteral("school_id")).toString();
+            out.course = s.value(QStringLiteral("course")).toString();
+            out.department = s.value(QStringLiteral("department")).toString();
+        } else if (!studentVal.isNull()) {
+            r.error = QStringLiteral("student not object/null"); return r;
+        }
+        entries.append(out);
+    }
+
+    r.valid = true;
+    r.entries = entries;
+    r.entriesToday = static_cast<int>(todayVal.toInteger());
+    r.lastEntryAt = lastVal.isString() ? lastVal.toString() : QString();
     return r;
 }
 

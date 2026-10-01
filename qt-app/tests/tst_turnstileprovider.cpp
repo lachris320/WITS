@@ -27,6 +27,14 @@ private slots:
     void failureStopsTimerAndPreservesCursor();
     void stopHaltsSteadyStateTimer();
     void stopFromEntrySlotHaltsDrain();
+    void baselineSuccessEmitsPolledOnce();
+    void polledOnValidEmptyPolls();
+    void polledOnEntryPolls();
+    void noPolledOnTransportError();
+    void noPolledOnNon2xx();
+    void noPolledOnMalformed();
+    void noPolledOnNonAdvancingEntry();
+    void noPolledFromReplyCompletingAfterStop();
 
 private:
     static QString sinceOf(const QUrl &url)
@@ -333,6 +341,118 @@ void TestTurnstileProvider::stopFromEntrySlotHaltsDrain()
     QTest::qWait(600);                  // > 2 * pollInterval(250)
     QCOMPARE(events.count(), 1);
     QCOMPARE(nam.requestCount(), 2);    // baseline + entry 1 only; no drain request
+}
+
+void TestTurnstileProvider::baselineSuccessEmitsPolledOnce()
+{
+    // Pinned behaviour: the BASELINE response is a validated successful poll,
+    // so it emits polled exactly once (before the Connected transition).
+    SequencedNam nam;
+    nam.enqueue(emptyPayload(5));   // baseline: valid
+    nam.enqueueStall();             // first steady poll: stays in flight (never completes here)
+    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
+    QSignalSpy polled(&p, &IAccessProvider::polled);
+    p.start();
+    QTRY_COMPARE_WITH_TIMEOUT(nam.requestCount(), 2, 3000);   // baseline done, steady in flight
+    QCOMPARE(p.state(), ConnectionState::Connected);
+    QCOMPARE(polled.count(), 1);                                // the baseline, once
+    p.stop();
+}
+
+void TestTurnstileProvider::polledOnValidEmptyPolls()
+{
+    SequencedNam nam;
+    nam.enqueue(emptyPayload(5));   // baseline: valid, entry:null
+    nam.enqueue(emptyPayload(5));   // steady empty poll: valid, entry:null
+    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
+    QSignalSpy polled(&p, &IAccessProvider::polled);
+    const QDateTime before = QDateTime::currentDateTimeUtc();
+    p.start();
+    QTRY_VERIFY_WITH_TIMEOUT(polled.count() >= 2, 3000);   // baseline + steady empty poll
+    const QDateTime first = polled.at(0).at(0).toDateTime();
+    const QDateTime second = polled.at(1).at(0).toDateTime();
+    QVERIFY(first.isValid());
+    QVERIFY(first >= before);                               // client completion time
+    QVERIFY(second >= first);
+    QVERIFY(second <= QDateTime::currentDateTimeUtc());
+    p.stop();
+}
+
+void TestTurnstileProvider::polledOnEntryPolls()
+{
+    SequencedNam nam;
+    nam.enqueue(emptyPayload(0));       // baseline
+    nam.enqueue(entryPayload(1, 1));    // entry poll (valid, advancing)
+    nam.enqueue(emptyPayload(1));       // drain end (valid empty)
+    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
+    QSignalSpy polled(&p, &IAccessProvider::polled);
+    QSignalSpy events(&p, &IAccessProvider::accessEvent);
+    p.start();
+    QTRY_COMPARE_WITH_TIMEOUT(events.count(), 1, 3000);
+    QTRY_VERIFY_WITH_TIMEOUT(polled.count() >= 3, 3000);   // baseline + entry + drain-end
+    p.stop();
+}
+
+void TestTurnstileProvider::noPolledOnTransportError()
+{
+    SequencedNam nam;
+    nam.enqueue(QByteArray(), QNetworkReply::HostNotFoundError);   // baseline: transport failure
+    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
+    QSignalSpy polled(&p, &IAccessProvider::polled);
+    p.start();
+    QTRY_VERIFY_WITH_TIMEOUT(p.state() == ConnectionState::Degraded, 3000);
+    QCOMPARE(polled.count(), 0);
+}
+
+void TestTurnstileProvider::noPolledOnNon2xx()
+{
+    SequencedNam nam;
+    // SequencedNam stamps HTTP 500 whenever error != NoError: a non-2xx answer
+    // that even carries a JSON body must not count as a successful poll.
+    nam.enqueue(QByteArrayLiteral("{\"status\":\"error\",\"message\":\"Internal server error\"}"),
+                QNetworkReply::InternalServerError);
+    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
+    QSignalSpy polled(&p, &IAccessProvider::polled);
+    p.start();
+    QTRY_VERIFY_WITH_TIMEOUT(p.state() == ConnectionState::Degraded, 3000);
+    QCOMPARE(polled.count(), 0);
+}
+
+void TestTurnstileProvider::noPolledOnMalformed()
+{
+    SequencedNam nam;
+    nam.enqueue(emptyPayload(1));                  // baseline ok -> exactly one polled
+    nam.enqueue(QByteArrayLiteral("not json"));    // steady poll: malformed
+    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
+    QSignalSpy polled(&p, &IAccessProvider::polled);
+    p.start();
+    QTRY_VERIFY_WITH_TIMEOUT(p.state() == ConnectionState::Degraded, 3000);
+    QCOMPARE(polled.count(), 1);                   // the baseline only
+}
+
+void TestTurnstileProvider::noPolledOnNonAdvancingEntry()
+{
+    SequencedNam nam;
+    nam.enqueue(emptyPayload(7));       // baseline: cursor = 7 -> one polled
+    nam.enqueue(entryPayload(7, 7));    // id == cursor: failed validation (protocol anomaly)
+    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
+    QSignalSpy polled(&p, &IAccessProvider::polled);
+    p.start();
+    QTRY_VERIFY_WITH_TIMEOUT(p.state() == ConnectionState::Degraded, 3000);
+    QCOMPARE(polled.count(), 1);        // the anomalous poll bumped nothing
+}
+
+void TestTurnstileProvider::noPolledFromReplyCompletingAfterStop()
+{
+    SequencedNam nam;
+    nam.enqueueStall();                 // baseline stays in flight
+    TurnstileProvider p(&nam, QUrl("http://localhost/loams_api/"), cfg());
+    QSignalSpy polled(&p, &IAccessProvider::polled);
+    p.start();
+    QTRY_COMPARE_WITH_TIMEOUT(nam.requestCount(), 1, 3000);
+    p.stop();                           // generation bump, then the reply completes (abort)
+    QTest::qWait(100);                  // let the late finished() run
+    QCOMPARE(polled.count(), 0);        // the generation guard dropped it before any emit
 }
 
 QTEST_MAIN(TestTurnstileProvider)

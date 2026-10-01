@@ -156,6 +156,11 @@ bool SettingsViewModel::isAuthFailureMessage(const QString &message)
         || message.contains(QStringLiteral("authentication required"), Qt::CaseInsensitive);
 }
 
+QString SettingsViewModel::adminAuthFailureMessage()
+{
+    return tr("Admin authentication failed — re-enter via admin login.");
+}
+
 SettingsViewModel::Outcome SettingsViewModel::classify(const QByteArray &json, QString *message)
 {
     const QJsonObject obj = QJsonDocument::fromJson(json).object();

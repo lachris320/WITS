@@ -85,6 +85,11 @@ void MockProvider::simulateDisconnect()
     setState(ConnectionState::Degraded);
 }
 
+void MockProvider::simulatePolled(const QDateTime &at)
+{
+    emit polled(at);   // synthetic per-poll freshness fact (drives service tests)
+}
+
 ProviderDescriptor MockProvider::defaultDescriptor()
 {
     ProviderDescriptor d;

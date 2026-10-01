@@ -52,6 +52,7 @@ qt_add_qml_module(witsquickmodule
         qml/admin/BulkEditDialog.qml
         qml/admin/ReportingScreen.qml
         qml/admin/SettingsScreen.qml
+        qml/admin/AccessControlScreen.qml
         qml/components/LButton.qml
         qml/components/LCard.qml
         qml/components/LTable.qml
@@ -98,11 +99,13 @@ qt_add_qml_module(witsquickmodule
         models/ReportRowsModel.h models/ReportRowsModel.cpp
         models/RankingModel.cpp
         models/RankingModel.h
+        models/AccessEntriesModel.h models/AccessEntriesModel.cpp
         viewmodels/SearchViewModel.h viewmodels/SearchViewModel.cpp
         viewmodels/DatabaseViewModel.cpp viewmodels/DatabaseViewModel.h
         viewmodels/SettingsViewModel.h viewmodels/SettingsViewModel.cpp
         viewmodels/ImportViewModel.cpp viewmodels/ImportViewModel.h
         viewmodels/ReportingViewModel.h viewmodels/ReportingViewModel.cpp
+        viewmodels/AccessControlViewModel.h viewmodels/AccessControlViewModel.cpp
         AccessControlHub.h AccessControlHub.cpp
         AccessControlSingleton.h
 )
@@ -266,6 +269,12 @@ wits_add_qttest(tst_reportrowsmodel
     SOURCES tests/tst_reportrowsmodel.cpp
     LIBS witsquickmodule)
 
+# --- AccessEntriesModel unit test (C++ QtTest). Pure QAbstractListModel over
+# LoginParser::RecentEntry, no NAM -> QTEST_APPLESS_MAIN, no OFFSCREEN. ---
+wits_add_qttest(tst_accessentriesmodel
+    SOURCES tests/tst_accessentriesmodel.cpp
+    LIBS witsquickmodule)
+
 # --- L* component skeletons Quick test (offscreen) ---
 # Same escape hatch as tst_qml_theme above: "import LOAMS" lives only in the
 # QUICK_TEST_MAIN data file, so the plugin + "_init" object must be linked
@@ -316,6 +325,17 @@ wits_add_qttest(tst_dashboardviewmodel
 # (qt-app/testsupport) — mirrors tst_databaseviewmodel's approach. ---
 wits_add_qttest(tst_visitlogsviewmodel
     SOURCES tests/tst_visitlogsviewmodel.cpp
+        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
+        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
+    OFFSCREEN)
+
+# --- AccessControlViewModel unit test (C++ QtTest, offscreen). admin_key in
+# the POST body, 401/5xx/transport paths and the generation guard, all via the
+# CapturingNam harness (qt-app/testsupport) — no live network. ---
+wits_add_qttest(tst_accesscontrolviewmodel
+    SOURCES tests/tst_accesscontrolviewmodel.cpp
         ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
         ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui

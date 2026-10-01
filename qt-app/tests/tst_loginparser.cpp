@@ -30,6 +30,12 @@ private slots:
     void parseEntryEvent_orphanedStudentNull();
     void parseEntryEvent_localTimeConvertedToUtc();
     void parseEntryEvent_malformedIsInvalid();
+    void parseRecentFeed_validListWithCounts();
+    void parseRecentFeed_nullStudentIsUnknownRow();
+    void parseRecentFeed_emptyButValid();
+    void parseRecentFeed_serverErrorCarriesMessage();
+    void parseRecentFeed_malformedIsInvalid();
+    void parseRecentFeed_cardAndReaderAreStrict();
 };
 
 void TestLoginParser::classifyPureDigitsIsStudent()
@@ -229,6 +235,123 @@ void TestLoginParser::parseEntryEvent_malformedIsInvalid()
         R"({"status":"success","latest_id":-1,"entry":null})", base).valid);
     QVERIFY(!LoginParser::parseEntryEvent(
         R"({"status":"success","latest_id":1,"entry":{"id":1,"created_at":"2026-09-29 08:30:00","student":5}})", base).valid);
+}
+
+static QByteArray recentFeedBody()
+{
+    return QByteArray(R"({"status":"success","entries":[
+        {"id":12,"card":"CARD0012","created_at":"2026-09-30 08:15:00","reader":1,
+         "student":{"name":"Test Student A","school_id":"TEST-0001","course":"BS Test",
+                    "department":"Dept Test","photo_path":"uploads/default.jpg"}},
+        {"id":11,"card":"CARD0011","created_at":"2026-09-30 08:10:00","reader":2,"student":null}],
+        "entries_today":7,"last_entry_at":"2026-09-30 08:15:00"})");
+}
+
+void TestLoginParser::parseRecentFeed_validListWithCounts()
+{
+    const auto r = LoginParser::parseRecentFeed(recentFeedBody());
+    QVERIFY(r.valid);
+    QCOMPARE(r.entries.size(), 2);
+    QCOMPARE(r.entriesToday, 7);
+    QCOMPARE(r.lastEntryAt, QStringLiteral("2026-09-30 08:15:00"));
+    const LoginParser::RecentEntry &e = r.entries.at(0);   // newest first, as served
+    QCOMPARE(e.id, Q_INT64_C(12));
+    QCOMPARE(e.card, QStringLiteral("CARD0012"));
+    QCOMPARE(e.createdAt, QStringLiteral("2026-09-30 08:15:00"));
+    QCOMPARE(e.reader, 1);
+    QVERIFY(e.known);
+    QCOMPARE(e.name, QStringLiteral("Test Student A"));
+    QCOMPARE(e.schoolId, QStringLiteral("TEST-0001"));
+    QCOMPARE(e.course, QStringLiteral("BS Test"));
+    QCOMPARE(e.department, QStringLiteral("Dept Test"));
+}
+
+void TestLoginParser::parseRecentFeed_nullStudentIsUnknownRow()
+{
+    const auto r = LoginParser::parseRecentFeed(recentFeedBody());
+    QVERIFY(r.valid);
+    const LoginParser::RecentEntry &e = r.entries.at(1);
+    QCOMPARE(e.id, Q_INT64_C(11));
+    QVERIFY(!e.known);
+    QVERIFY(e.name.isEmpty());
+    QVERIFY(e.schoolId.isEmpty());
+    QCOMPARE(e.card, QStringLiteral("CARD0011"));   // still carried for the admin
+    QCOMPARE(e.reader, 2);
+}
+
+void TestLoginParser::parseRecentFeed_emptyButValid()
+{
+    const auto r = LoginParser::parseRecentFeed(
+        R"({"status":"success","entries":[],"entries_today":0,"last_entry_at":null})");
+    QVERIFY(r.valid);                    // an empty feed is NOT an error
+    QVERIFY(r.entries.isEmpty());
+    QCOMPARE(r.entriesToday, 0);
+    QVERIFY(r.lastEntryAt.isEmpty());    // null -> ""
+}
+
+void TestLoginParser::parseRecentFeed_serverErrorCarriesMessage()
+{
+    const auto r = LoginParser::parseRecentFeed(
+        R"({"status":"error","message":"Invalid admin key"})");
+    QVERIFY(!r.valid);
+    QCOMPARE(r.error, QStringLiteral("Invalid admin key"));
+}
+
+void TestLoginParser::parseRecentFeed_malformedIsInvalid()
+{
+    QVERIFY(!LoginParser::parseRecentFeed("not json").valid);
+    QVERIFY(!LoginParser::parseRecentFeed(R"({"status":"error"})").valid);
+    QVERIFY(!LoginParser::parseRecentFeed(       // entries not an array
+        R"({"status":"success","entries":{},"entries_today":0,"last_entry_at":null})").valid);
+    QVERIFY(!LoginParser::parseRecentFeed(       // entries_today missing
+        R"({"status":"success","entries":[],"last_entry_at":null})").valid);
+    QVERIFY(!LoginParser::parseRecentFeed(       // entries_today negative
+        R"({"status":"success","entries":[],"entries_today":-1,"last_entry_at":null})").valid);
+    QVERIFY(!LoginParser::parseRecentFeed(       // last_entry_at wrong type
+        R"({"status":"success","entries":[],"entries_today":0,"last_entry_at":5})").valid);
+    QVERIFY(!LoginParser::parseRecentFeed(       // entry not an object
+        R"({"status":"success","entries":[3],"entries_today":1,"last_entry_at":null})").valid);
+    QVERIFY(!LoginParser::parseRecentFeed(       // id not positive
+        R"({"status":"success","entries":[{"id":0,"card":"C","created_at":"2026-09-30 08:00:00","reader":0,"student":null}],"entries_today":1,"last_entry_at":null})").valid);
+    QVERIFY(!LoginParser::parseRecentFeed(       // created_at not a string
+        R"({"status":"success","entries":[{"id":1,"card":"C","created_at":5,"reader":0,"student":null}],"entries_today":1,"last_entry_at":null})").valid);
+    QVERIFY(!LoginParser::parseRecentFeed(       // student wrong type
+        R"({"status":"success","entries":[{"id":1,"card":"C","created_at":"2026-09-30 08:00:00","reader":0,"student":5}],"entries_today":1,"last_entry_at":null})").valid);
+    QVERIFY(!LoginParser::parseRecentFeed(       // id missing
+        R"({"status":"success","entries":[{"card":"C","created_at":"2026-09-30 08:00:00","reader":0,"student":null}],"entries_today":1,"last_entry_at":null})").valid);
+    QVERIFY(!LoginParser::parseRecentFeed(       // id non-number
+        R"({"status":"success","entries":[{"id":"1","card":"C","created_at":"2026-09-30 08:00:00","reader":0,"student":null}],"entries_today":1,"last_entry_at":null})").valid);
+    QVERIFY(!LoginParser::parseRecentFeed(       // created_at missing
+        R"({"status":"success","entries":[{"id":1,"card":"C","reader":0,"student":null}],"entries_today":1,"last_entry_at":null})").valid);
+}
+
+void TestLoginParser::parseRecentFeed_cardAndReaderAreStrict()
+{
+    // card must be a JSON string and reader a JSON number — never silently
+    // defaulted to ""/0 (a shape drift must fail loudly, not render blanks).
+    const auto cardMissing = LoginParser::parseRecentFeed(
+        R"({"status":"success","entries":[{"id":1,"created_at":"2026-09-30 08:00:00","reader":0,"student":null}],"entries_today":1,"last_entry_at":null})");
+    QVERIFY(!cardMissing.valid);
+    QVERIFY(!cardMissing.error.isEmpty());
+
+    const auto cardNonString = LoginParser::parseRecentFeed(
+        R"({"status":"success","entries":[{"id":1,"card":1234,"created_at":"2026-09-30 08:00:00","reader":0,"student":null}],"entries_today":1,"last_entry_at":null})");
+    QVERIFY(!cardNonString.valid);
+    QVERIFY(!cardNonString.error.isEmpty());
+
+    const auto readerMissing = LoginParser::parseRecentFeed(
+        R"({"status":"success","entries":[{"id":1,"card":"C","created_at":"2026-09-30 08:00:00","student":null}],"entries_today":1,"last_entry_at":null})");
+    QVERIFY(!readerMissing.valid);
+    QVERIFY(!readerMissing.error.isEmpty());
+
+    const auto readerNonNumber = LoginParser::parseRecentFeed(
+        R"({"status":"success","entries":[{"id":1,"card":"C","created_at":"2026-09-30 08:00:00","reader":"1","student":null}],"entries_today":1,"last_entry_at":null})");
+    QVERIFY(!readerNonNumber.valid);
+    QVERIFY(!readerNonNumber.error.isEmpty());
+
+    // Control: the same row with a string card and numeric reader is valid.
+    QVERIFY(LoginParser::parseRecentFeed(
+        R"({"status":"success","entries":[{"id":1,"card":"C","created_at":"2026-09-30 08:00:00","reader":0,"student":null}],"entries_today":1,"last_entry_at":null})").valid);
 }
 
 QTEST_MAIN(TestLoginParser)
