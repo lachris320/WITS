@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QTemporaryDir>
+#include <QDir>
 #include <QFile>
 #include <QRegularExpression>
 #include <QTextStream>
@@ -23,6 +24,10 @@ private slots:
     void invalidEnvFallsThroughToIni();
     void invalidEnvAndInvalidIniGivesEmpty();
     void invalidEnvAndMissingIniGivesEmpty();
+    void iniWithoutBaseUrlKeyIsSilent();
+    void malformedIniFileIsReported();
+    void unreadableIniFileIsReported();
+    void applyFromRuntimeWarnsOnUnreadableIni();
     void rejectedCredentialsAreRedacted();
     void fullChainSetsEndpoint();
     void applyFromRuntimeWarnsOnInvalidEnvAndUsesIni();
@@ -144,6 +149,62 @@ void TestApiConfigLoader::invalidEnvAndInvalidIniGivesEmpty()
     QCOMPARE(r.rejected.at(0).value, QString("//evil.example/loams_api"));
     QVERIFY(r.rejected.at(1).source == Source::ConfigIni);
     QCOMPARE(r.rejected.at(1).value, QString("localhost/loams_api"));
+}
+
+void TestApiConfigLoader::iniWithoutBaseUrlKeyIsSilent()
+{
+    // A readable ini that simply doesn't configure the URL is "not
+    // configured", not "invalid": no rejection.
+    QTemporaryDir dir;
+    const QString ini = writeIni(dir, QStringLiteral("Other=1"));
+    QVERIFY(!ini.isEmpty());
+    const auto r = ApiConfigLoader::resolveBaseUrl(QString(), ini);
+    QCOMPARE(r.url, QString());
+    QVERIFY(r.rejected.isEmpty());
+}
+
+void TestApiConfigLoader::malformedIniFileIsReported()
+{
+    // Unterminated section header: QSettings reports FormatError.
+    QTemporaryDir dir;
+    const QString path = dir.path() + QStringLiteral("/config.ini");
+    {
+        QFile f(path);
+        QVERIFY(f.open(QIODevice::WriteOnly | QIODevice::Text));
+        QTextStream(&f) << "[Server\nBaseURL=http://ini.test/loams_api/\n";
+    }
+    const auto r = ApiConfigLoader::resolveBaseUrl(QString(), path);
+    QCOMPARE(r.url, QString());
+    QVERIFY(r.source == Source::Default);
+    QCOMPARE(r.rejected.size(), 1);
+    QVERIFY(r.rejected.at(0).source == Source::ConfigIni);
+    QVERIFY(r.rejected.at(0).fileUnreadable);
+}
+
+void TestApiConfigLoader::unreadableIniFileIsReported()
+{
+    // A config.ini that exists but cannot be opened as a file (here: a
+    // directory of that name) -> QSettings AccessError -> reported.
+    QTemporaryDir dir;
+    const QString path = dir.path() + QStringLiteral("/config.ini");
+    QVERIFY(QDir(dir.path()).mkdir(QStringLiteral("config.ini")));
+    const auto r = ApiConfigLoader::resolveBaseUrl(QString(), path);
+    QCOMPARE(r.url, QString());
+    QCOMPARE(r.rejected.size(), 1);
+    QVERIFY(r.rejected.at(0).source == Source::ConfigIni);
+    QVERIFY(r.rejected.at(0).fileUnreadable);
+}
+
+void TestApiConfigLoader::applyFromRuntimeWarnsOnUnreadableIni()
+{
+    QTemporaryDir dir;
+    QVERIFY(QDir(dir.path()).mkdir(QStringLiteral("config.ini")));
+
+    QTest::ignoreMessage(QtWarningMsg,
+                         QRegularExpression(QStringLiteral("config\\.ini.*unreadable or malformed")));
+    QTest::ignoreMessage(QtWarningMsg, QRegularExpression(QStringLiteral("default")));
+    ApiConfigLoader::applyFromRuntime(dir.path());
+    QCOMPARE(ApiConfig::baseUrl(), QString("http://localhost/loams_api/"));
 }
 
 void TestApiConfigLoader::invalidEnvAndMissingIniGivesEmpty()

@@ -18,9 +18,13 @@ enum class Source {
 
 // A present-but-invalid source that resolution skipped. `value` is for
 // diagnostics only and has any embedded credentials (userinfo) stripped.
+// `fileUnreadable` marks a config.ini that exists but QSettings could not
+// read/parse (value is then empty) -- distinct from a missing file or a
+// missing key, which are "not configured" and never rejected.
 struct Rejection {
     Source source = Source::Default;
     QString value;
+    bool fileUnreadable = false;
 };
 
 struct Resolution {
