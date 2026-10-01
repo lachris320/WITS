@@ -186,30 +186,30 @@
   <header class="masthead">
     <p class="eyebrow">Modernization Programme · Qt Widgets → Qt Quick</p>
     <h1>LOAMS <span class="v">2.0</span> — build progress</h1>
-    <p class="lede">A parallel rebuild of the library attendance &amp; monitoring system onto a shared <span class="mono">witscore</span> C++ core with a QML front-end. Seven roadmap phases; the first four are shipped.</p>
-    <span class="statusline"><span class="dot"></span> Active: Phase 4 · Admin Part 2 — latest merge <span class="mono">PR&nbsp;#41</span></span>
+    <p class="lede">A parallel rebuild of the library attendance &amp; monitoring system onto a shared <span class="mono">witscore</span> C++ core with a QML front-end. Seven roadmap phases, all shipped — and work has continued past the roadmap with the Access Control platform.</p>
+    <span class="statusline"><span class="dot"></span> Latest merge <span class="mono">PR&nbsp;#60</span> · Next: security uplift — TLS · per-user RBAC · device tokens, the hard gate before go-live</span>
   </header>
 
   <section class="metrics" aria-label="Programme metrics">
     <div class="stat">
       <p class="k">Phases shipped</p>
-      <div class="v tnum">4<small> / 7</small></div>
-      <p class="sub">0–3 complete · Phase 4 in progress</p>
+      <div class="v tnum">7<small> / 7</small></div>
+      <p class="sub">0–6 complete · roadmap done</p>
     </div>
     <div class="stat">
       <p class="k">Pull requests merged</p>
-      <div class="v tnum">24</div>
-      <p class="sub"><span class="mono">#17</span> <span class="arrow">→</span> <span class="mono">#41</span> to <span class="mono">master</span></p>
+      <div class="v tnum">44</div>
+      <p class="sub"><span class="mono">#17</span> <span class="arrow">→</span> <span class="mono">#60</span> to <span class="mono">master</span></p>
     </div>
     <div class="stat">
       <p class="k">Test suite (ctest)</p>
-      <div class="v tnum">42 <small class="mono">targets</small></div>
+      <div class="v tnum">58 <small class="mono">targets</small></div>
       <canvas class="spark" id="spark" width="320" height="76" aria-hidden="true"></canvas>
     </div>
     <div class="stat">
       <p class="k">Latest slice</p>
-      <div class="v" style="font-size:19px;line-height:1.15;font-weight:750">Reporting export — PDF · Excel · Print</div>
-      <p class="sub"><span class="mono">4b-ii</span> · merged <span class="mono tnum">2026-08-18</span></p>
+      <div class="v" style="font-size:19px;line-height:1.15;font-weight:750">Configurable runtime backend URL</div>
+      <p class="sub"><span class="mono">PR&nbsp;#60</span> · merged <span class="mono tnum">2026-10-01</span></p>
     </div>
   </section>
 
@@ -273,15 +273,15 @@
       </div>
     </article>
 
-    <article class="phase" data-status="active" style="animation-delay:.18s">
+    <article class="phase" data-status="done" style="animation-delay:.18s">
       <span class="node"></span>
       <div class="card">
         <div class="card-head">
           <span class="pnum">PHASE 4</span>
           <h2 class="ptitle">Admin Part 2 — Database · Reporting · Settings</h2>
-          <span class="chip active">In progress</span>
+          <span class="chip done">Complete</span>
         </div>
-        <p class="psummary">The heaviest phase, split into independent tracks. Settings, brand tokens, the Database track (CRUD + Excel/ZIP import) and Reporting (preview + export) are all shipped; analytics and photo display remain.</p>
+        <p class="psummary">The heaviest phase, split into independent tracks — all shipped: Settings, brand tokens, the Database track (CRUD + Excel/ZIP import), the full Reporting track (preview, export, analytics &amp; time-of-day), and photo display.</p>
 
         <div class="tracks">
           <p class="tracks-cap">Tracks</p>
@@ -316,48 +316,128 @@
             <div class="slice done"><span class="sk">4a.3</span><span class="sl">Excel / ZIP import <small>— breaking backend</small></span><span class="ss">#39 ✓</span></div>
           </div>
 
-          <div class="track" data-s="active">
+          <div class="track" data-s="done">
             <span class="tk">4b</span>
-            <span class="tl">Reporting <small>— filters, native preview, exports</small></span>
-            <span class="ts active">Active</span>
+            <span class="tl">Reporting <small>— filters, preview, exports, analytics</small></span>
+            <span class="ts done">#40–45</span>
           </div>
 
           <div class="ladder" aria-label="Reporting sub-slices">
             <div class="slice done"><span class="sk">4b-i</span><span class="sl">Filters + native preview <small>(table · ranked bar · tiles)</small></span><span class="ss">#40 ✓</span></div>
             <div class="slice done"><span class="sk">4b-ii</span><span class="sl">Export — PDF / Excel / Print <small>(+ overlap &amp; chart fixes)</small></span><span class="ss">#41 ✓</span></div>
-            <div class="slice planned"><span class="sk">4b-iii</span><span class="sl">Analytics — KPI band &amp; rankings</span><span class="ss">next</span></div>
+            <div class="slice done"><span class="sk">4b-iii-a</span><span class="sl">Analytics — KPI band &amp; Top-10 rankings</span><span class="ss">#42 ✓</span></div>
+            <div class="slice done"><span class="sk">4b-iii-b</span><span class="sl">Analytics in the PDF / Excel exports</span><span class="ss">#43 ✓</span></div>
+            <div class="slice done"><span class="sk">4b-iv-a</span><span class="sl">“When?” time-of-day analytics <small>(peak hours · busiest days)</small></span><span class="ss">#44 ✓</span></div>
+            <div class="slice done"><span class="sk">4b-iv-b</span><span class="sl">“When?” analytics in the exports</span><span class="ss">#45 ✓</span></div>
           </div>
 
-          <div class="track" data-s="planned">
+          <div class="track" data-s="done">
+            <span class="tk">polish</span>
+            <span class="tl">Reporting polish <small>— library-hours window · Portrait/Landscape · logo · login-time fixes</small></span>
+            <span class="ts done">#46–51</span>
+          </div>
+
+          <div class="ladder" aria-label="Polish &amp; fixes">
+            <div class="slice done"><span class="sk">#46</span><span class="sl">Report-header logo rendered as a circle</span><span class="ss">✓</span></div>
+            <div class="slice done"><span class="sk">#47–48</span><span class="sl">Kiosk login time stamped from the local clock</span><span class="ss">✓</span></div>
+            <div class="slice done"><span class="sk">#49</span><span class="sl">“When?” hourly chart windowed to library hours</span><span class="ss">✓</span></div>
+            <div class="slice done"><span class="sk">#50–51</span><span class="sl">Portrait / Landscape orientation picker <small>(+ guard test)</small></span><span class="ss">✓</span></div>
+          </div>
+
+          <div class="track" data-s="done">
             <span class="tk">photo</span>
-            <span class="tl">Photo display <small>— <span class="mono">LAvatar</span> on kiosk &amp; search</small></span>
-            <span class="ts planned">Planned</span>
+            <span class="tl">Photo display <small>— <span class="mono">LAvatar</span> on kiosk hero &amp; admin search</small></span>
+            <span class="ts done">#52</span>
           </div>
         </div>
       </div>
     </article>
 
-    <article class="phase" data-status="planned" style="animation-delay:.22s">
+    <article class="phase" data-status="done" style="animation-delay:.22s">
       <span class="node"></span>
       <div class="card">
         <div class="card-head">
           <span class="pnum">PHASE 5</span>
-          <h2 class="ptitle">Light / Dark Mode</h2>
-          <span class="chip planned">Planned</span>
+          <h2 class="ptitle">Admin Light / Dark / System</h2>
+          <span class="chip done">Complete</span>
         </div>
-        <p class="psummary">A full theming pass across both surfaces — the natural sibling of the Phase 4 brand-token work, parked until the Admin screens land.</p>
+        <p class="psummary">An admin-only Light / Dark / System theme, surface-scoped so the public kiosk always stays light. Reuses the <span class="mono">BrandTheme</span> WCAG engine (new <span class="mono">darkPalette()</span>) so logo-derived brand colours stay legible on dark; persisted mode + live OS-follow; picker in Settings. Brand fill desaturated on dark for admin-context restraint.</p>
+        <div class="prs"><span class="pr"><b>PR&nbsp;#53</b></span><span class="pr mono">tests →45</span></div>
       </div>
     </article>
 
-    <article class="phase" data-status="planned" style="animation-delay:.26s">
+    <article class="phase" data-status="done" style="animation-delay:.26s">
       <span class="node"></span>
       <div class="card">
         <div class="card-head">
           <span class="pnum">PHASE 6</span>
           <h2 class="ptitle">Backend Hardening</h2>
+          <span class="chip done">Complete</span>
+        </div>
+        <p class="psummary"><b>6a — read-endpoint auth (shipped).</b> The six admin-only read endpoints now require a valid admin key: a payload-aware auth helper (key from body, never a URL or <span class="mono">$_GET</span>, never logged, fail-closed on bad input), with the key threaded from the Quick client. Legacy Widgets reads left to break by design. Cleared per-task reviews plus dual whole-branch review — <span class="mono">Codex GPT-5.6-sol</span> and <span class="mono">Claude Opus</span> both APPROVE.</p>
+        <p class="psummary" style="margin-top:9px;color:var(--ink-faint)">Deferred as tracked non-blocking follow-ups: session tokens / per-user RBAC and HTTPS / TLS (now the security-uplift track, below), and retiring the legacy Widgets rollback once 2.0 is trusted. The configurable backend base URL has since shipped (#60, see below).</p>
+        <div class="prs"><span class="pr"><b>PR&nbsp;#54</b></span><span class="pr mono">tests →45</span></div>
+      </div>
+    </article>
+
+    <article class="phase" data-status="done" style="animation-delay:.30s">
+      <span class="node"></span>
+      <div class="card">
+        <div class="card-head">
+          <span class="pnum">BEYOND THE ROADMAP</span>
+          <h2 class="ptitle">Access Control Platform</h2>
+          <span class="chip done">Shipped</span>
+        </div>
+        <p class="psummary">Past the seven roadmap phases: a hardware-agnostic access-control seam so a gate / turnstile controller can drive attendance and the kiosk display — first as a no-rebuild bridge onto the deployed legacy app, then as a native <span class="mono">WITSQuick</span> feature behind a runtime flag (default off). Decisions and entries are kept distinct: a gate decision is not proof the student entered.</p>
+
+        <div class="tracks">
+          <p class="tracks-cap">Tracks</p>
+
+          <div class="track" data-s="done">
+            <span class="tk">turnstile</span>
+            <span class="tl">Legacy bridge <small>— server-side <span class="mono">turnstile.php</span> writes attendance; a bridge shows the swipe in the deployed app only when it is foreground; duplicate-suppressed, no double visit. Live on the gate</small></span>
+            <span class="ts done">#55</span>
+          </div>
+
+          <div class="track" data-s="done">
+            <span class="tk">access</span>
+            <span class="tl">Access Control core <small>— provider seam, typed event bus, decision service, health monitor</small></span>
+            <span class="ts done">#56–59</span>
+          </div>
+
+          <div class="ladder" aria-label="Access Control sub-plans">
+            <div class="slice done"><span class="sk">SP1</span><span class="sl">Hardware-agnostic core seam <small>(provider + factory · event bus · decision service · health monitor · mock provider)</small></span><span class="ss">#56 ✓</span></div>
+            <div class="slice done"><span class="sk">SP2</span><span class="sl">Read-only backend endpoints <small>(gate-display feed · admin recent entries)</small></span><span class="ss">#57 ✓</span></div>
+            <div class="slice done"><span class="sk">SP3</span><span class="sl">Native turnstile-swipe kiosk display <small>(no keyboard injection)</small></span><span class="ss">#58 ✓</span></div>
+            <div class="slice done"><span class="sk">SP4</span><span class="sl">Admin page <small>(recent entries · today tiles · live connection state · enable toggle)</small></span><span class="ss">#59 ✓</span></div>
+          </div>
+
+          <div class="track" data-s="done">
+            <span class="tk">config</span>
+            <span class="tl">Runtime backend URL <small>— env override → <span class="mono">config.ini</span> → default; strict validation, invalid values warned and ignored; both executables</small></span>
+            <span class="ts done">#60</span>
+          </div>
+        </div>
+        <div class="prs"><span class="pr"><b>PR&nbsp;#55</b></span><span class="pr"><b>#56</b></span><span class="pr"><b>#57</b></span><span class="pr"><b>#58</b></span><span class="pr"><b>#59</b></span><span class="pr latest"><b>PR&nbsp;#60</b></span><span class="pr mono">tests →58</span></div>
+      </div>
+    </article>
+
+    <article class="phase" data-status="planned" style="animation-delay:.34s">
+      <span class="node"></span>
+      <div class="card">
+        <div class="card-head">
+          <span class="pnum">NEXT</span>
+          <h2 class="ptitle">Security Uplift</h2>
           <span class="chip planned">Planned</span>
         </div>
-        <p class="psummary">Sessions/tokens, HTTPS, and the broader server-side auth work deliberately deferred out of the UI phases — plus retiring the legacy Widgets rollback once 2.0 is trusted.</p>
+        <p class="psummary">The hard gate before any real go-live of Access Control: transport security (HTTPS / TLS), per-user identity with role-based access control in place of the shared admin key, and per-device tokens for gate hardware. Not started.</p>
+        <div class="tracks">
+          <div class="track" data-s="planned">
+            <span class="tk">later</span>
+            <span class="tl">Installer 2.0 <small>— to be rebuilt from current <span class="mono">master</span>; the earlier all-in-one installer branch is parked as reference only</small></span>
+            <span class="ts planned">Planned</span>
+          </div>
+        </div>
       </div>
     </article>
 
@@ -365,7 +445,7 @@
 
   <footer>
     <span>LOAMS 2.0 · <span class="mono">github.com/lachris320/WITS</span></span>
-    <span class="mono">Snapshot 2026-08-19 · master @ 323f466</span>
+    <span class="mono">Snapshot 2026-10-01 · master @ f878898</span>
   </footer>
 </div>
 
@@ -373,7 +453,7 @@
   (function(){
     var c = document.getElementById('spark');
     if(!c) return;
-    var pts = [12,17,23,32,36,39,42];   // ctest target growth, Phase 1 → now
+    var pts = [12,17,23,32,36,39,42,43,44,45,52,54,57,58];   // ctest target growth, Phase 1 → now
     function draw(){
       var css = getComputedStyle(document.documentElement);
       var line = css.getPropertyValue('--brand').trim() || '#7E1A15';
