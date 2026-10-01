@@ -5,6 +5,7 @@
 #include <QSettings>
 
 #include "AccessControlHub.h"
+#include "apiconfigloader.h"
 #include "appsettings.h"
 #include <QSGRendererInterface>
 #include "brandtheme.h"
@@ -12,6 +13,12 @@
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
+
+    // Runtime backend URL (WITS_API_BASE_URL > config.ini > localhost default),
+    // applied FIRST: AccessControlHub::initialize() captures ApiConfig::baseUrl()
+    // into the TurnstileProvider factory, and LoginParser's same-origin photo
+    // check compares against that base -- both must see the runtime value.
+    ApiConfigLoader::applyFromRuntime(QCoreApplication::applicationDirPath());
 
     // Deployment-hardware fallback (proposal §19/spec §10 Risk 4): the library
     // PC may lack a working OpenGL/RHI path. "--software" or

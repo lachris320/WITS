@@ -2,6 +2,7 @@
 #include <QSignalSpy>
 #include <QTimeZone>
 #include "AccessControlHub.h"
+#include "apiconfig.h"
 #include "appsettings.h"
 #include "sequencednam.h"
 #include "accesscontrol/accesstypes.h"
@@ -19,6 +20,12 @@ private slots:
         qunsetenv("WITS_ACCESS_CONTROL");
         AppSettings s; s.clear(); s.sync();
     }
+    void cleanup()
+    {
+        // ApiConfig's base URL is process-global: restore the default so a
+        // runtime-URL case can't leak into later cases.
+        QVERIFY(ApiConfig::setBaseUrl(ApiConfig::defaultBaseUrl()));
+    }
     void toAccessEntry_knownStudent();
     void toAccessEntry_unknownStudent();
     void disabledByDefault_inert();
@@ -34,6 +41,8 @@ private slots:
     void lastContactAdvancesPerPoll();
     void stateOnlyHealthChangeDoesNotEmitLastContact();
     void contactAgeText_delegatesToPureFormatter();
+    void initializeUsesRuntimeBaseUrl();
+    void initializeCapturesBaseUrl_laterChangeIgnored();
 
 private:
     static QByteArray entryPayload(qint64 latest, qint64 id)
@@ -257,6 +266,38 @@ void TestAccessControlHub::contactAgeText_delegatesToPureFormatter()
              QStringLiteral("No contact yet"));
     QCOMPARE(hub.contactAgeText(false, QVariant(t), QVariant(t)),
              QStringLiteral("Monitoring off"));
+}
+
+void TestAccessControlHub::initializeUsesRuntimeBaseUrl()
+{
+    // Startup applies the runtime base URL (ApiConfigLoader::applyFromRuntime)
+    // BEFORE the hub is initialized; the provider must then poll that host.
+    QVERIFY(ApiConfig::setBaseUrl(QStringLiteral("http://kiosk-server.test/loams_api/")));
+    { AppSettings s; s.setValue("accessControl/enabled", true); s.sync(); }
+    SequencedNam nam;
+    AccessControlHub hub(&nam);
+    hub.initialize();
+    QTRY_VERIFY_WITH_TIMEOUT(nam.requestCount() >= 1, 3000);
+    const QUrl first = nam.urls.first();
+    QCOMPARE(first.scheme(), QStringLiteral("http"));
+    QCOMPARE(first.host(), QStringLiteral("kiosk-server.test"));
+    QCOMPARE(first.path(), QStringLiteral("/loams_api/turnstile_display.php"));
+}
+
+void TestAccessControlHub::initializeCapturesBaseUrl_laterChangeIgnored()
+{
+    // initialize() captures the base URL into the provider factory, so a value
+    // applied AFTER it is never seen -- the reason main() must apply the runtime
+    // URL before constructing/initializing the hub.
+    { AppSettings s; s.setValue("accessControl/enabled", true);
+      s.setValue("accessControl/pollIntervalMs", 250); s.sync(); }
+    SequencedNam nam;
+    AccessControlHub hub(&nam);
+    hub.initialize();
+    QVERIFY(ApiConfig::setBaseUrl(QStringLiteral("http://too-late.test/loams_api/")));
+    QTRY_VERIFY_WITH_TIMEOUT(nam.requestCount() >= 2, 3000);
+    for (const QUrl &u : std::as_const(nam.urls))
+        QCOMPARE(u.host(), QStringLiteral("localhost"));
 }
 
 QTEST_MAIN(TestAccessControlHub)
