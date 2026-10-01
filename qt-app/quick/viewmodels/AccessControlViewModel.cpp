@@ -98,7 +98,7 @@ void AccessControlViewModel::applyFailure(const QString &message)
     // A transport/parse failure says nothing new about the key, so it must NOT
     // clear authFailure (only a later SUCCESS does). While the key is still
     // known-bad, keep the actionable re-login message instead of the network one.
-    setError(m_authFailure ? authFailureMessage() : message);
+    setError(m_authFailure ? SettingsViewModel::adminAuthFailureMessage() : message);
     emit dataChanged();
 }
 
@@ -113,13 +113,13 @@ void AccessControlViewModel::applyAuthFailure()
     m_hasLoaded = false;
     setStale(false);
     setAuthFailure(true);
-    setError(authFailureMessage());
+    setError(SettingsViewModel::adminAuthFailureMessage());
     emit dataChanged();
 }
 
-QString AccessControlViewModel::authFailureMessage()
+QString AccessControlViewModel::authFailureText() const
 {
-    return tr("Admin authentication failed — re-enter via admin login.");
+    return SettingsViewModel::adminAuthFailureMessage();
 }
 
 void AccessControlViewModel::setLoading(bool v)

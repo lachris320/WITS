@@ -53,7 +53,7 @@ public:
     bool stale() const { return m_stale; }
     QString errorText() const { return m_errorText; }
     bool authFailure() const { return m_authFailure; }
-    QString authFailureText() const { return authFailureMessage(); }
+    QString authFailureText() const;
     AccessEntriesModel *entries() { return &m_entries; }
 
     Q_INVOKABLE void refresh();
@@ -76,7 +76,6 @@ signals:
 private:
     void applyFailure(const QString &message);
     void applyAuthFailure();
-    static QString authFailureMessage();
     void setLoading(bool v);
     void setStale(bool v);
     void setError(const QString &e);

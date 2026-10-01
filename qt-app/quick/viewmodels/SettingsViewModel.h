@@ -114,6 +114,10 @@ public:
     // requireAdminAuth (T17) / its guard return on a bad or missing key.
     static bool isAuthFailureMessage(const QString &message);
 
+    // The single user-facing sentence shown whenever the held admin key is
+    // rejected (Access Control + Database screens share it).
+    static QString adminAuthFailureMessage();
+
     // Tier-2 destructive op (spec §3.3): zeroes students.visits AND permanently
     // DELETEs library_visits rows for department on the backend. adminKey MUST
     // be the freshly re-typed key from the tier-2 confirmation dialog, NOT the

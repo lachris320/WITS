@@ -7,6 +7,7 @@
 #include "StudentsTableModel.h"
 #include "studentdata.h"
 #include "AdminSession.h"
+#include "SettingsViewModel.h"
 #include "studentcontroller.h"
 
 class TestDatabaseViewModel : public QObject
@@ -177,7 +178,7 @@ void TestDatabaseViewModel::onDeleteFinishedAuthFailureSetsAuthState()
     DatabaseViewModel vm;
     vm.onDeleteFinished(false, 2, QStringLiteral("Invalid admin key"));
     QVERIFY(vm.authFailure());
-    QVERIFY(!vm.statusMessage().isEmpty());
+    QCOMPARE(vm.statusMessage(), SettingsViewModel::adminAuthFailureMessage());
 }
 
 void TestDatabaseViewModel::onDeleteFinishedGenericFailureSetsStatusNoAuth()

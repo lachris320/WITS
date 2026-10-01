@@ -5,6 +5,7 @@
 #include "AccessControlViewModel.h"
 #include "AccessEntriesModel.h"
 #include "AdminSession.h"
+#include "SettingsViewModel.h"
 #include "capturingnam.h"
 
 class TestAccessControlViewModel : public QObject
@@ -252,6 +253,9 @@ void TestAccessControlViewModel::refresh_http401_setsAuthFailureAndClearsProtect
     QVERIFY(vm.authFailure());
     QCOMPARE(vm.errorText(),
              QStringLiteral("Admin authentication failed — re-enter via admin login."));
+    // One source of truth shared with the Database screen.
+    QCOMPARE(vm.authFailureText(), SettingsViewModel::adminAuthFailureMessage());
+    QCOMPARE(vm.errorText(), SettingsViewModel::adminAuthFailureMessage());
     QCOMPARE(vm.entries()->rowCount(), 0);      // protected data cleared
     QCOMPARE(vm.entriesToday(), 0);
     QVERIFY(vm.lastEntryAt().isEmpty());
