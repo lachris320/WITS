@@ -186,7 +186,7 @@ startup
 | `WITS_API_BASE_URL` set | Used verbatim (normalized); wins over ini. |
 | No env, `config.ini` present & valid | `[Server] BaseURL` used (normalized). |
 | No env, no `config.ini` | Falls back to `http://localhost/loams_api/`. |
-| `config.ini` present but malformed / key missing / value empty | Treated as "not configured" → falls through to default; app still starts. |
+| `config.ini` present but malformed / key missing / value empty | Treated as "not configured" → falls through to default; app still starts. **Superseded by the Addendum:** only a *missing* file or *missing* key is silent; an unparseable file or a present-but-blank value is a warned rejection. |
 | Value has trailing slash / no trailing slash | Normalized to exactly one trailing slash. |
 
 The app **never fails to start** because of configuration; a bad/absent config
@@ -213,6 +213,9 @@ degrades to the localhost default rather than crashing.
   `setBaseUrl(resolveBaseUrl(...))` then `endpoint(...)`.
 - Uses `QTemporaryDir` + a written ini file; no real env mutation required
   (`resolveBaseUrl` takes the env value as a parameter).
+- *(Revival note)* The `applyFromRuntime` cases do mutate the real env via
+  `qputenv`/`qunsetenv` (restored in `init()`/`cleanup()`) to exercise the
+  warnings and the reset-to-default path; see the Addendum.
 
 Both run headless under ctest (`APPLESS`/offscreen as appropriate).
 
@@ -264,3 +267,37 @@ changes supersede the matching parts of this spec:
 - This closes the Access Control spec's deferred **"runtime base-URL config"**
   item (`2026-09-29-access-control-provider-kiosk-design.md`).
 - **Still out of scope:** an installer that writes `config.ini` (Installer 2.0).
+
+### Review follow-ups (Codex round 1 + PR #60 gate)
+
+These supersede any earlier wording above:
+
+- **Final signature:** `Resolution resolveBaseUrl(const std::optional<QString> &env,
+  const QString &iniFilePath)`. `std::nullopt` means the env var is unset.
+  `Rejection` is `{source, reason, value}` with `Reason` = `InvalidUrl`, `Blank` or
+  `UnreadableFile`. `ApiConfig::resetBaseUrl()` restores `defaultBaseUrl()`.
+- **Blank-but-present is a warned rejection,** not "unset": a set-but-blank
+  `WITS_API_BASE_URL`, or a present-but-blank `[Server] BaseURL`, falls through.
+  Only an unset env var, a missing file or a missing key stays silent.
+- **Unparseable config.ini** (`QSettings` status not `NoError`) is warned
+  (`Reason::UnreadableFile`) and short-circuits to the default.
+- **Reset to default** when nothing valid resolves, so legacy WITS's in-process
+  restart loop never keeps a stale URL. The warning prints the real default.
+- **Comma in BaseURL** (which QSettings splits into a list) is read literally.
+- **Any `@` in the authority is rejected,** including empty userinfo
+  (`http://@host/`). An `@` in the path is allowed.
+- **Default ports are stripped** (`:80` for http, `:443` for https) and port 0 is
+  rejected, so LoginParser's same-origin photo check (which compares `port()`)
+  matches portless photo URLs.
+- **Rejected values are logged redacted:** only `scheme://host[:port]/path`.
+  Userinfo, query and fragment are removed; an unparseable value containing
+  `@`, `?` or `#` is withheld; control characters (CR, LF, TAB, ...) become `?`.
+
+### Deployment note: trust boundary
+
+`config.ini` is trusted exactly as much as the install directory's ACL. Every
+API request, including the ones carrying the admin key, goes to the URL it
+names. The install directory **must not be user-writable** (e.g. install under
+`Program Files`); otherwise a local user could point the kiosk, and the admin
+key, at a server they control. The same applies to whoever can set
+`WITS_API_BASE_URL` in the kiosk's environment.

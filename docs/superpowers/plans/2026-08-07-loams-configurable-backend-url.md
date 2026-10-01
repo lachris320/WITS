@@ -1,5 +1,7 @@
 # Configurable Backend URL Implementation Plan
 
+> **Superseded in part (2026-10-01):** the final signatures and validation, warning and reset behaviour are in the "Addendum" and "Review follow-ups" sections of `docs/superpowers/specs/2026-08-07-loams-configurable-backend-url-design.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Let the LOAMS client resolve its backend base URL at runtime from a `config.ini` beside the exe (or a `WITS_API_BASE_URL` env override), falling back to `http://localhost/loams_api/`, so one build can serve both the all-in-one PC and a server + multi-kiosk deployment.
