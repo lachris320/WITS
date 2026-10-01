@@ -59,7 +59,13 @@ inline QString normalizedBaseUrl(const QString &raw)
         return QString();
     if (url.host().isEmpty())
         return QString();
-    if (!url.userInfo().isEmpty() || url.hasQuery() || url.hasFragment())
+    if (url.hasQuery() || url.hasFragment())
+        return QString();
+    // Reject ANY userinfo, including an empty one: StrictMode accepts
+    // "http://@host/" with userInfo() empty, so check the authority for the
+    // '@' delimiter itself. An '@' in the path is not part of the authority.
+    if (!url.userInfo().isEmpty()
+        || url.authority(QUrl::FullyEncoded).contains(QLatin1Char('@')))
         return QString();
 
     url.setScheme(scheme);
@@ -81,6 +87,16 @@ inline bool setBaseUrl(const QString &url)
         return false;
     detail::mutableBaseUrl() = normalized;
     return true;
+}
+
+// Restore the built-in default (through the single writer above). Used when
+// runtime resolution yields nothing valid, so a re-resolution never keeps a
+// previously applied URL.
+inline void resetBaseUrl()
+{
+    const bool applied = setBaseUrl(defaultBaseUrl());
+    Q_ASSERT(applied);   // the compiled-in default always validates
+    Q_UNUSED(applied);
 }
 
 // Build a full endpoint URL from a relative path (e.g. "get_departments.php"

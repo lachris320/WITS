@@ -25,6 +25,7 @@ private slots:
     void setBaseUrlRejectsInvalidAndKeepsPrevious_data();
     void setBaseUrlRejectsInvalidAndKeepsPrevious();
     void setBaseUrlReturnsTrueAndAppliesNormalized();
+    void resetBaseUrlRestoresDefault();
 };
 
 void TestApiConfig::baseUrlValue()
@@ -121,6 +122,9 @@ void TestApiConfig::normalizedBaseUrlAccepts_data()
         << "http://server.test" << "http://server.test/";
     QTest::newRow("multiple trailing slashes collapsed")
         << "http://server.test/loams_api///" << "http://server.test/loams_api/";
+    // '@' in the PATH is not userinfo: accepted (the authority has no '@').
+    QTest::newRow("at sign in path")
+        << "http://host.test/a@b/" << "http://host.test/a@b/";
 }
 
 void TestApiConfig::normalizedBaseUrlAccepts()
@@ -145,6 +149,9 @@ void TestApiConfig::normalizedBaseUrlRejects_data()
     QTest::newRow("no scheme") << "localhost/loams_api";
     QTest::newRow("user and password") << "http://user:pass@host.test/";
     QTest::newRow("user only") << "http://user@host.test/";
+    QTest::newRow("empty userinfo") << "http://@host.test/";
+    QTest::newRow("empty user and password") << "http://:@host.test/";
+    QTest::newRow("empty userinfo with path") << "http://@host.test/loams_api";
     QTest::newRow("query") << "http://host.test/?q=1";
     QTest::newRow("empty query") << "http://host.test/loams_api/?";
     QTest::newRow("fragment") << "http://host.test/#f";
@@ -182,6 +189,13 @@ void TestApiConfig::setBaseUrlReturnsTrueAndAppliesNormalized()
 {
     QVERIFY(ApiConfig::setBaseUrl(QStringLiteral("HTTP://server.test:8080/loams_api")));
     QCOMPARE(ApiConfig::baseUrl(), QString("http://server.test:8080/loams_api/"));
+}
+
+void TestApiConfig::resetBaseUrlRestoresDefault()
+{
+    QVERIFY(ApiConfig::setBaseUrl(QStringLiteral("http://stale.test/loams_api/")));
+    ApiConfig::resetBaseUrl();
+    QCOMPARE(ApiConfig::baseUrl(), ApiConfig::defaultBaseUrl());
 }
 
 QTEST_APPLESS_MAIN(TestApiConfig)
