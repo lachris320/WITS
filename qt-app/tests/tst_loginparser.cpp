@@ -1,6 +1,7 @@
 #include <QtTest>
 #include <QJsonObject>
 #include <QUrl>
+#include "apiconfig.h"
 #include "loginparser.h"
 
 class TestLoginParser : public QObject
@@ -26,6 +27,7 @@ private slots:
     void parseEntryEvent_foreignHostPhotoUrlDropped();
     void parseEntryEvent_fileSchemePhotoUrlDropped();
     void parseEntryEvent_sameHostAbsolutePhotoUrlAccepted();
+    void parseEntryEvent_defaultPortConfiguredBaseAcceptsPortlessPhoto();
     void parseEntryEvent_noPhotoYieldsEmptyPhotoUrl();
     void parseEntryEvent_orphanedStudentNull();
     void parseEntryEvent_localTimeConvertedToUtc();
@@ -186,6 +188,21 @@ void TestLoginParser::parseEntryEvent_sameHostAbsolutePhotoUrlAccepted()
     QVERIFY(r.hasStudent);
     QCOMPARE(r.student.value("photo_url").toString(),
              QStringLiteral("http://localhost/loams_api/uploads/ok.png"));
+}
+
+void TestLoginParser::parseEntryEvent_defaultPortConfiguredBaseAcceptsPortlessPhoto()
+{
+    // BaseURL configured as http://srv.test:80/loams_api/ must be the same
+    // origin as a photo_url on http://srv.test/ -- the base is normalized
+    // (default port stripped) exactly as the hub receives it.
+    const QUrl base(ApiConfig::normalizedBaseUrl(QStringLiteral("http://srv.test:80/loams_api/")));
+    const QByteArray body = R"({"status":"success","latest_id":1,"entry":{
+        "id":1,"created_at":"2026-09-29 08:30:00",
+        "student":{"name":"A","photo_url":"http://srv.test/uploads/x.jpg"}}})";
+    const auto r = LoginParser::parseEntryEvent(body, base);
+    QVERIFY(r.hasStudent);
+    QCOMPARE(r.student.value("photo_url").toString(),
+             QStringLiteral("http://srv.test/uploads/x.jpg"));
 }
 
 void TestLoginParser::parseEntryEvent_noPhotoYieldsEmptyPhotoUrl()

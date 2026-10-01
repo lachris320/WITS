@@ -68,6 +68,15 @@ inline QString normalizedBaseUrl(const QString &raw)
         || url.authority(QUrl::FullyEncoded).contains(QLatin1Char('@')))
         return QString();
 
+    // Port 0 is never a usable server port. The scheme's default port is
+    // stripped so "http://srv:80/" and "http://srv/" are the same origin
+    // (LoginParser's same-origin photo check compares QUrl::port()).
+    if (url.port() == 0)
+        return QString();
+    const int defaultPort = scheme == QLatin1String("https") ? 443 : 80;
+    if (url.port() == defaultPort)
+        url.setPort(-1);
+
     url.setScheme(scheme);
     QString normalized = url.toString(QUrl::FullyEncoded);
     while (normalized.endsWith(QLatin1Char('/')))

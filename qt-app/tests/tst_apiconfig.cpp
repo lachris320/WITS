@@ -123,6 +123,12 @@ void TestApiConfig::normalizedBaseUrlAccepts_data()
     QTest::newRow("multiple trailing slashes collapsed")
         << "http://server.test/loams_api///" << "http://server.test/loams_api/";
     // '@' in the PATH is not userinfo: accepted (the authority has no '@').
+    QTest::newRow("http default port stripped")
+        << "http://host.test:80/a/" << "http://host.test/a/";
+    QTest::newRow("https default port stripped")
+        << "https://host.test:443/" << "https://host.test/";
+    QTest::newRow("http keeps non-default 443")
+        << "http://host.test:443/" << "http://host.test:443/";
     QTest::newRow("at sign in path")
         << "http://host.test/a@b/" << "http://host.test/a@b/";
 }
@@ -157,6 +163,7 @@ void TestApiConfig::normalizedBaseUrlRejects_data()
     QTest::newRow("fragment") << "http://host.test/#f";
     QTest::newRow("garbage scheme") << "ht!tp://x";
     QTest::newRow("port out of range") << "http://host.test:99999/";
+    QTest::newRow("port zero") << "http://host.test:0/";
 }
 
 void TestApiConfig::normalizedBaseUrlRejects()
