@@ -24,7 +24,7 @@ private slots:
     {
         // ApiConfig's base URL is process-global: restore the default so a
         // runtime-URL case can't leak into later cases.
-        QVERIFY(ApiConfig::setBaseUrl(ApiConfig::defaultBaseUrl()));
+        ApiConfig::resetBaseUrl();
     }
     void toAccessEntry_knownStudent();
     void toAccessEntry_unknownStudent();

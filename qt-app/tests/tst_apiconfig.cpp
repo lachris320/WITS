@@ -65,7 +65,7 @@ void TestApiConfig::cleanup()
 {
     // The base URL is a process-global mutable; reset after every case so
     // ordering can't leak state into the hardcoded-default assertions.
-    QVERIFY(ApiConfig::setBaseUrl(ApiConfig::defaultBaseUrl()));
+    ApiConfig::resetBaseUrl();
     QCOMPARE(ApiConfig::baseUrl(), QString("http://localhost/loams_api/"));
 }
 

@@ -12,7 +12,7 @@ namespace ApiConfigLoader {
 
 // Where a base-URL value came from.
 enum class Source {
-    Default,       // nothing usable configured: ApiConfig keeps its localhost default
+    Default,       // nothing usable configured: caller resets to the built-in default
     Environment,   // WITS_API_BASE_URL (dev/CI override)
     ConfigIni,     // [Server] BaseURL in <appDir>/config.ini (deployment config)
 };
@@ -36,7 +36,7 @@ struct Rejection {
 };
 
 struct Resolution {
-    QString url;                  // validated + normalized; empty => keep default
+    QString url;                  // validated + normalized; empty => caller resets to the built-in default
     Source source = Source::Default;
     QList<Rejection> rejected;    // in precedence order
 };
@@ -45,7 +45,7 @@ struct Resolution {
 // supplied ini path. Precedence:
 //   1. envValue                                (WITS_API_BASE_URL: dev/CI override)
 //   2. [Server] BaseURL from iniFilePath       (deployment config)
-//   3. nothing -> url empty, caller uses ApiConfig's localhost default
+//   3. nothing -> url empty, caller resets to the built-in default
 // envValue is std::nullopt when the variable is UNSET; an engaged empty or
 // whitespace value means "set but blank" and is rejected. A present-but-
 // INVALID source (see Reason) is recorded in `rejected` and resolution FALLS

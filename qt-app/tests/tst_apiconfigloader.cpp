@@ -58,7 +58,9 @@ private:
         return path;
     }
 
-    static QString missingIni() { return QStringLiteral("C:/no/such/config.ini"); }
+    // A config.ini path inside a fresh temporary directory that is never created.
+    QString missingIni() const { return m_scratch.path() + QStringLiteral("/config.ini"); }
+    QTemporaryDir m_scratch;
 };
 
 void TestApiConfigLoader::init()
@@ -71,7 +73,7 @@ void TestApiConfigLoader::cleanup()
     // Process-global state: restore the localhost default and the env so no
     // later case (or target) observes this case's configuration.
     qunsetenv("WITS_API_BASE_URL");
-    QVERIFY(ApiConfig::setBaseUrl(ApiConfig::defaultBaseUrl()));
+    ApiConfig::resetBaseUrl();
     QCOMPARE(ApiConfig::baseUrl(), QString("http://localhost/loams_api/"));
 }
 
@@ -99,7 +101,7 @@ void TestApiConfigLoader::iniUsedWhenEnvEmpty()
 
 void TestApiConfigLoader::defaultWhenNeitherPresent()
 {
-    // No env, and a path to a file that does not exist -> empty (caller keeps default).
+    // No env, and a path to a file that does not exist -> empty (caller resets to the built-in default).
     const auto r = ApiConfigLoader::resolveBaseUrl(std::nullopt, missingIni());
     QCOMPARE(r.url, QString());
     QVERIFY(r.source == Source::Default);
