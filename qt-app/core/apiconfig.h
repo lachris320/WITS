@@ -29,6 +29,60 @@ inline QString &mutableBaseUrl()
     static QString value = defaultBaseUrl();
     return value;
 }
+
+// Validates the EXPLICIT port in the raw input's authority ourselves, before
+// trusting QUrl: Qt 6.11 StrictMode wraps an overflowing port (e.g.
+// ":4294967376" == 2^32+80 parses as 80). Authority = text between "://" and
+// the next '/', '?' or '#'; an IPv6 literal's port follows the closing ']'.
+// No ':' delimiter -> no explicit port -> true. Otherwise the port must be
+// 1-5 ASCII digits (no sign, space or percent-encoding; empty is rejected)
+// with a value of 1..65535. Inputs without "://" are left to the URL checks.
+inline bool hasValidExplicitPort(const QString &raw)
+{
+    const qsizetype schemeEnd = raw.indexOf(QLatin1String("://"));
+    if (schemeEnd < 0)
+        return true;
+    const qsizetype start = schemeEnd + 3;
+    qsizetype end = raw.size();
+    for (qsizetype i = start; i < raw.size(); ++i) {
+        const QChar c = raw.at(i);
+        if (c == QLatin1Char('/') || c == QLatin1Char('?') || c == QLatin1Char('#')) {
+            end = i;
+            break;
+        }
+    }
+    QStringView hostPort = QStringView(raw).mid(start, end - start);
+    const qsizetype at = hostPort.lastIndexOf(QLatin1Char('@'));
+    if (at >= 0)
+        hostPort = hostPort.mid(at + 1);   // userinfo is rejected separately
+
+    qsizetype colon = -1;
+    if (hostPort.startsWith(QLatin1Char('['))) {
+        const qsizetype close = hostPort.indexOf(QLatin1Char(']'));
+        if (close < 0)
+            return false;
+        if (close + 1 == hostPort.size())
+            return true;                     // "[v6]" with no port
+        if (hostPort.at(close + 1) != QLatin1Char(':'))
+            return false;
+        colon = close + 1;
+    } else {
+        colon = hostPort.indexOf(QLatin1Char(':'));
+        if (colon < 0)
+            return true;
+    }
+
+    const QStringView port = hostPort.mid(colon + 1);
+    if (port.isEmpty() || port.size() > 5)
+        return false;
+    int value = 0;
+    for (const QChar c : port) {
+        if (c < QLatin1Char('0') || c > QLatin1Char('9'))
+            return false;
+        value = value * 10 + (c.unicode() - u'0');
+    }
+    return value >= 1 && value <= 65535;
+}
 } // namespace detail
 
 // The single source of truth for the backend base URL. Includes the trailing
@@ -48,6 +102,8 @@ inline QString normalizedBaseUrl(const QString &raw)
 {
     const QString trimmed = raw.trimmed();
     if (trimmed.isEmpty())
+        return QString();
+    if (!detail::hasValidExplicitPort(trimmed))
         return QString();
 
     QUrl url(trimmed, QUrl::StrictMode);

@@ -29,6 +29,8 @@ private slots:
     void applyFromRuntimeResetsToDefaultWhenNothingConfigured();
     void applyFromRuntimeResetsToDefaultWhenAllRejected();
     void validEnvDoesNotConsultInvalidIni();
+    void overflowingPortFallsThroughToIni();
+    void overflowingPortInIniIsRejected();
     void invalidEnvFallsThroughToIni();
     void invalidEnvAndInvalidIniGivesEmpty();
     void invalidEnvAndMissingIniGivesEmpty();
@@ -219,6 +221,33 @@ void TestApiConfigLoader::validEnvDoesNotConsultInvalidIni()
     const auto r = ApiConfigLoader::resolveBaseUrl(QStringLiteral("http://env.test/loams_api/"), ini);
     QCOMPARE(r.url, QString("http://env.test/loams_api/"));
     QVERIFY(r.rejected.isEmpty());   // lower-precedence source never reached
+}
+
+void TestApiConfigLoader::overflowingPortFallsThroughToIni()
+{
+    // Qt wraps 2^32+80 to port 80; the validator must reject it explicitly.
+    QTemporaryDir dir;
+    const QString ini = writeIni(dir, QStringLiteral("BaseURL=http://ini.test/loams_api"));
+    QVERIFY(!ini.isEmpty());
+    const auto r = ApiConfigLoader::resolveBaseUrl(
+        QStringLiteral("http://env.test:4294967376/loams_api/"), ini);
+    QCOMPARE(r.url, QString("http://ini.test/loams_api/"));
+    QVERIFY(r.source == Source::ConfigIni);
+    QCOMPARE(r.rejected.size(), 1);
+    QVERIFY(r.rejected.at(0).source == Source::Environment);
+    QVERIFY(r.rejected.at(0).reason == Reason::InvalidUrl);
+}
+
+void TestApiConfigLoader::overflowingPortInIniIsRejected()
+{
+    QTemporaryDir dir;
+    const QString ini = writeIni(dir, QStringLiteral("BaseURL=http://ini.test:4294967376/loams_api"));
+    QVERIFY(!ini.isEmpty());
+    const auto r = ApiConfigLoader::resolveBaseUrl(std::nullopt, ini);
+    QCOMPARE(r.url, QString());
+    QCOMPARE(r.rejected.size(), 1);
+    QVERIFY(r.rejected.at(0).source == Source::ConfigIni);
+    QVERIFY(r.rejected.at(0).reason == Reason::InvalidUrl);
 }
 
 void TestApiConfigLoader::invalidEnvFallsThroughToIni()

@@ -129,6 +129,13 @@ void TestApiConfig::normalizedBaseUrlAccepts_data()
         << "https://host.test:443/" << "https://host.test/";
     QTest::newRow("http keeps non-default 443")
         << "http://host.test:443/" << "http://host.test:443/";
+    QTest::newRow("port 1") << "http://h.test:1/" << "http://h.test:1/";
+    QTest::newRow("port 8080") << "http://h.test:8080/" << "http://h.test:8080/";
+    QTest::newRow("port 65535") << "http://h.test:65535/" << "http://h.test:65535/";
+    // Leading zeros are plain digits: 080 == 80, the http default -> stripped.
+    QTest::newRow("port 080 is default") << "http://h.test:080/" << "http://h.test/";
+    QTest::newRow("ipv6 with port") << "http://[::1]:8080/" << "http://[::1]:8080/";
+    QTest::newRow("ipv6 without port") << "http://[::1]/" << "http://[::1]/";
     QTest::newRow("at sign in path")
         << "http://host.test/a@b/" << "http://host.test/a@b/";
 }
@@ -164,6 +171,20 @@ void TestApiConfig::normalizedBaseUrlRejects_data()
     QTest::newRow("garbage scheme") << "ht!tp://x";
     QTest::newRow("port out of range") << "http://host.test:99999/";
     QTest::newRow("port zero") << "http://host.test:0/";
+    QTest::newRow("port 65536") << "http://h.test:65536/";
+    QTest::newRow("port 100000") << "http://h.test:100000/";
+    QTest::newRow("port 2^32") << "http://h.test:4294967296/";
+    QTest::newRow("port 2^32+80 wraps to 80") << "http://h.test:4294967376/";
+    QTest::newRow("port 2^64+80") << "http://h.test:18446744073709551696/";
+    QTest::newRow("port negative") << "http://h.test:-80/";
+    QTest::newRow("port plus sign") << "http://h.test:+80/";
+    QTest::newRow("port leading space") << "http://h.test: 80/";
+    QTest::newRow("port letter") << "http://h.test:8o/";
+    QTest::newRow("port percent-encoded") << "http://h.test:%38%30/";
+    QTest::newRow("port empty") << "http://h.test:/";
+    QTest::newRow("port empty no path") << "http://h.test:";
+    QTest::newRow("port 00000") << "http://h.test:00000/";
+    QTest::newRow("ipv6 port 65536") << "http://[::1]:65536/";
 }
 
 void TestApiConfig::normalizedBaseUrlRejects()

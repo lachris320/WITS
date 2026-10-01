@@ -289,6 +289,10 @@ These supersede any earlier wording above:
 - **Default ports are stripped** (`:80` for http, `:443` for https) and port 0 is
   rejected, so LoginParser's same-origin photo check (which compares `port()`)
   matches portless photo URLs.
+- **Explicit port validation:** the raw port text in the authority (after `]` for
+  IPv6) must be 1-5 ASCII digits with a value of 1..65535. Empty, signed, spaced,
+  percent-encoded or overflowing ports are rejected *before* QUrl parses them
+  (Qt 6.11 wraps `:4294967376` to 80). Leading zeros are allowed (`:080` = 80).
 - **Rejected values are logged redacted:** only `scheme://host[:port]/path`.
   Userinfo, query and fragment are removed; an unparseable value containing
   `@`, `?` or `#` is withheld; control characters (CR, LF, TAB, ...) become `?`.
