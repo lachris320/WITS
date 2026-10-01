@@ -77,14 +77,34 @@ Item {
         enabled: root.enabled
         onClicked: root.toggle()
     }
+    // Same semantics as a Qt Quick Controls AbstractButton: key auto-repeat is
+    // ignored (holding a key must not machine-gun toggled()), Space acts on
+    // RELEASE of a press that began here, Enter/Return act on the first press.
+    property bool m_spaceDown: false
+    onActiveFocusChanged: if (!activeFocus) m_spaceDown = false
+    onEnabledChanged: if (!enabled) m_spaceDown = false
+
     Keys.onPressed: function(event) {
         if (!root.enabled)
             return;
-        if (event.key === Qt.Key_Space || event.key === Qt.Key_Return
-                || event.key === Qt.Key_Enter) {
-            root.toggle();
+        if (event.key === Qt.Key_Space) {
+            if (!event.isAutoRepeat)
+                root.m_spaceDown = true;
+            event.accepted = true;
+        } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+            if (!event.isAutoRepeat)
+                root.toggle();
             event.accepted = true;
         }
+    }
+    Keys.onReleased: function(event) {
+        if (!root.enabled || event.key !== Qt.Key_Space)
+            return;
+        if (!event.isAutoRepeat && root.m_spaceDown) {
+            root.m_spaceDown = false;
+            root.toggle();
+        }
+        event.accepted = true;
     }
     Accessible.role: Accessible.CheckBox
     Accessible.name: root.label

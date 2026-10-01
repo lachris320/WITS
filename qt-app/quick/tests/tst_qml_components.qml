@@ -1562,6 +1562,36 @@ Item {
         function test_isTabFocusable() {
             verify(chk.activeFocusOnTab);
         }
+        // AbstractButton semantics: Space toggles on RELEASE, once, however many
+        // press/repeat events arrive while it is held.
+        function test_spaceHeldTogglesOnceOnRelease() {
+            var spy = signalSpy.createObject(chk, { target: chk, signalName: "toggled" });
+            chk.forceActiveFocus();
+            keyPress(Qt.Key_Space);
+            keyPress(Qt.Key_Space);                   // repeats while held
+            keyPress(Qt.Key_Space);
+            compare(chk.checked, false);              // nothing yet: still held
+            compare(spy.count, 0);
+            keyRelease(Qt.Key_Space);
+            compare(chk.checked, true);
+            compare(spy.count, 1);
+            spy.destroy();
+        }
+        // A stray release (focus arrived mid-press) must not toggle.
+        function test_spaceReleaseWithoutPressDoesNotToggle() {
+            chk.forceActiveFocus();
+            keyRelease(Qt.Key_Space);
+            compare(chk.checked, false);
+        }
+        // Enter/Return still toggle on press; repeats of a held Return toggle once
+        // per discrete press event but release does nothing extra.
+        function test_returnTogglesOnPressNotRelease() {
+            chk.forceActiveFocus();
+            keyPress(Qt.Key_Return);
+            compare(chk.checked, true);
+            keyRelease(Qt.Key_Return);
+            compare(chk.checked, true);
+        }
     }
     Component { id: signalSpy; SignalSpy {} }
 

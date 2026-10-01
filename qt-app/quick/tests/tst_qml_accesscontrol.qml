@@ -242,6 +242,19 @@ Item {
             compare(hubStub.accessEnabled, false);
             compare(toggle.checked, false);
         }
+        // Holding Space (repeat events) must reach the hub exactly once — each
+        // call persists settings and rebuilds the provider.
+        function test_heldSpaceCallsHubOnce() {
+            var toggle = findChild(ac, "monitorToggle");
+            toggle.forceActiveFocus();
+            keyPress(Qt.Key_Space);
+            keyPress(Qt.Key_Space);
+            keyPress(Qt.Key_Space);
+            keyPress(Qt.Key_Space);
+            keyRelease(Qt.Key_Space);
+            compare(hubStub.setCalls, 1);
+            compare(hubStub.accessEnabled, true);
+        }
         function test_refusedKeyboardToggleSnapsBackAndKeepsBinding() {
             var toggle = findChild(ac, "monitorToggle");
             hubStub.refuse = true;
