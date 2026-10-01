@@ -232,3 +232,35 @@ Both run headless under ctest (`APPLESS`/offscreen as appropriate).
   `http://` on a LAN kiosk network is the current backend posture (see
   `deliverables/docs/DEPLOYMENT_GUIDE.md`), unchanged by this work.
 - No PII and no credentials are read, logged, or written by the loader.
+
+## Addendum (2026-10-01, revival)
+
+Revived on `master` after Access Control Sub-plans 1-4. These owner-approved
+changes supersede the matching parts of this spec:
+
+- **Validation.** `ApiConfig::normalizedBaseUrl()` (header-only) accepts only an
+  absolute `http`/`https` URL (parsed in `QUrl::StrictMode`) with a non-empty
+  host and **no** userinfo, query or fragment; port and path are allowed. Scheme
+  is lowercased and the path gets exactly one trailing slash. Anything else
+  yields an empty string.
+- **`ApiConfig::setBaseUrl()` returns `bool`** and leaves the current base
+  unchanged on invalid or blank input (previously only blank was ignored).
+- **Fall-through on invalid.** Precedence is unchanged (`WITS_API_BASE_URL` ->
+  `[Server] BaseURL` in `config.ini` -> localhost default), but a present-but-
+  invalid higher-precedence value is rejected and resolution falls through to
+  the next source. `resolveBaseUrl()` now returns a `Resolution` (url, winning
+  source, rejected sources) so this is unit-testable without log capture.
+- **Warnings, not silence.** `applyFromRuntime()` emits one `qWarning()` per
+  rejected source (naming the env var or the `config.ini` path), plus one when
+  falling back to the default; a clean resolution logs one `qInfo()` with the
+  effective URL. Rejected values have any embedded credentials stripped before
+  logging; nothing from `AdminSession` is ever logged.
+- **Startup ordering.** Both entry points (`quick/main.cpp`, legacy `main.cpp`)
+  call `applyFromRuntime(applicationDirPath())` right after the application
+  object is constructed. In WITSQuick this is before `AccessControlHub` is
+  constructed/initialized: `initialize()` captures `ApiConfig::baseUrl()` into
+  the TurnstileProvider factory, and LoginParser's same-origin photo check
+  compares against that base. `tst_accesscontrolhub` pins both behaviours.
+- This closes the Access Control spec's deferred **"runtime base-URL config"**
+  item (`2026-09-29-access-control-provider-kiosk-design.md`).
+- **Still out of scope:** an installer that writes `config.ini` (Installer 2.0).
