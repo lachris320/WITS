@@ -1,6 +1,7 @@
 #include <QtTest>
 #include <QJsonObject>
 #include <QUrl>
+#include "apiconfig.h"
 #include "loginparser.h"
 
 class TestLoginParser : public QObject
@@ -26,6 +27,9 @@ private slots:
     void parseEntryEvent_foreignHostPhotoUrlDropped();
     void parseEntryEvent_fileSchemePhotoUrlDropped();
     void parseEntryEvent_sameHostAbsolutePhotoUrlAccepted();
+    void parseEntryEvent_defaultPortConfiguredBaseAcceptsPortlessPhoto();
+    void parseEntryEvent_effectivePortComparison_data();
+    void parseEntryEvent_effectivePortComparison();
     void parseEntryEvent_noPhotoYieldsEmptyPhotoUrl();
     void parseEntryEvent_orphanedStudentNull();
     void parseEntryEvent_localTimeConvertedToUtc();
@@ -186,6 +190,60 @@ void TestLoginParser::parseEntryEvent_sameHostAbsolutePhotoUrlAccepted()
     QVERIFY(r.hasStudent);
     QCOMPARE(r.student.value("photo_url").toString(),
              QStringLiteral("http://localhost/loams_api/uploads/ok.png"));
+}
+
+void TestLoginParser::parseEntryEvent_defaultPortConfiguredBaseAcceptsPortlessPhoto()
+{
+    // BaseURL configured as http://srv.test:80/loams_api/ must be the same
+    // origin as a photo_url on http://srv.test/ -- the base is normalized
+    // (default port stripped) exactly as the hub receives it.
+    const QUrl base(ApiConfig::normalizedBaseUrl(QStringLiteral("http://srv.test:80/loams_api/")));
+    const QByteArray body = R"({"status":"success","latest_id":1,"entry":{
+        "id":1,"created_at":"2026-09-29 08:30:00",
+        "student":{"name":"A","photo_url":"http://srv.test/uploads/x.jpg"}}})";
+    const auto r = LoginParser::parseEntryEvent(body, base);
+    QVERIFY(r.hasStudent);
+    QCOMPARE(r.student.value("photo_url").toString(),
+             QStringLiteral("http://srv.test/uploads/x.jpg"));
+}
+
+void TestLoginParser::parseEntryEvent_effectivePortComparison_data()
+{
+    QTest::addColumn<QString>("base");
+    QTest::addColumn<QString>("photo");
+    QTest::addColumn<bool>("accepted");
+
+    // Base is normalized (default port stripped -> port() == -1), as the hub
+    // receives it from ApiConfig::baseUrl().
+    QTest::newRow("explicit :80 photo on portless http base")
+        << "http://srv.test/loams_api/" << "http://srv.test:80/uploads/x.jpg" << true;
+    QTest::newRow("portless photo on portless http base")
+        << "http://srv.test/loams_api/" << "http://srv.test/uploads/x.jpg" << true;
+    QTest::newRow("explicit :443 photo on portless https base")
+        << "https://srv.test/" << "https://srv.test:443/x.jpg" << true;
+    QTest::newRow("non-default port photo rejected")
+        << "http://srv.test/" << "http://srv.test:8080/x.jpg" << false;
+    QTest::newRow("non-default base port, portless photo rejected")
+        << "http://srv.test:8080/loams_api/" << "http://srv.test/x.jpg" << false;
+    // Stricter, not looser: effective ports differ (443 vs 80).
+    QTest::newRow("http photo on https base rejected")
+        << "https://srv.test/" << "http://srv.test/x.jpg" << false;
+}
+
+void TestLoginParser::parseEntryEvent_effectivePortComparison()
+{
+    QFETCH(QString, base);
+    QFETCH(QString, photo);
+    QFETCH(bool, accepted);
+    const QUrl baseUrl(ApiConfig::normalizedBaseUrl(base));
+    QVERIFY(baseUrl.isValid());
+    const QByteArray body = QStringLiteral(
+        "{\"status\":\"success\",\"latest_id\":1,\"entry\":{"
+        "\"id\":1,\"created_at\":\"2026-09-29 08:30:00\","
+        "\"student\":{\"name\":\"A\",\"photo_url\":\"%1\"}}}").arg(photo).toUtf8();
+    const auto r = LoginParser::parseEntryEvent(body, baseUrl);
+    QVERIFY(r.hasStudent);
+    QCOMPARE(r.student.value("photo_url").toString(), accepted ? photo : QString());
 }
 
 void TestLoginParser::parseEntryEvent_noPhotoYieldsEmptyPhotoUrl()

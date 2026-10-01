@@ -387,3 +387,12 @@ wits_add_qttest(tst_contactage
         ${CMAKE_SOURCE_DIR}/core/accesscontrol/contactage.cpp
         ${CMAKE_SOURCE_DIR}/core/accesscontrol/contactage.h
     INCLUDES ${CMAKE_SOURCE_DIR}/core)
+
+# --- backend base-URL resolver (pure core, no offscreen). Compiles the loader
+# .cpp directly (same pattern as the other core tests). ---
+wits_add_qttest(tst_apiconfigloader
+    SOURCES
+        tst_apiconfigloader.cpp
+        ${CMAKE_SOURCE_DIR}/core/apiconfigloader.cpp
+        ${CMAKE_SOURCE_DIR}/core/apiconfigloader.h
+    INCLUDES ${CMAKE_SOURCE_DIR}/core)
