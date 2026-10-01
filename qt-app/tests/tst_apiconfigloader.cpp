@@ -166,6 +166,7 @@ void TestApiConfigLoader::rejectedCredentialsAreRedacted()
     QVERIFY(!r.rejected.at(0).value.contains(QStringLiteral("s3cret")));
     QVERIFY(!r.rejected.at(0).value.contains(QStringLiteral("user")));
     QVERIFY(r.rejected.at(0).value.contains(QStringLiteral("env.test")));
+    QVERIFY(r.rejected.at(0).value.contains(QStringLiteral("credentials removed")));
 }
 
 void TestApiConfigLoader::fullChainSetsEndpoint()

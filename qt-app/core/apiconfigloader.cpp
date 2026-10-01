@@ -19,7 +19,8 @@ QString redactedForLog(const QString &value)
         return value;
     const QUrl parsed(value, QUrl::TolerantMode);
     if (parsed.isValid() && !parsed.userInfo().isEmpty())
-        return parsed.toString(QUrl::RemoveUserInfo);
+        return parsed.toString(QUrl::RemoveUserInfo)
+               + QStringLiteral(" [credentials removed]");
     // Unparseable but contains '@': it may still embed a credential.
     return QStringLiteral("<withheld: value contains '@'>");
 }
