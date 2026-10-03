@@ -560,10 +560,7 @@ Item {
         // `wait(450)` returns well past 450ms of animation time, row 8 has
         // already settled at 1, and the strict-inequality check fails for
         // reasons unrelated to the code under test. Same flake class as the
-        // pageIn entrance tests de-flaked just before this one — and since
-        // both tst_qml_admin and tst_qml_components compile this whole
-        // directory via QUICK_TEST_SOURCE_DIR, one flake here reddens several
-        // ctest entries at once.
+        // pageIn entrance tests de-flaked just before this one.
         //
         // The timed sample is replaced by a polling WIRING proof — see the
         // twin comment on SearchScreen's test of the same name
@@ -580,10 +577,9 @@ Item {
         // step, and the negative-index guard) is deliberately NOT re-asserted
         // here: tst_qml_theme.qml's
         // test_staggerDelayClampsIndexToStaggerCapThenMultipliesByStep covers
-        // it on the pure Theme.motion.staggerDelay function, with zero clock,
-        // and QUICK_TEST_SOURCE_DIR means that test runs inside THIS binary
-        // too — repeating it here would only duplicate coverage already
-        // executing in the same process.
+        // it on the pure Theme.motion.staggerDelay function, with zero clock
+        // (in the tst_qml_theme target) — repeating it here would only
+        // duplicate coverage the suite already runs.
         //
         // RETRY POLICY (twin of the one in tst_qml_admin.qml): a retry is
         // legitimate ONLY when the entrance window was missed entirely —
@@ -799,10 +795,7 @@ Item {
         // past the Behavior's duration reddens it for reasons unrelated to
         // the code under test — the last member of the flake class already
         // de-flaked in the pageIn entrance tests and the row-stagger tests
-        // above. Both tst_qml_admin and
-        // tst_qml_components compile this whole directory via
-        // QUICK_TEST_SOURCE_DIR, so one flake here reddens several ctest
-        // entries at once.
+        // above.
         //
         // The timed sample is replaced by three checks that are collectively
         // STRICTER — in particular (a), which the original missed entirely:

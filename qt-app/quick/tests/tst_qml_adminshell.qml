@@ -6,9 +6,9 @@ import LOAMS
 // tst_qml_admin.qml (see Task 16 brief DEVIATION 1): that file already
 // carries a hand-computed y-band geometry ledger for its stub-VM screen
 // instances, and AdminScreen is the largest surface yet (sidebar + header +
-// Loader). A dedicated tst_*.qml is discovered at runtime via
-// QUICK_TEST_SOURCE_DIR, needs no new CMake target, and gets its own window
-// with no geometry bookkeeping to maintain.
+// Loader). A dedicated tst_*.qml gets its own QuickTest target
+// (wits_add_qmltest in quick/CMakeLists.txt) and its own window with no
+// geometry bookkeeping to maintain.
 //
 // This is the first QuickTest to instantiate AdminScreen, which in turn
 // instantiates the three REAL ViewModels (not QML stubs). autoLoad: false
@@ -39,10 +39,8 @@ Item {
         name: "AdminScreenShell"
         when: windowShown
 
-        // Navigator is a singleton whose state leaks across every tst_*.qml
-        // file sharing this QuickTest target's process (and, since all four
-        // QuickTest targets share QUICK_TEST_SOURCE_DIR, this file itself
-        // runs under all four). Reset both surface and page before AND after
+        // Navigator is a singleton whose state leaks between the test
+        // functions in this file. Reset both surface and page before AND after
         // every test — TestCase functions run alphabetically, not in
         // declaration order, so init() cannot rely on a "previous" test
         // having left things clean.

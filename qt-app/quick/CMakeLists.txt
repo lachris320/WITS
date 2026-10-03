@@ -173,17 +173,35 @@ wits_add_qttest(tst_themeviewmodel
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Svg
     OFFSCREEN)
 
-# --- Theme singleton Quick test (offscreen) ---
-# The literal "import LOAMS" lives only in tst_qml_theme.qml (a QUICK_TEST_MAIN
-# data file qmlimportscanner never scans), so the automatic static-plugin import
+# wits_add_qmltest(<name>)
+#
+# Registers one QuickTest target that runs exactly tests/<name>.qml, built from
+# tests/<name>.cpp + the shared tests/QuickTestSetup.h. QUICK_TEST_SOURCE_DIR
+# points at the single .qml FILE, not the tests/ directory: a directory makes
+# QUICK_TEST_MAIN run every tst_*.qml in it, so each target re-ran the whole
+# QML suite. If that path does not exist, quick_test_main silently falls back
+# to scanning the current working directory — hence the configure-time check.
+#
+# The literal "import LOAMS" lives only in the .qml (a QUICK_TEST_MAIN data
+# file qmlimportscanner never scans), so the automatic static-plugin import
 # never fires — link witsquickmoduleplugin + its Q_IMPORT_PLUGIN "_init" object
 # explicitly or the statically-embedded LOAMS module never registers.
-wits_add_qttest(tst_qml_theme
-    SOURCES tests/tst_qml_theme.cpp
-    LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
-         Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
-    DEFINES QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
-    OFFSCREEN)
+function(wits_add_qmltest name)
+    set(_qml "${CMAKE_CURRENT_SOURCE_DIR}/tests/${name}.qml")
+    if(NOT EXISTS "${_qml}")
+        message(FATAL_ERROR "wits_add_qmltest(${name}): ${_qml} does not exist")
+    endif()
+    wits_add_qttest(${name}
+        SOURCES tests/${name}.cpp tests/QuickTestSetup.h
+        LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
+             Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
+        DEFINES QUICK_TEST_SOURCE_DIR="${_qml}"
+        OFFSCREEN)
+    set_property(GLOBAL APPEND PROPERTY WITS_QMLTEST_TARGETS ${name})
+endfunction()
+
+# --- Theme singleton Quick test (offscreen) ---
+wits_add_qmltest(tst_qml_theme)
 
 # --- Navigator unit test (C++ QtTest, offscreen: house consistency with the
 # other quick tests — witsquickmodule PUBLIC-propagates Qt::Gui, which would
@@ -276,26 +294,10 @@ wits_add_qttest(tst_accessentriesmodel
     LIBS witsquickmodule)
 
 # --- L* component skeletons Quick test (offscreen) ---
-# Same escape hatch as tst_qml_theme above: "import LOAMS" lives only in the
-# QUICK_TEST_MAIN data file, so the plugin + "_init" object must be linked
-# explicitly.
-wits_add_qttest(tst_qml_components
-    SOURCES tests/tst_qml_components.cpp
-    LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
-         Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
-    DEFINES QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
-    OFFSCREEN)
+wits_add_qmltest(tst_qml_components)
 
 # --- Kiosk screens Quick test (offscreen) ---
-# Same escape hatch as tst_qml_theme/tst_qml_components above: "import LOAMS"
-# lives only in the QUICK_TEST_MAIN data file, so the plugin + "_init" object
-# must be linked explicitly.
-wits_add_qttest(tst_qml_kiosk
-    SOURCES tests/tst_qml_kiosk.cpp
-    LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
-         Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
-    DEFINES QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
-    OFFSCREEN)
+wits_add_qmltest(tst_qml_kiosk)
 
 # --- AccessControlHub unit test (C++ QtTest, offscreen). SequencedNam drives
 # the provider with no live network; AppSettings isolation is compiled in by
@@ -357,14 +359,14 @@ wits_add_qttest(tst_databaseviewmodel
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
     OFFSCREEN)
 
-# --- Admin screens Quick test (offscreen). "import LOAMS" lives only in the
-# QUICK_TEST_MAIN data file, so link the plugin + "_init" object explicitly. ---
-wits_add_qttest(tst_qml_admin
-    SOURCES tests/tst_qml_admin.cpp
-    LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
-         Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
-    DEFINES QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
-    OFFSCREEN)
+# --- Admin screens Quick test (offscreen) ---
+wits_add_qmltest(tst_qml_admin)
+
+# --- AdminScreen shell Quick test (offscreen) ---
+wits_add_qmltest(tst_qml_adminshell)
+
+# --- AccessControlScreen Quick test (offscreen) ---
+wits_add_qmltest(tst_qml_accesscontrol)
 
 # --- SettingsViewModel unit test (C++ QtTest, offscreen). Uses Network for
 # the async POST paths (T10-T13) and Gui via witsquickmodule propagation. ---
@@ -399,3 +401,30 @@ wits_add_qttest(tst_notokenaliases
     SOURCES tests/tst_notokenaliases.cpp
     DEFINES SRC_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
             SRC_QML_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
+
+# Coverage guard: before wits_add_qmltest, every QuickTest target scanned the
+# whole tests/ directory, so a new tst_*.qml was picked up automatically. Now
+# each target runs one file, so a tst_*.qml without its own wits_add_qmltest
+# would silently never run — fail the configure instead.
+# MUST stay the last statement in this file: it only sees wits_add_qmltest()
+# calls made above it. tests/ is scanned non-recursively (QuickTest .qml files
+# live flat in tests/).
+file(GLOB _wits_qml_tests CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/tst_*.qml)
+get_property(_wits_qml_targets GLOBAL PROPERTY WITS_QMLTEST_TARGETS)
+set(_wits_qml_orphans "")
+foreach(_f IN LISTS _wits_qml_tests)
+    get_filename_component(_n "${_f}" NAME_WE)
+    if(NOT _n IN_LIST _wits_qml_targets)
+        list(APPEND _wits_qml_orphans "tests/${_n}.qml")
+    endif()
+endforeach()
+if(_wits_qml_orphans)
+    message(FATAL_ERROR "QuickTest file(s) with no wits_add_qmltest() target "
+        "(they would never run): ${_wits_qml_orphans}")
+endif()
+unset(_wits_qml_tests)
+unset(_wits_qml_targets)
+unset(_wits_qml_orphans)
+unset(_f)
+unset(_n)
