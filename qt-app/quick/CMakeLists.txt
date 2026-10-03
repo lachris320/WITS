@@ -368,25 +368,6 @@ wits_add_qmltest(tst_qml_adminshell)
 # --- AccessControlScreen Quick test (offscreen) ---
 wits_add_qmltest(tst_qml_accesscontrol)
 
-# Coverage guard: before wits_add_qmltest, every QuickTest target scanned the
-# whole tests/ directory, so a new tst_*.qml was picked up automatically. Now
-# each target runs one file, so a tst_*.qml without its own wits_add_qmltest
-# would silently never run — fail the configure instead.
-file(GLOB _wits_qml_tests CONFIGURE_DEPENDS
-    ${CMAKE_CURRENT_SOURCE_DIR}/tests/tst_*.qml)
-get_property(_wits_qml_targets GLOBAL PROPERTY WITS_QMLTEST_TARGETS)
-set(_wits_qml_orphans "")
-foreach(_f IN LISTS _wits_qml_tests)
-    get_filename_component(_n "${_f}" NAME_WE)
-    if(NOT _n IN_LIST _wits_qml_targets)
-        list(APPEND _wits_qml_orphans "tests/${_n}.qml")
-    endif()
-endforeach()
-if(_wits_qml_orphans)
-    message(FATAL_ERROR "QuickTest file(s) with no wits_add_qmltest() target "
-        "(they would never run): ${_wits_qml_orphans}")
-endif()
-
 # --- SettingsViewModel unit test (C++ QtTest, offscreen). Uses Network for
 # the async POST paths (T10-T13) and Gui via witsquickmodule propagation. ---
 wits_add_qttest(tst_settingsviewmodel
@@ -420,3 +401,30 @@ wits_add_qttest(tst_notokenaliases
     SOURCES tests/tst_notokenaliases.cpp
     DEFINES SRC_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
             SRC_QML_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
+
+# Coverage guard: before wits_add_qmltest, every QuickTest target scanned the
+# whole tests/ directory, so a new tst_*.qml was picked up automatically. Now
+# each target runs one file, so a tst_*.qml without its own wits_add_qmltest
+# would silently never run — fail the configure instead.
+# MUST stay the last statement in this file: it only sees wits_add_qmltest()
+# calls made above it. tests/ is scanned non-recursively (QuickTest .qml files
+# live flat in tests/).
+file(GLOB _wits_qml_tests CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/tst_*.qml)
+get_property(_wits_qml_targets GLOBAL PROPERTY WITS_QMLTEST_TARGETS)
+set(_wits_qml_orphans "")
+foreach(_f IN LISTS _wits_qml_tests)
+    get_filename_component(_n "${_f}" NAME_WE)
+    if(NOT _n IN_LIST _wits_qml_targets)
+        list(APPEND _wits_qml_orphans "tests/${_n}.qml")
+    endif()
+endforeach()
+if(_wits_qml_orphans)
+    message(FATAL_ERROR "QuickTest file(s) with no wits_add_qmltest() target "
+        "(they would never run): ${_wits_qml_orphans}")
+endif()
+unset(_wits_qml_tests)
+unset(_wits_qml_targets)
+unset(_wits_qml_orphans)
+unset(_f)
+unset(_n)
