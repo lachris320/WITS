@@ -185,8 +185,10 @@ wits_add_qttest(tst_themeviewmodel
 
 # wits_add_qmltest(<name>)
 #
-# Registers one QuickTest target that runs exactly tests/<name>.qml, built from
-# tests/<name>.cpp + the shared tests/QuickTestSetup.h. QUICK_TEST_SOURCE_DIR
+# Registers one QuickTest target from tests/<name>.qml alone: the target runs
+# exactly that file, and its main is generated from tests/QuickTestMain.cpp.in
+# (configure_file, so it is rewritten only when its content changes) and uses
+# the shared tests/QuickTestSetup.h. QUICK_TEST_SOURCE_DIR
 # points at the single .qml FILE, not the tests/ directory: a directory makes
 # QUICK_TEST_MAIN run every tst_*.qml in it, so each target re-ran the whole
 # QML suite. If that path does not exist, quick_test_main silently falls back
@@ -198,11 +200,16 @@ function(wits_add_qmltest name)
     if(NOT EXISTS "${_qml}")
         message(FATAL_ERROR "wits_add_qmltest(${name}): ${_qml} does not exist")
     endif()
+    set(WITS_QMLTEST_NAME ${name})
+    set(_main "${CMAKE_CURRENT_BINARY_DIR}/qmltest_main/${name}.cpp")
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/tests/QuickTestMain.cpp.in
+        "${_main}" @ONLY)
     wits_add_qttest(${name}
-        SOURCES tests/${name}.cpp tests/QuickTestSetup.h
+        SOURCES "${_main}" tests/QuickTestSetup.h
         LIBS ${WITS_LOAMS_STATIC_LIBS}
              Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
         DEFINES QUICK_TEST_SOURCE_DIR="${_qml}"
+        INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/tests
         OFFSCREEN)
     set_property(GLOBAL APPEND PROPERTY WITS_QMLTEST_TARGETS ${name})
 endfunction()

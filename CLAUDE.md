@@ -32,7 +32,8 @@
 - **Tests:** register via `wits_add_qttest()` (`qt-app/cmake/WitsTest.cmake`);
   add `OFFSCREEN` for any GUI/Quick/painting test. QML QuickTests use
   `wits_add_qmltest(<name>)` (`qt-app/quick/CMakeLists.txt`), one target per
-  `tests/<name>.{cpp,qml}`; configure fails for a `tst_*.qml` with no target.
+  `tests/<name>.qml` (main generated from `tests/QuickTestMain.cpp.in`);
+  configure fails for a `tst_*.qml` with no target.
 
 ## Build & run
 

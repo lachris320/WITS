@@ -1,0 +1,6 @@
+// tests/QuickTestMain.cpp.in: the template wits_add_qmltest() (quick/CMakeLists.txt)
+// configures into each QuickTest target's main. Edit it, not the generated copies.
+#include <QtQuickTest/quicktest.h>
+#include "QuickTestSetup.h"
+
+QUICK_TEST_MAIN_WITH_SETUP(@WITS_QMLTEST_NAME@, QuickTestSetup)
