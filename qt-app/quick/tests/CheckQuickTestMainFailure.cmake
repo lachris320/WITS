@@ -11,14 +11,21 @@
 # source dir on purpose, so such a regression runs the real QML suite, prints
 # Qt's "Start testing of" banner and (normally) exits 0 — and this check fails.
 
+cmake_minimum_required(VERSION 3.16)
+
 foreach(_v EXE NAME WORKDIR)
     if(NOT DEFINED ${_v} OR "${${_v}}" STREQUAL "")
         message(FATAL_ERROR "CheckQuickTestMainFailure.cmake: -D${_v}=... is required")
     endif()
 endforeach()
+if(NOT EXISTS "${EXE}")
+    message(FATAL_ERROR "${NAME}: test executable not found: ${EXE} (build the target first)")
+endif()
 
+# Own TIMEOUT (< ctest's 120) so we kill the child; ctest killing only us orphans it on Windows.
 execute_process(COMMAND "${EXE}"
     WORKING_DIRECTORY "${WORKDIR}"
+    TIMEOUT 100
     RESULT_VARIABLE rc
     OUTPUT_VARIABLE out
     ERROR_VARIABLE err)

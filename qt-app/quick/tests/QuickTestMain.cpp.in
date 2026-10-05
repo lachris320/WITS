@@ -1,5 +1,6 @@
-// tests/QuickTestMain.cpp.in: the template wits_add_qmltest() (quick/CMakeLists.txt)
-// configures into each QuickTest target's main. Edit it, not the generated copies.
+// tests/QuickTestMain.cpp.in: the template _wits_qmltest_main() (quick/CMakeLists.txt)
+// configures into each QuickTest target's main (wits_add_qmltest() targets and the
+// tst_quicktestmain_missingfile guard). Edit it, not the generated copies.
 // Equivalent to QUICK_TEST_MAIN_WITH_SETUP(@WITS_QMLTEST_NAME@, QuickTestSetup), except
 // the .qml path is embedded as ASCII byte escapes and validated first (see
 // QuickTestSourcePath.h), so a bad path fails loudly instead of scanning the cwd.

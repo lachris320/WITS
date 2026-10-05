@@ -7,9 +7,10 @@
 
 #include "AccessControlHub.h"
 
-// Shared QUICK_TEST_MAIN_WITH_SETUP setup object for every tst_qml_* target
-// (registered via wits_add_qmltest in quick/CMakeLists.txt; each target runs
-// exactly one tst_qml_*.qml).
+// Shared QUICK_TEST_MAIN_WITH_SETUP setup object for every generated QuickTest
+// main: the tst_qml_* targets (registered via wits_add_qmltest in
+// quick/CMakeLists.txt; each runs exactly one tst_qml_*.qml) and
+// tst_quicktestmain_missingfile.
 class QuickTestSetup : public QObject
 {
     Q_OBJECT
