@@ -188,11 +188,18 @@ wits_add_qttest(tst_themeviewmodel
 # Registers one QuickTest target from tests/<name>.qml alone: the target runs
 # exactly that file, and its main is generated from tests/QuickTestMain.cpp.in
 # (configure_file, so it is rewritten only when its content changes) and uses
-# the shared tests/QuickTestSetup.h. QUICK_TEST_SOURCE_DIR
-# points at the single .qml FILE, not the tests/ directory: a directory makes
-# QUICK_TEST_MAIN run every tst_*.qml in it, so each target re-ran the whole
-# QML suite. If that path does not exist, quick_test_main silently falls back
-# to scanning the current working directory — hence the configure-time check.
+# the shared tests/QuickTestSetup.h. The main passes quick_test_main the
+# single .qml FILE, not the tests/ directory: a directory makes it run every
+# tst_*.qml in it, so each target re-ran the whole QML suite.
+#
+# The absolute .qml path is embedded in the generated main as ASCII-only \xNN
+# byte escapes of its UTF-8 (not a -D define, whose non-ASCII bytes do not
+# survive the Windows compiler command line reliably) and checked at startup
+# by tests/QuickTestSourcePath.h. quick_test_main decodes the path with
+# QString::fromLocal8Bit and, if it does not exist, silently scans the current
+# working directory instead — so a missing or code-page-unrepresentable path
+# (non-ASCII checkout on Windows) now exits 1 with a message. The configure-
+# time check below catches a missing file earlier.
 #
 # Links WITS_LOAMS_STATIC_LIBS (see the static-plugin note above WITSQuick).
 function(wits_add_qmltest name)
@@ -201,6 +208,11 @@ function(wits_add_qmltest name)
         message(FATAL_ERROR "wits_add_qmltest(${name}): ${_qml} does not exist")
     endif()
     set(WITS_QMLTEST_NAME ${name})
+    # UTF-8 bytes -> "\x2f\x68..." via a scratch file: string(HEX) needs 3.18.
+    set(_pathfile "${CMAKE_CURRENT_BINARY_DIR}/qmltest_main/${name}.path")
+    file(WRITE "${_pathfile}" "${_qml}")
+    file(READ "${_pathfile}" _hex HEX)
+    string(REGEX REPLACE "(..)" "\\\\x\\1" WITS_QMLTEST_PATH_ESCAPED "${_hex}")
     set(_main "${CMAKE_CURRENT_BINARY_DIR}/qmltest_main/${name}.cpp")
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/tests/QuickTestMain.cpp.in
         "${_main}" @ONLY)
@@ -208,11 +220,18 @@ function(wits_add_qmltest name)
         SOURCES "${_main}" tests/QuickTestSetup.h
         LIBS ${WITS_LOAMS_STATIC_LIBS}
              Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
-        DEFINES QUICK_TEST_SOURCE_DIR="${_qml}"
         INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/tests
         OFFSCREEN)
     set_property(GLOBAL APPEND PROPERTY WITS_QMLTEST_TARGETS ${name})
 endfunction()
+
+# --- QuickTestSourcePath pure-helper unit test (C++ QtTest). Guards the
+# path check every generated QuickTest main runs (missing/code-page-
+# unrepresentable path -> loud error, -input detection). Pure QString/
+# QFileInfo logic (no GUI -> QTEST_APPLESS_MAIN, no OFFSCREEN). ---
+wits_add_qttest(tst_quicktestsourcepath
+    SOURCES tests/tst_quicktestsourcepath.cpp
+    INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 
 # --- Theme singleton Quick test (offscreen) ---
 wits_add_qmltest(tst_qml_theme)
