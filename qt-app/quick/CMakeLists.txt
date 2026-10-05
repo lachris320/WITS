@@ -137,19 +137,29 @@ target_include_directories(witsquickmodule PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/vi
 # quote-includes resolve.
 target_include_directories(witsquickmodule PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/models)
 
-# qt_add_qml_module's automatic static-plugin import (qmlimportscanner, run
-# via a deferred call at the end of this directory) only fires when a target
-# statically analyzable QML/C++ source contains a literal "import LOAMS"
-# statement. Neither WITSQuick (main.cpp only) nor tst_appshell has one — both
-# resolve the module purely at runtime via loadFromModule("LOAMS", "AppShell")
-# — so the scanner finds zero imports and never links the plugin. Link the
-# generated plugin target and its Q_IMPORT_PLUGIN(LOAMSPlugin) "_init" object
+# Static-plugin note: qt_add_qml_module's automatic static-plugin import
+# (qmlimportscanner, run via a deferred call at the end of this directory)
+# only fires when a source the scanner analyzes contains a literal
+# "import LOAMS" statement. No consumer here has one: WITSQuick (main.cpp
+# only) and tst_appshell resolve the module purely at runtime via
+# loadFromModule("LOAMS", "AppShell"), and the QuickTest targets
+# (wits_add_qmltest) have "import LOAMS" only in their QUICK_TEST_MAIN .qml
+# data file, which the scanner never sees. So the plugin is never linked
+# automatically, and every consumer links WITS_LOAMS_STATIC_LIBS — the module,
+# its generated plugin, and the Q_IMPORT_PLUGIN(LOAMSPlugin) "_init" object —
 # explicitly so the statically-embedded LOAMS module actually registers.
+# It is a variable, not an INTERFACE library, because witsquickmoduleplugin_init
+# is an OBJECT library: CMake links an object library's object files only into
+# targets that list it directly; via an INTERFACE library's
+# INTERFACE_LINK_LIBRARIES it is treated as usage requirements only, so the
+# Q_IMPORT_PLUGIN object would be dropped and LOAMS would silently never
+# register.
+set(WITS_LOAMS_STATIC_LIBS
+    witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init)
+
 qt_add_executable(WITSQuick main.cpp)
 target_link_libraries(WITSQuick PRIVATE
-    witsquickmodule
-    witsquickmoduleplugin
-    witsquickmoduleplugin_init
+    ${WITS_LOAMS_STATIC_LIBS}
     Qt${QT_VERSION_MAJOR}::Widgets
 )
 set_target_properties(WITSQuick PROPERTIES WIN32_EXECUTABLE TRUE)
@@ -157,7 +167,7 @@ set_target_properties(WITSQuick PROPERTIES WIN32_EXECUTABLE TRUE)
 # --- AppShell load test (C++ QtTest, offscreen) ---
 wits_add_qttest(tst_appshell
     SOURCES tests/tst_appshell.cpp
-    LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
+    LIBS ${WITS_LOAMS_STATIC_LIBS}
          Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
     OFFSCREEN)
 
@@ -173,17 +183,103 @@ wits_add_qttest(tst_themeviewmodel
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Svg
     OFFSCREEN)
 
+# wits_add_qmltest(<name>)
+#
+# Registers one QuickTest target from tests/<name>.qml alone: the target runs
+# exactly that file, and its main is generated from tests/QuickTestMain.cpp.in
+# (configure_file, so it is rewritten only when its content changes) and uses
+# the shared tests/QuickTestSetup.h. The main passes quick_test_main the
+# single .qml FILE, not the tests/ directory: a directory makes it run every
+# tst_*.qml in it, so each target re-ran the whole QML suite.
+#
+# The absolute .qml path is embedded in the generated main as ASCII-only \xNN
+# byte escapes of its UTF-8 (not a -D define, whose non-ASCII bytes do not
+# survive the Windows compiler command line reliably) and checked at startup
+# by tests/QuickTestSourcePath.h. quick_test_main decodes the path with
+# QString::fromLocal8Bit and, if it does not exist, silently scans the current
+# working directory instead — so a missing or code-page-unrepresentable path
+# (non-ASCII checkout on Windows) now exits 1 with a message. The configure-
+# time check below catches a missing file earlier.
+#
+# Links WITS_QMLTEST_LIBS: WITS_LOAMS_STATIC_LIBS (see the static-plugin note
+# above WITSQuick) plus QuickTest/Qml/Quick.
+set(WITS_QMLTEST_LIBS ${WITS_LOAMS_STATIC_LIBS}
+    Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick)
+
+# _wits_qmltest_main(<name> <qml> <out_var>): internal. Generates the main for
+# QuickTest target <name> that runs <qml> (absolute path, escaped as described
+# above; NOT checked for existence here) and sets <out_var> to the generated
+# .cpp path. Shared by wits_add_qmltest and tst_quicktestmain_missingfile.
+function(_wits_qmltest_main name qml out_var)
+    set(WITS_QMLTEST_NAME ${name})
+    # UTF-8 bytes -> "\x2f\x68..." via a scratch file: string(HEX) needs 3.18.
+    set(_pathfile "${CMAKE_CURRENT_BINARY_DIR}/qmltest_main/${name}.path")
+    file(WRITE "${_pathfile}" "${qml}")
+    file(READ "${_pathfile}" _hex HEX)
+    string(REGEX REPLACE "(..)" "\\\\x\\1" WITS_QMLTEST_PATH_ESCAPED "${_hex}")
+    set(_main "${CMAKE_CURRENT_BINARY_DIR}/qmltest_main/${name}.cpp")
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/tests/QuickTestMain.cpp.in
+        "${_main}" @ONLY)
+    set(${out_var} "${_main}" PARENT_SCOPE)
+endfunction()
+
+function(wits_add_qmltest name)
+    set(_qml "${CMAKE_CURRENT_SOURCE_DIR}/tests/${name}.qml")
+    if(NOT EXISTS "${_qml}")
+        message(FATAL_ERROR "wits_add_qmltest(${name}): ${_qml} does not exist")
+    endif()
+    _wits_qmltest_main(${name} "${_qml}" _main)
+    wits_add_qttest(${name}
+        SOURCES "${_main}" tests/QuickTestSetup.h
+        LIBS ${WITS_QMLTEST_LIBS}
+        INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/tests
+        OFFSCREEN)
+    set_property(GLOBAL APPEND PROPERTY WITS_QMLTEST_TARGETS ${name})
+endfunction()
+
+# --- Generated-QuickTest-main failure-path guard. Pins the loud failure every
+# generated main (tests/QuickTestMain.cpp.in) must give for a missing .qml:
+# exit 1 with "<name>: QuickTest file not found: ..." before Qt's runner starts.
+# The six tst_qml_* targets cannot catch a regression there, because their
+# paths are valid: a main reverted to QUICK_TEST_MAIN_WITH_SETUP, or one that
+# passes the bad path through to quick_test_main anyway, still passes them —
+# but would make Qt silently scan the cwd for tst_*.qml instead. So this
+# target's main is generated from a path that never exists, and
+# tests/CheckQuickTestMainFailure.cmake runs it with tests/ as the cwd: a
+# regressed main finds and runs all the tst_*.qml there and exits 0, which
+# fails the check. Not a wits_add_qmltest target (no .qml of its own), so it
+# stays out of WITS_QMLTEST_TARGETS and the coverage guard at the end. ---
+set(_wits_missing_qml
+    "${CMAKE_CURRENT_BINARY_DIR}/qmltest_main/tst_quicktestmain_missingfile.does-not-exist.qml")
+if(EXISTS "${_wits_missing_qml}")
+    message(FATAL_ERROR "${_wits_missing_qml} must not exist (tst_quicktestmain_missingfile)")
+endif()
+_wits_qmltest_main(tst_quicktestmain_missingfile "${_wits_missing_qml}" _wits_missing_main)
+wits_add_qttest(tst_quicktestmain_missingfile
+    SOURCES "${_wits_missing_main}" tests/QuickTestSetup.h
+    LIBS ${WITS_QMLTEST_LIBS}
+    INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/tests
+    OFFSCREEN
+    TEST_COMMAND ${CMAKE_COMMAND}
+        -DEXE=$<TARGET_FILE:tst_quicktestmain_missingfile>
+        -DNAME=tst_quicktestmain_missingfile
+        -DWORKDIR=${CMAKE_CURRENT_SOURCE_DIR}/tests
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/CheckQuickTestMainFailure.cmake)
+# A regressed main runs the whole QML suite; don't let a hang stall ctest.
+set_tests_properties(tst_quicktestmain_missingfile PROPERTIES TIMEOUT 120)
+unset(_wits_missing_qml)
+unset(_wits_missing_main)
+
+# --- QuickTestSourcePath pure-helper unit test (C++ QtTest). Guards the
+# path check every generated QuickTest main runs (missing/code-page-
+# unrepresentable path -> loud error, -input detection). Pure QString/
+# QFileInfo logic (no GUI -> QTEST_APPLESS_MAIN, no OFFSCREEN). ---
+wits_add_qttest(tst_quicktestsourcepath
+    SOURCES tests/tst_quicktestsourcepath.cpp
+    INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+
 # --- Theme singleton Quick test (offscreen) ---
-# The literal "import LOAMS" lives only in tst_qml_theme.qml (a QUICK_TEST_MAIN
-# data file qmlimportscanner never scans), so the automatic static-plugin import
-# never fires — link witsquickmoduleplugin + its Q_IMPORT_PLUGIN "_init" object
-# explicitly or the statically-embedded LOAMS module never registers.
-wits_add_qttest(tst_qml_theme
-    SOURCES tests/tst_qml_theme.cpp
-    LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
-         Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
-    DEFINES QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
-    OFFSCREEN)
+wits_add_qmltest(tst_qml_theme)
 
 # --- Navigator unit test (C++ QtTest, offscreen: house consistency with the
 # other quick tests — witsquickmodule PUBLIC-propagates Qt::Gui, which would
@@ -276,26 +372,10 @@ wits_add_qttest(tst_accessentriesmodel
     LIBS witsquickmodule)
 
 # --- L* component skeletons Quick test (offscreen) ---
-# Same escape hatch as tst_qml_theme above: "import LOAMS" lives only in the
-# QUICK_TEST_MAIN data file, so the plugin + "_init" object must be linked
-# explicitly.
-wits_add_qttest(tst_qml_components
-    SOURCES tests/tst_qml_components.cpp
-    LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
-         Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
-    DEFINES QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
-    OFFSCREEN)
+wits_add_qmltest(tst_qml_components)
 
 # --- Kiosk screens Quick test (offscreen) ---
-# Same escape hatch as tst_qml_theme/tst_qml_components above: "import LOAMS"
-# lives only in the QUICK_TEST_MAIN data file, so the plugin + "_init" object
-# must be linked explicitly.
-wits_add_qttest(tst_qml_kiosk
-    SOURCES tests/tst_qml_kiosk.cpp
-    LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
-         Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
-    DEFINES QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
-    OFFSCREEN)
+wits_add_qmltest(tst_qml_kiosk)
 
 # --- AccessControlHub unit test (C++ QtTest, offscreen). SequencedNam drives
 # the provider with no live network; AppSettings isolation is compiled in by
@@ -357,14 +437,14 @@ wits_add_qttest(tst_databaseviewmodel
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
     OFFSCREEN)
 
-# --- Admin screens Quick test (offscreen). "import LOAMS" lives only in the
-# QUICK_TEST_MAIN data file, so link the plugin + "_init" object explicitly. ---
-wits_add_qttest(tst_qml_admin
-    SOURCES tests/tst_qml_admin.cpp
-    LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
-         Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
-    DEFINES QUICK_TEST_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests"
-    OFFSCREEN)
+# --- Admin screens Quick test (offscreen) ---
+wits_add_qmltest(tst_qml_admin)
+
+# --- AdminScreen shell Quick test (offscreen) ---
+wits_add_qmltest(tst_qml_adminshell)
+
+# --- AccessControlScreen Quick test (offscreen) ---
+wits_add_qmltest(tst_qml_accesscontrol)
 
 # --- SettingsViewModel unit test (C++ QtTest, offscreen). Uses Network for
 # the async POST paths (T10-T13) and Gui via witsquickmodule propagation. ---
@@ -399,3 +479,30 @@ wits_add_qttest(tst_notokenaliases
     SOURCES tests/tst_notokenaliases.cpp
     DEFINES SRC_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
             SRC_QML_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
+
+# Coverage guard: before wits_add_qmltest, every QuickTest target scanned the
+# whole tests/ directory, so a new tst_*.qml was picked up automatically. Now
+# each target runs one file, so a tst_*.qml without its own wits_add_qmltest
+# would silently never run — fail the configure instead.
+# MUST stay the last statement in this file: it only sees wits_add_qmltest()
+# calls made above it. tests/ is scanned non-recursively (QuickTest .qml files
+# live flat in tests/).
+file(GLOB _wits_qml_tests CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/tst_*.qml)
+get_property(_wits_qml_targets GLOBAL PROPERTY WITS_QMLTEST_TARGETS)
+set(_wits_qml_orphans "")
+foreach(_f IN LISTS _wits_qml_tests)
+    get_filename_component(_n "${_f}" NAME_WE)
+    if(NOT _n IN_LIST _wits_qml_targets)
+        list(APPEND _wits_qml_orphans "tests/${_n}.qml")
+    endif()
+endforeach()
+if(_wits_qml_orphans)
+    message(FATAL_ERROR "QuickTest file(s) with no wits_add_qmltest() target "
+        "(they would never run): ${_wits_qml_orphans}")
+endif()
+unset(_wits_qml_tests)
+unset(_wits_qml_targets)
+unset(_wits_qml_orphans)
+unset(_f)
+unset(_n)

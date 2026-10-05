@@ -3,14 +3,18 @@
 #     [LIBS    <lib...>]    # extra link libs beyond Qt::Test
 #     [DEFINES <def...>]    # target_compile_definitions PRIVATE
 #     [INCLUDES <dir...>]   # extra PRIVATE include dirs
-#     [OFFSCREEN])          # add QT_QPA_PLATFORM=offscreen to the ctest env
+#     [OFFSCREEN]           # add QT_QPA_PLATFORM=offscreen to the ctest env
+#     [TEST_COMMAND <cmd...>]) # ctest command instead of running <name> itself
 #
 # Registers a console (WIN32_EXECUTABLE FALSE — required on this MinGW kit or
 # ctest captures zero output) QtTest executable and its ctest test with the
 # house-standard environment (QT_FORCE_STDERR_LOGGING=1, plus offscreen when
 # OFFSCREEN is given). Centralizes the boilerplate every Phase-1 test repeated.
+# TEST_COMMAND is for a test that must drive the executable from outside (e.g.
+# a cmake -P script asserting on its exit code/output via
+# $<TARGET_FILE:<name>>); the environment above applies to it unchanged.
 function(wits_add_qttest name)
-    cmake_parse_arguments(T "OFFSCREEN" "" "SOURCES;LIBS;DEFINES;INCLUDES" ${ARGN})
+    cmake_parse_arguments(T "OFFSCREEN" "" "SOURCES;LIBS;DEFINES;INCLUDES;TEST_COMMAND" ${ARGN})
     # Settings isolation is compiled into EVERY test target, not opted into per
     # test. Qt 6's QSettings(org, app) constructor is hardcoded to NativeFormat
     # and ignores setDefaultFormat(), and setPath() is a no-op for NativeFormat
@@ -31,7 +35,11 @@ function(wits_add_qttest name)
     if(T_DEFINES)
         target_compile_definitions(${name} PRIVATE ${T_DEFINES})
     endif()
-    add_test(NAME ${name} COMMAND ${name})
+    if(T_TEST_COMMAND)
+        add_test(NAME ${name} COMMAND ${T_TEST_COMMAND})
+    else()
+        add_test(NAME ${name} COMMAND ${name})
+    endif()
     if(T_OFFSCREEN)
         # QT_QUICK_CONTROLS_STYLE=Basic: the OFFSCREEN platform still resolves
         # the native Windows Controls style by default, which ignores

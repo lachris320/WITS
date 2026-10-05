@@ -676,10 +676,7 @@ Item {
         // `wait(450)` returns well past 450ms of animation time, row 5 has
         // already settled at 1, and the strict-inequality check fails for
         // reasons unrelated to the code under test. Same flake class as the
-        // pageIn tests fixed just before this one — and since both
-        // tst_qml_admin and tst_qml_components compile this whole directory
-        // via QUICK_TEST_SOURCE_DIR, one flake here reddens several ctest
-        // entries at once.
+        // pageIn tests fixed just before this one.
         //
         // This test therefore asserts the WIRING only: that row 5 really LAGS
         // row 0 on screen. Instead of betting on one instant, poll and assert
@@ -698,11 +695,9 @@ Item {
         // step, and the negative-index guard) is deliberately NOT re-asserted
         // here: tst_qml_theme.qml's
         // test_staggerDelayClampsIndexToStaggerCapThenMultipliesByStep covers
-        // it on the pure Theme.motion.staggerDelay function, with zero clock,
-        // and every QuickTest binary compiles the whole tests/ directory via
-        // QUICK_TEST_SOURCE_DIR — so that test runs inside THIS binary too.
-        // Repeating it here would only duplicate coverage already executing in
-        // the same process.
+        // it on the pure Theme.motion.staggerDelay function, with zero clock
+        // (in the tst_qml_theme target). Repeating it here would only
+        // duplicate coverage the suite already runs.
         //
         // RETRY POLICY — a retry is only ever legitimate for ONE of the two
         // reasons an attempt can end without a strict lead, and the loop
@@ -836,10 +831,7 @@ Item {
         // clock: on a loaded machine the 80ms sleep either returned before the
         // animation had visibly advanced (opacity still exactly 0) or long
         // after it had finished (exactly 1), so the assertion failed for
-        // reasons that had nothing to do with the code under test. Both
-        // tst_qml_admin and tst_qml_components compile this whole directory
-        // via QUICK_TEST_SOURCE_DIR, so a single flake here reddened several
-        // ctest entries at once.
+        // reasons that had nothing to do with the code under test.
         //
         // The mid-flight sample is replaced by three deterministic checks that
         // are collectively STRICTER, not weaker:

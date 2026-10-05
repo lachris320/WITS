@@ -30,7 +30,10 @@
   visual token. ZERO raw hex outside `Theme.qml`; opacity variants use
   `Qt.alpha(Theme.<token>, a)`, never a literal color.
 - **Tests:** register via `wits_add_qttest()` (`qt-app/cmake/WitsTest.cmake`);
-  add `OFFSCREEN` for any GUI/Quick/painting test.
+  add `OFFSCREEN` for any GUI/Quick/painting test. QML QuickTests use
+  `wits_add_qmltest(<name>)` (`qt-app/quick/CMakeLists.txt`), one target per
+  `tests/<name>.qml` (main generated from `tests/QuickTestMain.cpp.in`);
+  configure fails for a `tst_*.qml` with no target.
 
 ## Build & run
 

@@ -1,0 +1,30 @@
+// tests/QuickTestMain.cpp.in: the template _wits_qmltest_main() (quick/CMakeLists.txt)
+// configures into each QuickTest target's main (wits_add_qmltest() targets and the
+// tst_quicktestmain_missingfile guard). Edit it, not the generated copies.
+// Equivalent to QUICK_TEST_MAIN_WITH_SETUP(@WITS_QMLTEST_NAME@, QuickTestSetup), except
+// the .qml path is embedded as ASCII byte escapes and validated first (see
+// QuickTestSourcePath.h), so a bad path fails loudly instead of scanning the cwd.
+#include <QtQuickTest/quicktest.h>
+#include <QString>
+#include <cstdio>
+#include "QuickTestSetup.h"
+#include "QuickTestSourcePath.h"
+
+int main(int argc, char **argv)
+{
+    QTEST_SET_MAIN_SOURCE_PATH
+    QuickTestSetup setup;
+    // An explicit -input wins inside quick_test_main; don't fail on the
+    // embedded path when it would be ignored anyway.
+    if (QuickTestSourcePath::hasInputOverride(argc, argv))
+        return quick_test_main_with_setup(argc, argv, "@WITS_QMLTEST_NAME@", nullptr, &setup);
+
+    const QuickTestSourcePath::Result source = QuickTestSourcePath::toQuickTestArg(
+        QString::fromUtf8("@WITS_QMLTEST_PATH_ESCAPED@"));
+    if (!source.error.isEmpty()) {
+        std::fprintf(stderr, "@WITS_QMLTEST_NAME@: %s\n", qPrintable(source.error));
+        return 1;
+    }
+    return quick_test_main_with_setup(argc, argv, "@WITS_QMLTEST_NAME@",
+                                      source.localPath.constData(), &setup);
+}
