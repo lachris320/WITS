@@ -932,18 +932,73 @@ Item {
 
         // --- Debounced live search ---
 
+        // Neither debounce test may depend on how long wait() really takes.
+        // An earlier version used a 30 ms window with wait(10) between
+        // keystrokes; under parallel ctest load a wait(10) could overshoot
+        // the window (Windows timer granularity / scheduler stalls), so the
+        // debounce fired mid-typing and `searchCount === 0` flaked. Instead
+        // the window is made effectively infinite while typing (so no stall
+        // can trip it) and is then shrunk to let the one pending fire land.
+
         function test_typingDebouncesSearchToOneCall() {
-            search.debounceMs = 30;
             var field = findChild(search, "queryField");
+            var timer = findChild(search, "debounceTimer");
+            search.debounceMs = 60000;
             field.text = "M";
-            wait(10);
             field.text = "Ma";
-            wait(10);
             field.text = "Mar";
-            // Still inside the (restarted) debounce window — no search yet.
+            // The whole burst landed inside one (restarted) debounce window
+            // that cannot elapse on its own: nothing searched, one fire armed.
             compare(searchVmStub.searchCount, 0);
+            verify(timer.running);
+            // Shrinking the interval of a running Timer restarts it with the
+            // new interval, releasing the single pending fire promptly.
+            search.debounceMs = 20;
             tryCompare(searchVmStub, "searchCount", 1);
             compare(searchVmStub.lastSearch, "Mar");
+            // The fire consumed the pending trigger: no repeat, no extra call.
+            verify(!timer.running);
+            wait(100);
+            compare(searchVmStub.searchCount, 1);
+        }
+
+        function test_eachKeystrokeArmsDebounce() {
+            var field = findChild(search, "queryField");
+            var timer = findChild(search, "debounceTimer");
+            search.debounceMs = 60000;
+            timer.stop();
+            verify(!timer.running);
+            field.text = "M";
+            verify(timer.running);
+            compare(searchVmStub.searchCount, 0);
+            // A further keystroke re-arms it after it was stopped again.
+            timer.stop();
+            field.text = "Ma";
+            verify(timer.running);
+            compare(searchVmStub.searchCount, 0);
+        }
+
+        // The test above stops the timer before every keystroke, so it only
+        // proves a keystroke ARMS an idle timer. The debounce contract is that
+        // a keystroke while the timer is ALREADY running RESTARTS it (pushes
+        // the fire out). restart() on a running Timer goes running
+        // true -> false -> true, emitting runningChanged twice; a plain
+        // start() on a running Timer is a no-op and emits nothing. A
+        // runningChanged spy is the deterministic way to tell them apart (no
+        // wall-clock dependence: the 60 s window cannot elapse on its own).
+        function test_keystrokeWhileRunningRestartsDebounce() {
+            var field = findChild(search, "queryField");
+            var timer = findChild(search, "debounceTimer");
+            search.debounceMs = 60000;
+            timer.stop();
+            field.text = "M";
+            verify(timer.running);
+            var spy = signalSpy.createObject(search, { target: timer, signalName: "runningChanged" });
+            field.text = "Ma";
+            compare(spy.count, 2);
+            verify(timer.running);
+            compare(searchVmStub.searchCount, 0);
+            spy.destroy();
         }
 
         // --- No-vm fallback path ---
