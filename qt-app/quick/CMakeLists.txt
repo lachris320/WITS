@@ -137,19 +137,29 @@ target_include_directories(witsquickmodule PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/vi
 # quote-includes resolve.
 target_include_directories(witsquickmodule PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/models)
 
-# qt_add_qml_module's automatic static-plugin import (qmlimportscanner, run
-# via a deferred call at the end of this directory) only fires when a target
-# statically analyzable QML/C++ source contains a literal "import LOAMS"
-# statement. Neither WITSQuick (main.cpp only) nor tst_appshell has one — both
-# resolve the module purely at runtime via loadFromModule("LOAMS", "AppShell")
-# — so the scanner finds zero imports and never links the plugin. Link the
-# generated plugin target and its Q_IMPORT_PLUGIN(LOAMSPlugin) "_init" object
+# Static-plugin note: qt_add_qml_module's automatic static-plugin import
+# (qmlimportscanner, run via a deferred call at the end of this directory)
+# only fires when a source the scanner analyzes contains a literal
+# "import LOAMS" statement. No consumer here has one: WITSQuick (main.cpp
+# only) and tst_appshell resolve the module purely at runtime via
+# loadFromModule("LOAMS", "AppShell"), and the QuickTest targets
+# (wits_add_qmltest) have "import LOAMS" only in their QUICK_TEST_MAIN .qml
+# data file, which the scanner never sees. So the plugin is never linked
+# automatically, and every consumer links WITS_LOAMS_STATIC_LIBS — the module,
+# its generated plugin, and the Q_IMPORT_PLUGIN(LOAMSPlugin) "_init" object —
 # explicitly so the statically-embedded LOAMS module actually registers.
+# It is a variable, not an INTERFACE library, because witsquickmoduleplugin_init
+# is an OBJECT library: CMake links an object library's object files only into
+# targets that list it directly; via an INTERFACE library's
+# INTERFACE_LINK_LIBRARIES it is treated as usage requirements only, so the
+# Q_IMPORT_PLUGIN object would be dropped and LOAMS would silently never
+# register.
+set(WITS_LOAMS_STATIC_LIBS
+    witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init)
+
 qt_add_executable(WITSQuick main.cpp)
 target_link_libraries(WITSQuick PRIVATE
-    witsquickmodule
-    witsquickmoduleplugin
-    witsquickmoduleplugin_init
+    ${WITS_LOAMS_STATIC_LIBS}
     Qt${QT_VERSION_MAJOR}::Widgets
 )
 set_target_properties(WITSQuick PROPERTIES WIN32_EXECUTABLE TRUE)
@@ -157,7 +167,7 @@ set_target_properties(WITSQuick PROPERTIES WIN32_EXECUTABLE TRUE)
 # --- AppShell load test (C++ QtTest, offscreen) ---
 wits_add_qttest(tst_appshell
     SOURCES tests/tst_appshell.cpp
-    LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
+    LIBS ${WITS_LOAMS_STATIC_LIBS}
          Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
     OFFSCREEN)
 
@@ -182,10 +192,7 @@ wits_add_qttest(tst_themeviewmodel
 # QML suite. If that path does not exist, quick_test_main silently falls back
 # to scanning the current working directory — hence the configure-time check.
 #
-# The literal "import LOAMS" lives only in the .qml (a QUICK_TEST_MAIN data
-# file qmlimportscanner never scans), so the automatic static-plugin import
-# never fires — link witsquickmoduleplugin + its Q_IMPORT_PLUGIN "_init" object
-# explicitly or the statically-embedded LOAMS module never registers.
+# Links WITS_LOAMS_STATIC_LIBS (see the static-plugin note above WITSQuick).
 function(wits_add_qmltest name)
     set(_qml "${CMAKE_CURRENT_SOURCE_DIR}/tests/${name}.qml")
     if(NOT EXISTS "${_qml}")
@@ -193,7 +200,7 @@ function(wits_add_qmltest name)
     endif()
     wits_add_qttest(${name}
         SOURCES tests/${name}.cpp tests/QuickTestSetup.h
-        LIBS witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init
+        LIBS ${WITS_LOAMS_STATIC_LIBS}
              Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
         DEFINES QUICK_TEST_SOURCE_DIR="${_qml}"
         OFFSCREEN)
