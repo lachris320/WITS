@@ -201,29 +201,74 @@ wits_add_qttest(tst_themeviewmodel
 # (non-ASCII checkout on Windows) now exits 1 with a message. The configure-
 # time check below catches a missing file earlier.
 #
-# Links WITS_LOAMS_STATIC_LIBS (see the static-plugin note above WITSQuick).
-function(wits_add_qmltest name)
-    set(_qml "${CMAKE_CURRENT_SOURCE_DIR}/tests/${name}.qml")
-    if(NOT EXISTS "${_qml}")
-        message(FATAL_ERROR "wits_add_qmltest(${name}): ${_qml} does not exist")
-    endif()
+# Links WITS_QMLTEST_LIBS: WITS_LOAMS_STATIC_LIBS (see the static-plugin note
+# above WITSQuick) plus QuickTest/Qml/Quick.
+set(WITS_QMLTEST_LIBS ${WITS_LOAMS_STATIC_LIBS}
+    Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick)
+
+# _wits_qmltest_main(<name> <qml> <out_var>): internal. Generates the main for
+# QuickTest target <name> that runs <qml> (absolute path, escaped as described
+# above; NOT checked for existence here) and sets <out_var> to the generated
+# .cpp path. Shared by wits_add_qmltest and tst_quicktestmain_missingfile.
+function(_wits_qmltest_main name qml out_var)
     set(WITS_QMLTEST_NAME ${name})
     # UTF-8 bytes -> "\x2f\x68..." via a scratch file: string(HEX) needs 3.18.
     set(_pathfile "${CMAKE_CURRENT_BINARY_DIR}/qmltest_main/${name}.path")
-    file(WRITE "${_pathfile}" "${_qml}")
+    file(WRITE "${_pathfile}" "${qml}")
     file(READ "${_pathfile}" _hex HEX)
     string(REGEX REPLACE "(..)" "\\\\x\\1" WITS_QMLTEST_PATH_ESCAPED "${_hex}")
     set(_main "${CMAKE_CURRENT_BINARY_DIR}/qmltest_main/${name}.cpp")
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/tests/QuickTestMain.cpp.in
         "${_main}" @ONLY)
+    set(${out_var} "${_main}" PARENT_SCOPE)
+endfunction()
+
+function(wits_add_qmltest name)
+    set(_qml "${CMAKE_CURRENT_SOURCE_DIR}/tests/${name}.qml")
+    if(NOT EXISTS "${_qml}")
+        message(FATAL_ERROR "wits_add_qmltest(${name}): ${_qml} does not exist")
+    endif()
+    _wits_qmltest_main(${name} "${_qml}" _main)
     wits_add_qttest(${name}
         SOURCES "${_main}" tests/QuickTestSetup.h
-        LIBS ${WITS_LOAMS_STATIC_LIBS}
-             Qt${QT_VERSION_MAJOR}::QuickTest Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
+        LIBS ${WITS_QMLTEST_LIBS}
         INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/tests
         OFFSCREEN)
     set_property(GLOBAL APPEND PROPERTY WITS_QMLTEST_TARGETS ${name})
 endfunction()
+
+# --- Generated-QuickTest-main failure-path guard. Pins the loud failure every
+# generated main (tests/QuickTestMain.cpp.in) must give for a missing .qml:
+# exit 1 with "<name>: QuickTest file not found: ..." before Qt's runner starts.
+# The six tst_qml_* targets cannot catch a regression there, because their
+# paths are valid: a main reverted to QUICK_TEST_MAIN_WITH_SETUP, or one that
+# passes the bad path through to quick_test_main anyway, still passes them —
+# but would make Qt silently scan the cwd for tst_*.qml instead. So this
+# target's main is generated from a path that never exists, and
+# tests/CheckQuickTestMainFailure.cmake runs it with tests/ as the cwd: a
+# regressed main finds and runs all the tst_*.qml there and exits 0, which
+# fails the check. Not a wits_add_qmltest target (no .qml of its own), so it
+# stays out of WITS_QMLTEST_TARGETS and the coverage guard at the end. ---
+set(_wits_missing_qml
+    "${CMAKE_CURRENT_BINARY_DIR}/qmltest_main/tst_quicktestmain_missingfile.does-not-exist.qml")
+if(EXISTS "${_wits_missing_qml}")
+    message(FATAL_ERROR "${_wits_missing_qml} must not exist (tst_quicktestmain_missingfile)")
+endif()
+_wits_qmltest_main(tst_quicktestmain_missingfile "${_wits_missing_qml}" _wits_missing_main)
+wits_add_qttest(tst_quicktestmain_missingfile
+    SOURCES "${_wits_missing_main}" tests/QuickTestSetup.h
+    LIBS ${WITS_QMLTEST_LIBS}
+    INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/tests
+    OFFSCREEN
+    TEST_COMMAND ${CMAKE_COMMAND}
+        -DEXE=$<TARGET_FILE:tst_quicktestmain_missingfile>
+        -DNAME=tst_quicktestmain_missingfile
+        -DWORKDIR=${CMAKE_CURRENT_SOURCE_DIR}/tests
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/CheckQuickTestMainFailure.cmake)
+# A regressed main runs the whole QML suite; don't let a hang stall ctest.
+set_tests_properties(tst_quicktestmain_missingfile PROPERTIES TIMEOUT 120)
+unset(_wits_missing_qml)
+unset(_wits_missing_main)
 
 # --- QuickTestSourcePath pure-helper unit test (C++ QtTest). Guards the
 # path check every generated QuickTest main runs (missing/code-page-
