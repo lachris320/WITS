@@ -978,6 +978,29 @@ Item {
             compare(searchVmStub.searchCount, 0);
         }
 
+        // The test above stops the timer before every keystroke, so it only
+        // proves a keystroke ARMS an idle timer. The debounce contract is that
+        // a keystroke while the timer is ALREADY running RESTARTS it (pushes
+        // the fire out). restart() on a running Timer goes running
+        // true -> false -> true, emitting runningChanged twice; a plain
+        // start() on a running Timer is a no-op and emits nothing. A
+        // runningChanged spy is the deterministic way to tell them apart (no
+        // wall-clock dependence: the 60 s window cannot elapse on its own).
+        function test_keystrokeWhileRunningRestartsDebounce() {
+            var field = findChild(search, "queryField");
+            var timer = findChild(search, "debounceTimer");
+            search.debounceMs = 60000;
+            timer.stop();
+            field.text = "M";
+            verify(timer.running);
+            var spy = signalSpy.createObject(search, { target: timer, signalName: "runningChanged" });
+            field.text = "Ma";
+            compare(spy.count, 2);
+            verify(timer.running);
+            compare(searchVmStub.searchCount, 0);
+            spy.destroy();
+        }
+
         // --- No-vm fallback path ---
 
         function test_undefinedVmRendersFallbacksWithoutError() {
