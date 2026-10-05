@@ -70,7 +70,7 @@ This spec owns these invariants. Slice plans MUST NOT redefine them.
 2. **Exclusive, issuer-independent trust.** Clients trust exactly the configured CA(s), through an identical code path whether the issuer is the LOAMS private CA or an institutional CA. No system roots, no bypass, no downgrade, no "proceed anyway".
 3. **Fail closed everywhere.** Missing/invalid config, wrong TLS backend, manifest mismatch or certificate failure → no request is sent, and an actionable error is shown.
 4. **Legacy compatibility rule.** Exactly two exceptions exist: `LegacyLoopbackHttp` and `ControllerHttp`. No new client may use them; both are removed at legacy retirement.
-5. **Administrator-controlled configuration only in production.** No user-level environment variable can affect the server address, trust, TLS library or plugins.
+5. **Administrator-controlled configuration only in production.** No user-level environment variable can affect the server address, trust, TLS library, plugins (including the platform plugin) or QML import paths; the packaged `qt.conf` is authoritative for plugin and import paths.
 6. **Keys stay where born.** The CA key is offline and encrypted; the server key never leaves the server (CSR flow).
 7. **Pinned, verified runtime.** Server and client TLS libraries match the compatibility manifest, verified from what is actually loaded.
 8. **No production deployment before S1f.**
@@ -94,11 +94,17 @@ Only these listeners exist:
 
 | Listener | Serves | Named exception |
 |---|---|---|
-| `:443` (loopback + LAN) | Entire API, HTTPS-only, for all 2.0 clients | — |
+| `:443` (loopback + LAN) | Entire API, HTTPS-only, for all 2.0 clients — except `turnstile_display.php`, loopback / server's own addresses only (below) | — |
 | `127.0.0.1:80` and `[::1]:80` | Exact endpoint + method allowlist for legacy `WITS.exe` and the bridge | `LegacyLoopbackHttp` |
 | `<server-LAN-IP>:80` | `turnstile.php` only, from `<controller-IP>` only; also enforced by Windows Firewall | `ControllerHttp` |
 
 Port 80 from any other LAN source MUST be blocked by the firewall and refused by Apache. Forbidden HTTP is refused with 403 and MUST NOT be redirected to HTTPS.
+
+**Gate-PC-only endpoint — `turnstile_display.php`.** Today it is loopback-only (`deliverables/loams_api/turnstile_display.php:30-32`) and is polled by `AccessControlHub`. It returns student identity data and S1 does not authenticate clients, so **it is NOT opened to the LAN in S1** (owner-level decision, recorded here):
+
+- On `:443` it is served only to loopback / the server's own addresses; any other LAN source → 403. During the bridge era its existing loopback restriction also stays in force.
+- The gate PC's 2.0 client therefore uses BaseURL `https://localhost/loams_api/`; the server certificate MUST include `localhost` via `-IncludeLoopback` on that deployment.
+- Networked turnstile-display polling from other PCs is deferred to S2 device identity.
 
 ### Controller as untrusted input
 
@@ -107,6 +113,7 @@ The Cloud+ controller is treated as unauthenticated network input:
 - Apache `Require ip <controller-IP>`.
 - Windows Firewall rule: inbound TCP 80 only from `<controller-IP>`.
 - VLAN / switch-port isolation is recommended and documented in the deployment guide; it is the institution's network, so LOAMS cannot enforce it.
+- **Single source of the controller IP.** `turnstile.php` today compiles in an `ALLOWED_CONTROLLER_IP` constant and fails closed when it is empty (`deliverables/loams_api/turnstile.php:43-53`, `219-231`). S1d replaces the compiled constant with a value read from the admin-only server config (same ProgramData location as `compat.ini`, e.g. `[Controller] AllowedIp`). That one value is authoritative: the deployment tooling renders Apache's `Require ip` and the Windows Firewall rule from it, and `Test-LoamsDeployment.ps1` verifies all three agree. Empty or missing → fail closed, as today. `BENCH_MODE` semantics are unchanged unless the S1d plan decides otherwise, and it MUST remain false in production.
 
 ### Client: one security policy, not one physical manager
 
@@ -114,6 +121,7 @@ The Cloud+ controller is treated as unauthenticated network input:
 - `HttpClient` owns the controller-facing manager.
 - A `QQmlNetworkAccessManagerFactory` creates a **new** QML-owned manager on each `create()` call (which may be called from multiple threads), using the same `TransportPolicy`.
 - Both manager kinds are `PolicyEnforcingNam` instances.
+- The QML URL interceptor (`QQmlAbstractUrlInterceptor::intercept()` may be called from multiple threads) reads an immutable policy snapshot obtained by atomic load of the `shared_ptr` (C++17 `std::atomic_load` / `std::atomic_store` on `shared_ptr`); a trust-epoch change swaps the snapshot atomically.
 
 ### Server request path
 
@@ -125,7 +133,7 @@ Apache listener
       → else                                    → log "rejected" → 403
 ```
 
-The decision uses only connection facts: `HTTPS` (from mod_ssl), `SERVER_ADDR`, `SERVER_PORT`, `REMOTE_ADDR`, script path and method. `X-Forwarded-*` headers are ignored. No reverse proxy is supported.
+The decision uses only connection facts: `HTTPS` (from mod_ssl), `SERVER_ADDR`, `SERVER_PORT`, `REMOTE_ADDR`, the canonical decoded request path (script + `PATH_INFO`) and method. `X-Forwarded-*` headers are ignored. No reverse proxy is supported.
 
 ### Trust flow
 
@@ -146,13 +154,25 @@ The S1d deployment script verifies against the **live** Apache, not config files
 
 ## 3. Client transport (S1a + S1e)
 
+### S1a seam — behaviour-neutral Passthrough mode
+
+- S1a introduces `HttpClient`, `PolicyEnforcingNam` and the QML factory in a **Passthrough** policy mode that preserves today's behaviour: the current `http` default is allowed and no TLS enforcement is applied. S1a can therefore merge before S1e without breaking anything.
+- Passthrough exists only until S1e, which deletes it. S1f packaging (the only release boundary) requires S1e, so Passthrough can never reach production.
+- **Injection boundary:** `HttpClient` accepts an injected `QNetworkAccessManager` / manager factory, so the existing `CapturingNam` / `SequencedNam` tests stay realistic (`qt-app/testsupport/capturingnam.h`, `qt-app/testsupport/sequencednam.h`).
+- Core controllers already accept injected managers. ViewModels and hubs that construct managers internally today (e.g. `qt-app/quick/viewmodels/DatabaseViewModel.cpp:11-24`, `qt-app/quick/viewmodels/GuestViewModel.cpp:11`, `qt-app/quick/viewmodels/KioskViewModel.cpp:20`, `qt-app/quick/AccessControlHub.cpp:20-29`) MUST obtain them from the seam instead.
+
 ### PolicyEnforcingNam
 
 A `QNetworkAccessManager` subclass overriding `createRequest()`. It is the single choke point for every request in the process; a rejected request returns an error reply without touching the network.
 
 - **Remote URLs:** `https` with the exact BaseURL origin (scheme, host, port) only. Student photo and logo URLs MUST be same-origin (this closes the photo scheme/origin check deferred from PR #60).
 - **Local URLs:** only `qrc:` is allowed at the NAM level; `file:`, `data:` and other schemes are rejected.
-- **URL interceptor:** QML loads local files and `image://` without the NAM, so a `QQmlAbstractUrlInterceptor` additionally allows `qrc:`, the registered `image://` providers and the HTTPS origin, and rejects any other scheme and any `file:` outside the install directory. A local-resource allowance is never permission for another network protocol.
+- **URL interceptor:** QML loads local files and `image://` without the NAM, so a `QQmlAbstractUrlInterceptor` additionally allows `qrc:`, the registered `image://` providers, the HTTPS origin and the two `file:` locations below, and rejects any other scheme and any other `file:` URL. A local-resource allowance is never permission for another network protocol. The interceptor reads its policy via an atomic snapshot (see Section 2).
+- **Allowed `file:` locations:** only (a) the install directory and (b) the imported-asset directory. Imported logos/posters are copied into `QStandardPaths::AppDataLocation` and shown as `file:` URLs (`qt-app/core/settingscontroller.cpp:75-89`, `qt-app/quick/viewmodels/SchoolInfoUtil.cpp:7-11`, `qt-app/quick/qml/components/LLogoCircle.qml:25`). The allowance for (b) is narrow:
+  - the app-data asset directory is canonicalised once at startup;
+  - image extensions only;
+  - each requested path is compared by canonical path after resolving symlinks, junctions and reparse points; if the canonical target leaves the directory, it is rejected;
+  - no other `file:` location is allowed.
 - **Resource inventory:** S1a inventories every resource actually loaded (logos, photos, fallback avatars, bundled assets); each becomes a test.
 - **Per-request `QSslConfiguration`** from the policy:
   - CA list = exactly the configured CA(s) via `setCaCertificates` (replace, never append system roots);
@@ -165,42 +185,60 @@ A `QNetworkAccessManager` subclass overriding `createRequest()`. It is the singl
 
 ### Startup — TransportBootstrap
 
-Three phases, in this order. The ordering MUST be verified on Qt 6.11.1 and on a clean install, including platform-plugin loading.
+Three phases, in this order, so that nothing TLS-related loads before it is verified. The ordering MUST be verified on Qt 6.11.1 and on a clean install, including platform-plugin loading.
 
-| Phase | Steps |
-|---|---|
-| **A — pre-Qt** | Neutralise `OPENSSL_CONF`, `OPENSSL_MODULES`, `OPENSSL_ENGINES`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `QT_PLUGIN_PATH` (all builds). `SetDefaultDllDirectories` restricted to the app directory + System32. |
-| **B — Qt runtime** | Controlled plugin path = the app's `plugins/`. `QSslSocket::setActiveBackend("openssl")` before any TLS class is used; if unavailable, fail closed. Never fall back to Schannel. |
-| **C — transport** | Pre-load verification: hash the packaged `libssl`, `libcrypto` and `qopensslbackend.dll` on disk against the client manifest, then preload the verified DLLs by absolute path (`LoadLibraryExW`) so Qt's by-name load resolves to the verified module. Post-load re-check of actual module paths (`GetModuleFileName`) + SHA-256. An admin-only-writable install directory closes the hash-to-load gap. Then read `config.ini` `[Server] BaseURL` and `CaCertificate`, build the `TransportPolicy`, and enable networking. |
+| Phase | When | Steps |
+|---|---|---|
+| **A — pre-Qt** | Before `QApplication` is constructed | 1. Neutralise the environment (all builds; list below). 2. `SetDefaultDllDirectories` restricted to the app directory + System32. 3. A packaged, trusted `qt.conf` fixes the plugin and QML import paths to the install directory, so the platform plugin path is controlled before `QApplication` exists. 4. Hash the packaged `libssl`, `libcrypto` and `qopensslbackend.dll` on disk against the client manifest. 5. Preload the verified OpenSSL DLLs by absolute path (`LoadLibraryExW`) so Qt's later by-name load resolves to the verified modules. |
+| **B — Qt runtime** | After `QApplication`, before any TLS class/object is used and before any network object exists | 1. `QSslSocket::setActiveBackend("openssl")`; if unavailable, fail closed — never fall back to Schannel. 2. Post-load verification: the actually loaded module paths (`GetModuleFileName`) + SHA-256 for `libssl`, `libcrypto` and the TLS plugin match the manifest. |
+| **C — transport** | After A and B pass | Read `config.ini` `[Server] BaseURL` and `CaCertificate` (+ rotation keys), build the `TransportPolicy`, and enable networking. |
 
-Any failure → the app starts in a **transport setup error** state: no network objects are created, and a setup screen explains the problem.
+- Any failure in any phase → the app starts in a **transport setup error** state: no network objects are created, and a setup screen explains the problem.
+- An admin-only-writable install directory closes the hash-to-load gap between the Phase A hash and the actual load.
+- **Current code order:** both entry points construct `QApplication` first (`qt-app/quick/main.cpp:15`, `qt-app/main.cpp:10`), and `ApiConfigLoader::applyFromRuntime` runs after it. S1e restructures `qt-app/quick/main.cpp` to the order above.
+
+**Environment neutralised in Phase A (all builds):** `OPENSSL_CONF`, `OPENSSL_MODULES`, `OPENSSL_ENGINES`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `QT_PLUGIN_PATH`, `QT_QPA_PLATFORM_PLUGIN_PATH`, `QML_IMPORT_PATH`, `QML2_IMPORT_PATH`.
+
+- The packaged `qt.conf` is authoritative: the environment MUST NOT be able to redirect plugin or QML import paths.
+- `QT_QUICK_BACKEND=software` stays allowed: it only selects the built-in software renderer (see `qt-app/quick/main.cpp`).
 
 ### Configuration
 
 - In release builds, `BaseURL` and `CaCertificate` come from `config.ini` only. The CA path is never read from the environment.
-- The built-in fallback BaseURL becomes `https://localhost/loams_api/`. A release client with no `CaCertificate` makes no requests.
+- **Release builds fail closed on invalid config** (invariant 3). Today a present-but-invalid `BaseURL` falls back to the default (`qt-app/core/apiconfigloader.cpp:143-181`); in release this changes:
+
+| Key | Absent | Present but invalid |
+|---|---|---|
+| `BaseURL` | Built-in default `https://localhost/loams_api/` | Setup error, no fallback (bad URL, `http` scheme, query/fragment, etc.) |
+| `CaCertificate` | Setup error (no CA → no requests) | Setup error (unreadable or invalid certificate) |
+
+- Dev builds MAY keep today's warn-and-fall-through behaviour.
 - Rotation keys:
 
 | Key | Meaning |
 |---|---|
 | `CaCertificate` | Active / new CA |
 | `CaRetiring` | Old CA during rotation |
-| `CaRotationUntil` | ISO UTC date at which `CaRetiring` stops being trusted |
+| `CaRotationUntil` | Instant at which `CaRetiring` stops being trusted |
 
+- `CaRotationUntil` grammar: ISO 8601 UTC with mandatory `Z`, exactly `YYYY-MM-DDTHH:MM:SSZ`. Anything else (offsets, missing `Z`, date-only, fractional seconds) is a setup error.
 - More than one CA requires `CaRotationUntil`; if it is missing, that is a setup error.
 - Each configured CA MUST be `CA:TRUE`, have `keyCertSign`, and be currently valid.
 - Diagnostics list every trusted CA fingerprint.
 
 ### CA retirement (automatic)
 
-- During rotation both CAs are trusted. At `CaRotationUntil` the retiring CA is automatically untrusted.
+- During rotation both CAs are trusted. The retiring CA is automatically untrusted at and after `CaRotationUntil` (`now >= deadline`).
 - Certificates from the retired CA → `CertUntrusted`, with an admin message naming the retired fingerprint, plus an urgent admin banner until the `CaRetiring` lines are removed.
 - The emergency runbook removes `CaRetiring` immediately, with no grace period.
 - **Trust epoch:** the policy carries an epoch, advanced at the deadline.
   - `HttpClient` clears its connection cache and aborts in-flight replies started under the old epoch (`TransportError::TrustRetired`).
   - Each QML `PolicyEnforcingNam` tracks its replies and subscribes to the `TrustEpoch` signal via a queued connection, so the slot runs on its owning thread: abort old-epoch replies, `clearConnectionCache`, apply the new policy.
-- The deadline is rechecked on every request, on a 60 s coarse timer, and on Windows `WM_TIMECHANGE` and resume-from-sleep power events (native event filter).
-- Tests (injected clock): a keep-alive connection across the deadline; an unfinished QML image download across the deadline.
+- **Deadline enforcement:**
+  - Primary: a precise single-shot deadline timer, re-armed in chunks because `QTimer` intervals are limited to ~24.8 days.
+  - Also checked on every request and on Windows `WM_TIMECHANGE` and resume-from-sleep power events (native event filter).
+  - A 60 s timer runs only as a recovery check, never as the primary mechanism.
+- Tests (injected clock): a keep-alive connection across the deadline; an unfinished QML image download across the deadline; an in-flight reply aborted at the exact deadline (within timer tolerance); malformed `CaRotationUntil` values → setup error.
 
 ### Errors
 
@@ -299,7 +337,7 @@ Apache runs as `NT SERVICE\Apache2.4` (virtual account), after verifying the act
 | Resource | Apache/PHP access |
 |---|---|
 | API code, Apache/PHP config, compat allowlist | read/execute |
-| `C:\ProgramData\LOAMS\server\compat.ini` | read |
+| `C:\ProgramData\LOAMS\server\compat.ini` and the controller-IP config in the same folder | read |
 | Server cert, CA cert, server key | read (key: Apache + Administrators only) |
 | Compatibility log | append-only (`FILE_APPEND_DATA`) |
 | Apache's own logs; PHP temp/upload/session dirs | modify (exact list from the S1b inventory) |
@@ -316,19 +354,28 @@ Apache runs as `NT SERVICE\Apache2.4` (virtual account), after verifying the act
 
 Static files never execute the PHP guard, so Apache denies first:
 
-- Each HTTP vhost starts with `<Location "/"> Require all denied`, then opens only exact `<LocationMatch>` paths, with methods enforced via `Require method` (not `<Limit>`). Authorization-section merging MUST be checked carefully.
-- `Options -Indexes`, `AcceptPathInfo Off`, `AllowEncodedSlashes Off`, `TraceEnable Off`; no `Alias`; no rewrite rules.
+- Each HTTP vhost starts with `<Location "/"> Require all denied`, then opens only exact `<LocationMatch>` paths, with methods enforced via `Require method` (not `<Limit>`).
+- **Authorization composition.** Sibling `Require` directives are implicitly OR-ed (`RequireAny`), so each exception `<LocationMatch>` MUST use `AuthMerging Off` and a single `<RequireAll>` containing both `Require method ...` **and** the source restriction (`Require local` / loopback, or `Require ip <controller-IP>`). A method-only or source-only grant is a defect.
+- `Options -Indexes`, `AllowEncodedSlashes Off`, `TraceEnable Off`; no `Alias`; no rewrite rules.
+- **Path-info routes.** The client calls `POST api.php/reports/data` (`qt-app/core/reportcontroller.cpp:428`), routed by `deliverables/loams_api/api.php`, which parses the path from `REQUEST_URI` (~lines 19-32). Therefore there is no blanket `AcceptPathInfo Off`:
+  - path-info is accepted **only** on `api.php`, and only for exact allowlisted routes (exact route + method);
+  - every other script has `AcceptPathInfo Off`;
+  - HTTPS vhost: all approved `api.php` routes used by 2.0;
+  - HTTP loopback vhost: only routes evidenced as used by the deployed `WITS.exe` (e.g. `reports/data` if the access log shows it).
 - **The one static exception:** legacy `WITS.exe` fetches student photos as static files — `rfid_login.php` builds `photo_url` as `<base>` + the stored relative photo path, falling back to `<base>uploads/default.jpg` (`deliverables/loams_api/rfid_login.php:139-145`). Allowed: GET/HEAD only, under `/loams_api/uploads/`, image extensions only, loopback listener only. Exact depth and extensions come from access-log evidence.
 - **Endpoint allowlist:** an exact list of endpoints + HTTP methods, no wildcard routes, built from evidence — the legacy Widgets source, the bridge script, and the gate PC's real Apache access log (the deployed binary may differ from source) — before it is locked.
-- **HTTPS vhost is default-deny too:** "entire API" means the approved endpoint scripts and `uploads/` images only. Non-endpoint content under `loams_api/` (`bridge/`, `tests/`, `sql/`, `*.ps1`, `*.sql`, `*.log`, backups) MUST be refused over HTTPS as well, and the S1f server bundle MUST NOT deploy `tests/` or dev SQL into the web root.
-- **Bypass tests:** URL encoding, double encoding, case variants, `PATH_INFO`, trailing dots/slashes, alternate methods, `.php` under `uploads/`, backup/config files.
+- **HTTPS vhost is default-deny too:** "entire API" means the approved endpoint scripts (and approved `api.php` routes) and `uploads/` images only. Non-endpoint content under `loams_api/` (`bridge/`, `tests/`, `sql/`, `*.ps1`, `*.sql`, `*.log`, backups) MUST be refused over HTTPS as well, and the S1f server bundle MUST NOT deploy `tests/` or dev SQL into the web root. `turnstile_display.php` is restricted to loopback / the server's own addresses (Section 2).
+- **Bypass tests:** URL encoding, double encoding, case variants, `PATH_INFO` on non-`api.php` scripts, trailing dots/slashes, alternate methods, `.php` under `uploads/`, backup/config files; `api.php` route variants (encoded, trailing slash, case, extra segments, unlisted routes); wrong method from an allowed source; allowed method from a wrong source.
 
 ### PHP layer — transport_guard.php
 
 - Installed via `php_admin_value auto_prepend_file` (cannot be overridden by `.htaccess` or `ini_set`). A test enumerates every `*.php` and asserts HTTP rejection.
 - TLS → pass.
-- Otherwise the request MUST match a named exception in `compat_allowlist.php` (code, versioned in the repo, read-only to Apache: exact script path, exact methods, listener `SERVER_ADDR`/`SERVER_PORT`) **and** that exception's switch MUST be on in `compat.ini`.
+- **Request path:** the decision model uses the canonical, decoded request path (script + `PATH_INFO`), not just the script path. Encoded slashes and dot-segments are rejected before matching.
+- Otherwise the request MUST match a named exception in `compat_allowlist.php` (code, versioned in the repo, read-only to Apache) **and** that exception's switch MUST be on in `compat.ini`. Each allowlist entry is exact: script, path-info route (or none), methods, listener (`SERVER_ADDR`/`SERVER_PORT`).
 - Everything else → 403, no redirect, logged.
+- **TLS loopback requests:** endpoints with a locality restriction (`turnstile_display.php`) MUST treat a loopback request over `:443` (`HTTPS` on, `REMOTE_ADDR` loopback) correctly — allowed — while refusing every non-local source.
+- **Controller IP:** `turnstile.php` reads its allowed controller IP from the admin-only server config (Section 2), not from a compiled constant; empty/missing → fail closed.
 
 ### Kill switches
 
@@ -349,7 +396,7 @@ Two coordinated layers with consistent field names and UTC timestamps:
 | Apache dedicated `CustomLog` | HTTP-vhost authorization denials |
 | PHP guard JSON-lines log | Every allowed and rejected non-TLS request the guard evaluates |
 
-- Fields: timestamp, source IP, listener, script path, method, exception name, outcome.
+- Fields: timestamp, source IP, listener, script path, path-info route, method, exception name, outcome.
 - MUST NOT log query string, body, headers, admin key, card numbers/RFID credentials, or other sensitive payloads.
 - Aggregation never assumes a rejection reached PHP.
 - If the guard log write fails → Windows Event Log error (`LOAMS-Transport`). If **both** channels fail → compatibility requests fail closed (403); TLS requests are unaffected.
@@ -443,17 +490,17 @@ Security tests use `QFAIL`, never `QSKIP`, when prerequisites are missing; missi
 
 | # | Layer | Covers |
 |---|---|---|
-| 1 | Qt unit (CTest) | Policy decisions (scheme, origin, redirect, `qrc:` / `image://` / `file:`, URL interceptor); config parsing incl. rotation keys; manifest parsing / hash checks against generated dummy files; `TransportError` mapping; expiry thresholds + trust epoch with injected clock. |
-| 2 | Qt TLS integration (CTest + PKI fixture + `QSslServer`) | Valid, expired, not-yet-valid, wrong host, wrong IP, unknown CA, injected "system" CA, broken chain, client-auth-only EKU, `CA:TRUE` leaf, invalid key usage; 30x→`http` and 30x→same-origin `https` both rejected; caller cannot override redirect policy; 304 passes; keep-alive and in-flight across the rotation deadline; no session resumption; QML `Image` via factory managers (allowed origin loads; cross-origin, `http:`, stray `file:` rejected; unfinished image download across the deadline); no `ignoreSslErrors` (grep). |
-| 3 | Bootstrap (child process, CTest) | `OPENSSL_CONF` / `OPENSSL_MODULES` / `SSL_CERT_*` / `QT_PLUGIN_PATH` neutralised; decoy `libssl` in CWD and on `PATH` not loaded; tampered DLL/plugin hash → setup error before load; missing OpenSSL backend → setup error, no Schannel fallback; clean Qt 6.11.1 deployment works. |
-| 4 | Release configuration | Second build with `LOAMS_DEV_TRANSPORT_OVERRIDES=OFF` reruns 1–3; `WITS_API_BASE_URL` ignored; `http://` refused; dev-override symbols absent from the binary. |
+| 1 | Qt unit (CTest) | Policy decisions (scheme, origin, redirect, `qrc:` / `image://` / `file:`, URL interceptor incl. the app-data asset allowance: image extensions only, `..` traversal and symlink/junction/reparse-point escapes rejected); config parsing incl. rotation keys, `CaRotationUntil` grammar and release fail-closed on present-but-invalid keys; manifest parsing / hash checks against generated dummy files; `TransportError` mapping; expiry thresholds + trust epoch with injected clock. |
+| 2 | Qt TLS integration (CTest + PKI fixture + `QSslServer`) | Valid, expired, not-yet-valid, wrong host, wrong IP, unknown CA, injected "system" CA, broken chain, client-auth-only EKU, `CA:TRUE` leaf, invalid key usage; 30x→`http` and 30x→same-origin `https` both rejected; caller cannot override redirect policy; 304 passes; keep-alive and in-flight across the rotation deadline; in-flight reply aborted at the exact deadline; no session resumption; QML `Image` via factory managers (allowed origin loads; cross-origin, `http:`, stray `file:` rejected; unfinished image download across the deadline); imported logo and poster loading from the app-data asset directory, plus traversal/junction escapes rejected; no `ignoreSslErrors` (grep). |
+| 3 | Bootstrap (child process, CTest) | Hostile values for each neutralised variable — `OPENSSL_CONF`, `OPENSSL_MODULES`, `OPENSSL_ENGINES`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `QT_PLUGIN_PATH`, `QT_QPA_PLATFORM_PLUGIN_PATH`, `QML_IMPORT_PATH`, `QML2_IMPORT_PATH` — have no effect, including a hostile QML import path and a hostile platform plugin path; packaged `qt.conf` wins; decoy `libssl` in CWD and on `PATH` not loaded; tampered DLL/plugin hash → setup error before load; missing OpenSSL backend → setup error, no Schannel fallback; clean Qt 6.11.1 deployment works incl. platform-plugin loading. |
+| 4 | Release configuration | Second build with `LOAMS_DEV_TRANSPORT_OVERRIDES=OFF` reruns 1–3. Behavioural: setting `WITS_API_BASE_URL` has no effect and `http://` origins are refused. The environment-read function itself is not compiled, verified by a compile-time test / build check — not by searching the binary for literal strings (diagnostic strings may legitimately remain). Passthrough mode is absent. |
 | 5 | PHP guard (PHP CLI + `php -S`, logic only) | Pure decision function vs `$_SERVER` cases; every `*.php` rejects HTTP with `auto_prepend_file` active; malformed / missing / partial `compat.ini` → all off; log-write failure → Event Log alert; both-channel failure → fail closed. |
 | 6 | PowerShell tooling (Pester 5) | SAN validation; refuse overwrite; hostile CSR requesting `CA:TRUE` still gets `CA:FALSE`; inventory enforcement; lifetime ≤ CA; passphrase never appears in child-process command lines (captured via process-creation records), PowerShell transcripts, `-Verbose`/`-Debug` output, exception messages or logs; manifest schema. |
-| 7 | Staging deployment (`Test-LoamsDeployment.ps1` against a **live** staging Apache) | Listeners IPv4/IPv6; no wildcard HTTP; default-deny bypass corpus; each layer rejects alone (the other disabled in staging); `auto_prepend_file` actually active (guard marker observed from every endpoint); every PHP endpoint executes the guard; static photo exception serves images only (other uploads and `.php` under `uploads/` refused); guard effective under the actual PHP execution mode; kill switch effective on the next request under load; both log layers populated; append-only ACL holds; event source writable by the Apache account; loaded DLLs match the manifest; service-account effective permissions. |
+| 7 | Staging deployment (`Test-LoamsDeployment.ps1` against a **live** staging Apache) | Listeners IPv4/IPv6; no wildcard HTTP; default-deny bypass corpus (incl. `api.php` route variants and method/source composition); `turnstile_display.php` refused from non-local sources over HTTPS and allowed over loopback TLS; controller IP agrees across server config, Apache `Require ip` and the firewall rule; each layer rejects alone (the other disabled in staging); `auto_prepend_file` actually active (guard marker observed from every endpoint); every PHP endpoint executes the guard; static photo exception serves images only (other uploads and `.php` under `uploads/` refused); guard effective under the actual PHP execution mode; kill switch effective on the next request under load; both log layers populated; append-only ACL holds; event source writable by the Apache account; loaded DLLs match the manifest; service-account effective permissions. |
 | 8 | Deployment acceptance (S1f; scripted manual checklist on a representative real Windows 11 machine) | AVG interception rejected; a CA present in the Windows root store but not configured is rejected; release package has only `qopensslbackend`; DLL loading restrictions; clean install; legacy `WITS.exe` end-to-end (login, RFID, photos, the admin operations it performs, turnstile + bridge); time sync; recorded dry runs of runbooks 2, 4, 6, 9. |
-| 9 | Functional regression | Kiosk student / RFID / guest attendance; admin login + guarded operations; student database operations and imports; reporting and exports; turnstile polling, reconnection and cursor preservation (`AccessControlHub`, `qt-app/quick/AccessControlHub.h`); remote photos, logos, fallback avatars, bundled QML assets; all existing `CapturingNam` / `SequencedNam` suites (`qt-app/testsupport/`) adapted to inject through `HttpClient`. |
+| 9 | Functional regression | Kiosk student / RFID / guest attendance; admin login + guarded operations; student database operations and imports; reporting and exports (incl. the `api.php/reports/data` route); turnstile polling on the gate PC, reconnection and cursor preservation (`AccessControlHub`, `qt-app/quick/AccessControlHub.h`); remote photos, imported logos/posters, fallback avatars, bundled QML assets; all existing `CapturingNam` / `SequencedNam` suites (`qt-app/testsupport/`) adapted to inject through `HttpClient`. |
 
-S1a MUST NOT change behaviour; Layer 9 proves it. Passing security tests MUST NOT conceal broken functionality.
+S1a MUST NOT change behaviour (Passthrough mode, Section 3); Layer 9 proves it. Passing security tests MUST NOT conceal broken functionality.
 
 **Distinction:** the automated gate verifies certificate validation, exclusive trust, redirects and QML image requests through controlled test infrastructure. Deployment acceptance separately verifies real Windows 11 behaviour (AVG, system-root distrust, DLL loading, packaged release restrictions).
 
@@ -465,11 +512,11 @@ One spec (this one) and one implementation plan per slice, written as each slice
 
 | Slice | Content | Depends on |
 |---|---|---|
-| **S1a** Client networking seam | All controllers/ViewModels + QML engine networking onto `HttpClient` / `PolicyEnforcingNam` with injectable fakes; behaviour-neutral; plus the `LOAMS_BUILD_LEGACY_WIDGETS=OFF` freeze. | — |
+| **S1a** Client networking seam | All controllers/ViewModels/hubs + QML engine networking onto `HttpClient` / `PolicyEnforcingNam` with injectable managers (Section 3 injection boundary); behaviour-neutral via the temporary **Passthrough** policy mode; plus the `LOAMS_BUILD_LEGACY_WIDGETS=OFF` freeze. | — |
 | **S1b** Server stack & host | Manifest (server + client sections), `Test-LoamsServerHost.ps1`, service identity, ACLs, event source, staging upgrade runbook. | — |
 | **S1c** Certificate tooling + runbooks | Section 5. | S1b (manifest OpenSSL) |
-| **S1d** Server transport guard | Apache layout, `auto_prepend_file` guard, evidence-based allowlist, kill switches, two-layer logging, `Test-LoamsDeployment.ps1`. | S1b, S1c |
-| **S1e** Client TLS enforcement | OpenSSL backend + manifest checks, env/DLL neutralisation, exclusive CA from `config.ini`, release compile-outs, test PKI fixtures + negative suites, rotation / trust epoch, expiry warnings, error UI, URL interceptor. | S1a, S1c, S1b's client manifest |
+| **S1d** Server transport guard | Apache layout (incl. exact `api.php` path-info routes and `AuthMerging Off` + `<RequireAll>` composition), `auto_prepend_file` guard with canonical-path matching, evidence-based allowlist, kill switches, two-layer logging, controller IP moved from the compiled constant to admin-only server config, `turnstile_display.php` kept gate-PC-only with loopback TLS requests (`REMOTE_ADDR` loopback over `:443`) handled correctly, `Test-LoamsDeployment.ps1`. | S1b, S1c |
+| **S1e** Client TLS enforcement | Restructured `qt-app/quick/main.cpp` bootstrap order (Phases A–C), OpenSSL backend + manifest checks, env/DLL/`qt.conf` neutralisation, exclusive CA from `config.ini` with release fail-closed parsing, release compile-outs, deletion of Passthrough mode, test PKI fixtures + negative suites, rotation / trust epoch with precise deadline timer, expiry warnings, error UI, URL interceptor incl. the app-data asset allowance. | S1a, S1c, S1b's client manifest |
 | **S1f** Packaging, acceptance & cutover | Packaging, signed release records, Layer 8, production cutover. | All; requires successful end-to-end integration of S1d + S1e incl. QML image loading and legacy compatibility |
 
 Conditions:
@@ -494,11 +541,17 @@ The only release boundary. Packaging invokes the gate itself; a developer-run sc
 
 - Contents: the approved PHP API + guard, Apache config + compat allowlist, deployment scripts, stack manifest + verified dependencies.
 - Same tagged commit and manifest version as the client package.
-- Deployment scripts verify the bundle against its release record before modifying the gate PC.
+- The bundle is verified against its release record by the independent verifier (see Release records) before any of its scripts run or the gate PC is modified.
 
 ### Release records
 
-Release records (artifact SHA-256s, commit, tag, manifest version, gate results) are signed with the offline Ed25519 release-signing key (OpenSSL). Installers and deployment scripts verify the signature against a public key whose fingerprint was distributed out-of-band. Authenticity never depends solely on a checksum stored beside the package. Authenticode is deferred.
+Release records (artifact SHA-256s, commit, tag, manifest version, gate results) are signed with the offline Ed25519 release-signing key (OpenSSL). Authenticity never depends solely on a checksum stored beside the package. Authenticode is deferred.
+
+Verification MUST NOT be circular:
+
+- It MUST run **before** any script or executable from the package/bundle is executed.
+- It uses a verifier and Ed25519 public key provisioned independently of the package — e.g. a standalone `Test-LoamsRelease.ps1` + public key installed once out-of-band (admin media / the offline CA machine), using an already-trusted OpenSSL. The public key's fingerprint is confirmed out-of-band.
+- A package's own scripts never vouch for themselves; installers and deployment scripts run only after the independent verifier has passed.
 
 ### Production cutover runbook
 
@@ -580,6 +633,7 @@ Fix completion criteria:
 | R10 | No Authenticode signing. | Signed release records, admin-only install directory. | Future code-signing certificate |
 | R11 | Rollback temporarily restores a vulnerable stack. | Time-limited, restricted, dated remediation plan. | Per occurrence |
 | R12 | Swipes during server downtime may be lost (type=100 ACKed but not recorded). | Evidence test, manual reconciliation. | Separate type=100 fix (criteria in Section 7) |
+| R13 | Turnstile display is limited to the gate PC: `turnstile_display.php` returns student identity data and S1 does not authenticate clients, so other PCs cannot poll it. | Served only to loopback / the server's own addresses; gate PC 2.0 client uses `https://localhost/loams_api/`. | S2 device identity |
 
 ### Non-goals
 
@@ -592,3 +646,4 @@ Fix completion criteria:
 - Widgets app migration.
 - Authenticode.
 - The type=100 recording fix (tracked separately).
+- Networked turnstile-display polling from PCs other than the gate PC (S2).
