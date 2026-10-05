@@ -1,0 +1,330 @@
+<title>Security Uplift Board</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,500..800&family=Public+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: an operations board — summary strip first, then the S1 slice
+   pipeline in dependency order, then the activity log beside the
+   residual-risk register. Data lives in the artifact db; Claude writes it. */
+:root {
+  --ground: #f3f5f2;
+  --surface: #ffffff;
+  --ink: #18211d;
+  --muted: #5a6660;
+  --line: #d9dfda;
+  --accent: #0d6a5a;
+  --accent-soft: #e2efeb;
+  --ok: #2e7a3d;
+  --ok-soft: #e3f1e5;
+  --live: #9a6411;
+  --live-soft: #f8eedb;
+  --plan: #5d6b76;
+  --plan-soft: #e9edf0;
+  --stop: #b0281f;
+  --stop-soft: #f8e3e1;
+  --font-display: "Archivo", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Public Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #0e1311; --surface: #151c19; --ink: #e4ebe7; --muted: #98a69f;
+    --line: #26302c; --accent: #52c2a7; --accent-soft: #173029;
+    --ok: #74c783; --ok-soft: #1b2e1f; --live: #e2ab4f; --live-soft: #33281a;
+    --plan: #93a3ae; --plan-soft: #1f262b; --stop: #f07067; --stop-soft: #3a1c1a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #0e1311; --surface: #151c19; --ink: #e4ebe7; --muted: #98a69f;
+  --line: #26302c; --accent: #52c2a7; --accent-soft: #173029;
+  --ok: #74c783; --ok-soft: #1b2e1f; --live: #e2ab4f; --live-soft: #33281a;
+  --plan: #93a3ae; --plan-soft: #1f262b; --stop: #f07067; --stop-soft: #3a1c1a;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--ground); color: var(--ink);
+  font: 15px/1.55 var(--font-body);
+  padding-inline: 16px; padding-block: 28px 56px;
+}
+.wrap { max-width: 1180px; margin: 0 auto; display: grid; gap: 28px; }
+h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(28px, 4.2vw, 40px); font-weight: 800; font-stretch: 85%; letter-spacing: -0.01em; }
+h2 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted); }
+h3 { font-size: 17px; font-weight: 700; font-stretch: 92%; }
+code, .mono { font-family: var(--font-mono); font-size: 0.86em; }
+a { color: var(--accent); }
+
+/* Header */
+.head { display: grid; gap: 14px; }
+.eyebrow { font-family: var(--font-mono); font-size: 12px; color: var(--accent); letter-spacing: 0.04em; }
+.headline { font-size: 17px; max-width: 70ch; margin: 0; }
+.meta-row { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; color: var(--muted); font-size: 13px; }
+.next {
+  display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap;
+  background: var(--accent-soft); color: var(--ink);
+  border-radius: var(--radius); padding: 12px 16px;
+}
+.next b { font-family: var(--font-display); font-stretch: 90%; color: var(--accent); white-space: nowrap; }
+.rule {
+  margin: 0; padding: 12px 16px; border-left: 3px solid var(--accent);
+  background: var(--surface); border-radius: 0 var(--radius) var(--radius) 0;
+  font-style: italic; color: var(--ink); max-width: 80ch;
+}
+.rule small { display: block; font-style: normal; color: var(--muted); margin-top: 4px; font-size: 12px; }
+
+/* Sub-project strip */
+.strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.sp { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 14px 16px; display: grid; gap: 6px; align-content: start; min-width: 0; }
+.sp .top { display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.sp .code { font-family: var(--font-mono); font-weight: 600; font-size: 13px; color: var(--muted); }
+.sp p { margin: 0; color: var(--muted); font-size: 13.5px; }
+
+/* Status pills */
+.pill { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.s-done { color: var(--ok); background: var(--ok-soft); }
+.s-active { color: var(--live); background: var(--live-soft); }
+.s-planned { color: var(--plan); background: var(--plan-soft); }
+.s-blocked { color: var(--stop); background: var(--stop-soft); }
+
+/* Pipeline */
+.pipeline { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 14px; }
+.slice { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.slice.is-active { border-color: var(--live); box-shadow: 0 0 0 1px var(--live) inset; }
+.slice .top { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+.slice .code { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.slice p { margin: 0; font-size: 14px; color: var(--muted); }
+.deps { font-size: 12.5px; color: var(--muted); }
+.deps .mono { color: var(--ink); }
+.meter { display: grid; gap: 4px; }
+.meter .bar { height: 6px; border-radius: 3px; background: var(--plan-soft); overflow: hidden; }
+.meter .fill { height: 100%; background: var(--accent); }
+.meter .lbl { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+details summary { cursor: pointer; font-size: 13px; color: var(--accent); }
+details summary:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.gates { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; font-size: 13.5px; }
+.gates li { display: grid; grid-template-columns: 18px 1fr; gap: 6px; }
+.gates .tick { font-family: var(--font-mono); color: var(--muted); }
+.gates li.done .tick { color: var(--ok); }
+.gates li.done span:last-child { color: var(--muted); }
+.paths { display: grid; gap: 2px; font-size: 12px; color: var(--muted); }
+.paths .mono { overflow-wrap: anywhere; color: var(--ink); }
+
+/* Lower row */
+.lower { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: 22px; align-items: start; }
+@media (max-width: 860px) { .lower { grid-template-columns: 1fr; } }
+.panel { display: grid; gap: 12px; min-width: 0; }
+.log { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+.log li { display: grid; grid-template-columns: 92px 1fr; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 14px; }
+.log time { font-family: var(--font-mono); font-size: 12px; color: var(--muted); padding-top: 2px; font-variant-numeric: tabular-nums; }
+.tablewrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+table { border-collapse: collapse; width: 100%; min-width: 620px; font-size: 13.5px; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-top: 1px solid var(--line); }
+thead th { border-top: 0; font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); font-weight: 600; }
+td.code { font-family: var(--font-mono); font-weight: 600; white-space: nowrap; }
+td.closes { color: var(--muted); }
+
+.empty { background: var(--surface); border: 1px dashed var(--line); border-radius: var(--radius); padding: 18px; color: var(--muted); font-size: 14px; }
+footer { color: var(--muted); font-size: 12.5px; border-top: 1px solid var(--line); padding-top: 14px; }
+@media (prefers-reduced-motion: no-preference) { .meter .fill { transition: width .4s ease; } }
+</style>
+
+<div class="wrap">
+  <header class="head">
+    <div class="eyebrow">LOAMS 2.0 · hard gate before Access Control go-live</div>
+    <h1>Security Uplift Board</h1>
+    <p class="headline" id="headline">Loading the latest status…</p>
+    <div class="next" id="next" hidden><b>Next step</b><span id="nextText"></span></div>
+    <div class="meta-row"><span id="phase"></span><span id="updated"></span></div>
+    <blockquote class="rule" id="rule" hidden></blockquote>
+  </header>
+
+  <section class="panel" aria-labelledby="h-uplift">
+    <h2 id="h-uplift">Sub-projects</h2>
+    <div class="strip" id="strip"></div>
+  </section>
+
+  <section class="panel" aria-labelledby="h-s1">
+    <h2 id="h-s1">S1 slices · in dependency order</h2>
+    <div class="pipeline" id="pipeline"></div>
+  </section>
+
+  <div class="lower">
+    <section class="panel" aria-labelledby="h-log">
+      <h2 id="h-log">Activity</h2>
+      <ul class="log" id="log"></ul>
+    </section>
+    <section class="panel" aria-labelledby="h-risk">
+      <h2 id="h-risk">Residual-risk register</h2>
+      <div id="riskHost"></div>
+    </section>
+  </div>
+
+  <footer>Status is kept in this board's data store and updated by Claude as the work moves. The approved design lives in <code>docs/superpowers/specs/2026-10-05-loams-s1-transport-security-design.md</code>.</footer>
+</div>
+
+<script>
+(function () {
+  var STATUS_LABEL = { done: "Done", active: "In progress", planned: "Planned", blocked: "Blocked" };
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  }
+  function pill(status) {
+    var s = STATUS_LABEL[status] ? status : "planned";
+    return el("span", "pill s-" + s, STATUS_LABEL[s]);
+  }
+  function empty(host, msg) {
+    host.replaceChildren(el("div", "empty", msg));
+  }
+
+  var state = { meta: null, tracks: null, log: null, risks: null };
+
+  function renderMeta() {
+    var m = state.meta;
+    if (!m) {
+      document.getElementById("headline").textContent = "No status recorded yet. Claude fills this board in as the security uplift progresses.";
+      return;
+    }
+    document.getElementById("headline").textContent = m.headline || "";
+    document.getElementById("phase").textContent = m.phase || "";
+    document.getElementById("updated").textContent = m.updated ? "Updated " + m.updated : "";
+    var next = document.getElementById("next");
+    document.getElementById("nextText").textContent = m.nextStep || "";
+    next.hidden = !m.nextStep;
+    var rule = document.getElementById("rule");
+    if (m.rule) {
+      rule.replaceChildren(document.createTextNode("“" + m.rule + "”"), el("small", null, "Legacy compatibility rule — every accommodation explicit, narrow, observable and removable."));
+      rule.hidden = false;
+    } else rule.hidden = true;
+  }
+
+  function gatesBlock(gates) {
+    var frag = document.createDocumentFragment();
+    if (!Array.isArray(gates) || !gates.length) return frag;
+    var done = gates.filter(function (g) { return g && g.done; }).length;
+    var meter = el("div", "meter");
+    var bar = el("div", "bar"); var fill = el("div", "fill");
+    fill.style.width = Math.round((done / gates.length) * 100) + "%";
+    bar.appendChild(fill);
+    meter.append(bar, el("div", "lbl", done + " of " + gates.length + " gates passed"));
+    var det = el("details");
+    det.appendChild(el("summary", null, "Gate checklist"));
+    var ul = el("ul", "gates");
+    gates.forEach(function (g) {
+      var li = el("li", g && g.done ? "done" : "");
+      li.append(el("span", "tick", g && g.done ? "✓" : "○"), el("span", null, (g && g.label) || ""));
+      ul.appendChild(li);
+    });
+    det.appendChild(ul);
+    frag.append(meter, det);
+    return frag;
+  }
+
+  function renderTracks() {
+    var strip = document.getElementById("strip");
+    var pipe = document.getElementById("pipeline");
+    var t = state.tracks;
+    if (!t || !t.length) {
+      empty(strip, "Sub-projects appear here once Claude records them.");
+      empty(pipe, "S1 slices appear here once Claude records them.");
+      return;
+    }
+    strip.replaceChildren();
+    pipe.replaceChildren();
+    t.forEach(function (d) {
+      if (d.group === "uplift") {
+        var c = el("article", "sp");
+        var top = el("div", "top");
+        top.append(el("span", "code", d.code || ""), pill(d.status));
+        c.append(top, el("h3", null, d.name || ""), el("p", null, d.summary || ""));
+        strip.appendChild(c);
+        return;
+      }
+      var s = el("article", "slice" + (d.status === "active" ? " is-active" : ""));
+      var head = el("div", "top");
+      var titles = el("div");
+      titles.append(el("div", "code", d.code || ""), el("h3", null, d.name || ""));
+      head.append(titles, pill(d.status));
+      s.append(head, el("p", null, d.summary || ""));
+      if (Array.isArray(d.deps) && d.deps.length) {
+        var deps = el("div", "deps", "Needs ");
+        deps.appendChild(el("span", "mono", d.deps.join(" · ")));
+        s.appendChild(deps);
+      }
+      s.appendChild(gatesBlock(d.gates));
+      if (Array.isArray(d.paths) && d.paths.length) {
+        var p = el("div", "paths");
+        d.paths.forEach(function (x) { p.appendChild(el("span", "mono", x)); });
+        s.appendChild(p);
+      }
+      pipe.appendChild(s);
+    });
+    if (!strip.children.length) empty(strip, "Sub-projects appear here once Claude records them.");
+    if (!pipe.children.length) empty(pipe, "S1 slices appear here once Claude records them.");
+  }
+
+  function renderLog() {
+    var host = document.getElementById("log");
+    var entries = state.log && Array.isArray(state.log.entries) ? state.log.entries : [];
+    if (!entries.length) { host.replaceChildren(el("li", "empty", "No activity recorded yet.")); return; }
+    host.replaceChildren();
+    entries.forEach(function (e) {
+      var li = el("li");
+      li.append(el("time", null, e.date || ""), el("span", null, e.text || ""));
+      host.appendChild(li);
+    });
+  }
+
+  function renderRisks() {
+    var host = document.getElementById("riskHost");
+    var r = state.risks;
+    if (!r || !r.length) { empty(host, "The residual-risk register appears here once Claude records it."); return; }
+    var wrap = el("div", "tablewrap");
+    var table = el("table");
+    var thead = el("thead"); var hr = el("tr");
+    ["#", "Risk", "Mitigation now", "Closes when", "State"].forEach(function (h) { hr.appendChild(el("th", null, h)); });
+    thead.appendChild(hr);
+    var tb = el("tbody");
+    r.forEach(function (d) {
+      var tr = el("tr");
+      var st = el("td");
+      var stateName = d.state === "closed" ? "done" : d.state === "accepted" ? "planned" : "active";
+      var p = el("span", "pill s-" + stateName, d.state === "closed" ? "Closed" : d.state === "accepted" ? "Accepted" : "Open");
+      st.appendChild(p);
+      tr.append(el("td", "code", d.code || ""), el("td", null, d.risk || ""), el("td", null, d.mitigation || ""), el("td", "closes", d.closes || ""), st);
+      tb.appendChild(tr);
+    });
+    table.append(thead, tb);
+    wrap.appendChild(table);
+    host.replaceChildren(wrap);
+  }
+
+  function renderAll() { renderMeta(); renderTracks(); renderLog(); renderRisks(); }
+  renderAll();
+
+  function offline() {
+    document.getElementById("headline").textContent = "Live status isn't available in this view. Open the board from claude.ai while signed in to see it.";
+  }
+
+  if (!window.claude || typeof window.claude.use !== "function") { offline(); return; }
+  window.claude.use("db").then(function (db) {
+    if (!db) { offline(); return; }
+    function onErr() { /* subscription ended; keep the last rendered state */ }
+    db.doc("board/meta").onSnapshot(function (s) { state.meta = s.exists ? s.data() : null; renderMeta(); }, onErr);
+    db.doc("board/log").onSnapshot(function (s) { state.log = s.exists ? s.data() : null; renderLog(); }, onErr);
+    db.collection("tracks").orderBy("order").onSnapshot(function (q) {
+      state.tracks = q.docs.map(function (d) { return d.data(); }); renderTracks();
+    }, onErr);
+    db.collection("risks").orderBy("order").onSnapshot(function (q) {
+      state.risks = q.docs.map(function (d) { return d.data(); }); renderRisks();
+    }, onErr);
+  }, offline);
+})();
+</script>
