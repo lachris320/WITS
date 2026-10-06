@@ -19,12 +19,13 @@
 - **Injection boundary:** "`HttpClient` accepts an injected `QNetworkAccessManager` / manager factory, so the existing `CapturingNam` / `SequencedNam` tests stay realistic." ViewModels/hubs that construct managers internally "MUST obtain them from the seam instead."
 - **Owner invariant (S1a plan approval condition):** every production network request passes through the authoritative transport policy. In LOAMS 2.0 production every core network class (`StudentController`, `VisitorController`, `ReportController`, `ImportController`, `BrandingController`, `AccessControl::AccessDecisionService`, `AccessControl::TurnstileProvider`) receives the manager supplied by its owner's `HttpClient::manager()` (a `PolicyEnforcingNam`). Raw `QNetworkAccessManager*` injection on these classes remains **only** as a test seam; no production constructor may create an unprotected manager, and a null manager is a contract violation (`Q_ASSERT_X`, Task 4b). Frozen Widgets compatibility never weakens this rule — a resulting Widgets incompatibility is documented, not worked around.
 - **Mandatory gates (S1a plan approval condition):** GATE G1 (Task 2: `std::atomic_load`/`std::atomic_store` on `shared_ptr` compiles warning-free under `-Wall -Wextra -Werror`) and GATE G2 (Task 5b: Qt 6.11.1's image/Canvas loading uses the manager from the installed factory) run before any task that depends on them. **If a gate fails: STOP — do not continue dependent tasks and do not substitute a workaround; escalate to the owner for a design review.**
-- **Factory ordering:** the QML network factory is installed on the engine before any QML is loaded and before any request is initiated — enforced at runtime by `PolicyNamFactory::installOn()` (refuses a late install; Task 5) and by source-order guard `quickMainInstallsTransportBeforeLoad` (Task 7).
+- **Factory ordering:** the QML network factory is installed on the engine before any QML is loaded and before any request is initiated. Enforcement is two-part and its limits are explicit: (1) `quick/main.cpp` installs on a freshly constructed `QQmlApplicationEngine` immediately before `loadFromModule`, pinned by source-order guard `quickMainInstallsTransportBeforeLoad` (Task 7); (2) at runtime `PolicyNamFactory::installOn()` (Task 5) refuses — and `main.cpp` fails closed — in exactly three detectable cases: the engine already has a factory, the engine has already created its own manager, or a `QQmlApplicationEngine` already has root objects. It does **not** detect a plain `QQmlEngine`/`QQuickView` that compiled components without creating a manager; that case is covered only by the fresh-engine + source-order rule.
 - **SSL errors:** "`ignoreSslErrors` MUST NOT appear anywhere in client source; a source grep check enforces this." (Enforced from S1a onward by `tst_transportseamguard`.)
 - **Legacy Widgets:** "The target sits behind CMake option `LOAMS_BUILD_LEGACY_WIDGETS=OFF` by default; release packaging explicitly rejects the legacy target." Source is "deprecated / reference-only: no new features, security migrations or routine maintenance." Widgets app migration is a spec non-goal: `mainwindow.cpp`, `adminwindow.cpp`, `guestwindow.cpp` are **not** migrated.
 - **Release boundary:** "No production deployment before S1f." "S1a–S1e MAY merge independently after review, but incomplete security changes MUST NOT reach production." No release-packaging logic in S1a.
 - **Slice approval:** "Each slice needs passing tests, security review where applicable, and documented rollback considerations before approval. A passing unit test alone is not sufficient."
 - **No secrets / PII:** synthetic fixtures only (`Test Student A`, `TEST-0001`, `21-1-0001`, `20260001`, key `s1a-test-key`). No real admin key, backend URL credential or student data in code, tests, commits or screenshots.
+- **No test may reach a backend (Codex R1 condition):** every seam owner (ViewModel / `AccessControlHub`) a test constructs receives an injected fake through `HttpClient` — `CapturingNam`, `SequencedNam`, or the never-answering `OfflineHttp` — except request-free `defaultConstruction*` / `defaultHub*` ownership tests; enforced by `tst_transportseamguard::ownersInTestsUseFakeManagers` (Task 6b) and proven empirically by an unchanged dev-Apache access log across the full `ctest` run (Task 14 Step 1).
 - **No external network in tests:** request assembly via `CapturingNam` / `SequencedNam`; wire-level parity and QML image loads via the in-process `TinyHttpServer`, which listens **only on `127.0.0.1` with an ephemeral port** (`QTcpServer::listen(QHostAddress::LocalHost, 0)`) and **never touches XAMPP** or any other real backend.
 - **MVVM:** ViewModels (`quick/viewmodels/`) remain the only QML-facing C++; `HttpClient` / `PolicyNamFactory` are not QML types. No QML visual change in S1a; any QML touched keeps **zero raw hex outside `Theme.qml`** (`Qt.alpha(Theme.<token>, a)` for opacity).
 - **Naming:** `core/` files lowercase (`httpclient.h`), `quick/` C++ files PascalCase (`PolicyNamFactory.h`), members `m_camelCase`, function-pointer `connect`.
@@ -51,8 +52,8 @@ Every command block below assumes the `export PATH=...` line ran in the same inv
 
 ### Owner-approved design decisions (2026-10-05)
 
-1. **One `HttpClient` per owner** (ViewModel / hub), each owning one `PolicyEnforcingNam` — "one security policy, not one physical manager" — preserving today's one-manager-per-owner lifetimes.
-2. **Constructor injection:** owners take `(QObject *parent = nullptr, HttpClient *http = nullptr)`; `HttpClient(QObject *parent = nullptr, QNetworkAccessManager *injected = nullptr)`.
+1. **One `HttpClient` per owner** (ViewModel / hub), each owning one `PolicyEnforcingNam` — "one security policy, not one physical manager" — preserving today's per-owner lifetimes. An owner with several controllers (`DatabaseViewModel`) still has exactly one client; all its controllers share its manager.
+2. **Constructor injection, one locked order for every owner** — ViewModels **and** `AccessControlHub`: `(QObject *parent = nullptr, HttpClient *http = nullptr)`; `HttpClient(QObject *parent = nullptr, QNetworkAccessManager *injected = nullptr)`.
 3. **Core network classes — require a non-null manager (chosen approach).** Verified on `master`: none of the seven core network classes creates a manager when given `nullptr` (each just stores the pointer, `studentcontroller.cpp:18-21`, `visitorcontroller.cpp:18-21`, `reportcontroller.cpp:15-18`, `importcontroller.cpp:20-23`, `brandingcontroller.cpp:13-16`, `accessdecisionservice.cpp:16-19`, `turnstileprovider.cpp:20-23`), so there is no silent-default path to remove. S1a makes the contract explicit and enforced: each constructor gets `Q_ASSERT_X(nam, ...)` + a header contract ("non-null; in LOAMS 2.0 production it is `HttpClient::manager()`"), plus a read-only `networkManager()` accessor used by runtime identity tests. **Why not route a null default through the seam:** a hidden per-controller `HttpClient` would create an extra, ownerless manager the owner cannot see or (in S1e) epoch-manage, and would hide wiring bugs; requiring the owner's manager keeps exactly one policy-checked manager per owner and makes a miswired controller fail loudly. Applied identically to all seven classes (Task 4b). The five existing tests that passed `nullptr` for network-free paths now pass an unused test manager.
 4. **`LOAMS_BUILD_LEGACY_WIDGETS`** replaces `BUILD_LEGACY_WIDGETS` (default OFF; the old variable is ignored with a warning).
 5. **`ignoreSslErrors` ban starts in S1a** (`tst_transportseamguard`).
@@ -87,7 +88,11 @@ Every command block below assumes the `export PATH=...` line ran in the same inv
 | `qt-app/tests/tst_{studentcontroller,visitorcontroller,reportcontroller,importcontroller,brandingcontroller,accessdecisionservice,turnstileprovider}.cpp` | Modify | Accessor-identity test; 5 `nullptr` constructions → unused test manager | 4b |
 | `qt-app/quick/PolicyNamFactory.h/.cpp` | Create | QML engine factory: new `PolicyEnforcingNam` per `create()`; `installOn()` refuses a late install | 5 |
 | `qt-app/quick/tests/tst_qmlfactorygate.cpp` | Create | GATE G2: Qt image + Canvas loads use the installed factory's manager | 5b |
-| `qt-app/quick/CMakeLists.txt` | Modify (module SOURCES line 82; quick test registrations) | Compile factory into `witsquickmodule`; register/adjust quick tests | 5, 5b, 6, 10-13 |
+| `qt-app/quick/tests/RecordingPolicyNam.h` | Create | Test-only recording `PolicyEnforcingNam` + `PolicyNamFactory` subclass (request log = proof of seam use) | 5b, 13 |
+| `qt-app/testsupport/sequencednam.h/.cpp` | Modify | `setStallWhenEmpty(bool)` (default off: existing suites unchanged) | 6b |
+| `qt-app/testsupport/offlinehttp.h` | Create | Test-only `HttpClient` over a never-answering `SequencedNam` | 6b |
+| `qt-app/tests/tst_httpclient.cpp` + its CMake entry | Modify | `offlineHttpNeverAnswers` | 6b |
+| `qt-app/quick/CMakeLists.txt` | Modify (module SOURCES line 82; quick test registrations) | Compile factory into `witsquickmodule`; `WITS_TEST_NAM_SOURCES`; register/adjust quick tests | 5, 5b, 6, 6b, 13 |
 | `qt-app/quick/tests/tst_policynamfactory.cpp` | Create | Factory per-call/threaded creation, engine integration | 5 |
 | `qt-app/quick/tests/tst_transportseamguard.cpp` | Create | Source guard: no raw manager outside the seam; no SSL-error bypass; main.cpp wiring | 6, 7 |
 | `qt-app/quick/main.cpp` | Modify (lines 1-58) | Publish Passthrough policy; install `PolicyNamFactory` before first QML load | 7 |
@@ -112,7 +117,7 @@ Every resource the 2.0 client actually loads, how it is loaded today, and the S1
 
 | # | Resource | Built by | Loaded by | URL kind | Network path | S1a test |
 |---|---|---|---|---|---|---|
-| R1 | Bundled QML module (all `qml/**/*.qml`, incl. `LAvatar`/`LLogoCircle`/`LCircleImage`) | `qt_add_qml_module(witsquickmodule)` (`quick/CMakeLists.txt:33-111`) | QML engine (`loadFromModule`) | `qrc:/qt/qml/LOAMS/...` | none (resource system) | `tst_qmlresourceinventory::bundledModuleQmlLoadsFromQrc`, `tst_appshell::loadsWithZeroWarnings` |
+| R1 | Bundled QML module (all `qml/**/*.qml`, incl. `LAvatar`/`LLogoCircle`/`LCircleImage`) | `qt_add_qml_module(witsquickmodule)` (`quick/CMakeLists.txt:33-111`) | QML engine (`loadFromModule`) | `qrc:/qt/qml/LOAMS/...` | none (resource system) | `tst_qmlresourceinventory::everyBundledQmlFileCompilesFromQrc` (each of the 43 `qml/**/*.qml` files loaded from `qrc:/qt/qml/LOAMS/qml/...` and compiled by a seam-installed engine), `bundledModuleQmlLoadsFromQrc` (module lookup), `tst_appshell::loadsWithZeroWarnings` (live AppShell instantiation) |
 | R2 | Kiosk photo from a turnstile entry | `LoginParser::parseEntryEvent` → `sameOriginPhotoUrl` (`core/loginparser.cpp:23-46,158-166`) → `KioskViewModel::applyStudentLogin` (`KioskViewModel.cpp:123`) | `LAvatar` → `LCircleImage` `Image` + `Canvas.loadImage` (`LCircleImage.qml:36-70`) | remote `http(s)` same-origin | QML engine NAM (pixmap-reader thread) → `PolicyNamFactory` | `turnstilePhotoLoadsThroughFactory` |
 | R3 | Kiosk photo from student/RFID login | backend `photo_url` passed through `LoginParser::parseRfidResponse` / `parseLoginResponse` (`KioskViewModel.cpp:123`) | same as R2 (`KioskMain.qml:104-122`) | remote `http(s)` | same as R2 | `loginPhotoUrlLoadsThroughFactory` |
 | R4 | Search result avatar | `SearchResultsModel::PhotoRole` = `ApiConfig::endpoint(photo)` (`models/SearchResultsModel.cpp:30-35`) | `LAvatar` (`SearchScreen.qml:500-507`) | remote `http(s)` | same as R2 | `searchAvatarLoadsThroughFactory` |
@@ -140,13 +145,13 @@ No `FontLoader`, `XMLHttpRequest`, `BorderImage`/`AnimatedImage` or `image://` p
 | `quick/viewmodels/KioskViewModel.cpp:20` | `new QNetworkAccessManager(this)` | `http ? http : new HttpClient(this)` | 10 |
 | `quick/viewmodels/GuestViewModel.cpp:11` | same | same | 10 |
 | `quick/viewmodels/SearchViewModel.cpp:9` | same | same | 11 |
-| `quick/viewmodels/DatabaseViewModel.cpp:13,23` | two managers (`m_nam`, `m_editNam`) | two owned `HttpClient`s, or both use the one injected client | 11 |
+| `quick/viewmodels/DatabaseViewModel.cpp:13,23` | two managers (`m_nam`, `m_editNam`) | **one** `HttpClient` (owned or injected) whose manager both `StudentController`s use; `m_editNam` removed (no code depends on separate managers — Task 11) | 11 |
 | `quick/viewmodels/ImportViewModel.cpp:13` | `new QNetworkAccessManager(this)` | `http ? http : new HttpClient(this)` | 12 |
 | `quick/viewmodels/ReportingViewModel.cpp:22` | same | same | 12 |
 | `quick/viewmodels/SettingsViewModel.cpp:28` | same | same | 12 |
 | QML engine (`quick/main.cpp`) | Qt default factory | `PolicyNamFactory` installed before first load | 7 |
 
-Core network classes already take an injected pointer and **never** create a manager themselves: `StudentController`, `VisitorController`, `ReportController`, `ImportController`, `BrandingController` (`core/*controller.*`), `AccessControl::AccessDecisionService`, `AccessControl::TurnstileProvider` (`core/accesscontrol/*`); `HttpForm::submit/get` (`quick/HttpForm.*`) is a free-function helper over the caller's pointer. Task 4b makes their non-null contract explicit (`Q_ASSERT_X`) and adds a `networkManager()` accessor; in 2.0 production their manager is always the owning ViewModel's / hub's `HttpClient::manager()`, proved at runtime by identity tests in Tasks 8, 11 and 12 (`qobject_cast<PolicyEnforcingNam *>(controller->networkManager())` and `controller->networkManager() == owner's HttpClient::manager()`). Their `CapturingNam`/`SequencedNam` suites (`tst_studentcontroller`, `tst_importcontroller`, `tst_reportcontroller`, `tst_brandingcontroller`, `tst_visitorcontroller`, `tst_accessdecisionservice`, `tst_turnstileprovider`, `tst_accesscontrolservice`) keep injecting directly — the raw-pointer constructor is their test seam only. Production owners per class: `StudentController` ← `SearchViewModel`, `DatabaseViewModel` (×2); `ImportController` ← `ImportViewModel`; `ReportController` ← `ReportingViewModel`; `TurnstileProvider` ← `AccessControlHub` (via its provider factory lambda, `AccessControlHub.cpp:126-132`); `VisitorController`, `BrandingController`, `AccessDecisionService` have **no 2.0 production owner** today (legacy Widgets / tests only) — any future 2.0 owner must pass `HttpClient::manager()`. Frozen legacy owners (`mainwindow.cpp:52,246`, `adminwindow.cpp:201,745`, `guestwindow.cpp:14`) are **not** migrated. Test doubles (`testsupport/capturingnam.*`, `testsupport/sequencednam.*`, `tests/tst_accessdecisionservice.cpp:33`) stay plain `QNetworkAccessManager` subclasses.
+Core network classes already take an injected pointer and **never** create a manager themselves: `StudentController`, `VisitorController`, `ReportController`, `ImportController`, `BrandingController` (`core/*controller.*`), `AccessControl::AccessDecisionService`, `AccessControl::TurnstileProvider` (`core/accesscontrol/*`); `HttpForm::submit/get` (`quick/HttpForm.*`) is a free-function helper over the caller's pointer. Task 4b makes their non-null contract explicit (`Q_ASSERT_X`) and adds a `networkManager()` accessor; in 2.0 production their manager is always the owning ViewModel's / hub's `HttpClient::manager()`, proved at runtime by identity tests in Tasks 8, 11 and 12 (`qobject_cast<PolicyEnforcingNam *>(controller->networkManager())` and `controller->networkManager() == owner's HttpClient::manager()`). Their `CapturingNam`/`SequencedNam` suites (`tst_studentcontroller`, `tst_importcontroller`, `tst_reportcontroller`, `tst_brandingcontroller`, `tst_visitorcontroller`, `tst_accessdecisionservice`, `tst_turnstileprovider`, `tst_accesscontrolservice`) keep injecting directly — the raw-pointer constructor is their test seam only. Production owners per class: `StudentController` ← `SearchViewModel`, `DatabaseViewModel` (two controllers sharing its one client); `ImportController` ← `ImportViewModel`; `ReportController` ← `ReportingViewModel`; `TurnstileProvider` ← `AccessControlHub` (via its provider factory lambda, `AccessControlHub.cpp:126-132`); `VisitorController`, `BrandingController`, `AccessDecisionService` have **no 2.0 production owner** today (legacy Widgets / tests only) — any future 2.0 owner must pass `HttpClient::manager()`. Frozen legacy owners (`mainwindow.cpp:52,246`, `adminwindow.cpp:201,745`, `guestwindow.cpp:14`) are **not** migrated. Test doubles (`testsupport/capturingnam.*`, `testsupport/sequencednam.*`, `tests/tst_accessdecisionservice.cpp:33`) stay plain `QNetworkAccessManager` subclasses.
 
 ---
 
@@ -1729,7 +1734,7 @@ Expected: all pass (no test anywhere constructs these classes with `nullptr` any
   - `class PolicyNamFactory : public QQmlNetworkAccessManagerFactory`
   - `QNetworkAccessManager *PolicyNamFactory::create(QObject *parent) override;` — a **new** `PolicyEnforcingNam(TransportPolicy::current(), parent)` per call; thread-safe
   - `int PolicyNamFactory::createdCount() const;` (atomic diagnostic counter)
-  - `static bool PolicyNamFactory::installOn(QQmlEngine &engine, PolicyNamFactory &factory);` — installs `factory` only if the engine has no factory yet, has not created a manager yet, and (for a `QQmlApplicationEngine`) has not loaded any QML; otherwise logs `qCritical` and returns `false` without installing (the factory-before-any-load/request ordering rule, enforced at runtime)
+  - `static bool PolicyNamFactory::installOn(QQmlEngine &engine, PolicyNamFactory &factory);` — installs `factory` only if the engine has no factory yet, has not created its own manager yet, and (for a `QQmlApplicationEngine`) has no root objects; otherwise logs `qCritical` and returns `false` without installing. Guarantee is limited to those three detectable states; it cannot see components compiled on a plain `QQmlEngine` without a manager — the production ordering rule relies on the fresh engine + `quickMainInstallsTransportBeforeLoad` (Task 7) for that
 
 - [ ] **Step 1: Write the failing test.** Create `qt-app/quick/tests/tst_policynamfactory.cpp`:
 
@@ -1930,11 +1935,14 @@ public:
     int createdCount() const { return m_created.load(); }
 
     // The only sanctioned way to install the factory. Refuses (qCritical +
-    // false, nothing installed) when it would be too late to guarantee that
-    // every engine manager comes from the seam: the engine already has a
-    // factory, has already created a manager (QQmlEngine parents its own
-    // manager to itself), or — for a QQmlApplicationEngine — has already
-    // loaded QML. Callers treat false as a fatal startup error.
+    // false, nothing installed) in exactly three detectable "too late" states:
+    // the engine already has a factory; it has already created its own
+    // manager (QQmlEngine parents that manager to itself); or it is a
+    // QQmlApplicationEngine that already has root objects. It cannot detect
+    // components compiled on a plain QQmlEngine/QQuickView that never created
+    // a manager — callers must install on a freshly constructed engine before
+    // any load (quick/main.cpp is pinned by a source-order guard test).
+    // Callers treat false as a fatal startup error.
     static bool installOn(QQmlEngine &engine, PolicyNamFactory &factory);
 
 private:
@@ -2008,43 +2016,56 @@ Expected: `100% tests passed` (9 functions). `installRefusedAfterEngineCreatedAM
 This gate verifies, on Qt 6.11.1, the Qt behaviour the whole QML half of the seam relies on: an `Image` (and `Canvas.loadImage`, used by `LCircleImage`) fetching an `http(s)` URL does so through a manager obtained from the engine's installed `QQmlNetworkAccessManagerFactory` (spec §2: "`create()` … may be called from multiple threads"). Tasks 6-14 depend on it.
 
 **Files:**
+- Create: `qt-app/quick/tests/RecordingPolicyNam.h` (header-only test support, reused by Task 13)
 - Create: `qt-app/quick/tests/tst_qmlfactorygate.cpp`
 - Modify: `qt-app/quick/CMakeLists.txt` (register after the `tst_policynamfactory` block added in Task 5)
 - Test: `tst_qmlfactorygate`
 
 **Interfaces:**
-- Consumes: `PolicyEnforcingNam` (its protected `createRequest` override point), `PolicyNamFactory::installOn` signature pattern, `TinyHttpServer` (Task 3).
-- Produces: CTest `tst_qmlfactorygate`; a recorded answer (in the test log) to whether the image request ran on a non-GUI thread.
+- Consumes: `PolicyEnforcingNam` (its protected `createRequest` override point), `PolicyNamFactory` (virtual `create`, `installOn`), `TinyHttpServer` (Task 3).
+- Produces: test-only `struct RequestLog { bool contains(const QUrl &) const; QThread *threadFor(const QUrl &) const; }`, `class RecordingPolicyNam : public PolicyEnforcingNam`, `class RecordingPolicyNamFactory : public PolicyNamFactory` (`explicit RecordingPolicyNamFactory(RequestLog *log)`); CTest `tst_qmlfactorygate`; a recorded answer (in the test log) to whether the image request ran on a non-GUI thread.
 
-- [ ] **Step 1: Write the gate test.** Create `qt-app/quick/tests/tst_qmlfactorygate.cpp`:
+- [ ] **Step 1: Write the gate test.** Create `qt-app/quick/tests/RecordingPolicyNam.h`:
 
 ```cpp
-#include <QtTest>
-#include <QBuffer>
-#include <QImage>
-#include <QMutex>
-#include <QNetworkProxy>
-#include <QQmlComponent>
-#include <QQmlEngine>
-#include <QQmlNetworkAccessManagerFactory>
-#include <QQuickItem>
-#include <QQuickView>
-#include <QThread>
+#ifndef RECORDINGPOLICYNAM_H
+#define RECORDINGPOLICYNAM_H
 
-#include "tinyhttpserver.h"
+#include <QList>
+#include <QMutex>
+#include <QMutexLocker>
+#include <QNetworkRequest>
+#include <QThread>
+#include <QUrl>
+
+#include "PolicyNamFactory.h"
 #include "transport/policyenforcingnam.h"
 #include "transport/transportpolicy.h"
 
-// S1a GATE G2: proves on this Qt build that QML image fetches (Image and
-// Canvas.loadImage) go through a manager created by the engine's installed
-// factory. A recording PolicyEnforcingNam subclass logs every request that
-// passes through a factory-made manager; the in-process TinyHttpServer
-// (127.0.0.1, ephemeral port) serves the image — never XAMPP.
-namespace {
-struct RequestLog {
-    QMutex mutex;
+// Test-only proof that a request really went through a manager made by the
+// installed factory. RecordingPolicyNamFactory is a PolicyNamFactory whose
+// managers are PolicyEnforcingNams that log each request (URL + issuing
+// thread) and then hand it to the real PolicyEnforcingNam pipeline. Counting
+// create() calls is NOT proof (an engine may reuse a manager), so tests assert
+// on this log instead. Thread-safe: managers may live on loader threads.
+struct RequestLog
+{
+    mutable QMutex mutex;
     QList<QUrl> urls;
     QList<QThread *> threads;
+
+    bool contains(const QUrl &url) const
+    {
+        QMutexLocker lock(&mutex);
+        return urls.contains(url);
+    }
+    // Thread that issued the first request for `url`, or nullptr if none.
+    QThread *threadFor(const QUrl &url) const
+    {
+        QMutexLocker lock(&mutex);
+        const qsizetype i = urls.indexOf(url);
+        return i < 0 ? nullptr : threads.at(i);
+    }
 };
 
 class RecordingPolicyNam : public PolicyEnforcingNam
@@ -2069,10 +2090,10 @@ private:
     RequestLog *m_log;
 };
 
-class RecordingFactory : public QQmlNetworkAccessManagerFactory
+class RecordingPolicyNamFactory : public PolicyNamFactory
 {
 public:
-    explicit RecordingFactory(RequestLog *log) : m_log(log) {}
+    explicit RecordingPolicyNamFactory(RequestLog *log) : m_log(log) {}
     QNetworkAccessManager *create(QObject *parent) override
     {
         return new RecordingPolicyNam(m_log, parent);
@@ -2082,6 +2103,31 @@ private:
     RequestLog *m_log;
 };
 
+#endif // RECORDINGPOLICYNAM_H
+```
+
+Create `qt-app/quick/tests/tst_qmlfactorygate.cpp`:
+
+```cpp
+#include <QtTest>
+#include <QBuffer>
+#include <QImage>
+#include <QNetworkProxy>
+#include <QQmlComponent>
+#include <QQmlEngine>
+#include <QQuickItem>
+#include <QQuickView>
+#include <QThread>
+
+#include "RecordingPolicyNam.h"
+#include "tinyhttpserver.h"
+
+// S1a GATE G2: proves on this Qt build that QML image fetches (Image and
+// Canvas.loadImage) go through a manager created by the engine's installed
+// factory. RecordingPolicyNamFactory's managers log every request that passes
+// through them; the in-process TinyHttpServer (127.0.0.1, ephemeral port)
+// serves the image — never XAMPP.
+namespace {
 QByteArray pngBytes()
 {
     QImage img(4, 4, QImage::Format_ARGB32);
@@ -2137,9 +2183,9 @@ QQuickItem *TestQmlFactoryGate::load(QQuickView &view, const QByteArray &qml)
 void TestQmlFactoryGate::imageLoadUsesInstalledFactoryManager()
 {
     RequestLog log;
-    RecordingFactory factory(&log);                     // declared before the view: outlives it
+    RecordingPolicyNamFactory factory(&log);            // declared before the view: outlives it
     QQuickView view;
-    view.engine()->setNetworkAccessManagerFactory(&factory);   // before any QML/request
+    QVERIFY(PolicyNamFactory::installOn(*view.engine(), factory));   // before any QML/request
     view.resize(100, 100);
     view.show();
 
@@ -2150,19 +2196,18 @@ void TestQmlFactoryGate::imageLoadUsesInstalledFactoryManager()
     QTRY_COMPARE_WITH_TIMEOUT(image->property("status").toInt(), 1 /* Image.Ready */, 5000);
     QVERIFY(m_server.countFor("/loams_api/uploads/students/gate-image.png") >= 1);
 
-    QMutexLocker lock(&log.mutex);
-    const qsizetype i = log.urls.indexOf(url);
-    QVERIFY2(i >= 0, "GATE G2 FAILED: the Image request did not pass through a factory-made manager");
+    QThread *issuer = log.threadFor(url);
+    QVERIFY2(issuer, "GATE G2 FAILED: the Image request did not pass through a factory-made manager");
     qInfo("GATE G2: image request ran on the %s thread",
-          log.threads.at(i) == QThread::currentThread() ? "GUI" : "non-GUI (pixmap reader)");
+          issuer == QThread::currentThread() ? "GUI" : "non-GUI (pixmap reader)");
 }
 
 void TestQmlFactoryGate::canvasLoadImageUsesInstalledFactoryManager()
 {
     RequestLog log;
-    RecordingFactory factory(&log);
+    RecordingPolicyNamFactory factory(&log);
     QQuickView view;
-    view.engine()->setNetworkAccessManagerFactory(&factory);
+    QVERIFY(PolicyNamFactory::installOn(*view.engine(), factory));
     view.resize(100, 100);
     view.show();
 
@@ -2174,8 +2219,7 @@ void TestQmlFactoryGate::canvasLoadImageUsesInstalledFactoryManager()
     QVERIFY(canvas);
     QTRY_VERIFY_WITH_TIMEOUT(canvas->property("done").toBool(), 5000);
 
-    QMutexLocker lock(&log.mutex);
-    QVERIFY2(log.urls.contains(url),
+    QVERIFY2(log.contains(url),
              "GATE G2 FAILED: the Canvas.loadImage request did not pass through a factory-made manager");
 }
 
@@ -2191,15 +2235,15 @@ In `qt-app/quick/CMakeLists.txt`, after the `tst_policynamfactory` registration 
 # fetch through the installed QQmlNetworkAccessManagerFactory's managers.
 # Loopback TinyHttpServer (127.0.0.1, ephemeral port) only. ---
 wits_add_qttest(tst_qmlfactorygate
-    SOURCES tests/tst_qmlfactorygate.cpp
+    SOURCES tests/tst_qmlfactorygate.cpp tests/RecordingPolicyNam.h
         ${CMAKE_SOURCE_DIR}/testsupport/tinyhttpserver.cpp
         ${CMAKE_SOURCE_DIR}/testsupport/tinyhttpserver.h
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick Qt${QT_VERSION_MAJOR}::Network
-    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport ${CMAKE_CURRENT_SOURCE_DIR}/tests
     OFFSCREEN)
 ```
 
-- [ ] **Step 2: Prove the detector — expected FAIL.** Temporarily delete the line `view.engine()->setNetworkAccessManagerFactory(&factory);` in `imageLoadUsesInstalledFactoryManager` only, then:
+- [ ] **Step 2: Prove the detector — expected FAIL.** Temporarily delete the line `QVERIFY(PolicyNamFactory::installOn(*view.engine(), factory));   // before any QML/request` in `imageLoadUsesInstalledFactoryManager` only, then:
 
 ```bash
 cmake -S qt-app -B C:/b/s1a -G Ninja -DCMAKE_PREFIX_PATH=C:/Qt/6.11.1/mingw_64
@@ -2491,6 +2535,362 @@ ctest --test-dir C:/b/s1a -R '^tst_transportseamguard$' --output-on-failure
 
 ---
 
+### Task 6b: Offline test harness — no test may reach a real backend
+
+Today many ViewModel tests default-construct their VM, which builds a real manager aimed at `http://localhost/loams_api/`; some drive request paths (e.g. `tst_databaseviewmodel.cpp` delete/edit/register/department paths around lines 154, 445, 770, 786, 801) and could mutate a running XAMPP. After S1a a default-constructed owner builds a real `PolicyEnforcingNam` (Passthrough), so the risk would persist. This task adds `OfflineHttp` — an `HttpClient` over a `SequencedNam` that records every request and **never answers** (stalled until aborted) — and a guard that forbids default-constructed seam owners in `quick/tests/tst_*.cpp` outside dedicated `defaultConstruction*` / `defaultHub*` ownership tests (which issue no request). Tasks 8-12 then migrate every such site (213 ViewModel sites in 10 files + the hubs in `tst_accesscontrolhub.cpp:261` and `tst_appshell.cpp:30`).
+
+**Audit result (from the code on `master`):** default-constructed seam owners per test file — `tst_dashboardviewmodel` 4, `tst_visitlogsviewmodel` 8, `tst_accesscontrolviewmodel` 8, `tst_kioskviewmodel` 18, `tst_guestviewmodel` 3, `tst_searchviewmodel` 9, `tst_databaseviewmodel` 63 (`vm`×57, `vm2`×2, `del`, `del2`, `bulk`, `bulk2`), `tst_importviewmodel` 5, `tst_reportingviewmodel` 57 (`vm`×56, `vm2`), `tst_settingsviewmodel` 38 (`vm`×35, `vm2`, `info`, `reset`) = **213**; plus `AccessControlHub hub;` in `tst_accesscontrolhub.cpp:261` and `tst_appshell.cpp:30`. All are migrated, not only the ones known to issue requests — that is provably complete and costs nothing for network-free tests. QML tests that instantiate real VMs (`tst_qml_kiosk.qml:134` `KioskScreen`, only `reloadSchoolInfo()`; `tst_qml_adminshell.qml:26` `AdminScreen { autoLoad: false }`; `tst_qml_admin.qml:1685` vm-less `SettingsScreen` theme picker; `DatabaseScreen.qml:298`'s own `ImportViewModel`, never driven to `startImport()`) issue no request; `QuickTestSetup.h`'s static hub is never `initialize()`d, so it never polls. Task 14 Step 1 proves the whole suite stays offline empirically (Apache access-log unchanged across a full `ctest` run).
+
+**Why no runtime "offline default" inside `HttpClient`:** the only S1a policy is Passthrough, so making an un-injected test client offline would need either a new policy mode or a manager-swap hook in the production seam — a code path a reviewer must prove can never be selected in production (a swap hook is itself a bypass vector). The static guard + empirical access-log check give the same assurance with zero production change, and S1e's fail-closed default policy (no configured `https` origin → no request) then makes an un-injected test client unable to reach `http://localhost` at all.
+
+**Files:**
+- Modify: `qt-app/testsupport/sequencednam.h` (public API + one member), `qt-app/testsupport/sequencednam.cpp` (lines 66-78 `createRequest`)
+- Create: `qt-app/testsupport/offlinehttp.h`
+- Modify: `qt-app/tests/tst_httpclient.cpp`, `qt-app/tests/CMakeLists.txt` (`tst_httpclient` registration from Task 4)
+- Modify: `qt-app/quick/CMakeLists.txt` (new `WITS_TEST_NAM_SOURCES` after line 158; re-register 12 test targets)
+- Modify: `qt-app/quick/tests/tst_transportseamguard.cpp` (new `ownersInTestsUseFakeManagers` + `kPendingTestMigration`)
+- Test: `tst_httpclient::offlineHttpNeverAnswers`, `tst_transportseamguard::ownersInTestsUseFakeManagers`
+
+**Interfaces:**
+- Consumes: `SequencedNam`, `HttpClient(QObject*, QNetworkAccessManager*)`.
+- Produces: `void SequencedNam::setStallWhenEmpty(bool on);` (default `false` — every existing `SequencedNam` user keeps today's "valid empty poll" answer); `struct OfflineHttp { SequencedNam nam; HttpClient http; }` (header-only, test-only); CMake list `WITS_TEST_NAM_SOURCES`; guard list `kPendingTestMigration` (12 entries, shrunk by Tasks 8-12, empty at the end of Task 12).
+
+- [ ] **Step 1: Write the failing tests.** In `qt-app/tests/tst_httpclient.cpp` add after `#include "capturingnam.h"`:
+
+```cpp
+#include "offlinehttp.h"
+```
+
+add `void offlineHttpNeverAnswers();` to `private slots:` and before `QTEST_MAIN`:
+
+```cpp
+void TestHttpClient::offlineHttpNeverAnswers()
+{
+    // Test-safety helper: a request through OfflineHttp is recorded and then
+    // stays in flight — no backend, no canned answer — until it is aborted.
+    OfflineHttp offline;
+    std::unique_ptr<QNetworkReply> reply(offline.http.manager()->get(
+        QNetworkRequest(QUrl(QStringLiteral("http://localhost/loams_api/get_departments.php")))));
+    QCOMPARE(offline.nam.requestCount(), 1);
+    QCOMPARE(offline.nam.lastUrl.path(), QStringLiteral("/loams_api/get_departments.php"));
+    QTest::qWait(100);                       // negative assertion: nothing may answer
+    QVERIFY(!reply->isFinished());
+    reply->abort();
+    QVERIFY(reply->isFinished());
+    QCOMPARE(reply->error(), QNetworkReply::OperationCanceledError);
+}
+```
+
+In `qt-app/tests/CMakeLists.txt`, in the `tst_httpclient` registration (Task 4) add these lines to `SOURCES` after the `capturingnam.h` line:
+
+```cmake
+        ${CMAKE_SOURCE_DIR}/testsupport/sequencednam.cpp
+        ${CMAKE_SOURCE_DIR}/testsupport/sequencednam.h
+        ${CMAKE_SOURCE_DIR}/testsupport/offlinehttp.h
+```
+
+In `qt-app/quick/tests/tst_transportseamguard.cpp`, after the `kCoreNetworkClasses` list (inside the anonymous namespace) add:
+
+```cpp
+// Test files that still construct a seam owner (network-owning ViewModel or
+// AccessControlHub) WITHOUT an injected fake manager. Tasks 8-12 delete their
+// entries; empty once S1a is complete. A listed file that no longer offends
+// FAILS as stale.
+const QStringList kPendingTestMigration = {
+};
+
+const QString kOwnerTypes = QStringLiteral(
+    "(?:(?:Dashboard|VisitLogs|AccessControl|Kiosk|Guest|Search|Database|Import|Reporting|Settings)"
+    "ViewModel|AccessControlHub)");
+```
+
+add `void ownersInTestsUseFakeManagers();` to `private slots:`, and before `QTEST_APPLESS_MAIN`:
+
+```cpp
+void TestTransportSeamGuard::ownersInTestsUseFakeManagers()
+{
+    // A seam owner constructed in a test with no HttpClient argument builds a
+    // real manager aimed at the configured backend (default
+    // http://localhost/loams_api/) and could mutate a running XAMPP. Every test
+    // must pass an HttpClient over CapturingNam / SequencedNam / OfflineHttp.
+    // Exempt: functions named defaultConstruction* / defaultHub*, which only
+    // assert seam ownership and issue no request.
+    const QStringList files = sourceFiles(QStringLiteral("quick/tests"), {QStringLiteral("tst_*.cpp")}, {});
+    QVERIFY2(files.size() > 20, "scan found too few test files — is SRC_ROOT wrong?");
+    const QRegularExpression header(QStringLiteral("^void\\s+\\w+::(\\w+)\\s*\\("),
+                                    QRegularExpression::MultilineOption);
+    const QRegularExpression stackDefault(
+        QStringLiteral("^[ \\t]*(?:static\\s+)?") + kOwnerTypes
+            + QStringLiteral("\\s+\\w+\\s*(?:;|\\{\\s*\\}|\\([^,()]*\\))"),
+        QRegularExpression::MultilineOption);
+    const QRegularExpression heapDefault(
+        QStringLiteral("\\b(?:new\\s+|make_unique\\s*<\\s*)") + kOwnerTypes
+            + QStringLiteral("\\s*>?\\s*\\([^,()]*\\)"));
+
+    QStringList offenders;
+    for (const QString &rel : files) {
+        bool ok = false;
+        const QString code = stripComments(readSource(rel, &ok));
+        QVERIFY2(ok, qPrintable(QStringLiteral("cannot read ") + rel));
+        QList<QPair<qsizetype, QString>> functions;   // (start offset, name), in order
+        for (auto it = header.globalMatch(code); it.hasNext();) {
+            const QRegularExpressionMatch m = it.next();
+            functions.append({m.capturedStart(), m.captured(1)});
+        }
+        auto enclosing = [&functions](qsizetype pos) {
+            QString name;
+            for (const auto &f : functions) {
+                if (f.first > pos)
+                    break;
+                name = f.second;
+            }
+            return name;
+        };
+        bool offends = false;
+        for (const QRegularExpression *re : {&stackDefault, &heapDefault}) {
+            for (auto it = re->globalMatch(code); it.hasNext();) {
+                const QString fn = enclosing(it.next().capturedStart());
+                if (!fn.startsWith(QLatin1String("defaultConstruction"))
+                    && !fn.startsWith(QLatin1String("defaultHub")))
+                    offends = true;
+            }
+        }
+        if (offends)
+            offenders << rel;
+    }
+
+    QStringList unexpected;
+    QStringList stale;
+    for (const QString &o : offenders) {
+        if (!kPendingTestMigration.contains(o))
+            unexpected << o;
+    }
+    for (const QString &p : kPendingTestMigration) {
+        if (!offenders.contains(p))
+            stale << p;
+    }
+    QVERIFY2(unexpected.isEmpty(), qPrintable(
+        QStringLiteral("test constructs a seam owner without a fake manager (inject "
+                       "OfflineHttp / CapturingNam / SequencedNam via HttpClient): ")
+        + unexpected.join(QStringLiteral(", "))));
+    QVERIFY2(stale.isEmpty(), qPrintable(
+        QStringLiteral("Stale kPendingTestMigration entries (already migrated — delete them): ")
+        + stale.join(QStringLiteral(", "))));
+}
+```
+
+- [ ] **Step 2: Run — expected FAIL:**
+
+```bash
+cmake -S qt-app -B C:/b/s1a -G Ninja -DCMAKE_PREFIX_PATH=C:/Qt/6.11.1/mingw_64
+cmake --build C:/b/s1a --target tst_httpclient tst_transportseamguard
+ctest --test-dir C:/b/s1a -R '^tst_transportseamguard$' --output-on-failure
+```
+
+Expected: `tst_httpclient` fails to compile (`offlinehttp.h: No such file or directory`); `ownersInTestsUseFakeManagers` FAILS listing exactly these 12 files: `quick/tests/tst_accesscontrolhub.cpp, quick/tests/tst_accesscontrolviewmodel.cpp, quick/tests/tst_appshell.cpp, quick/tests/tst_dashboardviewmodel.cpp, quick/tests/tst_databaseviewmodel.cpp, quick/tests/tst_guestviewmodel.cpp, quick/tests/tst_importviewmodel.cpp, quick/tests/tst_kioskviewmodel.cpp, quick/tests/tst_reportingviewmodel.cpp, quick/tests/tst_searchviewmodel.cpp, quick/tests/tst_settingsviewmodel.cpp, quick/tests/tst_visitlogsviewmodel.cpp`. If the list differs, stop and reconcile with the audit above.
+
+- [ ] **Step 3: Implement.** In `qt-app/testsupport/sequencednam.h` add after `void enqueueStall();`:
+
+```cpp
+    // When on, a request with nothing queued STALLS (finishes only via abort())
+    // instead of getting the default valid-empty-poll answer. Used by
+    // OfflineHttp so tests can never reach — or be answered as if by — a backend.
+    void setStallWhenEmpty(bool on) { m_stallWhenEmpty = on; }
+```
+
+and after `int m_maxActive = 0;`:
+
+```cpp
+    bool m_stallWhenEmpty = false;
+```
+
+In `qt-app/testsupport/sequencednam.cpp` replace lines 73-76 (the `Canned c = ...` statement) with:
+
+```cpp
+    Canned c = !m_queue.isEmpty() ? m_queue.dequeue()
+               : m_stallWhenEmpty ? Canned{QByteArray(), QNetworkReply::NoError, true}
+                                  : Canned{QByteArrayLiteral("{\"status\":\"success\",\"latest_id\":0,\"entry\":null}"),
+                                           QNetworkReply::NoError, false};
+```
+
+Create `qt-app/testsupport/offlinehttp.h`:
+
+```cpp
+#ifndef OFFLINEHTTP_H
+#define OFFLINEHTTP_H
+
+#include "sequencednam.h"
+#include "transport/httpclient.h"
+
+// Test-only seam client that can never reach a real backend: every request is
+// recorded by SequencedNam (requestCount(), lastUrl, urls) and then stays in
+// flight — never answered — until aborted. Inject it into every seam owner a
+// test constructs (ViewModel / AccessControlHub) unless the test injects its
+// own CapturingNam / SequencedNam:
+//
+//     OfflineHttp vmHttp;
+//     DatabaseViewModel vm(nullptr, &vmHttp.http);
+//
+// Declare it BEFORE the owner so it outlives it. Enforced by
+// tst_transportseamguard::ownersInTestsUseFakeManagers.
+struct OfflineHttp
+{
+    OfflineHttp() { nam.setStallWhenEmpty(true); }
+
+    SequencedNam nam;
+    HttpClient http{nullptr, &nam};   // declared after nam: constructed after it
+};
+
+#endif // OFFLINEHTTP_H
+```
+
+In `qt-app/quick/CMakeLists.txt`, after the `set(WITS_LOAMS_STATIC_LIBS ...)` statement (lines 157-158) add:
+
+```cmake
+
+# Fake managers for tests that construct seam owners (S1a transport seam):
+# CapturingNam / SequencedNam + the header-only OfflineHttp. Every quick test
+# that builds a ViewModel or AccessControlHub compiles these and adds
+# ${CMAKE_SOURCE_DIR}/testsupport to INCLUDES.
+set(WITS_TEST_NAM_SOURCES
+    ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
+    ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
+    ${CMAKE_SOURCE_DIR}/testsupport/sequencednam.cpp
+    ${CMAKE_SOURCE_DIR}/testsupport/sequencednam.h
+    ${CMAKE_SOURCE_DIR}/testsupport/offlinehttp.h)
+```
+
+and re-register the 12 owner-constructing test targets with it (replace each existing `wits_add_qttest(<name> ...)` call, keeping the comment block above it):
+
+```cmake
+wits_add_qttest(tst_appshell
+    SOURCES tests/tst_appshell.cpp ${WITS_TEST_NAM_SOURCES}
+    LIBS ${WITS_LOAMS_STATIC_LIBS}
+         Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
+    OFFSCREEN)
+```
+
+```cmake
+wits_add_qttest(tst_kioskviewmodel
+    SOURCES tests/tst_kioskviewmodel.cpp ${WITS_TEST_NAM_SOURCES}
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Quick Qt${QT_VERSION_MAJOR}::Network
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
+    OFFSCREEN)
+```
+
+```cmake
+wits_add_qttest(tst_guestviewmodel
+    SOURCES tests/tst_guestviewmodel.cpp ${WITS_TEST_NAM_SOURCES}
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
+    OFFSCREEN)
+```
+
+```cmake
+wits_add_qttest(tst_accesscontrolhub
+    SOURCES tests/tst_accesscontrolhub.cpp ${WITS_TEST_NAM_SOURCES}
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
+    OFFSCREEN)
+```
+
+```cmake
+wits_add_qttest(tst_dashboardviewmodel
+    SOURCES tests/tst_dashboardviewmodel.cpp ${WITS_TEST_NAM_SOURCES}
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
+    OFFSCREEN)
+```
+
+```cmake
+wits_add_qttest(tst_visitlogsviewmodel
+    SOURCES tests/tst_visitlogsviewmodel.cpp ${WITS_TEST_NAM_SOURCES}
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
+    OFFSCREEN)
+```
+
+```cmake
+wits_add_qttest(tst_accesscontrolviewmodel
+    SOURCES tests/tst_accesscontrolviewmodel.cpp ${WITS_TEST_NAM_SOURCES}
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
+    OFFSCREEN)
+```
+
+```cmake
+wits_add_qttest(tst_searchviewmodel
+    SOURCES tests/tst_searchviewmodel.cpp ${WITS_TEST_NAM_SOURCES}
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
+    OFFSCREEN)
+```
+
+```cmake
+wits_add_qttest(tst_databaseviewmodel
+    SOURCES tests/tst_databaseviewmodel.cpp ${WITS_TEST_NAM_SOURCES}
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
+    OFFSCREEN)
+```
+
+```cmake
+wits_add_qttest(tst_settingsviewmodel
+    SOURCES tests/tst_settingsviewmodel.cpp ${WITS_TEST_NAM_SOURCES}
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
+    OFFSCREEN)
+```
+
+```cmake
+wits_add_qttest(tst_importviewmodel
+    SOURCES tests/tst_importviewmodel.cpp ${WITS_TEST_NAM_SOURCES}
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
+    OFFSCREEN)
+```
+
+```cmake
+wits_add_qttest(tst_reportingviewmodel
+    SOURCES tests/tst_reportingviewmodel.cpp ${WITS_TEST_NAM_SOURCES}
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
+    OFFSCREEN)
+```
+
+In `tst_transportseamguard.cpp`, fill `kPendingTestMigration` with the 12 files the red run listed:
+
+```cpp
+const QStringList kPendingTestMigration = {
+    QStringLiteral("quick/tests/tst_appshell.cpp"),                 // Task 8 (needs the hub's HttpClient ctor)
+    QStringLiteral("quick/tests/tst_accesscontrolhub.cpp"),         // Task 8
+    QStringLiteral("quick/tests/tst_accesscontrolviewmodel.cpp"),   // Task 9
+    QStringLiteral("quick/tests/tst_dashboardviewmodel.cpp"),       // Task 9
+    QStringLiteral("quick/tests/tst_visitlogsviewmodel.cpp"),       // Task 9
+    QStringLiteral("quick/tests/tst_guestviewmodel.cpp"),           // Task 10
+    QStringLiteral("quick/tests/tst_kioskviewmodel.cpp"),           // Task 10
+    QStringLiteral("quick/tests/tst_databaseviewmodel.cpp"),        // Task 11
+    QStringLiteral("quick/tests/tst_searchviewmodel.cpp"),          // Task 11
+    QStringLiteral("quick/tests/tst_importviewmodel.cpp"),          // Task 12
+    QStringLiteral("quick/tests/tst_reportingviewmodel.cpp"),       // Task 12
+    QStringLiteral("quick/tests/tst_settingsviewmodel.cpp"),        // Task 12
+};
+```
+
+- [ ] **Step 4: Run — expected PASS** (and the existing `SequencedNam` suites are unaffected because the stall mode defaults off):
+
+```bash
+cmake -S qt-app -B C:/b/s1a -G Ninja -DCMAKE_PREFIX_PATH=C:/Qt/6.11.1/mingw_64
+cmake --build C:/b/s1a --target tst_httpclient tst_transportseamguard tst_turnstileprovider tst_accesscontrolservice tst_accesscontrolhub
+QT_QPA_PLATFORM=offscreen QT_QUICK_CONTROLS_STYLE=Basic QT_QPA_FONTDIR=C:/Windows/Fonts \
+  ctest --test-dir C:/b/s1a -R '^(tst_httpclient|tst_transportseamguard|tst_turnstileprovider|tst_accesscontrolservice|tst_accesscontrolhub)$' --output-on-failure -j 4
+```
+
+- [ ] **Step 5: Commit** via the project `commit` skill. Intended subject: `test(transport): add offline test client and forbid live managers in tests`.
+
+---
+
 ### Task 7: Install the seam in `WITSQuick`, the QuickTest harness and `tst_appshell`
 
 **Files:**
@@ -2747,29 +3147,47 @@ Expected: all pass (QuickTests unchanged in content, now running through the fac
 **Files:**
 - Modify: `qt-app/quick/AccessControlHub.h` (line 14 forward decls, lines 34-35 ctor, lines 70-78 members)
 - Modify: `qt-app/quick/AccessControlHub.cpp` (lines 1-30)
-- Modify: `qt-app/quick/tests/tst_accesscontrolhub.cpp` (include block lines 1-8; 14 `AccessControlHub hub(&nam);` sites)
-- Modify: `qt-app/quick/tests/tst_transportseamguard.cpp` (`kPendingMigration`)
+- Modify: `qt-app/quick/tests/tst_accesscontrolhub.cpp` (include block lines 1-8; 13 `AccessControlHub hub(&nam);` sites; the default `AccessControlHub hub;` at line 261)
+- Modify: `qt-app/quick/tests/tst_appshell.cpp` (the hub declaration, as rewritten in Task 7)
+- Modify: `qt-app/quick/tests/tst_transportseamguard.cpp` (`kPendingMigration`, `kPendingTestMigration`)
 - Test: `tst_accesscontrolhub`, `tst_transportseamguard`
 
 **Interfaces:**
-- Consumes: `HttpClient(QObject*, QNetworkAccessManager*)`, `HttpClient::manager()`.
-- Produces: `explicit AccessControlHub(HttpClient *injectedClient = nullptr, QObject *parent = nullptr);` (was `QNetworkAccessManager *injectedNam`). Default path owns `std::unique_ptr<HttpClient> m_ownedClient` in the slot `m_ownedNam` occupied, so teardown stays service → factory → owned client (+ its manager) → bus.
+- Consumes: `HttpClient(QObject*, QNetworkAccessManager*)`, `HttpClient::manager()`, `OfflineHttp` (Task 6b).
+- Produces: `explicit AccessControlHub(QObject *parent = nullptr, HttpClient *http = nullptr);` — the locked owner-constructor order shared with every ViewModel (was `(QNetworkAccessManager *injectedNam = nullptr, QObject *parent = nullptr)`); `QNetworkAccessManager *AccessControlHub::networkManager() const`. Default path owns `std::unique_ptr<HttpClient> m_ownedClient` in the slot `m_ownedNam` occupied, so teardown stays service → factory → owned client (+ its manager) → bus. Production call sites are unaffected: `quick/main.cpp` and `QuickTestSetup.h` default-construct the hub.
 
-- [ ] **Step 1: Write the failing change.** In `qt-app/quick/tests/tst_transportseamguard.cpp` delete the `QStringLiteral("quick/AccessControlHub.cpp"),` entry. In `qt-app/quick/tests/tst_accesscontrolhub.cpp` add after line 7 (`#include "sequencednam.h"`):
+- [ ] **Step 1: Write the failing change.** In `qt-app/quick/tests/tst_transportseamguard.cpp` delete the `QStringLiteral("quick/AccessControlHub.cpp"),` entry from `kPendingMigration` and the `QStringLiteral("quick/tests/tst_accesscontrolhub.cpp"),` entry from `kPendingTestMigration`. In `qt-app/quick/tests/tst_accesscontrolhub.cpp` add after line 7 (`#include "sequencednam.h"`):
 
 ```cpp
+#include "offlinehttp.h"
 #include "transport/httpclient.h"
+#include "transport/policyenforcingnam.h"
 ```
 
-and inject every `SequencedNam` through an `HttpClient` (14 sites; `http` is declared after `nam` and before `hub`, so it is destroyed after the hub and before `nam`):
+inject every `SequencedNam` through an `HttpClient` (13 sites; `http` is declared after `nam` and before `hub`, so it is destroyed after the hub and before `nam`), and make the never-initialized default hub at line 261 offline too:
 
 ```bash
-sed -i 's/^\(\s*\)AccessControlHub hub(&nam);/\1HttpClient http(nullptr, \&nam);\n\1AccessControlHub hub(\&http);/' qt-app/quick/tests/tst_accesscontrolhub.cpp
-grep -c "AccessControlHub hub(&http);" qt-app/quick/tests/tst_accesscontrolhub.cpp   # expect 14
-grep -c "AccessControlHub hub(&nam);" qt-app/quick/tests/tst_accesscontrolhub.cpp    # expect 0
+sed -i 's/^\(\s*\)AccessControlHub hub(&nam);/\1HttpClient http(nullptr, \&nam);\n\1AccessControlHub hub(nullptr, \&http);/' qt-app/quick/tests/tst_accesscontrolhub.cpp
+sed -i 's/^\(\s*\)AccessControlHub hub;\(.*\)$/\1OfflineHttp hubHttp;\n\1AccessControlHub hub(nullptr, \&hubHttp.http);\2/' qt-app/quick/tests/tst_accesscontrolhub.cpp
+grep -c "AccessControlHub hub(nullptr, &http);" qt-app/quick/tests/tst_accesscontrolhub.cpp          # expect 13
+grep -c "AccessControlHub hub(nullptr, &hubHttp.http);" qt-app/quick/tests/tst_accesscontrolhub.cpp  # expect 1
+grep -cE "AccessControlHub hub(\(&nam\))?;" qt-app/quick/tests/tst_accesscontrolhub.cpp              # expect 0
 ```
 
-Also add after the new include: `#include "transport/policyenforcingnam.h"`; add `void defaultHubManagerIsSeamManager();` and `void injectedClientManagerReachesTheProvider();` to `private slots:`; and before `QTEST_MAIN`:
+Also make `tst_appshell`'s hub offline (delete the `QStringLiteral("quick/tests/tst_appshell.cpp"),` entry from `kPendingTestMigration` too). In `qt-app/quick/tests/tst_appshell.cpp` (as rewritten in Task 7) add `#include "offlinehttp.h"` after `#include "PolicyNamFactory.h"` and replace
+
+```cpp
+    AccessControlHub hub;                 // default settings, no env -> disabled
+```
+
+with
+
+```cpp
+    OfflineHttp hubHttp;                  // the hub can never reach a backend in tests
+    AccessControlHub hub(nullptr, &hubHttp.http);   // default settings, no env -> disabled
+```
+
+Only **after** running the seds above (so the new ownership test stays default-constructed — it is exempt from the guard by its `defaultHub` name and never initializes the hub), add `void defaultHubManagerIsSeamManager();` and `void injectedClientManagerReachesTheProvider();` to `private slots:`; and before `QTEST_MAIN`:
 
 ```cpp
 void TestAccessControlHub::defaultHubManagerIsSeamManager()
@@ -2784,7 +3202,7 @@ void TestAccessControlHub::injectedClientManagerReachesTheProvider()
 {
     SequencedNam nam;                        // unqueued requests: valid empty polls
     HttpClient http(nullptr, &nam);
-    AccessControlHub hub(&http);
+    AccessControlHub hub(nullptr, &http);
     QCOMPARE(hub.networkManager(), static_cast<QNetworkAccessManager *>(&nam));
     hub.initialize();
     hub.setAccessEnabled(true);              // provider is created with hub.networkManager()
@@ -2793,14 +3211,14 @@ void TestAccessControlHub::injectedClientManagerReachesTheProvider()
 }
 ```
 
-- [ ] **Step 2: Run — expected FAIL** (compile: no `AccessControlHub(HttpClient*)` ctor; guard: `quick/AccessControlHub.cpp` unexpected):
+- [ ] **Step 2: Run — expected FAIL** (compile: no `AccessControlHub(QObject*, HttpClient*)` ctor; guard: `quick/AccessControlHub.cpp` unexpected):
 
 ```bash
 cmake --build C:/b/s1a --target tst_accesscontrolhub tst_transportseamguard
 ctest --test-dir C:/b/s1a -R '^tst_transportseamguard$' --output-on-failure
 ```
 
-Expected: `tst_accesscontrolhub` fails to compile (`cannot convert 'HttpClient*' to 'QNetworkAccessManager*'`); guard fails listing `quick/AccessControlHub.cpp`.
+Expected: `tst_accesscontrolhub` fails to compile (no `AccessControlHub(std::nullptr_t, HttpClient*)` constructor yet); `namConstructedOnlyInsideSeam` fails listing `quick/AccessControlHub.cpp`. (`ownersInTestsUseFakeManagers` already passes for this file because the sed removed its only default-constructed hub.)
 
 - [ ] **Step 3: Implement.** In `qt-app/quick/AccessControlHub.h` replace line 14:
 
@@ -2825,10 +3243,10 @@ replace lines 34-35:
 with:
 
 ```cpp
-    // injectedClient: test seam (an HttpClient wrapping SequencedNam). Null in
-    // production: the hub owns an HttpClient (transport seam, S1 spec §3).
-    explicit AccessControlHub(HttpClient *injectedClient = nullptr,
-                              QObject *parent = nullptr);
+    // http: test seam (an HttpClient wrapping SequencedNam / OfflineHttp).
+    // Null in production: the hub owns an HttpClient (transport seam, S1 spec
+    // §3). Same (parent, http) order as every ViewModel.
+    explicit AccessControlHub(QObject *parent = nullptr, HttpClient *http = nullptr);
 
     // The client's manager — the one handed to every TurnstileProvider this
     // hub creates. Lets tests prove production wiring (PolicyEnforcingNam).
@@ -2887,13 +3305,13 @@ namespace { AccessControlHub *g_instance = nullptr; }
 AccessControlHub *AccessControlHub::instance() { return g_instance; }
 void AccessControlHub::setInstance(AccessControlHub *hub) { g_instance = hub; }
 
-AccessControlHub::AccessControlHub(HttpClient *injectedClient, QObject *parent)
+AccessControlHub::AccessControlHub(QObject *parent, HttpClient *http)
     : QObject(parent)
     , m_bus(std::make_unique<EventBus>())
     , m_service(std::make_unique<AccessControlService>(m_bus.get(), &m_factory))
 {
-    if (injectedClient) {
-        m_nam = injectedClient->manager();   // externally owned; must outlive the hub
+    if (http) {
+        m_nam = http->manager();             // externally owned; must outlive the hub
     } else {
         m_ownedClient = std::make_unique<HttpClient>();
         m_nam = m_ownedClient->manager();
@@ -2923,10 +3341,10 @@ Expected: all pass; every pre-existing hub assertion (cursor, reconnect, enable-
 - Modify: `qt-app/quick/viewmodels/VisitLogsViewModel.h` (line 11, lines 34-37, line 88), `VisitLogsViewModel.cpp` (lines 1-22)
 - Modify: `qt-app/quick/viewmodels/AccessControlViewModel.h` (line 10, lines 43-45, line 84), `AccessControlViewModel.cpp` (lines 1-18)
 - Modify: `qt-app/quick/tests/tst_dashboardviewmodel.cpp`, `tst_visitlogsviewmodel.cpp`, `tst_accesscontrolviewmodel.cpp`
-- Modify: `qt-app/quick/tests/tst_transportseamguard.cpp` (`kPendingMigration`)
+- Modify: `qt-app/quick/tests/tst_transportseamguard.cpp` (`kPendingMigration`, `kPendingTestMigration`)
 
 **Interfaces:**
-- Consumes: `HttpClient`, `PolicyEnforcingNam` (for `findChild` assertions), `CapturingNam`.
+- Consumes: `HttpClient`, `PolicyEnforcingNam` (for `findChild` assertions), `CapturingNam`, `OfflineHttp`.
 - Produces:
   - `explicit DashboardViewModel(QObject *parent = nullptr, HttpClient *http = nullptr);`
   - `explicit VisitLogsViewModel(QObject *parent = nullptr, HttpClient *http = nullptr);`
@@ -2935,9 +3353,21 @@ Expected: all pass; every pre-existing hub assertion (cursor, reconnect, enable-
 
 - [ ] **Step 1: Write the failing tests.**
 
-Guard: delete the three entries `AccessControlViewModel.cpp`, `DashboardViewModel.cpp`, `VisitLogsViewModel.cpp` from `kPendingMigration`.
+Guard: delete the three entries `AccessControlViewModel.cpp`, `DashboardViewModel.cpp`, `VisitLogsViewModel.cpp` from `kPendingMigration`, and the three entries `quick/tests/tst_accesscontrolviewmodel.cpp`, `quick/tests/tst_dashboardviewmodel.cpp`, `quick/tests/tst_visitlogsviewmodel.cpp` from `kPendingTestMigration`.
 
-Inject through `HttpClient` at every existing CapturingNam site:
+**Safety injection first** — every default-constructed VM in these files gets an `OfflineHttp` (Task 6b) so no test can reach a backend (run this before adding the new ownership tests below, which must stay default-constructed):
+
+```bash
+for f in dashboardviewmodel:DashboardViewModel visitlogsviewmodel:VisitLogsViewModel accesscontrolviewmodel:AccessControlViewModel; do
+  t=${f%%:*}; c=${f##*:}
+  sed -i "s/^\(\s*\)$c \([A-Za-z_][A-Za-z0-9_]*\);/\1OfflineHttp \2Http;\n\1$c \2(nullptr, \&\2Http.http);/" qt-app/quick/tests/tst_$t.cpp
+  echo "$t: $(grep -c 'Http.http);' qt-app/quick/tests/tst_$t.cpp) offline, $(grep -cE "^\s*$c \w+;" qt-app/quick/tests/tst_$t.cpp) default left"
+done
+```
+
+Expected: dashboard `4 offline, 0 default left`; visitlogs `8 offline, 0 default left`; accesscontrol `8 offline, 0 default left`.
+
+Then inject through `HttpClient` at every existing CapturingNam site:
 
 ```bash
 for f in dashboardviewmodel:DashboardViewModel visitlogsviewmodel:VisitLogsViewModel accesscontrolviewmodel:AccessControlViewModel; do
@@ -2952,6 +3382,7 @@ Expected counts: dashboard `2 injected, 0 left`; visitlogs `2 injected, 0 left`;
 In each of the three test files add after the `#include "capturingnam.h"` line:
 
 ```cpp
+#include "offlinehttp.h"
 #include "transport/httpclient.h"
 #include "transport/policyenforcingnam.h"
 ```
@@ -3100,43 +3531,28 @@ QT_QPA_PLATFORM=offscreen QT_QUICK_CONTROLS_STYLE=Basic QT_QPA_FONTDIR=C:/Window
 - Modify: `qt-app/quick/viewmodels/KioskViewModel.h` (line 14, line 66, line 151), `KioskViewModel.cpp` (lines 16-22)
 - Modify: `qt-app/quick/viewmodels/GuestViewModel.h` (line 9, line 17, line 33), `GuestViewModel.cpp` (lines 1-13)
 - Modify: `qt-app/quick/tests/tst_kioskviewmodel.cpp`, `qt-app/quick/tests/tst_guestviewmodel.cpp`
-- Modify: `qt-app/quick/CMakeLists.txt` (`tst_kioskviewmodel` lines 300-303, `tst_guestviewmodel` lines 323-326)
-- Modify: `qt-app/quick/tests/tst_transportseamguard.cpp` (`kPendingMigration`)
+- Modify: `qt-app/quick/tests/tst_transportseamguard.cpp` (`kPendingMigration`, `kPendingTestMigration`)
+- (No CMake change: Task 6b already registers both tests with `${WITS_TEST_NAM_SOURCES}` and the `testsupport` include dir.)
 
 **Interfaces:**
-- Consumes: `HttpClient`, `PolicyEnforcingNam`, `CapturingNam`, `ApiConfig::endpoint`.
+- Consumes: `HttpClient`, `PolicyEnforcingNam`, `CapturingNam`, `OfflineHttp`, `ApiConfig::endpoint`.
 - Produces: `explicit KioskViewModel(QObject *parent = nullptr, HttpClient *http = nullptr);`, `explicit GuestViewModel(QObject *parent = nullptr, HttpClient *http = nullptr);` (+ `m_http` members as in Task 9).
 
 - [ ] **Step 1: Write the failing tests.**
 
-Guard: delete `GuestViewModel.cpp` and `KioskViewModel.cpp` from `kPendingMigration`.
+Guard: delete `GuestViewModel.cpp` and `KioskViewModel.cpp` from `kPendingMigration`, and `quick/tests/tst_guestviewmodel.cpp`, `quick/tests/tst_kioskviewmodel.cpp` from `kPendingTestMigration`.
 
-`qt-app/quick/CMakeLists.txt` — replace the two registrations with:
+**Safety injection first** (before adding the new ownership tests below):
 
-```cmake
-# --- KioskViewModel + RecentLoginsModel unit test (C++ QtTest, offscreen).
-# CapturingNam (qt-app/testsupport) proves login requests go through an
-# injected HttpClient (S1a transport seam) with no live network. ---
-wits_add_qttest(tst_kioskviewmodel
-    SOURCES tests/tst_kioskviewmodel.cpp
-        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
-        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
-    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Quick Qt${QT_VERSION_MAJOR}::Network
-    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
-    OFFSCREEN)
+```bash
+for f in kioskviewmodel:KioskViewModel guestviewmodel:GuestViewModel; do
+  t=${f%%:*}; c=${f##*:}
+  sed -i "s/^\(\s*\)$c \([A-Za-z_][A-Za-z0-9_]*\);/\1OfflineHttp \2Http;\n\1$c \2(nullptr, \&\2Http.http);/" qt-app/quick/tests/tst_$t.cpp
+  echo "$t: $(grep -c 'Http.http);' qt-app/quick/tests/tst_$t.cpp) offline, $(grep -cE "^\s*$c \w+;" qt-app/quick/tests/tst_$t.cpp) default left"
+done
 ```
 
-```cmake
-# --- GuestViewModel unit test (C++ QtTest, offscreen; CapturingNam via an
-# injected HttpClient, S1a transport seam) ---
-wits_add_qttest(tst_guestviewmodel
-    SOURCES tests/tst_guestviewmodel.cpp
-        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
-        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
-    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network
-    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
-    OFFSCREEN)
-```
+Expected: kiosk `18 offline, 0 default left`; guest `3 offline, 0 default left`.
 
 `tst_kioskviewmodel.cpp`: after line 11 (`#include "appsettings.h"`) add
 
@@ -3144,6 +3560,7 @@ wits_add_qttest(tst_guestviewmodel
 #include <QUrlQuery>
 #include "apiconfig.h"
 #include "capturingnam.h"
+#include "offlinehttp.h"
 #include "transport/httpclient.h"
 #include "transport/policyenforcingnam.h"
 ```
@@ -3182,6 +3599,7 @@ void TestKioskViewModel::studentLoginGoesThroughInjectedClient()
 #include <QUrlQuery>
 #include "apiconfig.h"
 #include "capturingnam.h"
+#include "offlinehttp.h"
 #include "transport/httpclient.h"
 #include "transport/policyenforcingnam.h"
 ```
@@ -3301,53 +3719,39 @@ QT_QPA_PLATFORM=offscreen QT_QUICK_CONTROLS_STYLE=Basic QT_QPA_FONTDIR=C:/Window
 - Modify: `qt-app/quick/viewmodels/SearchViewModel.h` (line 11, line 28, line 93), `SearchViewModel.cpp` (lines 1-10)
 - Modify: `qt-app/quick/viewmodels/DatabaseViewModel.h` (line 12, line 79, lines 273 and 285), `DatabaseViewModel.cpp` (lines 1-24)
 - Modify: `qt-app/quick/tests/tst_searchviewmodel.cpp`, `qt-app/quick/tests/tst_databaseviewmodel.cpp`
-- Modify: `qt-app/quick/CMakeLists.txt` (`tst_searchviewmodel` lines 426-429, `tst_databaseviewmodel` lines 435-438)
-- Modify: `qt-app/quick/tests/tst_transportseamguard.cpp` (`kPendingMigration`)
+- Modify: `qt-app/quick/tests/tst_transportseamguard.cpp` (`kPendingMigration`, `kPendingTestMigration`)
+- (No CMake change: Task 6b already registers both tests with `${WITS_TEST_NAM_SOURCES}`.)
 
 **Interfaces:**
-- Consumes: `HttpClient`, `PolicyEnforcingNam`, `CapturingNam`, `StudentController(QNetworkAccessManager*, QObject*)` (unchanged).
+- Consumes: `HttpClient`, `PolicyEnforcingNam`, `CapturingNam`, `OfflineHttp`, `StudentController(QNetworkAccessManager*, QObject*)` + `networkManager()` (Task 4b).
 - Produces:
   - `explicit SearchViewModel(QObject *parent = nullptr, HttpClient *http = nullptr);`
-  - `explicit DatabaseViewModel(QObject *parent = nullptr, HttpClient *http = nullptr);` — default path owns **two** `HttpClient`s (`m_http` for the table controller, `m_editHttp` for the edit controller) exactly as today's two managers; when `http` is injected, both controllers use it.
+  - `explicit DatabaseViewModel(QObject *parent = nullptr, HttpClient *http = nullptr);` — owns **one** `HttpClient` (injected or an owned child), and **both** of its `StudentController`s (table `m_controller`, edit `m_editController`) receive that client's manager (locked decision: one client per owner).
+
+**DatabaseViewModel single-client confirmation (from the code on `master`):** today `DatabaseViewModel.cpp:13` and `:23` create two managers, but nothing depends on them being separate: `m_editNam` is referenced only at construction (`DatabaseViewModel.cpp:23-24`); neither the VM nor `StudentController` ever calls `abort()`, `clearConnectionCache()`, `clearAccessCache()` or `setTransferTimeout()` on a manager, or connects to any `QNetworkAccessManager` signal (`finished`, `authenticationRequired`, `sslErrors`) — every reply is handled through its own `QNetworkReply::finished` connection with the controller as context; and both managers were children of the VM with the same lifetime. Sharing one manager therefore changes only HTTP connection pooling (one per-host pool instead of two), which has no functional effect for these sequential admin requests. `m_editNam` is removed; `m_nam` serves both controllers.
 
 - [ ] **Step 1: Write the failing tests.**
 
-Guard: delete `DatabaseViewModel.cpp` and `SearchViewModel.cpp` from `kPendingMigration`.
+Guard: delete `DatabaseViewModel.cpp` and `SearchViewModel.cpp` from `kPendingMigration`, and `quick/tests/tst_databaseviewmodel.cpp`, `quick/tests/tst_searchviewmodel.cpp` from `kPendingTestMigration`.
 
-`qt-app/quick/CMakeLists.txt` — replace the two registrations with:
+**Safety injection first** (before adding the new ownership tests below). The Database suite drives delete, edit, bulk edit, register and department deactivate/delete paths (e.g. around `tst_databaseviewmodel.cpp:154, 445, 770, 786, 801`) — after this, none of them can reach a backend:
 
-```cmake
-# --- SearchViewModel unit test (C++ QtTest, offscreen; CapturingNam via an
-# injected HttpClient, S1a transport seam) ---
-wits_add_qttest(tst_searchviewmodel
-    SOURCES tests/tst_searchviewmodel.cpp
-        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
-        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
-    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
-    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
-    OFFSCREEN)
+```bash
+for f in searchviewmodel:SearchViewModel databaseviewmodel:DatabaseViewModel; do
+  t=${f%%:*}; c=${f##*:}
+  sed -i "s/^\(\s*\)$c \([A-Za-z_][A-Za-z0-9_]*\);/\1OfflineHttp \2Http;\n\1$c \2(nullptr, \&\2Http.http);/" qt-app/quick/tests/tst_$t.cpp
+  echo "$t: $(grep -c 'Http.http);' qt-app/quick/tests/tst_$t.cpp) offline, $(grep -cE "^\s*$c \w+;" qt-app/quick/tests/tst_$t.cpp) default left"
+done
 ```
 
-```cmake
-# --- DatabaseViewModel unit test (C++ QtTest, offscreen). The VM builds real
-# HttpClients + StudentControllers and some paths (setDepartment) fire a
-# fire-and-forget post(), so this needs a QCoreApplication (QTEST_MAIN, not
-# APPLESS) + Network/Gui + OFFSCREEN; CapturingNam proves both controllers use
-# an injected HttpClient (S1a transport seam). ---
-wits_add_qttest(tst_databaseviewmodel
-    SOURCES tests/tst_databaseviewmodel.cpp
-        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
-        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
-    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
-    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
-    OFFSCREEN)
-```
+Expected: search `9 offline, 0 default left`; database `63 offline, 0 default left` (incl. the one-line `del2` / `bulk2` constructions at lines 423-424, whose trailing statements stay on the rewritten line).
 
 `tst_searchviewmodel.cpp`: after line 5 (`#include "studentdata.h"`) add
 
 ```cpp
 #include "apiconfig.h"
 #include "capturingnam.h"
+#include "offlinehttp.h"
 #include "studentcontroller.h"
 #include "transport/httpclient.h"
 #include "transport/policyenforcingnam.h"
@@ -3386,38 +3790,31 @@ void TestSearchViewModel::searchGoesThroughInjectedClient()
 `tst_databaseviewmodel.cpp`: after line 11 (`#include "studentcontroller.h"`) add
 
 ```cpp
-#include <QSet>
 #include "apiconfig.h"
 #include "capturingnam.h"
+#include "offlinehttp.h"
 #include "transport/httpclient.h"
 #include "transport/policyenforcingnam.h"
 ```
 
-add `void defaultConstructionUsesTwoSeamManagers();` and `void bothControllersUseInjectedClient();` to `private slots:`, and before `QTEST_MAIN`:
+add `void defaultConstructionUsesOneSeamManager();` and `void bothControllersUseInjectedClient();` to `private slots:`, and before `QTEST_MAIN`:
 
 ```cpp
-void TestDatabaseViewModel::defaultConstructionUsesTwoSeamManagers()
+void TestDatabaseViewModel::defaultConstructionUsesOneSeamManager()
 {
-    // Today's topology preserved: one manager for the table controller, one
-    // for the edit controller — both now PolicyEnforcingNam via HttpClient.
+    // One client per owner: the VM owns exactly one HttpClient, and both
+    // StudentControllers (table + edit) hold that client's PolicyEnforcingNam.
     DatabaseViewModel vm;
     const QList<HttpClient *> clients = vm.findChildren<HttpClient *>();
-    QCOMPARE(clients.size(), 2);
-    QCOMPARE(vm.findChildren<PolicyEnforcingNam *>().size(), 2);
+    QCOMPARE(clients.size(), 1);
+    QCOMPARE(vm.findChildren<PolicyEnforcingNam *>().size(), 1);
+    QNetworkAccessManager *seamManager = clients.first()->manager();
+    QVERIFY(qobject_cast<PolicyEnforcingNam *>(seamManager));
 
-    // Each StudentController holds exactly one of the VM's two client managers.
-    QSet<QNetworkAccessManager *> clientManagers;
-    for (HttpClient *c : clients)
-        clientManagers.insert(c->manager());
-    QSet<QNetworkAccessManager *> controllerManagers;
     const QList<StudentController *> controllers = vm.findChildren<StudentController *>();
     QCOMPARE(controllers.size(), 2);
-    for (StudentController *c : controllers) {
-        QVERIFY(qobject_cast<PolicyEnforcingNam *>(c->networkManager()));
-        controllerManagers.insert(c->networkManager());
-    }
-    QCOMPARE(controllerManagers.size(), 2);
-    QVERIFY(controllerManagers == clientManagers);
+    for (StudentController *c : controllers)
+        QCOMPARE(c->networkManager(), seamManager);
 }
 
 void TestDatabaseViewModel::bothControllersUseInjectedClient()
@@ -3485,9 +3882,9 @@ SearchViewModel::SearchViewModel(QObject *parent, HttpClient *http)
 `DatabaseViewModel.h`: after line 12 add `class HttpClient;`; replace line 79 with
 
 ```cpp
-    // http: injection seam for tests (HttpClient wrapping a CapturingNam); when
-    // given, both the table and the edit controller use it. Null in production:
-    // the VM owns two HttpClients, one per controller (transport seam).
+    // http: injection seam for tests (HttpClient wrapping a CapturingNam /
+    // OfflineHttp). Null in production: the VM owns ONE HttpClient (transport
+    // seam); the table and the edit StudentController both use its manager.
     explicit DatabaseViewModel(QObject *parent = nullptr, HttpClient *http = nullptr);
 ```
 
@@ -3495,15 +3892,10 @@ replace line 273 (`QNetworkAccessManager *m_nam = nullptr;`) with
 
 ```cpp
     HttpClient *m_http = nullptr;              // injected, or an owned child
-    QNetworkAccessManager *m_nam = nullptr;    // m_http->manager(); non-owning
+    QNetworkAccessManager *m_nam = nullptr;    // m_http->manager(); non-owning; both controllers
 ```
 
-and replace line 285 (`QNetworkAccessManager *m_editNam = nullptr;`) with
-
-```cpp
-    HttpClient *m_editHttp = nullptr;            // == m_http when injected
-    QNetworkAccessManager *m_editNam = nullptr;  // m_editHttp->manager(); non-owning
-```
+and delete line 285 (`QNetworkAccessManager *m_editNam = nullptr;`) — the edit controller now uses `m_nam` (see the single-client confirmation above).
 
 `DatabaseViewModel.cpp`: after line 9 (`#include "SettingsViewModel.h"`) add `#include "transport/httpclient.h"`; replace lines 11-14 with
 
@@ -3518,9 +3910,14 @@ DatabaseViewModel::DatabaseViewModel(QObject *parent, HttpClient *http)
 and replace lines 23-24 with
 
 ```cpp
-    m_editHttp = http ? http : new HttpClient(this);
-    m_editNam = m_editHttp->manager();
-    m_editController = new StudentController(m_editNam, this);
+    // Same seam manager as the table controller: one client per owner.
+    m_editController = new StudentController(m_nam, this);
+```
+
+Confirm no other reference to the removed member remains:
+
+```bash
+grep -n "m_editNam" qt-app/quick/viewmodels/DatabaseViewModel.h qt-app/quick/viewmodels/DatabaseViewModel.cpp   # expect: no output
 ```
 
 - [ ] **Step 4: Run — expected PASS:**
@@ -3542,8 +3939,7 @@ QT_QPA_PLATFORM=offscreen QT_QUICK_CONTROLS_STYLE=Basic QT_QPA_FONTDIR=C:/Window
 - Modify: `qt-app/quick/viewmodels/ReportingViewModel.h` (lines 20, 84, 261), `ReportingViewModel.cpp` (lines 18-23)
 - Modify: `qt-app/quick/viewmodels/SettingsViewModel.h` (lines 13, 39, 193), `SettingsViewModel.cpp` (lines 23-28)
 - Modify: `qt-app/quick/tests/tst_importviewmodel.cpp`, `tst_reportingviewmodel.cpp`, `tst_settingsviewmodel.cpp`
-- Modify: `qt-app/quick/CMakeLists.txt` (`tst_settingsviewmodel` 451-454, `tst_importviewmodel` 460-463, `tst_reportingviewmodel` 469-472)
-- Modify: `qt-app/quick/tests/tst_transportseamguard.cpp` (`kPendingMigration` → empty)
+- Modify: `qt-app/quick/tests/tst_transportseamguard.cpp` (`kPendingMigration` and `kPendingTestMigration` → empty)
 
 **Interfaces:**
 - Consumes: `HttpClient`, `PolicyEnforcingNam`, `CapturingNam`, `ImportController` / `ReportController` (unchanged).
@@ -3558,45 +3954,31 @@ const QStringList kPendingMigration = {
 };
 ```
 
-`qt-app/quick/CMakeLists.txt` — in each of the three registrations add the CapturingNam sources and include dir (keep LIBS/OFFSCREEN as they are):
+and likewise empty `kPendingTestMigration` (its last three entries — `tst_importviewmodel.cpp`, `tst_reportingviewmodel.cpp`, `tst_settingsviewmodel.cpp` — are migrated now):
 
-```cmake
-wits_add_qttest(tst_settingsviewmodel
-    SOURCES tests/tst_settingsviewmodel.cpp
-        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
-        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
-    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
-    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
-    OFFSCREEN)
+```cpp
+const QStringList kPendingTestMigration = {
+};
 ```
 
-```cmake
-wits_add_qttest(tst_importviewmodel
-    SOURCES tests/tst_importviewmodel.cpp
-        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
-        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
-    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
-    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
-    OFFSCREEN)
+**Safety injection first** (before adding the new ownership tests below; no CMake change — Task 6b already registers these tests with `${WITS_TEST_NAM_SOURCES}`). The Settings suite reaches admin-key change, admin-info save and visit-reset paths; after this none can reach a backend:
+
+```bash
+for f in importviewmodel:ImportViewModel reportingviewmodel:ReportingViewModel settingsviewmodel:SettingsViewModel; do
+  t=${f%%:*}; c=${f##*:}
+  sed -i "s/^\(\s*\)$c \([A-Za-z_][A-Za-z0-9_]*\);/\1OfflineHttp \2Http;\n\1$c \2(nullptr, \&\2Http.http);/" qt-app/quick/tests/tst_$t.cpp
+  echo "$t: $(grep -c 'Http.http);' qt-app/quick/tests/tst_$t.cpp) offline, $(grep -cE "^\s*$c \w+;" qt-app/quick/tests/tst_$t.cpp) default left"
+done
 ```
 
-```cmake
-wits_add_qttest(tst_reportingviewmodel
-    SOURCES tests/tst_reportingviewmodel.cpp
-        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
-        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
-    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
-    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
-    OFFSCREEN)
-```
-
-(Keep each block's existing comment lines above it.)
+Expected: import `5 offline, 0 default left`; reporting `57 offline, 0 default left`; settings `38 offline, 0 default left`.
 
 In each of `tst_importviewmodel.cpp` (after line 7 `#include "AdminSession.h"`), `tst_reportingviewmodel.cpp` (after line 11 `#include "ReportingViewModel.h"`) and `tst_settingsviewmodel.cpp` (after line 15 `#include "appsettings.h"`) add:
 
 ```cpp
 #include "apiconfig.h"
 #include "capturingnam.h"
+#include "offlinehttp.h"
 #include "transport/httpclient.h"
 #include "transport/policyenforcingnam.h"
 ```
@@ -3785,8 +4167,8 @@ Expected: tests pass; the final `grep` prints nothing.
 - Test: `tst_qmlresourceinventory`
 
 **Interfaces:**
-- Consumes: `PolicyNamFactory`, `TinyHttpServer` (Task 3), `LoginParser::parseEntryEvent(const QByteArray&, const QUrl&)`, `LoginParser::parseRfidResponse(const QByteArray&)`, `SearchResultsModel::setRecords` / `PhotoRole`, `SchoolInfoUtil::resolveLogoUrl(const QString&, bool*)`, `SettingsViewModel::load()` / `logoUrl()`, `ApiConfig::setBaseUrl/resetBaseUrl`, QML `LAvatar` (`imageStatus`, `showInitials`), `LLogoCircle` (child `objectName: "logoImage"`).
-- Produces: CTest `tst_qmlresourceinventory` covering inventory rows R1-R8 and R10 (R9 and R11 stay covered by the existing suites named in the inventory).
+- Consumes: `PolicyNamFactory::installOn`, `RecordingPolicyNamFactory` / `RequestLog` (Task 5b, `quick/tests/RecordingPolicyNam.h`), `OfflineHttp` (Task 6b), `TinyHttpServer` (Task 3), `LoginParser::parseEntryEvent(const QByteArray&, const QUrl&)`, `LoginParser::parseRfidResponse(const QByteArray&)`, `SearchResultsModel::setRecords` / `PhotoRole`, `SchoolInfoUtil::resolveLogoUrl(const QString&, bool*)`, `SettingsViewModel(QObject*, HttpClient*)` / `load()` / `logoUrl()`, `ApiConfig::setBaseUrl/resetBaseUrl`, QML `LAvatar` (`imageStatus`, `showInitials`), `LLogoCircle` (child `objectName: "logoImage"`).
+- Produces: CTest `tst_qmlresourceinventory` covering inventory rows R1-R8 and R10 (R9 and R11 stay covered by the existing suites named in the inventory). Remote loads are proven by the **request log of the factory-made manager** (the same evidence as GATE G2), never by counting `create()` calls — Qt may serve a load from a manager it already has.
 
 - [ ] **Step 1: Write the test.** Create `qt-app/quick/tests/tst_qmlresourceinventory.cpp`:
 
@@ -3805,13 +4187,14 @@ Expected: tests pass; the final `grep` prints nothing.
 #include <QStandardPaths>
 #include <memory>
 
-#include "PolicyNamFactory.h"
+#include "RecordingPolicyNam.h"
 #include "SchoolInfoUtil.h"
 #include "SearchResultsModel.h"
 #include "SettingsViewModel.h"
 #include "apiconfig.h"
 #include "appsettings.h"
 #include "loginparser.h"
+#include "offlinehttp.h"
 #include "studentdata.h"
 #include "tinyhttpserver.h"
 #include "transport/policyenforcingnam.h"
@@ -3820,7 +4203,8 @@ Expected: tests pass; the final `grep` prints nothing.
 // actually loaded becomes a test). Each row of the plan's inventory table is
 // loaded exactly as production does — URL built by the production C++ code,
 // rendered by the production QML component — on an engine whose managers come
-// from PolicyNamFactory, against the in-process loopback TinyHttpServer.
+// from a (recording) PolicyNamFactory installed via installOn(), against the
+// in-process loopback TinyHttpServer (127.0.0.1, ephemeral port; never XAMPP).
 namespace {
 constexpr int kImageReady = 1;   // QQuickImageBase::Ready (QML Image.Ready)
 constexpr int kImageError = 3;   // QQuickImageBase::Error (QML Image.Error)
@@ -3862,7 +4246,8 @@ class TestQmlResourceInventory : public QObject
 private slots:
     void initTestCase();
     void cleanup();
-    void bundledModuleQmlLoadsFromQrc();                      // R1
+    void bundledModuleQmlLoadsFromQrc();                      // R1 (module lookup)
+    void everyBundledQmlFileCompilesFromQrc();                // R1 (all 43 files)
     void turnstilePhotoLoadsThroughFactory();                 // R2
     void loginPhotoUrlLoadsThroughFactory();                  // R3
     void searchAvatarLoadsThroughFactory();                   // R4
@@ -3878,7 +4263,8 @@ private:
     void expectRemoteAvatarLoads(const QString &photoUrl, const QByteArray &path);
 
     TinyHttpServer m_server;
-    PolicyNamFactory m_factory;   // outlives every view/engine created below
+    RequestLog m_log;                               // every request through a factory-made manager
+    RecordingPolicyNamFactory m_factory{&m_log};    // outlives every view/engine created below
 };
 
 void TestQmlResourceInventory::initTestCase()
@@ -3931,11 +4317,8 @@ void TestQmlResourceInventory::expectRemoteAvatarLoads(const QString &photoUrl,
                                                        const QByteArray &path)
 {
     auto view = makeView();
-    // The engine's own (main-thread) manager is a seam manager...
+    // The engine's own manager is a seam manager...
     QVERIFY(qobject_cast<PolicyEnforcingNam *>(view->engine()->networkAccessManager()));
-    // ...and the image load needs one more: the pixmap reader thread asks the
-    // factory for its own manager, which is what fetches the photo.
-    const int createdBefore = m_factory.createdCount();
     QQuickItem *avatar = create(*view, QStringLiteral(
         "import QtQuick\nimport LOAMS\nLAvatar { size: 40; initials: \"TA\"; source: %1 }")
         .arg(qmlString(photoUrl)));
@@ -3943,7 +4326,10 @@ void TestQmlResourceInventory::expectRemoteAvatarLoads(const QString &photoUrl,
     QTRY_COMPARE_WITH_TIMEOUT(avatar->property("imageStatus").toInt(), kImageReady, 5000);
     QVERIFY(!avatar->property("showInitials").toBool());
     QVERIFY(m_server.countFor(path) >= 1);
-    QVERIFY(m_factory.createdCount() > createdBefore);   // loaded by a factory-made manager
+    // ...and the photo request itself passed through a factory-made
+    // PolicyEnforcingNam (whichever thread issued it).
+    QVERIFY2(m_log.contains(QUrl(photoUrl)),
+             qPrintable(QStringLiteral("not fetched through the seam: ") + photoUrl));
 }
 
 void TestQmlResourceInventory::bundledModuleQmlLoadsFromQrc()
@@ -3953,6 +4339,35 @@ void TestQmlResourceInventory::bundledModuleQmlLoadsFromQrc()
     component.loadFromModule("LOAMS", "LAvatar");
     QVERIFY2(component.isReady(), qPrintable(component.errorString()));
     QCOMPARE(component.url().scheme(), QStringLiteral("qrc"));
+}
+
+void TestQmlResourceInventory::everyBundledQmlFileCompilesFromQrc()
+{
+    // R1 per file: every .qml in the source tree (quick/qml — the same 43 files
+    // listed in qt_add_qml_module QML_FILES) is loaded from the module's qrc
+    // copy and compiled by a seam-installed engine. Compile/load only:
+    // instantiating whole screens (e.g. AdminScreen with autoLoad) could start
+    // requests; live instantiation stays covered by tst_appshell (AppShell) and
+    // the tst_qml_* suites. A source file missing from the module fails here.
+    QVERIFY2(QFile::exists(QStringLiteral(":/qt/qml/LOAMS/qml/AppShell.qml")),
+             "module resources are not under :/qt/qml/LOAMS/ — check qt_add_qml_module's resource prefix");
+    auto view = makeView();
+    const QDir srcRoot(QStringLiteral(SRC_QML_DIR));
+    QDirIterator it(srcRoot.path(), {QStringLiteral("*.qml")}, QDir::Files,
+                    QDirIterator::Subdirectories);
+    QStringList failures;
+    int compiled = 0;
+    while (it.hasNext()) {
+        const QString rel = srcRoot.relativeFilePath(it.next());   // e.g. components/LAvatar.qml
+        QQmlComponent component(view->engine(),
+                                QUrl(QStringLiteral("qrc:/qt/qml/LOAMS/qml/") + rel));
+        if (component.isReady())
+            ++compiled;
+        else
+            failures << rel + QStringLiteral(": ") + component.errorString();
+    }
+    QVERIFY2(failures.isEmpty(), qPrintable(failures.join(QLatin1Char('\n'))));
+    QCOMPARE(compiled, 43);   // update together with QML_FILES in quick/CMakeLists.txt
 }
 
 void TestQmlResourceInventory::turnstilePhotoLoadsThroughFactory()
@@ -4054,7 +4469,8 @@ void TestQmlResourceInventory::settingsLogoPreviewLoads()
         s.setValue(QStringLiteral("school/logoPath"), path);
         s.sync();
     }
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;                          // seam owner in a test: never a live manager
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     vm.load();
     const QUrl url = vm.logoUrl();
     QVERIFY(url.isLocalFile());
@@ -4102,12 +4518,13 @@ Register in `qt-app/quick/CMakeLists.txt` immediately **before** the `# Coverage
 # client loads (remote photos, fallback avatars, imported logos, bundled QML)
 # still loads through PolicyNamFactory managers. Loopback TinyHttpServer only. ---
 wits_add_qttest(tst_qmlresourceinventory
-    SOURCES tests/tst_qmlresourceinventory.cpp
+    SOURCES tests/tst_qmlresourceinventory.cpp tests/RecordingPolicyNam.h
         ${CMAKE_SOURCE_DIR}/testsupport/tinyhttpserver.cpp
         ${CMAKE_SOURCE_DIR}/testsupport/tinyhttpserver.h
+        ${WITS_TEST_NAM_SOURCES}
     LIBS ${WITS_LOAMS_STATIC_LIBS}
          Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick Qt${QT_VERSION_MAJOR}::Network
-    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport ${CMAKE_CURRENT_SOURCE_DIR}/tests
     DEFINES SRC_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
     OFFSCREEN)
 ```
@@ -4121,7 +4538,7 @@ QT_QPA_PLATFORM=offscreen QT_QUICK_CONTROLS_STYLE=Basic QT_QPA_FONTDIR=C:/Window
   ctest --test-dir C:/b/s1a -R '^tst_qmlresourceinventory$' --output-on-failure
 ```
 
-Expected: `turnstilePhotoLoadsThroughFactory`, `loginPhotoUrlLoadsThroughFactory` and `searchAvatarLoadsThroughFactory` FAIL at `qobject_cast<PolicyEnforcingNam *>(view->engine()->networkAccessManager())` (the engine fell back to Qt's default manager). Then restore the deleted line exactly.
+Expected: `turnstilePhotoLoadsThroughFactory`, `loginPhotoUrlLoadsThroughFactory` and `searchAvatarLoadsThroughFactory` FAIL at `qobject_cast<PolicyEnforcingNam *>(view->engine()->networkAccessManager())` (the engine fell back to Qt's default manager, and the photo never appears in `m_log`). Then restore the deleted statement exactly.
 
 - [ ] **Step 3: Run — expected PASS** with the real factory:
 
@@ -4131,7 +4548,7 @@ QT_QPA_PLATFORM=offscreen QT_QUICK_CONTROLS_STYLE=Basic QT_QPA_FONTDIR=C:/Window
   ctest --test-dir C:/b/s1a -R '^tst_qmlresourceinventory$' --output-on-failure
 ```
 
-Expected: all 9 inventory functions pass. Do not loosen a timeout to make a row pass; investigate via `superpowers:systematic-debugging`.
+Expected: all 10 inventory functions pass (incl. `everyBundledQmlFileCompilesFromQrc` reporting 43 files). Do not loosen a timeout to make a row pass; investigate via `superpowers:systematic-debugging`.
 
 - [ ] **Step 4: Cross-check the inventory is complete.** Re-run the discovery greps and confirm every hit maps to an inventory row (R1-R12); add a row + test if anything new appears:
 
@@ -4154,18 +4571,23 @@ grep -rnE "fromLocalFile|endpoint\(.*photo|photo_url|logoUrl" qt-app/quick qt-ap
 - Consumes: everything above.
 - Produces: recorded evidence for the slice-approval conditions (spec §7) and the PR body.
 
-- [ ] **Step 1: Clean full build + full suite (default OFF).**
+- [ ] **Step 1: Clean full build + full suite (default OFF), proven offline.** Start the dev XAMPP Apache first, so that any stray request from a test would be logged, and keep the machine otherwise idle (no browser or other client hitting `localhost`) during the run:
 
 ```bash
 rm -rf C:/b/s1a
 cmake -S qt-app -B C:/b/s1a -G Ninja -DCMAKE_PREFIX_PATH=C:/Qt/6.11.1/mingw_64
 cmake --build C:/b/s1a 2>&1 | tee C:/b/s1a-build.log
 grep -niE "warning:" C:/b/s1a-build.log | grep -E "core/transport|quick/PolicyNamFactory|AccessControlHub|viewmodels/" || echo "no new warnings in S1a files"
+ACCESS_LOG=C:/xampp/apache/logs/access.log            # dev XAMPP access log
+before=$(wc -l < "$ACCESS_LOG")
 QT_QPA_PLATFORM=offscreen QT_QUICK_CONTROLS_STYLE=Basic QT_QPA_FONTDIR=C:/Windows/Fonts \
   ctest --test-dir C:/b/s1a --output-on-failure -j 8
+after=$(wc -l < "$ACCESS_LOG")
+echo "access.log lines added during ctest: $((after - before))"   # expect 0
+tail -n "$((after - before))" "$ACCESS_LOG" | grep "/loams_api/" || echo "no backend request from the test run"
 ```
 
-Expected: build succeeds with no new warnings in S1a files; **68 tests, 100% passed, 0 Not Run**:
+Expected: build succeeds with no new warnings in S1a files; **68 tests, 100% passed, 0 Not Run**; **0 access-log lines added** (if any line was added, every one must be attributable to something other than the test run — any `/loams_api/` request during the run is a test that reached the backend: find it via `superpowers:systematic-debugging` and inject a fake manager):
 
 - 60 pre-existing targets that must stay green: `tst_appshell tst_rfidquickfilter tst_themeviewmodel tst_quicktestmain_missingfile tst_quicktestsourcepath tst_qml_theme tst_navigator tst_adminsession tst_kioskviewmodel tst_schoolinfoviewmodel tst_schoolinfoutil tst_guestviewmodel tst_httpform tst_initials tst_barsmodel tst_studentstablemodel tst_searchresultsmodel tst_reportrowsmodel tst_accessentriesmodel tst_qml_components tst_qml_kiosk tst_accesscontrolhub tst_dashboardviewmodel tst_visitlogsviewmodel tst_accesscontrolviewmodel tst_searchviewmodel tst_databaseviewmodel tst_qml_admin tst_qml_adminshell tst_qml_accesscontrol tst_settingsviewmodel tst_importviewmodel tst_reportingviewmodel tst_notokenaliases tst_rfidscandetector tst_apiconfig tst_theme tst_visitorcontroller tst_importcontroller tst_studentcontroller tst_reportcontroller tst_reportrenderer tst_brandtheme tst_brandingcontroller tst_loginparser tst_dashboardparser tst_visitlogparser tst_csvutil tst_reportanalytics tst_timeanalytics tst_accesstypes tst_eventbus tst_mockprovider tst_accessproviderfactory tst_accessdecisionservice tst_healthmonitor tst_accesscontrolservice tst_turnstileprovider tst_contactage tst_apiconfigloader`
 - 8 new: `tst_legacywidgetsgate tst_transportpolicy tst_policyenforcingnam tst_httpclient tst_policynamfactory tst_qmlfactorygate tst_transportseamguard tst_qmlresourceinventory`
@@ -4180,14 +4602,17 @@ cmake --build C:/b/s1a-legacy --target WITS tst_rfidkeyboardfilter tst_responsiv
 QT_QPA_PLATFORM=offscreen ctest --test-dir C:/b/s1a-legacy -R '^(tst_legacywidgetsgate|tst_rfidkeyboardfilter|tst_responsive_ui)$' --output-on-failure
 ```
 
-Expected: all three pass (`WITS` builds; S1a did not change the core controller API it uses).
+Expected: all three pass (`WITS` builds; S1a did not change the core controller signatures it uses).
 
-- [ ] **Step 3: Passthrough evidence — tests changed only by injection plumbing.** No pre-existing test line other than the 34 plumbing sites may be removed or modified (a modified line shows as a removed `-` line): 14 hub + 15 ViewModel injection sites (Tasks 8-9) and 5 `Controller controller(nullptr);` sites now passing an unused test manager (Task 4b):
+- [ ] **Step 3: Passthrough evidence — tests changed only by injection plumbing.** A pre-existing test line may be removed or modified (a modified line shows as a removed `-` line) **only** at these **248** plumbing sites:
+  - 33 fake-manager re-routes: 13 `AccessControlHub hub(&nam);` (Task 8) + 15 `XViewModel vm(nullptr, &nam);` (Task 9: dashboard 2, visit logs 2, access control 11) + 5 `Controller controller(nullptr);` (Task 4b);
+  - 215 offline safety injections: 213 default-constructed ViewModels (Tasks 9-12: dashboard 4, visit logs 8, access control 8, kiosk 18, guest 3, search 9, database 63, import 5, reporting 57, settings 38) + 2 default-constructed hubs (`tst_accesscontrolhub.cpp:261`, `tst_appshell.cpp:30`; Task 8).
 
 ```bash
 git diff master...HEAD -U0 -- 'qt-app/tests/*' 'qt-app/quick/tests/*' | grep -E '^-[^-]' > C:/b/s1a-removed.txt
-grep -cE 'AccessControlHub hub\(&nam\);|ViewModel vm2?\(nullptr, &nam\);|Controller controller\(nullptr\);' C:/b/s1a-removed.txt   # expect 34
-grep -vE 'AccessControlHub hub\(&nam\);|ViewModel vm2?\(nullptr, &nam\);|Controller controller\(nullptr\);' C:/b/s1a-removed.txt   # expect: no output
+PLUMBING='AccessControlHub hub(\(&nam\))?;|ViewModel vm2?\(nullptr, &nam\);|Controller controller\(nullptr\);|^-\s*\w+ViewModel \w+;'
+grep -cE "$PLUMBING" C:/b/s1a-removed.txt    # expect 248
+grep -vE "$PLUMBING" C:/b/s1a-removed.txt    # expect: no output
 ```
 
 If the second `grep` prints anything, it is a changed pre-existing test line: justify it (it must not weaken or remove an assertion) or restore it. Paste both commands and their output into the proof doc.
@@ -4197,11 +4622,36 @@ If the second `grep` prints anything, it is a changed pre-existing test line: ju
 ```bash
 grep -rnE "new\s+QNetworkAccessManager|make_(unique|shared)\s*<\s*QNetworkAccessManager" qt-app/core qt-app/quick --include=*.cpp --include=*.h | grep -v "/build" | grep -v "quick/tests/"    # expect: no output
 grep -rn "ignoreSslErrors" qt-app --include=*.cpp --include=*.h --include=*.qml --include=*.js | grep -v "^qt-app/libs/" | grep -v "/build"   # expect: no output
+grep -nE "^\s*(static\s+)?((Dashboard|VisitLogs|AccessControl|Kiosk|Guest|Search|Database|Import|Reporting|Settings)ViewModel|AccessControlHub) \w+;" qt-app/quick/tests/tst_*.cpp   # expect: only lines inside defaultConstruction*/defaultHub* functions
 cmake -LA -N C:/b/s1a | grep LOAMS_BUILD_LEGACY_WIDGETS    # expect: LOAMS_BUILD_LEGACY_WIDGETS:BOOL=OFF
 git diff --stat master...HEAD -- qt-app/quick/qml   # expect: no output (S1a changes no production QML, so no Theme-token risk)
 ```
 
-- [ ] **Step 5: Manual Layer 9 smoke on `WITSQuick`** — run `C:/b/s1a/quick/WITSQuick.exe` (the binary from **this** branch's build dir — stale-binary trap) against the dev XAMPP backend at the default `http://localhost/loams_api/` with **synthetic** data only, and compare side by side with a `master` build of `WITSQuick` on the same backend/data. Record pass/fail per item:
+- [ ] **Step 5: Prepare an isolated smoke backend (MANDATORY before Step 6).** The smoke mutates persistent state (student register/delete, bulk edit, department deactivate/delete, imports, visit reset, school settings, logo import, admin-key rotation). **Never** smoke against the production gate PC, the client's real database, or any shared or real-data database, and never with real student data or the real production admin key. Use synthetic data and a smoke-only admin key (`s1a-smoke-key-<random suffix>`, never committed or pasted into the proof doc). Choose one option and record which in the proof doc:
+
+  - **Option A (preferred) — disposable backend:** a throwaway Windows VM or spare machine with its own XAMPP and the `loams_api` code from this repo, its database created from a **synthetic-only** seed (no copy of real student data), and the smoke-only admin key set through `hash_admin.php` on that machine. Point `WITSQuick` at it with `WITS_API_BASE_URL=http://<disposable-host>/loams_api/` (dev builds keep the env override, spec §3) or its own `config.ini` `[Server] BaseURL`. Destroy the VM/database after the smoke; nothing to restore.
+  - **Option B — verified snapshot of the developer's local dev backend:** allowed **only** if that dev database already contains synthetic data exclusively. Before any smoke action, with Apache stopped and from an elevated Git Bash on the dev box (`<DB_USER>` / `<DB_NAME>` are the values in the dev `deliverables/loams_api/config.php` copy deployed under `C:/xampp/htdocs/loams_api/`; enter the DB password interactively, never on the command line):
+
+```bash
+SNAP=C:/b/s1a-smoke/$(date -u +%Y%m%dT%H%M%SZ); mkdir -p "$SNAP"
+/c/xampp/mysql/bin/mysqldump.exe -u <DB_USER> -p --single-transaction --routines --triggers <DB_NAME> > "$SNAP/db.sql"
+/c/xampp/mysql/bin/mysqldump.exe -u <DB_USER> -p <DB_NAME> admin > "$SNAP/admin.sql"             # admin-key hash, for fast key recovery
+/c/xampp/mysql/bin/mysql.exe -u <DB_USER> -p -e "SELECT COUNT(*) FROM <DB_NAME>.students; SELECT COUNT(*) FROM <DB_NAME>.library_visits;" > "$SNAP/counts-before.txt"
+cp -r /c/xampp/htdocs/loams_api/uploads "$SNAP/uploads"                                          # photos written by register/import
+cp -r /c/xampp/htdocs/loams_api/loams_api.uploads "$SNAP/loams_api.uploads" 2>/dev/null || true
+reg export 'HKCU\Software\MyCompany\MyApp' "$(cygpath -w "$SNAP")\\qsettings.reg" /y            # QSettings (AppSettings)
+cp -r "$APPDATA/MyCompany/MyApp" "$SNAP/appdata" 2>/dev/null || true                             # imported logos/posters
+cp C:/b/s1a/quick/config.ini "$SNAP/config.ini" 2>/dev/null || true
+( cd "$SNAP" && find . -type f -exec sha256sum {} + > SHA256SUMS )
+# Verify the dump restores before relying on it:
+/c/xampp/mysql/bin/mysql.exe -u <DB_USER> -p -e "CREATE DATABASE <DB_NAME>_s1a_verify"
+/c/xampp/mysql/bin/mysql.exe -u <DB_USER> -p <DB_NAME>_s1a_verify < "$SNAP/db.sql"
+/c/xampp/mysql/bin/mysql.exe -u <DB_USER> -p -e "SELECT COUNT(*) FROM <DB_NAME>_s1a_verify.students; SELECT COUNT(*) FROM <DB_NAME>_s1a_verify.library_visits; DROP DATABASE <DB_NAME>_s1a_verify;"
+```
+
+  Expected: the verify counts equal `counts-before.txt`. If the dump does not restore cleanly, **do not start the smoke** — use Option A.
+
+- [ ] **Step 6: Manual Layer 9 smoke on `WITSQuick`** — run `C:/b/s1a/quick/WITSQuick.exe` (the binary from **this** branch's build dir — stale-binary trap) against the isolated backend from Step 5, with **synthetic** data only, and compare side by side with a `master` build of `WITSQuick` on the same backend/data. Record pass/fail per item:
 
 | # | Area | Check |
 |---|---|---|
@@ -4209,27 +4659,44 @@ git diff --stat master...HEAD -- qt-app/quick/qml   # expect: no output (S1a cha
 | K2 | Kiosk RFID | Reader / keyboard-wedge scan → same as K1; one tap = one visit (debounce) |
 | K3 | Kiosk errors | Unknown ID / unregistered card → error toast; network-down (stop Apache) → "Network error" toast |
 | K4 | Guest | Enable guest in Settings → kiosk guest dialog submit → success toast |
-| K5 | Admin entry | Admin key at kiosk → admin shell opens |
+| K5 | Admin entry | Smoke-only admin key at kiosk → admin shell opens |
 | A1 | Dashboard | Stats and hourly bars load |
 | A2 | Search | Department/course chips load; search returns cards with photos / initials |
 | A3 | Visit logs | Today/Week, student/visitor modes load |
 | A4 | Database | Table + filters; single edit (course list loads); bulk edit; register with photo; delete a synthetic record; department deactivate/delete on a synthetic department; CSV export |
 | A5 | Import | Template download; synthetic CSV + ZIP → duplicate check → upload → result |
 | A6 | Reporting | Departments/years load; generate report (`api.php/reports/data`); time analytics; export PDF + Excel; print dialog opens |
-| A7 | Settings | Save school info; import logo → preview, sidebar and kiosk BrandPanel update; admin info save; admin key change and revert; reset visits on a synthetic department with manifest |
+| A7 | Settings | Save school info; import logo → preview, sidebar and kiosk BrandPanel update; admin info save; admin key change to a second synthetic key **and back** (verify login with the smoke-only key afterwards); reset visits on a synthetic department with manifest |
 | A8 | Guarded ops | Wrong admin key → auth-failure message on a guarded operation |
 | A9 | Access Control page | Feed loads; monitoring toggle on/off |
-| T1 | Turnstile polling | Monitoring on (gate PC, or the documented bench/bridge simulation) → entry appears on kiosk with photo |
+| T1 | Turnstile polling | Monitoring on (gate-PC-like bench, or the documented bench/bridge simulation — never the production gate PC) → entry appears on kiosk with photo |
 | T2 | Reconnect + cursor | Stop Apache → connection state degrades; restart → reconnects; no duplicated or skipped entries |
 | R | Assets | Remote photos (kiosk + search); `default.jpg` → initials; missing photo → initials; imported logo (kiosk, sidebar, settings preview); bundled QML renders; `--software` backend still renders |
 
-Any difference from the `master` build is a regression: route it through `superpowers:systematic-debugging`, fix with a failing test first, and re-run Steps 1-5.
+Any difference from the `master` build is a regression: route it through `superpowers:systematic-debugging`, fix with a failing test first, and re-run Steps 1-6.
 
-- [ ] **Step 6: Write the proof doc** `docs/superpowers/proofs/2026-10-05-loams-s1a-proof.md` with: the commit SHA tested, the ctest summary (68/68, 0 Not Run), the GATE G1/G2 results (incl. the `GATE G2:` thread log line) and the ON-config result, the Step 3 diff output, the Step 4 grep outputs, the Step 5 smoke table with pass/fail and which turnstile setup was used, and a link to this plan's Rollback Considerations. No real student data, no admin key, no screenshots containing PII.
+- [ ] **Step 7: Restore and verify the backend (Option B only; Option A: destroy the disposable backend).** With Apache stopped:
 
-- [ ] **Step 7: Commit** via the project `commit` skill. Intended subject: `docs(security): record S1a Layer 9 regression evidence`.
+```bash
+/c/xampp/mysql/bin/mysql.exe -u <DB_USER> -p <DB_NAME> < "$SNAP/db.sql"                       # dump carries DROP TABLE IF EXISTS
+rm -rf /c/xampp/htdocs/loams_api/uploads && cp -r "$SNAP/uploads" /c/xampp/htdocs/loams_api/uploads
+[ -d "$SNAP/loams_api.uploads" ] && rm -rf /c/xampp/htdocs/loams_api/loams_api.uploads && cp -r "$SNAP/loams_api.uploads" /c/xampp/htdocs/loams_api/loams_api.uploads
+reg delete 'HKCU\Software\MyCompany\MyApp' /f && reg import "$(cygpath -w "$SNAP")\\qsettings.reg"
+[ -d "$SNAP/appdata" ] && rm -rf "$APPDATA/MyCompany/MyApp" && cp -r "$SNAP/appdata" "$APPDATA/MyCompany/MyApp"
+[ -f "$SNAP/config.ini" ] && cp "$SNAP/config.ini" C:/b/s1a/quick/config.ini
+/c/xampp/mysql/bin/mysql.exe -u <DB_USER> -p -e "SELECT COUNT(*) FROM <DB_NAME>.students; SELECT COUNT(*) FROM <DB_NAME>.library_visits;" > "$SNAP/counts-after.txt"
+diff "$SNAP/counts-before.txt" "$SNAP/counts-after.txt" && echo "row counts restored"
+```
 
-- [ ] **Step 8: Review gates** (not commits): `/codex-review` (owner override: `gpt-5.6-sol`, high effort) and/or `/claude-review` in branch mode until APPROVE (≤ 3 rounds); fix Critical/Important findings via new commits; then the project `create-pr` gate (three agents: `dry-checker`, `security-reviewer`, `general-code-reviewer` — if a loaded skill names `api-checker`, re-read `.claude/skills/create-pr/SKILL.md`); open the PR against `master`. Do **not** merge — hand off to the owner.
+Then start Apache and verify with the `master` `WITSQuick`: admin login with the **pre-smoke** dev admin key succeeds, dashboard counts match the pre-smoke values, the school logo/settings are as before.
+
+**If admin-key reversion fails** (A7 left an unknown key, or login with the pre-smoke key fails after restore): restore just the admin row from the snapshot — `/c/xampp/mysql/bin/mysql.exe -u <DB_USER> -p <DB_NAME> < "$SNAP/admin.sql"` — and re-test login. If that still fails, restore the full `db.sql` again; if the dump itself is unusable, rebuild the dev database from the synthetic seed and set a new dev key with `hash_admin.php`. Record the incident in the proof doc. None of this can touch production: Steps 5-7 only ever operate on the disposable or dev backend.
+
+- [ ] **Step 8: Write the proof doc** `docs/superpowers/proofs/2026-10-05-loams-s1a-proof.md` with: the commit SHA tested, the ctest summary (68/68, 0 Not Run) with the access-log offline evidence, the GATE G1/G2 results (incl. the `GATE G2:` thread log line), the ON-config result, the Step 3 diff output, the Step 4 grep outputs, which smoke backend option was used and (Option B) the snapshot `SHA256SUMS` plus `counts-before.txt` / `counts-after.txt`, the Step 6 smoke table with pass/fail and which turnstile setup was used, and a link to this plan's Rollback Considerations. No real student data, no admin key (real or smoke), no DB password, no screenshots containing PII.
+
+- [ ] **Step 9: Commit** via the project `commit` skill. Intended subject: `docs(security): record S1a Layer 9 regression evidence`.
+
+- [ ] **Step 10: Review gates** (not commits): `/codex-review` (owner override: `gpt-5.6-sol`, high effort) and/or `/claude-review` in branch mode until APPROVE (≤ 3 rounds); fix Critical/Important findings via new commits; then the project `create-pr` gate (three agents: `dry-checker`, `security-reviewer`, `general-code-reviewer` — if a loaded skill names `api-checker`, re-read `.claude/skills/create-pr/SKILL.md`); open the PR against `master`. Do **not** merge — hand off to the owner.
 
 ---
 
@@ -4237,12 +4704,13 @@ Any difference from the `master` build is a regression: route it through `superp
 
 **Automated (Windows, Qt 6.11.1 MinGW, `C:/b/s1a`, default `LOAMS_BUILD_LEGACY_WIDGETS=OFF`) — 68/68 passed, 0 Not Run, 0 skipped:**
 
-- New: `tst_legacywidgetsgate`, `tst_transportpolicy` (GATE G1), `tst_policyenforcingnam`, `tst_httpclient`, `tst_policynamfactory` (incl. the four `installOn` ordering tests), `tst_qmlfactorygate` (GATE G2), `tst_transportseamguard` (incl. `namConstructedOnlyInsideSeam` with an empty pending list, `coreNetworkClassesRequireInjectedManager`, `noSslErrorBypassInClientSource`, `quickMainInstallsTransportBeforeLoad`), `tst_qmlresourceinventory`.
+- New: `tst_legacywidgetsgate`, `tst_transportpolicy` (GATE G1), `tst_policyenforcingnam`, `tst_httpclient`, `tst_policynamfactory` (incl. the four `installOn` ordering tests), `tst_qmlfactorygate` (GATE G2), `tst_transportseamguard` (incl. `namConstructedOnlyInsideSeam` and `ownersInTestsUseFakeManagers` with empty pending lists, `coreNetworkClassesRequireInjectedManager`, `noSslErrorBypassInClientSource`, `quickMainInstallsTransportBeforeLoad`), `tst_qmlresourceinventory` (incl. the per-file `everyBundledQmlFileCompilesFromQrc`).
+- Test safety: every seam owner constructed in `quick/tests/tst_*.cpp` uses an injected fake manager (`OfflineHttp` / `CapturingNam` / `SequencedNam`) except the request-free `defaultConstruction*`/`defaultHub*` ownership tests; `tst_httpclient::offlineHttpNeverAnswers` green; the full `ctest` run adds **0** lines to the running dev Apache's access log (Task 14 Step 1).
 - Extended: `tst_appshell` (seam installed via `installOn` before load, zero warnings), `tst_accesscontrolhub` (+ `defaultHubManagerIsSeamManager`, `injectedClientManagerReachesTheProvider`), `tst_dashboardviewmodel`, `tst_visitlogsviewmodel`, `tst_accesscontrolviewmodel`, `tst_kioskviewmodel`, `tst_guestviewmodel`, `tst_searchviewmodel`, `tst_databaseviewmodel`, `tst_importviewmodel`, `tst_reportingviewmodel`, `tst_settingsviewmodel` (injection through `HttpClient`, seam ownership, and — for controller-owning VMs — controller manager identity), and the seven core suites `tst_studentcontroller`, `tst_visitorcontroller`, `tst_reportcontroller`, `tst_importcontroller`, `tst_brandingcontroller`, `tst_accessdecisionservice`, `tst_turnstileprovider` (`networkManagerIsTheInjectedOne`).
 - Unchanged and green: the remaining pre-existing targets listed in Task 14 Step 1, including every `tst_qml_*` QuickTest (now running on factory-made managers) and all core `CapturingNam` / `SequencedNam` controller suites.
 - Developer config `-DLOAMS_BUILD_LEGACY_WIDGETS=ON`: `WITS`, `tst_rfidkeyboardfilter`, `tst_responsive_ui` build; `tst_legacywidgetsgate`, `tst_rfidkeyboardfilter`, `tst_responsive_ui` pass.
 
-**Manual:** Layer 9 smoke table (Task 14 Step 5) all PASS on `WITSQuick` built from this branch, side by side with `master`.
+**Manual:** Layer 9 smoke table (Task 14 Step 6) all PASS on `WITSQuick` built from this branch, side by side with `master`, against an isolated backend (Task 14 Step 5: disposable backend, or a verified snapshot of a synthetic-only dev backend), followed by the Step 7 restore + verification.
 
 **"Passthrough proves no behaviour change" — evidence required in the proof doc and PR body:**
 
@@ -4255,20 +4723,22 @@ Any difference from the `master` build is a regression: route it through `superp
 ## Rollback Considerations
 
 - **Nature of the change:** S1a is behaviour-neutral (Passthrough), client-only and confined to source + build configuration. No server, database, PHP endpoint, `config.ini` key, `QSettings` key or on-disk format changes; no migration to undo.
-- **How to revert:** revert the squash/merge commit of the S1a PR on `master` (`git revert <merge-sha>` via a normal PR). Each task is also an independent commit, so a single faulty migration (e.g. one ViewModel) can be reverted alone; the guard's `kPendingMigration` entry for that file must be restored in the same revert. Reverting Task 4b alone (the core non-null contract) also requires removing `coreNetworkClassesRequireInjectedManager` from the guard; it changes no runtime behaviour for correctly wired callers.
+- **How to revert:** revert the squash/merge commit of the S1a PR on `master` (`git revert <merge-sha>` via a normal PR). Each task is also an independent commit, so a single faulty migration (e.g. one ViewModel) can be reverted alone; the guard's `kPendingMigration` entry for that file (and its test file's `kPendingTestMigration` entry) must be restored in the same revert. Reverting Task 4b alone (the core non-null contract) also requires removing `coreNetworkClassesRequireInjectedManager` from the guard; it changes no runtime behaviour for correctly wired callers.
 - **Legacy Widgets:** the freeze only changes the default. Developers who need the Widgets build use `-DLOAMS_BUILD_LEGACY_WIDGETS=ON` (no revert needed). Existing build directories that cached the old `BUILD_LEGACY_WIDGETS=ON` get a warning and must reconfigure (`cmake -U BUILD_LEGACY_WIDGETS -B <dir> -DLOAMS_BUILD_LEGACY_WIDGETS=ON`).
+- **Smoke-test state (Task 14 Steps 5-7):** the manual smoke is the only S1a activity that mutates data. It runs only against a disposable backend (Option A: destroy it afterwards) or a synthetic-only dev backend with a **verified** pre-smoke snapshot (Option B: DB dump verified by a scratch restore, separate `admin` table dump, uploads folders, `HKCU\Software\MyCompany\MyApp` QSettings export, `%APPDATA%\MyCompany\MyApp` assets, `config.ini`, all with SHA-256 sums). Restoration = reload the dump, restore folders/registry/config, confirm row counts and login with the pre-smoke admin key. If admin-key reversion fails: reload `admin.sql`, then the full dump, then (last resort) rebuild the dev DB from the synthetic seed and set a new dev key with `hash_admin.php`. Never against production, the gate PC, or any shared/real-data database.
 - **Production impact:** none possible — S1a is **never shipped to production before S1f** (spec invariant 8; only S1f packaging can produce a release, and it requires S1e, which deletes Passthrough). The deployed gate-PC `WITS.exe` is untouched by this slice and is not rebuilt from this tree.
 - **Forward compatibility:** reverting S1a after S1e work has started would also revert S1e's call-site assumptions; S1e must therefore start from a merged, green S1a.
 
 ## Completion Criteria
 
-- [ ] Tasks 1-14 (incl. 4b and 5b) done; every task committed via the project `commit` skill, Conventional Commits, no Claude/Anthropic co-author trailer.
+- [ ] Tasks 1-14 (incl. 4b, 5b and 6b) done; every task committed via the project `commit` skill, Conventional Commits, no Claude/Anthropic co-author trailer.
 - [ ] GATE G1 and GATE G2 passed **when first run** (Tasks 2 and 5b) and again in the final full run; no gate failure was worked around.
 - [ ] Clean full build + full `ctest` green on Windows MinGW (`C:/b/s1a`): 68/68, 0 failed, 0 Not Run; no new compiler warnings in S1a files.
 - [ ] Every production network request passes through the policy: core network classes assert a non-null injected manager (`tst_transportseamguard::coreNetworkClassesRequireInjectedManager`), and runtime identity tests prove each production owner's controllers hold its `HttpClient`'s `PolicyEnforcingNam` (Tasks 8, 11, 12).
 - [ ] Factory ordering enforced: `PolicyNamFactory::installOn` refusal tests (Task 5) and `quickMainInstallsTransportBeforeLoad` (Task 7) green.
 - [ ] `-DLOAMS_BUILD_LEGACY_WIDGETS=ON` configures and builds `WITS` + its two tests; default is `OFF` (`cmake -LA -N C:/b/s1a | grep LOAMS_BUILD_LEGACY_WIDGETS` → `OFF`).
-- [ ] Layer 9 manual smoke done on `WITSQuick` from this branch, zero differences from `master`, recorded in `docs/superpowers/proofs/2026-10-05-loams-s1a-proof.md`.
+- [ ] No test can reach a backend: `tst_transportseamguard::ownersInTestsUseFakeManagers` green with an **empty** `kPendingTestMigration`, and the Task 14 Step 1 run added 0 lines to the running dev Apache's access log.
+- [ ] Layer 9 manual smoke done on `WITSQuick` from this branch against an isolated backend (Task 14 Step 5), zero differences from `master`, backend restored and verified (Step 7), recorded in `docs/superpowers/proofs/2026-10-05-loams-s1a-proof.md`.
 - [ ] Passthrough evidence items 1-5 (Acceptance Tests) present in the proof doc and PR body.
 - [ ] No raw manager outside the seam — `tst_transportseamguard` green with an **empty** `kPendingMigration`, and `grep -rnE "new\s+QNetworkAccessManager|make_(unique|shared)\s*<\s*QNetworkAccessManager" qt-app/core qt-app/quick --include=*.cpp --include=*.h | grep -v "/build" | grep -v "quick/tests/"` prints nothing.
 - [ ] No `ignoreSslErrors` in client source — `tst_transportseamguard::noSslErrorBypassInClientSource` green and `grep -rn "ignoreSslErrors" qt-app --include=*.cpp --include=*.h --include=*.qml --include=*.js | grep -v "^qt-app/libs/" | grep -v "/build"` prints nothing.
@@ -4292,7 +4762,7 @@ Any difference from the `master` build is a regression: route it through `superp
 | Injection boundary: `HttpClient` accepts injected manager; `CapturingNam`/`SequencedNam` stay realistic (§3) | Task 4 (`injectedManagerIsUsedNotOwned`, `requestsThroughInjectedManagerReachIt`); Tasks 8-12 test adaptations |
 | ViewModels/hubs that construct managers obtain them from the seam (`DatabaseViewModel.cpp:11-24`, `GuestViewModel.cpp:11`, `KioskViewModel.cpp:20`, `AccessControlHub.cpp:20-29`, …) (§3) | Tasks 8-12; Task 6 guard with shrinking `kPendingMigration` |
 | QML engine networking onto the seam (§7 S1a row) | Task 7 (`main.cpp`, `QuickTestSetup.h`, `tst_appshell`, guard `quickMainInstallsTransportBeforeLoad`) |
-| Factory installed before any QML load / any request (approval condition; §2) | Task 5 `PolicyNamFactory::installOn` + `installRefusedAfterEngineCreatedAManager` / `installRefusedAfterQmlLoaded` / `installRefusedWhenAnotherFactoryInstalled`; Task 7 `main.cpp` fails closed on refusal + source-order guard |
+| Factory installed before any QML load / any request (approval condition; §2) | Task 7 source-order guard `quickMainInstallsTransportBeforeLoad` (fresh engine, install immediately before `loadFromModule`) — the primary guarantee; Task 5 `PolicyNamFactory::installOn` runtime refusal for its three detectable late states (`installRefusedAfterEngineCreatedAManager` / `installRefusedAfterQmlLoaded` / `installRefusedWhenAnotherFactoryInstalled`), with `main.cpp` failing closed on refusal |
 | QML image loads use the factory's managers, incl. from loader threads (§2; approval condition — mandatory early gate) | Task 5b GATE G2 `tst_qmlfactorygate` (Image + Canvas.loadImage), STOP-on-fail |
 | Atomic `shared_ptr` snapshot compiles cleanly on the target toolchain (§2; approval condition — mandatory early gate) | Task 2 GATE G1 (`-Wall -Wextra -Werror` on `transportpolicy.cpp`), STOP-on-fail |
 | Every production request passes through the policy; raw-manager injection on core classes is a test seam only (approval condition) | Task 4b (non-null `Q_ASSERT_X` contract + `networkManager()` on all seven core network classes); Task 6 guard `coreNetworkClassesRequireInjectedManager` + `namConstructedOnlyInsideSeam`; runtime identity tests Tasks 8 (hub → provider), 11 (`StudentController` ×3), 12 (`ImportController`, `ReportController`) |
@@ -4302,9 +4772,9 @@ Any difference from the `master` build is a regression: route it through `superp
 | Legacy source deprecated / reference-only; no security migrations (§3) | Task 1 `LEGACY-WIDGETS.md`, `CLAUDE.md`; legacy owners excluded from migration and guard scope |
 | Release packaging rejects the legacy target (§3, §7 S1f) | Out of S1a scope by design — S1f `New-LoamsReleasePackage.ps1` (noted in `LEGACY-WIDGETS.md` and the CMake option comment) |
 | Shared `core/` not constrained by legacy buildability; incompatibilities documented (§3) | `LEGACY-WIDGETS.md` "Known incompatibilities" (none introduced: controller APIs unchanged; Task 14 Step 2 proves ON builds) |
-| Layer 9 functional regression incl. `api.php/reports/data`, turnstile polling/reconnect/cursor, photos/logos/avatars/bundled assets, `CapturingNam`/`SequencedNam` suites via `HttpClient` (§6) | Task 3 (`api.php/reports/data` parity), Task 8 (hub cursor/reconnect suite), Task 13, Task 14 Steps 1, 3, 5 |
+| Layer 9 functional regression incl. `api.php/reports/data`, turnstile polling/reconnect/cursor, photos/logos/avatars/bundled assets, `CapturingNam`/`SequencedNam` suites via `HttpClient` (§6) | Task 3 (`api.php/reports/data` parity), Task 6b + Tasks 8-12 (every owner-constructing suite injects through `HttpClient` — fakes or `OfflineHttp`), Task 8 (hub cursor/reconnect suite), Task 13, Task 14 Steps 1 (incl. offline access-log evidence), 3, 6 |
 | "S1a MUST NOT change behaviour … Layer 9 proves it" (§6) | Acceptance Tests "Passthrough proves no behaviour change" items 1-5 |
-| Slice needs passing tests, security review, documented rollback (§7) | Task 14 Steps 1-8; Rollback Considerations; Completion Criteria |
+| Slice needs passing tests, security review, documented rollback (§7) | Task 14 Steps 1-10 (incl. isolated smoke backend + restore, Steps 5-7); Rollback Considerations; Completion Criteria |
 | No production deployment before S1f (§1 invariant 8, §7) | Global Constraints; Rollback Considerations; no packaging/deploy step in this plan |
 | Security tests fail, never skip (§6 Gate) | Guard/inventory use `QVERIFY`/`QVERIFY2` only; no `QSKIP` anywhere in new tests |
 
@@ -4312,5 +4782,5 @@ Any difference from the `master` build is a regression: route it through `superp
 
 - `TransportPolicy::current()` defaults to Passthrough when nothing is published; S1e's fail-closed bootstrap must replace that default (no network objects before Phase C).
 - `HttpClient` snapshots the policy at construction; S1e's trust-epoch handling attaches here and in `PolicyEnforcingNam`.
-- Injected test managers (`CapturingNam`/`SequencedNam`) bypass `PolicyEnforcingNam` by design in S1a; S1e decides whether enforcement suites wrap them.
+- Injected test managers (`CapturingNam`/`SequencedNam`/`OfflineHttp`) bypass `PolicyEnforcingNam` by design in S1a; S1e decides whether enforcement suites wrap them. S1e's fail-closed default policy also becomes the runtime backstop that makes an un-injected test client unable to reach `http://localhost` (S1a relies on the static guard + access-log evidence instead — see Task 6b).
 - QuickTest fixtures use `data:` image URIs (inventory R12); S1e's URL interceptor rejects `data:`, so those fixtures must move to `qrc:` or the allowed `file:` locations then.
