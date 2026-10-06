@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Revision 4 (2026-10-06):** Codex plan review round 2 applied — run-specific MariaDB verification schemas with an idempotent dropping undo (`MariaDbVerification` checkpoint, restore step, fingerprint and post-change check), `reports` folder provisioned in runbook B0 while `-Report` fails closed on a missing folder, a dirty post-change report rolls back (`RolledBack`, report kept as evidence; `RecoveryRequired` if rollback fails) tested through the real `Validate` checkpoint and engine, exact `tools\` tree capture/restore incl. directories, and a child-process success test of the generated restore wrapper.
+
 **Revision 3 (2026-10-06):** Codex plan review round 1 applied — manifest array contract (`Get-LoamsPropList`), contained tool paths, prior-state-preserving retention rollback, a restore that covers every mutation (16-row inventory) and is tested by executing the generated script, database backup readiness (D19), verified `mysqld` shutdown, post-change report gating `Success`, mandatory legacy photo fallback, future-dated report rejection, and mechanically recounted tests.
 
 **Revision 2 (2026-10-05):** owner review "APPROVE WITH CHANGES" applied — MariaDB identity and data-directory hardening moved into S1b (D15/D16), encrypted backups with a verified off-host copy and 30-day retention (D14), staging authorization by approved machine identity plus typed confirmation (D2), a fresh drift re-check before the first change (D9), and read-only post-change validation beyond `get_branding.php` (D13).
@@ -42,7 +44,8 @@
 - Paths taken from the manifest (`server.tools[].relativePath`, module paths) must be plain relative paths strictly below the XAMPP root: no `.`/`..`, root or drive (validator), and before execution no escape and no junction/symbolic link (`Resolve-LoamsContainedPath`).
 - Every mutation `-Converge` can make is listed in the Task 14 mutation inventory: captured before the change, undone automatically (no error suppression in any rollback path), restorable by the generated restore script, and part of the host fingerprint so drift and restoration are verifiable.
 - The database is backed up only while MariaDB is running; a stopped MariaDB that holds data, or a host without the application database, is refused with instructions (D19). A backup is never skipped.
-- `Success` requires a clean post-change report: Apache and MariaDB `Converged`, both ACL profiles compliant, event source registered, complete module inventory, and report outcome `Success` (staging: no runtime finding other than `ManifestNotFinal`).
+- `Success` requires a clean post-change report: Apache and MariaDB `Converged`, both ACL profiles compliant, event source registered, complete module inventory, no leftover verification schemas, and report outcome `Success` (staging: no runtime finding other than `ManifestNotFinal`). A dirty report fails `Validate` ⇒ rollback ⇒ `RolledBack` with the report kept in `<backup>\logs\post-change-report.json` (or `RecoveryRequired` if rollback fails).
+- `-Report` never creates directories and fails closed if its target folder is missing; `C:\ProgramData\LOAMS\reports` is provisioned (admin-only) by the administrative runbook step B0.
 - The deployed web root must contain `loams_api\uploads\default.jpg`; validation fails without it (D20).
 - Acknowledged reports dated more than 5 minutes in the future are refused (clock-skew tolerance).
 - Pester mock bodies run in the module scope: fixtures reach them through `$global:LoamsT*` variables (removed in `AfterAll`) or literals, never test-file `$script:` variables.
@@ -91,6 +94,7 @@
 - **D19 — Database backup readiness (new, Codex round 1):** dump only while MariaDB runs; stopped-with-data and no-application-database hosts are refused with instructions; S1b never auto-starts a database before backing it up and never skips the backup (Task 13 table).
 - **D20 — Legacy photo fallback (new, Codex round 1):** `uploads\default.jpg` must be deployed and served as an image; its absence fails validation instead of passing silently.
 - **D21 — Restore covers every mutation (new, Codex round 1):** 16-row mutation inventory (Task 14); the backup set carries a module copy and prior-state capture (`loams-state.json`, task XML, tools copies); the generated restore script verifies its inputs inside the step machinery and exits 4 naming the failed step; the fingerprint includes LOAMS-owned state (event source, retention task, tools, layout).
+- **D23 — Round-2 decisions (new):** dirty post-change report ⇒ rollback ⇒ `RolledBack` with the report kept as evidence (`RecoveryRequired` only if rollback fails); verification schema names are per run (`loams_s1b_verify_<set id>`, `…_r`) and only those are ever dropped; the restore requires elevation only when a step touches services, ACLs, the event log, a scheduled task or the database.
 - **D22 — Manifest access contract (new, Codex round 1):** `Get-LoamsProp` raw / `Get-LoamsPropList` enumerating, with tests that fail on the PS 5.1 nested-array bug.
 - **D18 — Cipher (new):** AES-256-CBC CMS EnvelopedData (`-aes256`) plus external SHA-256 hashes; CMS AuthEnvelopedData (GCM) to be evaluated on the pinned OpenSSL 3 in staging and adopted by reviewed change if supported end-to-end.
 
@@ -3433,16 +3437,16 @@ Via the project `commit` skill — subject: `feat(deploy): detect and harden the
 - Create: `deploy/server/Test-LoamsServerHost.ps1` (Report parameter set only; Task 17 adds `-Converge`)
 - Create: `deploy/tests/Report.Tests.ps1`
 - Modify: `deploy/tests/TestHelpers.ps1` (append `Get-LoamsTreeFingerprint`, `Set-LoamsReportMocks`)
-- Modify: `deploy/tests/expected-test-count.txt` → `156`
+- Modify: `deploy/tests/expected-test-count.txt` → `158`
 
 **Interfaces:**
 - Consumes: Tasks 2–10.
 - Produces:
   - `Get-LoamsFingerprintAclPaths -AclProfile <object[]> -ProgramDataRoot <string>` → `[string[]]` XAMPP-side ACL paths (LOAMS-owned `ProgramData` paths are excluded: the tool creates them itself, so they would always "drift").
-  - `LoamsHost.HostState.ps1` (read-only): `Get-LoamsScheduledTaskXml -TaskName` → task XML or `$null`; `Get-LoamsTaskDefinitionHash -Xml` → SHA-256 of the definition without `RegistrationInfo`, or `'absent'`; `Get-LoamsLayoutState -ProgramDataRoot` → `{ path; exists }` for `server`, `server\logs`, `server\logs\compat-guard.log`, `server\tls`, `server\tls\private`, `tools`; `Get-LoamsToolsState -ProgramDataRoot` → `{ path (relative to tools); sha256 }`; `Get-LoamsLoamsState -ProgramDataRoot` → hashtable `eventSource`, `retentionTask`, `layout:<path>` (SDDL or `absent`), `tool:<path>` (hash). These make every LOAMS-owned mutation (Task 14 inventory) part of the fingerprint.
+  - `LoamsHost.HostState.ps1` (read-only): `Get-LoamsScheduledTaskXml -TaskName` → task XML or `$null`; `Get-LoamsTaskDefinitionHash -Xml` → SHA-256 of the definition without `RegistrationInfo`, or `'absent'`; `Get-LoamsLayoutState -ProgramDataRoot` → `{ path; exists }` for `server`, `server\logs`, `server\logs\compat-guard.log`, `server\tls`, `server\tls\private`, `tools`; `Get-LoamsToolsState -ProgramDataRoot` → the whole tree below `tools\`: `{ path (relative); type='dir'|'file'; sha256 (files) }`; `Get-LoamsVerifySchemaFolders -DataDir` → names of `loams_s1b_verify*` schema folders in the MariaDB datadir (read-only folder listing, no credentials); `Get-LoamsLoamsState -ProgramDataRoot [-MariaDbDataDir]` → hashtable `eventSource`, `retentionTask`, `layout:<path>` (SDDL or `absent`), `tool:<path>` (hash or `dir`), `verifySchemas` (names or `none`). These make every LOAMS-owned mutation (Task 14 inventory) part of the fingerprint.
   - `Get-LoamsLiveFingerprint -XamppRoot <string> -ProgramDataRoot <string> -ApacheServiceName <string> -MariaDbServiceName <string> -MariaDbLayout <pscustomobject> -AclPaths <string[]>` → fingerprint (Task 9 shape, incl. `loamsState`) read **live** from the host: both service configurations, hashes of `httpd.conf`, `extra\httpd-xampp.conf`, `extra\httpd-ssl.conf`, `php.ini`, `my.ini` (never `config.php`: hashing a small file that contains the DB password would allow offline guessing), SDDL of every ACL path, and the loaded `httpd` modules. Used by the report **and** by the pre-change drift re-check (Task 16/17), so both are computed by one code path.
   - `New-LoamsHostReport -XamppRoot -ManifestPath -ProgramDataRoot [-ServiceName 'Apache2.4'] [-MariaDbServiceName 'mysql']` → `[pscustomobject]` with `reportVersion` (2), `generatedUtc`, `computerName`, `elevated`, `manifest`, Apache fields (`layout`, `services`, `processes`, `httpd`, `phpSapi`, `phpCli`, `classification`, `runtime`, `inventoryComplete`, `loadedModules`, `acl`), `mariaDb` {`layout`, `services`, `processes`, `classification`, `acl`}, `eventSource`, `fingerprint`, `profileHash` (= `Get-LoamsFingerprintHash fingerprint`), `convergenceNeeded`, `outcome` (`Success`|`StopAndReport`|`Incomplete`), `outcomeReasons`.
-  - `Format-LoamsHostReport -Report` → `[string[]]`; `Save-LoamsHostReport -Report -Path` (UTF-8 without BOM; never creates directories); `Invoke-LoamsHostReport -XamppRoot -ManifestPath -ProgramDataRoot -ServiceName -MariaDbServiceName -ReportPath` → report (forces Report mode).
+  - `Format-LoamsHostReport -Report` → `[string[]]`; `Save-LoamsHostReport -Report -Path` (UTF-8 without BOM; **never creates directories** — a missing folder throws `"... -Report never creates directories ..."`, so `C:\ProgramData\LOAMS\reports` is provisioned in runbook B0); `Invoke-LoamsHostReport -XamppRoot -ManifestPath -ProgramDataRoot -ServiceName -MariaDbServiceName -ReportPath` → report (forces Report mode).
   - Entry: `Test-LoamsServerHost.ps1 [-Report] [-XamppRoot] [-ManifestPath] [-ServiceName] [-MariaDbServiceName] [-ProgramDataRoot] [-ReportPath]`.
 
 **Outcome rules:** manifest invalid, Apache stop, or **MariaDB stop** ⇒ `StopAndReport` (exit 2); not elevated, `httpd` not running, or module list unreadable ⇒ `Incomplete` (exit 3); runtime `Mismatch` or a draft manifest (`Unknown`) ⇒ `StopAndReport` ("stack does not match an approved manifest"); otherwise `Success` (exit 0). On this dev box today the expected result is `StopAndReport` elevated (draft manifest; OpenSSL 1.1.1t loaded) or `Incomplete` non-elevated.
@@ -3604,6 +3608,16 @@ Describe '-Report is read-only' {
     }
 }
 
+Describe 'Report output location' {
+    It 'fails closed with a clear message instead of creating a missing report directory' {
+        Set-LoamsReportMocks -XamppRoot $script:Root -ModulePaths $script:Mods
+        $missing = Join-Path $TestDrive 'no-such-reports\report.json'
+        { Invoke-LoamsHostReport -XamppRoot $script:Root -ManifestPath $script:ManifestPath -ProgramDataRoot $script:Pd -ServiceName 'Apache2.4' -MariaDbServiceName 'mysql' -ReportPath $missing 6>$null } |
+            Should -Throw -ExpectedMessage '*-Report never creates directories*'
+        Test-Path (Join-Path $TestDrive 'no-such-reports') | Should -BeFalse
+    }
+}
+
 Describe 'Host state helpers' {
     It 'hashes a task definition independently of its registration info, and reports absence' {
         $a = '<Task xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><RegistrationInfo><Date>2026-01-01</Date></RegistrationInfo><Actions><Exec><Command>x.exe</Command></Exec></Actions></Task>'
@@ -3622,6 +3636,17 @@ Describe 'Host state helpers' {
         $st["layout:$(Join-Path $pd 'server')"] | Should -Be 'absent'
         $st["layout:$(Join-Path $pd 'tools')"] | Should -Match '^O:'
         $st.ContainsKey('tool:Invoke-LoamsBackupRetention.ps1') | Should -BeTrue
+        $st['verifySchemas'] | Should -Be 'none'
+    }
+    It 'reports leftover MariaDB verification schemas in the report and the fingerprint' {
+        Set-LoamsReportMocks -XamppRoot $script:Root -ModulePaths $script:Mods
+        $left = Join-Path $script:Root 'mysql\data\loams_s1b_verify_20261006t000000z'
+        New-Item -ItemType Directory -Path $left | Out-Null
+        try {
+            $r = Run-Report
+            (@($r.mariaDb.leftoverVerifySchemas) -join ',') | Should -Be 'loams_s1b_verify_20261006t000000z'
+            @($r.fingerprint.loamsState) | Should -Contain 'verifySchemas=loams_s1b_verify_20261006t000000z'
+        } finally { Remove-Item -LiteralPath $left -Recurse -Force }
     }
 }
 
@@ -3682,17 +3707,28 @@ function Get-LoamsLayoutState {
 function Get-LoamsToolsState {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $ProgramDataRoot)
+    # The whole tree below tools\: directories (type 'dir') and files (type 'file' + SHA-256).
     $tools = Join-Path $ProgramDataRoot 'tools'
     if (-not (Test-Path -LiteralPath $tools)) { return }
     $base = (Resolve-Path -LiteralPath $tools).ProviderPath.TrimEnd('\') + '\'
-    foreach ($f in (Get-ChildItem -LiteralPath $tools -Recurse -File -Force | Sort-Object FullName)) {
-        [pscustomobject]@{ path = $f.FullName.Substring($base.Length); sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $f.FullName).Hash.ToLowerInvariant() }
+    foreach ($i in (Get-ChildItem -LiteralPath $tools -Recurse -Force | Sort-Object FullName)) {
+        $rel = $i.FullName.Substring($base.Length)
+        if ($i.PSIsContainer) { [pscustomobject]@{ path = $rel; type = 'dir'; sha256 = '' } }
+        else { [pscustomobject]@{ path = $rel; type = 'file'; sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $i.FullName).Hash.ToLowerInvariant() } }
     }
+}
+
+function Get-LoamsVerifySchemaFolders {
+    [CmdletBinding()]
+    param([AllowEmptyString()][string] $DataDir)
+    # MariaDB keeps each schema as a folder in datadir; a read-only folder listing needs no DB credentials.
+    if (-not $DataDir -or -not (Test-Path -LiteralPath $DataDir)) { return }
+    Get-ChildItem -LiteralPath $DataDir -Directory -Force -Filter 'loams_s1b_verify*' | Sort-Object Name | ForEach-Object { $_.Name }
 }
 
 function Get-LoamsLoamsState {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string] $ProgramDataRoot)
+    param([Parameter(Mandatory)][string] $ProgramDataRoot, [AllowEmptyString()][string] $MariaDbDataDir = '')
     $state = @{}
     $es = Get-LoamsEventSourceState
     $state['eventSource'] = $(if ($es.Registered) { "registered:$($es.LogName)" } else { 'absent' })
@@ -3700,7 +3736,9 @@ function Get-LoamsLoamsState {
     foreach ($l in @(Get-LoamsLayoutState -ProgramDataRoot $ProgramDataRoot)) {
         $state["layout:$($l.path)"] = $(if ($l.exists) { Get-LoamsAclSddl -Path $l.path } else { 'absent' })
     }
-    foreach ($t in @(Get-LoamsToolsState -ProgramDataRoot $ProgramDataRoot)) { $state["tool:$($t.path)"] = $t.sha256 }
+    foreach ($t in @(Get-LoamsToolsState -ProgramDataRoot $ProgramDataRoot)) { $state["tool:$($t.path)"] = $(if ($t.type -eq 'dir') { 'dir' } else { $t.sha256 }) }
+    $verify = @(Get-LoamsVerifySchemaFolders -DataDir $MariaDbDataDir)
+    $state['verifySchemas'] = $(if ($verify.Count -gt 0) { $verify -join ',' } else { 'none' })
     return $state
 }
 ```
@@ -3736,7 +3774,7 @@ function Get-LoamsLiveFingerprint {
         if (Test-Path -LiteralPath $p) { $acl[$p] = Get-LoamsAclSddl -Path $p } else { $acl[$p] = '<absent>' }
     }
     return New-LoamsHostFingerprint -ComputerName $env:COMPUTERNAME -ApacheService $apache -MariaDbService $db -ConfigHashes $conf -AclSddl $acl -Modules @($inv.Modules) `
-        -LoamsState (Get-LoamsLoamsState -ProgramDataRoot $ProgramDataRoot)
+        -LoamsState (Get-LoamsLoamsState -ProgramDataRoot $ProgramDataRoot -MariaDbDataDir $MariaDbLayout.DataDir)
 }
 
 function New-LoamsHostReport {
@@ -3835,7 +3873,8 @@ function New-LoamsHostReport {
         inventoryComplete = $inventory.Complete
         loadedModules = @($inventory.Modules)
         acl = $acl
-        mariaDb = [pscustomobject]@{ layout = $dbLayout; services = $dbServices; processes = $dbProcesses; classification = $dbClass; acl = $dbAcl }
+        mariaDb = [pscustomobject]@{ layout = $dbLayout; services = $dbServices; processes = $dbProcesses; classification = $dbClass; acl = $dbAcl
+            leftoverVerifySchemas = @(Get-LoamsVerifySchemaFolders -DataDir $dbLayout.DataDir) }
         eventSource = $eventSource
         fingerprint = $fingerprint
         profileHash = (Get-LoamsFingerprintHash -Fingerprint $fingerprint)
@@ -3884,6 +3923,10 @@ function Format-LoamsHostReport {
 function Save-LoamsHostReport {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Report, [Parameter(Mandatory)][string] $Path)
+    $dir = Split-Path -Parent ([IO.Path]::GetFullPath($Path))
+    if (-not (Test-Path -LiteralPath $dir -PathType Container)) {
+        throw "Report directory '$dir' does not exist: -Report never creates directories. Provision it first (runbook Part B0, elevated) or pass -ReportPath in an existing folder."
+    }
     $json = $Report | ConvertTo-Json -Depth 8
     [IO.File]::WriteAllText($Path, $json, (New-Object System.Text.UTF8Encoding($false)))
 }
@@ -3941,7 +3984,7 @@ exit (Get-LoamsExitCode -Outcome $result.outcome)
 
 - [ ] **Step 6: Run to verify it passes**
 
-Same command as Step 3. Expected: PASS, 12 tests. Set `expected-test-count.txt` to `156` and run the suite runner → `PASSED: 156 tests`.
+Same command as Step 3. Expected: PASS, 14 tests. Set `expected-test-count.txt` to `158` and run the suite runner → `PASSED: 158 tests`.
 
 - [ ] **Step 7: Read-only smoke on this dev box (manual; non-elevated is fine)**
 
@@ -3971,7 +4014,7 @@ Via the project `commit` skill — subject: `feat(deploy): add read-only Test-Lo
 - Create: `deploy/server/LoamsHost/LoamsHost.BackupArchive.ps1`
 - Create: `deploy/tests/Crypto.Tests.ps1`
 - Modify: `deploy/tests/TestHelpers.ps1` (append `Get-LoamsTestOpenSsl`, `New-LoamsTestRecoveryCert`)
-- Modify: `deploy/tests/expected-test-count.txt` → `173`
+- Modify: `deploy/tests/expected-test-count.txt` → `175`
 
 **Interfaces:**
 - Consumes: `Invoke-LoamsExternal`, `ConvertTo-LoamsArgumentString`, `Protect-LoamsText`, `Assert-LoamsMutationAllowed`, `Write-LoamsLog` (Task 1); `Get-LoamsProp` (Task 2).
@@ -4399,7 +4442,7 @@ The temporary plaintext in `Expand-LoamsEncryptedArchive` exists only on the rec
 
 - [ ] **Step 6: Run to verify it passes**
 
-Same command as Step 3. Expected: PASS, 17 tests. Set `expected-test-count.txt` to `173` and run the suite runner → `PASSED: 173 tests`.
+Same command as Step 3. Expected: PASS, 17 tests. Set `expected-test-count.txt` to `175` and run the suite runner → `PASSED: 175 tests`.
 
 - [ ] **Step 7: Commit**
 
@@ -4414,7 +4457,7 @@ Via the project `commit` skill — subject: `feat(deploy): add streaming CMS bac
 - Create: `deploy/server/LoamsHost/LoamsHost.Database.ps1`
 - Create: `deploy/tests/Secrets.Tests.ps1`
 - Create: `deploy/tests/Database.Tests.ps1`
-- Modify: `deploy/tests/expected-test-count.txt` → `192`
+- Modify: `deploy/tests/expected-test-count.txt` → `196`
 
 **Interfaces:**
 - Consumes: Task 1 helpers; `Start-LoamsRedirectedProcess`, `Invoke-LoamsEncryptStream` (Task 12).
@@ -4430,7 +4473,8 @@ Via the project `commit` skill — subject: `feat(deploy): add streaming CMS bac
   - `Invoke-LoamsMysqlQuery -MysqlExe -DefaultsFile -Sql` → `[string]` trimmed stdout (`--defaults-extra-file` first, `--batch --skip-column-names -e <sql>`).
   - `Copy-LoamsDbSchemaPipe -MysqldumpExe -MysqlExe -DefaultsFile -Source <schema> -Target <schema>` (mutating: `mysqldump <Source>` piped into `mysql <Target>` in memory).
   - `Get-LoamsDatabaseBackupReadiness -MariaDbLayout -Processes -ApplicationDatabase -ServiceName` → `[pscustomobject]@{ Ready; State='running'|'stopped-with-data'|'no-application-database'; Reason }` (decision D19, below).
-  - `Invoke-LoamsDbVerification -MysqlExe -MysqldumpExe -ConnectionInfo -WorkDirectory` → `[pscustomobject]@{ Passed=[bool]; Steps=[pscustomobject[]] (Name, Ok, Detail) }`. Steps: `read` (`SELECT VERSION()`), `write` (create scratch schema `loams_s1b_verify`, table, 3 rows), `backup-restore` (dump the scratch schema and restore it into `loams_s1b_verify_restore`, row count must be 3), `cleanup` (always drops both scratch schemas). It **never** reads or writes the application database or attendance tables.
+  - `Invoke-LoamsDbVerification -MysqlExe -MysqldumpExe -ConnectionInfo -WorkDirectory -Schema <name> -RestoreSchema <name>` → `[pscustomobject]@{ Passed=[bool]; Steps=[pscustomobject[]] (Name, Ok, Detail) }`. Names are **run-specific** (`loams_s1b_verify_<backup-set id>` and `…_r`, from the backup manifest `verifySchemas`) and must match `^loams_s1b_verify_[0-9a-z_]+$`. Steps: `read` (`SELECT VERSION()`), `write` (create the scratch schema, a table, 3 rows), `backup-restore` (dump it and restore it into the restore schema, row count must be 3), `cleanup` (drops both). A failed `cleanup` makes `Passed` false; the checkpoint's undo (`Remove-LoamsVerifySchemas`) then drops them again and fails loudly if it cannot. It **never** reads or writes the application database or attendance tables.
+  - `Remove-LoamsVerifySchemas -MysqlExe -ConnectionInfo -WorkDirectory -Schemas <string[]>` (mutating; idempotent): refuses any name outside `^loams_s1b_verify_[0-9a-z_]+$`, runs `DROP DATABASE IF EXISTS` for exactly the given names, then confirms via `information_schema.SCHEMATA` that none remains — otherwise throws (⇒ `RECOVERY REQUIRED` when called from an undo).
 
 **Database backup readiness (D19):** the backup is never skipped and S1b never starts a database before backing it up.
 
@@ -4583,7 +4627,7 @@ BeforeAll {
         }
         Mock -ModuleName LoamsHost Copy-LoamsDbSchemaPipe { }
     }
-    function Verify { Invoke-LoamsDbVerification -MysqlExe 'C:\x\mysql.exe' -MysqldumpExe 'C:\x\mysqldump.exe' -ConnectionInfo $script:Conn -WorkDirectory $TestDrive }
+    function Verify { Invoke-LoamsDbVerification -MysqlExe 'C:\x\mysql.exe' -MysqldumpExe 'C:\x\mysqldump.exe' -ConnectionInfo $script:Conn -WorkDirectory $TestDrive -Schema 'loams_s1b_verify_t1' -RestoreSchema 'loams_s1b_verify_t1_r' }
 }
 AfterAll { Remove-Variable -Name LoamsTSql, LoamsTFailWrite -Scope Global -ErrorAction SilentlyContinue }
 
@@ -4624,8 +4668,8 @@ Describe 'Invoke-LoamsDbVerification' {
         $r = Verify
         $r.Passed | Should -BeTrue
         ($r.Steps.Name -join ',') | Should -Be 'read,write,backup-restore,cleanup'
-        $global:LoamsTSql[$global:LoamsTSql.Count - 1] | Should -Match 'DROP DATABASE IF EXISTS loams_s1b_verify; DROP DATABASE IF EXISTS loams_s1b_verify_restore'
-        Should -Invoke -ModuleName LoamsHost Copy-LoamsDbSchemaPipe -Times 1 -Exactly -ParameterFilter { $Source -eq 'loams_s1b_verify' -and $Target -eq 'loams_s1b_verify_restore' }
+        $global:LoamsTSql[$global:LoamsTSql.Count - 1] | Should -Match 'DROP DATABASE IF EXISTS loams_s1b_verify_t1; DROP DATABASE IF EXISTS loams_s1b_verify_t1_r'
+        Should -Invoke -ModuleName LoamsHost Copy-LoamsDbSchemaPipe -Times 1 -Exactly -ParameterFilter { $Source -eq 'loams_s1b_verify_t1' -and $Target -eq 'loams_s1b_verify_t1_r' }
     }
     It 'fails when the write step fails, skips backup-restore, and still cleans up' {
         Use-DbMocks -FailWrite
@@ -4644,6 +4688,22 @@ Describe 'Invoke-LoamsDbVerification' {
         Set-LoamsMode -Mode Report
         Use-DbMocks
         { Verify } | Should -Throw -ExpectedMessage 'LOAMS-READONLY*'
+    }
+}
+
+Describe 'Remove-LoamsVerifySchemas' {
+    BeforeEach { Set-LoamsMode -Mode Converge }
+    AfterEach { Set-LoamsMode -Mode Report }
+    It 'refuses to drop anything that is not a verification schema name' {
+        Use-DbMocks
+        { Remove-LoamsVerifySchemas -MysqlExe 'C:\x\mysql.exe' -ConnectionInfo $script:Conn -WorkDirectory $TestDrive -Schemas @('loams_s1b_verify_t1', 'wits_test') } | Should -Throw -ExpectedMessage "*Refusing to drop 'wits_test'*"
+        @($global:LoamsTSql).Count | Should -Be 0
+    }
+    It 'fails loudly when a schema is still present after the drop' {
+        Use-DbMocks
+        Mock -ModuleName LoamsHost Invoke-LoamsMysqlQuery { $global:LoamsTSql.Add($Sql); if ($Sql -match 'SCHEMA_NAME') { return 'loams_s1b_verify_t1' }; '' }
+        { Remove-LoamsVerifySchemas -MysqlExe 'C:\x\mysql.exe' -ConnectionInfo $script:Conn -WorkDirectory $TestDrive -Schemas @('loams_s1b_verify_t1') } | Should -Throw -ExpectedMessage '*still present after DROP*'
+        ($global:LoamsTSql -join ' ') | Should -Match 'DROP DATABASE IF EXISTS loams_s1b_verify_t1;'
     }
 }
 ```
@@ -4793,8 +4853,7 @@ The `Writer` block runs inside `Invoke-LoamsEncryptStream` and sees `$MysqldumpE
 ```powershell
 # MariaDB verification on a scratch schema only (owner change D15): startup, reads, writes, backup + restore.
 
-$script:LoamsVerifySchema = 'loams_s1b_verify'
-$script:LoamsVerifyRestoreSchema = 'loams_s1b_verify_restore'
+$script:LoamsVerifyNamePattern = '^loams_s1b_verify_[0-9a-z_]+$'
 $script:LoamsSystemSchemas = @('mysql', 'performance_schema', 'sys', 'test', 'phpmyadmin')
 
 function Get-LoamsDatabaseBackupReadiness {
@@ -4842,10 +4901,12 @@ function Invoke-LoamsDbVerification {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string] $MysqlExe, [Parameter(Mandatory)][string] $MysqldumpExe,
-        [Parameter(Mandatory)] $ConnectionInfo, [Parameter(Mandatory)][string] $WorkDirectory
+        [Parameter(Mandatory)] $ConnectionInfo, [Parameter(Mandatory)][string] $WorkDirectory,
+        [Parameter(Mandatory)][string] $Schema, [Parameter(Mandatory)][string] $RestoreSchema
     )
     Assert-LoamsMutationAllowed -Action 'MariaDB verification (scratch schema only)'
-    $s = $script:LoamsVerifySchema; $t = $script:LoamsVerifyRestoreSchema
+    foreach ($n in @($Schema, $RestoreSchema)) { if ($n -cnotmatch $script:LoamsVerifyNamePattern) { throw "'$n' is not a LOAMS verification schema name." } }
+    $s = $Schema; $t = $RestoreSchema
     if ($ConnectionInfo.Database -in @($s, $t)) { throw "The application database may not be named $s or $t." }
     $steps = New-Object System.Collections.Generic.List[object]
     $run = { param([string] $name, [scriptblock] $body)
@@ -4878,11 +4939,31 @@ function Invoke-LoamsDbVerification {
     Write-LoamsLog -Message ("MariaDB verification: " + (($steps | ForEach-Object { "$($_.Name)=$(if ($_.Ok) { 'ok' } else { 'FAILED' })" }) -join ', '))
     return [pscustomobject]@{ Passed = $passed; Steps = @($steps) }
 }
+
+function Remove-LoamsVerifySchemas {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string] $MysqlExe, [Parameter(Mandatory)] $ConnectionInfo,
+        [Parameter(Mandatory)][string] $WorkDirectory, [Parameter(Mandatory)][AllowEmptyCollection()][string[]] $Schemas
+    )
+    Assert-LoamsMutationAllowed -Action 'drop MariaDB verification schemas'
+    foreach ($n in $Schemas) { if ($n -cnotmatch $script:LoamsVerifyNamePattern) { throw "Refusing to drop '$n': not a LOAMS verification schema name." } }
+    if (@($Schemas).Count -eq 0) { return }
+    $cnf = New-LoamsMysqlDefaultsFile -Directory $WorkDirectory -ConnectionInfo $ConnectionInfo
+    try {
+        Invoke-LoamsMysqlQuery -MysqlExe $MysqlExe -DefaultsFile $cnf -Sql ((@($Schemas) | ForEach-Object { "DROP DATABASE IF EXISTS $_;" }) -join ' ') | Out-Null
+        $left = Invoke-LoamsMysqlQuery -MysqlExe $MysqlExe -DefaultsFile $cnf -Sql ("SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME IN ('" + (@($Schemas) -join "','") + "')")
+        if ($left) { throw "verification schemas still present after DROP: $left" }
+    } finally {
+        Remove-LoamsMysqlDefaultsFile -Path $cnf
+    }
+    Write-LoamsLog -Message ("Dropped verification schemas: " + (@($Schemas) -join ', '))
+}
 ```
 
 - [ ] **Step 6: Run to verify they pass**
 
-Same command as Step 3. Expected: PASS, 19 tests (Secrets 11, Database 8). Set `expected-test-count.txt` to `192` and run the suite runner → `PASSED: 192 tests`.
+Same command as Step 3. Expected: PASS, 21 tests (Secrets 11, Database 10). Set `expected-test-count.txt` to `196` and run the suite runner → `PASSED: 196 tests`.
 
 - [ ] **Step 7: Commit**
 
@@ -4898,20 +4979,21 @@ Via the project `commit` skill — subject: `feat(deploy): stream an encrypted D
 - Create: `deploy/server/LoamsHost/LoamsHost.OffHost.ps1`
 - Create: `deploy/server/LoamsHost/Restore-LoamsHostBackup.template.ps1` (not dot-sourced: the module loads only `LoamsHost.*.ps1`)
 - Create: `deploy/tests/Backup.Tests.ps1`
-- Modify: `deploy/tests/expected-test-count.txt` → `217`
+- Modify: `deploy/tests/expected-test-count.txt` → `223`
 
 **Interfaces:**
 - Consumes: Task 1 helpers; `Get-LoamsServiceSnapshot`, `Set-LoamsServiceAccount`, `Stop-/Start-LoamsWindowsService`, `Start-LoamsControlPanelHttpd`, `Unregister-LoamsApacheService` (Task 8); `Unregister-LoamsMariaDbService`, `Start-LoamsControlPanelMysqld` (Task 10); `Get-LoamsEventSourceState`, `Unregister-LoamsEventSource` (Task 7); `Get-LoamsScheduledTaskXml`, `Get-LoamsTaskDefinitionHash`, `Get-LoamsLayoutState`, `Get-LoamsToolsState` (Task 11); `Invoke-LoamsEncryptStream`, `Test-LoamsCmsFile`, `Write-LoamsBackupArchive` (Task 12); `Invoke-LoamsEncryptedDatabaseDump` (Task 13); ACL profiles (Tasks 6, 10).
 - Produces (`LoamsHost.Backup.ps1`):
   - `Set-LoamsAdminOnlyAcl -Path [-Directory]` (mutating).
   - `Get-LoamsBackupItems -XamppRoot -ApiRoot -MyIni -ProgramDataRoot` → `@{ Source; Name }[]` (Apache conf, `php.ini`, `my.ini`, API folder incl. `config.php` and photos except `logs\`, `ProgramData\LOAMS\server` except `logs\`).
-  - `Save-LoamsPriorHostState -BackupDir -ProgramDataRoot` → the object written to `rollback\loams-state.json`: `{ eventSource {Registered, LogName}, layout [{path, exists}], retention {taskName, taskExists, taskHash}, tools [{path, sha256}] }`; also writes `rollback\retention-task.xml` (when the task exists) and `rollback\tools\…` (copies of every pre-existing tools file).
+  - `Save-LoamsPriorHostState -BackupDir -ProgramDataRoot` → the object written to `rollback\loams-state.json`: `{ eventSource {Registered, LogName}, layout [{path, exists}], retention {taskName, taskExists, taskHash}, tools [{path, type ('dir'|'file'), sha256}] }` — the whole `tools\` tree, directories included; also writes `rollback\retention-task.xml` (when the task exists) and `rollback\tools\…` (copies of every pre-existing tools file).
   - `New-LoamsBackupSet -Layout -MariaDbLayout -ApacheServiceName -MariaDbServiceName -ApacheSituation -MariaDbSituation -BackupRoot -ProgramDataRoot -ConnectionInfo -AclProfile -OpenSslExe -Recipient [-ReportPath]` → `[pscustomobject]@{ Path; Verified=$true; Services; AclSaves; PriorState; RestoreScript; ManifestPath; SumsSha256 }`; throws `"Backup at '<dir>' failed verification: ..."` (no host change has happened yet).
   - `Write-LoamsBackupSums -Path` → SHA-256 of the written `SHA256SUMS.json`; `Test-LoamsBackupSet -Path -OpenSslExe` → `{ Verified; Problems }`; `Restore-LoamsAclSave -BackupPath -AclSave` (mutating).
-  - Retention: `New-LoamsRetentionTaskXml -ScriptPath` → task XML (SYSTEM `S-1-5-18`, daily 03:30); `Register-LoamsScheduledTaskXml -TaskName -Xml` / `Remove-LoamsScheduledTask -TaskName` (mutating wrappers, errors **not** suppressed); `Register-LoamsBackupRetentionTask -ProgramDataRoot [-ModuleSource] [-TaskName]`; `Get-LoamsRetentionTaskState -ProgramDataRoot [-TaskName]`; `Restore-LoamsRetentionTaskState -ProgramDataRoot -BackupPath -Prior` (restores exactly the captured task definition and tools files, then **verifies** both and throws on any difference); `Invoke-LoamsBackupRetention -BackupRoot [-RetentionDays 30] [-NowUtc]`.
+  - Retention: `New-LoamsRetentionTaskXml -ScriptPath` → task XML (SYSTEM `S-1-5-18`, daily 03:30); `Register-LoamsScheduledTaskXml -TaskName -Xml` / `Remove-LoamsScheduledTask -TaskName` (mutating wrappers, errors **not** suppressed); `Register-LoamsBackupRetentionTask -ProgramDataRoot [-ModuleSource] [-TaskName]`; `Get-LoamsRetentionTaskState -ProgramDataRoot [-TaskName]`; `Restore-LoamsRetentionTaskState -ProgramDataRoot -BackupPath -Prior` (restores exactly the captured task definition and `tools\` tree — removes files and then directories added by convergence, recreates prior directories, restores prior files — then **verifies** both and throws on any difference); `Invoke-LoamsBackupRetention -BackupRoot [-RetentionDays 30] [-NowUtc]`.
 - Produces (`LoamsHost.Restore.ps1`):
   - `Set-LoamsServiceStartMode -ServiceName -StartMode <'Auto'|'Manual'|'Disabled'>` (mutating: `sc.exe config <name> start= auto|demand|disabled`).
-  - `Invoke-LoamsHostRestore -BackupPath` → `[pscustomobject]@{ Outcome='Restored'|'RecoveryRequired'; Steps=[pscustomobject[]] (Name, Ok, Detail); FailedSteps=[string[]] }` — every step (including reading and checking the backup) runs inside the step machinery; any failed step ⇒ `RecoveryRequired`.
+  - `Test-LoamsRestoreNeedsElevation -Manifest -State` → `[bool]` — true when any step would touch services, ACLs, the event log, a scheduled task or the database (then the restore requires elevation; a restore of filesystem-only state does not).
+  - `Invoke-LoamsHostRestore -BackupPath` → `[pscustomobject]@{ Outcome='Restored'|'RecoveryRequired'; Steps=[pscustomobject[]] (Name, Ok, Detail); FailedSteps=[string[]] }` — every step (including reading and checking the backup) runs inside the step machinery; any failed step ⇒ `RecoveryRequired`. The last step drops this run's verification schemas if their folders still exist (credentials from the deployed `config.php`).
 - Produces (`LoamsHost.OffHost.ps1`): `Get-LoamsDestinationKind`, `Copy-LoamsSetTree`, `Export-LoamsBackupSet`, `Set-LoamsOffHostAttestation`, `Test-LoamsOffHostVerification` (unchanged contract, below).
 
 **Mutation inventory — everything `-Converge` can change, and how each is captured, undone and verified (16 mutations):**
@@ -4933,7 +5015,7 @@ Via the project `commit` skill — subject: `feat(deploy): stream an encrypted D
 | 13 | `LOAMS-Transport` event source | `EventSource` | `loams-state.json` `eventSource` | remove only if created | `restore event source` | fingerprint `loamsState` (`eventSource`) |
 | 14 | `LOAMS Backup Retention` task (create or overwrite) | `BackupRetentionTask` | `rollback\retention-task.xml` + definition hash | re-register prior XML or remove | `restore retention task and tools` | fingerprint `loamsState` (`retentionTask`) |
 | 15 | Deployed tools (`ProgramData\LOAMS\tools\LoamsHost\…`, retention script) | `BackupRetentionTask` | `rollback\tools\…` copies + hashes | restore copies, delete new files | same step | fingerprint `loamsState` (`tool:*`) |
-| 16 | MariaDB scratch schemas `loams_s1b_verify*` | `MariaDbServiceAccount` (verification) | — (never exist before) | dropped by the verification's own `cleanup` step | — (needs DB credentials; runbook D2 lists the manual `DROP DATABASE IF EXISTS`) | `converge.log`: `cleanup=ok` |
+| 16 | MariaDB scratch schemas `loams_s1b_verify_<set id>` and `…_r` | `MariaDbVerification` | names derived from the backup-set id and recorded in `backup-manifest.json` `verifySchemas` (they never exist before) | `Remove-LoamsVerifySchemas` for exactly those names (idempotent; failure ⇒ `RECOVERY REQUIRED`) | `drop verification schemas left by converge` (only if their folders exist) | fingerprint `loamsState` `verifySchemas` + post-change check `mariaDb.leftoverVerifySchemas` |
 
 Not rolled back by design: the backup set itself and `C:\ProgramData\LOAMS\backups` (they hold the recovery data), the off-host copy, and `compat.ini` (S1b never writes it; S1d does). S1b never writes application data.
 
@@ -5155,6 +5237,41 @@ Describe 'Restore (generated script and Invoke-LoamsHostRestore)' {
         $r.ExitCode | Should -Be 4
         $r.Text | Should -Match 'changed since the backup was taken: rollback\\acl-01.txt'
     }
+    It 'runs the generated wrapper end to end in a child process: imports the backup''s module copy, restores and exits 0' {
+        # Harmless fixture: no services (names that do not exist), no ACLs, event source and task untouched,
+        # only filesystem state inside TestDrive - so the real wrapper and module copy run unmocked and unelevated.
+        $set = Join-Path $TestDrive 'child-ok-set'; $pd = Join-Path $TestDrive 'child-ok-pd'; $data = Join-Path $TestDrive 'child-ok-data'
+        foreach ($d in @((Join-Path $set 'rollback\tools\sub'), (Join-Path $set 'logs'), (Join-Path $pd 'tools'), $data)) { New-Item -ItemType Directory -Force -Path $d | Out-Null }
+        Set-Content -Path (Join-Path $set 'rollback\tools\sub\keep.txt') -Value 'prior'
+        $moduleDir = Join-Path $PSScriptRoot '..\server\LoamsHost'
+        Copy-Item -Path (Join-Path $moduleDir '*') -Destination (New-Item -ItemType Directory -Path (Join-Path $set 'rollback\LoamsHost')).FullName -Recurse
+        Copy-Item -LiteralPath (Join-Path $moduleDir 'Restore-LoamsHostBackup.template.ps1') -Destination (Join-Path $set 'Restore-LoamsHostBackup.ps1')
+        $sha = (Get-FileHash -Algorithm SHA256 (Join-Path $set 'rollback\tools\sub\keep.txt')).Hash.ToLowerInvariant()
+        $none = 'LoamsTestNoSvc' + [guid]::NewGuid().ToString('N').Substring(0, 8)
+        $state = [ordered]@{ programDataRoot = $pd; eventSource = [ordered]@{ Registered = $true; LogName = 'Application' }
+            layout = @([ordered]@{ path = (Join-Path $pd 'server'); exists = $false })
+            retention = [ordered]@{ taskName = "LOAMS Test Restore $none"; taskExists = $false; taskHash = 'absent' }
+            tools = @([ordered]@{ path = 'sub'; type = 'dir'; sha256 = '' }, [ordered]@{ path = 'sub\keep.txt'; type = 'file'; sha256 = $sha }) }
+        [IO.File]::WriteAllText((Join-Path $set 'rollback\loams-state.json'), ($state | ConvertTo-Json -Depth 5))
+        $snap = [ordered]@{ Exists = $false; Name = ''; StartName = ''; StartMode = ''; PathName = ''; State = ''; AccountKind = 'None' }
+        $manifest = [ordered]@{ backupVersion = 3; computerName = $env:COMPUTERNAME; programDataRoot = $pd; apiRoot = $pd; httpdExe = 'x'; mysqldExe = 'x'; mysqlExe = 'x'; myIni = 'x'; dataDir = $data
+            services = [ordered]@{ apache = [ordered]@{ role = 'apache'; name = "${none}a"; situation = 'FreshInstall'; snapshot = $snap }
+                                   mariadb = [ordered]@{ role = 'mariadb'; name = "${none}m"; situation = 'FreshInstall'; snapshot = $snap } }
+            aclSaves = @(); verifySchemas = @('loams_s1b_verify_child', 'loams_s1b_verify_child_r'); preChangeReport = 'pre.json' }
+        [IO.File]::WriteAllText((Join-Path $set 'backup-manifest.json'), ($manifest | ConvertTo-Json -Depth 6))
+        Write-LoamsBackupSums -Path $set | Out-Null
+        # The "converged" state to undo: a changed file, an added file, an added directory, a created layout folder.
+        New-Item -ItemType Directory -Force -Path (Join-Path $pd 'tools\sub'), (Join-Path $pd 'tools\added-dir'), (Join-Path $pd 'server') | Out-Null
+        Set-Content -Path (Join-Path $pd 'tools\sub\keep.txt') -Value 'changed'
+        Set-Content -Path (Join-Path $pd 'tools\added.txt') -Value 'added by converge'
+        $r = Run-RestoreScript -SetPath $set
+        $r.ExitCode | Should -Be 0 -Because $r.Text
+        $r.Text | Should -Match 'Restore completed'
+        Get-Content -LiteralPath (Join-Path $pd 'tools\sub\keep.txt') | Should -Be 'prior'
+        Test-Path (Join-Path $pd 'tools\added.txt') | Should -BeFalse
+        Test-Path (Join-Path $pd 'tools\added-dir') | Should -BeFalse
+        Test-Path (Join-Path $pd 'server') | Should -BeFalse
+    }
     It 'restores every captured mutation and reports Restored' {
         Use-RestoreMocks
         Use-TaskStore -Initial @{ 'LOAMS Backup Retention' = '<Task xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task"><Actions><Exec><Command>new.exe</Command></Exec></Actions></Task>' }
@@ -5256,6 +5373,21 @@ Describe 'Backup retention task and its rollback' {
         Get-Content (Join-Path $pd 'tools\LoamsHost\LoamsHost.psm1') | Should -Be 'old-module'
         Test-Path (Join-Path $pd 'tools\LoamsHost\LoamsHost.Common.ps1') | Should -BeFalse
     }
+    It 'restores a pre-existing EMPTY tools folder exactly, pruning directories convergence created' {
+        $pd = Join-Path $TestDrive 'pd-empty-tools'
+        New-Item -ItemType Directory -Force -Path (Join-Path $pd 'tools') | Out-Null
+        Use-TaskStore
+        Mock -ModuleName LoamsHost Get-LoamsEventSourceState { [pscustomobject]@{ Registered = $false; LogName = '' } }
+        $bk = Join-Path $TestDrive 'bk-empty-tools'
+        $prior = Save-LoamsPriorHostState -BackupDir $bk -ProgramDataRoot $pd
+        @($prior.tools).Count | Should -Be 0
+        Register-LoamsBackupRetentionTask -ProgramDataRoot $pd | Out-Null
+        Test-Path (Join-Path $pd 'tools\LoamsHost') | Should -BeTrue
+        Restore-LoamsRetentionTaskState -ProgramDataRoot $pd -BackupPath $bk -Prior $prior
+        Test-Path (Join-Path $pd 'tools') | Should -BeTrue
+        @(Get-ChildItem -LiteralPath (Join-Path $pd 'tools') -Force).Count | Should -Be 0
+        $global:LoamsTTasks.ContainsKey('LOAMS Backup Retention') | Should -BeFalse
+    }
     It 'surfaces a rollback failure instead of suppressing it' {
         $pd = Join-Path $TestDrive 'pd-fresh'
         Use-TaskStore -RemoveFails
@@ -5348,7 +5480,7 @@ function Save-LoamsPriorHostState {
     $es = Get-LoamsEventSourceState
     $ret = Get-LoamsRetentionTaskState -ProgramDataRoot $ProgramDataRoot
     if ($ret.taskExists) { [IO.File]::WriteAllText((Join-Path $rb 'retention-task.xml'), $ret.taskXml, (New-Object System.Text.UTF8Encoding($false))) }
-    foreach ($t in $ret.tools) {
+    foreach ($t in @($ret.tools | Where-Object { $_.type -eq 'file' })) {
         $dest = Join-Path $rb ('tools\' + $t.path)
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest) | Out-Null
         Copy-Item -LiteralPath (Join-Path (Join-Path $ProgramDataRoot 'tools') $t.path) -Destination $dest
@@ -5405,6 +5537,9 @@ function New-LoamsBackupSet {
         $aclSaves += [pscustomobject]@{ path = $path; parent = (Split-Path -Parent $path); file = $file }
     }
     $prior = Save-LoamsPriorHostState -BackupDir $dir -ProgramDataRoot $ProgramDataRoot
+    # Run-specific MariaDB scratch schema names (mutation inventory row 16), derived from this set's id.
+    $runId = (Split-Path -Leaf $dir).Substring(5).ToLowerInvariant()
+    $verifySchemas = @("loams_s1b_verify_$runId", "loams_s1b_verify_${runId}_r")
     Copy-Item -Path (Join-Path $PSScriptRoot '*') -Destination (New-Item -ItemType Directory -Path (Join-Path $dir 'rollback\LoamsHost')).FullName -Recurse
 
     $dump = Invoke-LoamsEncryptedDatabaseDump -MysqldumpExe $MariaDbLayout.MysqldumpExe -ConnectionInfo $ConnectionInfo -OpenSslExe $OpenSslExe `
@@ -5426,6 +5561,7 @@ function New-LoamsBackupSet {
         recipientCertSha256 = $Recipient.Sha256
         opensslSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $OpenSslExe).Hash.ToLowerInvariant()
         preChangeReport = $ReportPath; retentionDays = 30
+        apiRoot = $Layout.ApiRoot; mysqlExe = $MariaDbLayout.MysqlExe; dataDir = $MariaDbLayout.DataDir; verifySchemas = $verifySchemas
     }
     $manifestPath = Join-Path $dir 'backup-manifest.json'
     [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 6), (New-Object System.Text.UTF8Encoding($false)))
@@ -5434,7 +5570,7 @@ function New-LoamsBackupSet {
     $v = Test-LoamsBackupSet -Path $dir -OpenSslExe $OpenSslExe
     if (-not $v.Verified) { throw "Backup at '$dir' failed verification: $($v.Problems -join '; ')" }
     Write-LoamsLog -Message "Backup verified: $($box.count) archived files, $(@($aclSaves).Count) ACL saves, SHA256SUMS $sumsSha"
-    return [pscustomobject]@{ Path = $dir; Verified = $true; Services = $services; AclSaves = $aclSaves; PriorState = $prior; RestoreScript = $restore; ManifestPath = $manifestPath; SumsSha256 = $sumsSha }
+    return [pscustomobject]@{ Path = $dir; Verified = $true; Services = $services; AclSaves = $aclSaves; PriorState = $prior; VerifySchemas = $verifySchemas; RestoreScript = $restore; ManifestPath = $manifestPath; SumsSha256 = $sumsSha }
 }
 
 function Test-LoamsBackupSet {
@@ -5562,14 +5698,20 @@ function Restore-LoamsRetentionTaskState {
     Assert-LoamsMutationAllowed -Action 'restore retention task and tools'
     $tools = Join-Path $ProgramDataRoot 'tools'
     $priorTools = @($Prior.tools)
-    $priorPaths = @($priorTools | ForEach-Object { $_.path })
-    foreach ($now in @(Get-LoamsToolsState -ProgramDataRoot $ProgramDataRoot)) {
-        if ($priorPaths -notcontains $now.path) { Remove-Item -LiteralPath (Join-Path $tools $now.path) -Force -ErrorAction Stop }
+    $priorKeys = @($priorTools | ForEach-Object { "$($_.type)|$($_.path)" })
+    $now = @(Get-LoamsToolsState -ProgramDataRoot $ProgramDataRoot)
+    # 1. files added by convergence, 2. directories added by convergence (deepest first, now empty) - exact tree restore.
+    foreach ($e in @($now | Where-Object { $_.type -eq 'file' })) {
+        if ($priorKeys -notcontains "file|$($e.path)") { Remove-Item -LiteralPath (Join-Path $tools $e.path) -Force -ErrorAction Stop }
     }
-    foreach ($t in $priorTools) {
-        $target = Join-Path $tools $t.path
+    foreach ($e in @($now | Where-Object { $_.type -eq 'dir' } | Sort-Object { $_.path.Length } -Descending)) {
+        if ($priorKeys -notcontains "dir|$($e.path)") { [IO.Directory]::Delete((Join-Path $tools $e.path)) }
+    }
+    foreach ($e in @($priorTools | Where-Object { $_.type -eq 'dir' })) { New-Item -ItemType Directory -Force -Path (Join-Path $tools $e.path) | Out-Null }
+    foreach ($e in @($priorTools | Where-Object { $_.type -eq 'file' })) {
+        $target = Join-Path $tools $e.path
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $target) | Out-Null
-        Copy-Item -LiteralPath (Join-Path $BackupPath ('rollback\tools\' + $t.path)) -Destination $target -Force -ErrorAction Stop
+        Copy-Item -LiteralPath (Join-Path $BackupPath ('rollback\tools\' + $e.path)) -Destination $target -Force -ErrorAction Stop
     }
     $name = $Prior.retention.taskName
     if ($Prior.retention.taskExists) {
@@ -5578,8 +5720,8 @@ function Restore-LoamsRetentionTaskState {
         Remove-LoamsScheduledTask -TaskName $name
     }
     $nowState = Get-LoamsRetentionTaskState -ProgramDataRoot $ProgramDataRoot -TaskName $name
-    $want = (@($priorTools | ForEach-Object { "$($_.path)=$($_.sha256)" }) | Sort-Object) -join ';'
-    $have = (@($nowState.tools | ForEach-Object { "$($_.path)=$($_.sha256)" }) | Sort-Object) -join ';'
+    $want = (@($priorTools | ForEach-Object { "$($_.type)|$($_.path)=$($_.sha256)" }) | Sort-Object) -join ';'
+    $have = (@($nowState.tools | ForEach-Object { "$($_.type)|$($_.path)=$($_.sha256)" }) | Sort-Object) -join ';'
     if ($nowState.taskHash -ne $Prior.retention.taskHash -or $want -ne $have) {
         throw "retention task or tools not restored exactly (task $($nowState.taskHash) vs $($Prior.retention.taskHash))"
     }
@@ -5602,6 +5744,19 @@ function Set-LoamsServiceStartMode {
     Invoke-LoamsExternal -FilePath $script:LoamsSc -ArgumentList @('config', $ServiceName, 'start=', $map[$StartMode]) | Out-Null
 }
 
+function Test-LoamsRestoreNeedsElevation {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Manifest, [Parameter(Mandatory)] $State)
+    foreach ($s in @($Manifest.services.apache, $Manifest.services.mariadb)) {
+        if ($s.snapshot.Exists -or $s.situation -eq 'ControlPanel' -or (Get-LoamsServiceSnapshot -ServiceName $s.name).Exists) { return $true }
+    }
+    if (@($Manifest.aclSaves).Count -gt 0) { return $true }
+    if (-not $State.eventSource.Registered -and (Get-LoamsEventSourceState).Registered) { return $true }
+    if ($State.retention.taskExists -or $null -ne (Get-LoamsScheduledTaskXml -TaskName $State.retention.taskName)) { return $true }
+    if (@(Get-LoamsVerifySchemaFolders -DataDir $Manifest.dataDir | Where-Object { @($Manifest.verifySchemas) -contains $_ }).Count -gt 0) { return $true }
+    return $false
+}
+
 function Invoke-LoamsHostRestore {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $BackupPath)
@@ -5614,10 +5769,10 @@ function Invoke-LoamsHostRestore {
     Set-LoamsMode -Mode Converge
     try {
         $ok = & $run 'read backup manifest' {
-            if (-not (Test-LoamsElevated)) { throw 'not elevated: run the restore as Administrator' }
             $box.m = Get-Content -Raw -LiteralPath (Join-Path $BackupPath 'backup-manifest.json') -ErrorAction Stop | ConvertFrom-Json
             $box.state = Get-Content -Raw -LiteralPath (Join-Path $BackupPath 'rollback\loams-state.json') -ErrorAction Stop | ConvertFrom-Json
             if ($box.m.computerName -ne $env:COMPUTERNAME) { throw "backup was taken on '$($box.m.computerName)', not '$env:COMPUTERNAME'" }
+            if ((Test-LoamsRestoreNeedsElevation -Manifest $box.m -State $box.state) -and -not (Test-LoamsElevated)) { throw 'not elevated: this restore changes services, ACLs, the event log, scheduled tasks or the database; run it as Administrator' }
         }
         if ($ok) {
             $m = $box.m; $state = $box.state
@@ -5652,6 +5807,12 @@ function Invoke-LoamsHostRestore {
                         if ($s.role -eq 'apache') { Start-LoamsControlPanelHttpd -HttpdExe $m.httpdExe } else { Start-LoamsControlPanelMysqld -MysqldExe $m.mysqldExe -MyIni $m.myIni }
                     } })
             }
+            [void](& $run 'drop verification schemas left by converge' {
+                $left = @(Get-LoamsVerifySchemaFolders -DataDir $m.dataDir | Where-Object { @($m.verifySchemas) -contains $_ })
+                if ($left.Count -gt 0) {
+                    $conn = Get-LoamsDbConnectionInfo -ApiRoot $m.apiRoot
+                    Remove-LoamsVerifySchemas -MysqlExe $m.mysqlExe -ConnectionInfo $conn -WorkDirectory (Join-Path $BackupPath 'logs') -Schemas $left
+                } })
         }
     } finally {
         Set-LoamsMode -Mode $previousMode
@@ -5763,7 +5924,7 @@ function Test-LoamsOffHostVerification {
 
 - [ ] **Step 7: Run to verify it passes**
 
-Same command as Step 3. Expected: PASS, 25 tests. Set `expected-test-count.txt` to `217` and run the suite runner → `PASSED: 217 tests`.
+Same command as Step 3. Expected: PASS, 27 tests. Set `expected-test-count.txt` to `223` and run the suite runner → `PASSED: 223 tests`.
 
 - [ ] **Step 8: Commit**
 
@@ -5776,7 +5937,7 @@ Via the project `commit` skill — subjects (two concerns): `feat(deploy): take 
 **Files:**
 - Create: `deploy/server/LoamsHost/LoamsHost.Checkpoints.ps1`
 - Create: `deploy/tests/Checkpoints.Tests.ps1`
-- Modify: `deploy/tests/expected-test-count.txt` → `226`
+- Modify: `deploy/tests/expected-test-count.txt` → `232`
 
 **Interfaces:**
 - Consumes: `Write-LoamsLog`, `Protect-LoamsText` (Task 1).
@@ -5958,7 +6119,7 @@ function Invoke-LoamsCheckpointPlan {
 
 - [ ] **Step 4: Run to verify it passes**
 
-Same command as Step 2. Expected: PASS, 9 tests. Set `expected-test-count.txt` to `226` and run the suite runner → `PASSED: 226 tests`.
+Same command as Step 2. Expected: PASS, 9 tests. Set `expected-test-count.txt` to `232` and run the suite runner → `PASSED: 232 tests`.
 
 - [ ] **Step 5: Commit**
 
@@ -5977,7 +6138,7 @@ Via the project `commit` skill — subject: `feat(deploy): add checkpoint engine
 - Create: `deploy/server/LoamsHost/LoamsHost.Validation.ps1`
 - Create: `deploy/tests/Authorization.Tests.ps1`
 - Create: `deploy/tests/Validation.Tests.ps1`
-- Modify: `deploy/tests/expected-test-count.txt` → `246`
+- Modify: `deploy/tests/expected-test-count.txt` → `252`
 
 **Interfaces:**
 - Consumes: `Test-LoamsAdminOnlyAcl`, `Get-LoamsAclSddl` (Task 6); `Compare-LoamsHostFingerprint` (Task 9); `Get-LoamsServiceSnapshot` (Task 8); `New-LoamsMysqlDefaultsFile`, `Remove-LoamsMysqlDefaultsFile` (Task 13); `Invoke-LoamsMysqlQuery` (Task 13).
@@ -6304,7 +6465,7 @@ function Invoke-LoamsPostConvergeValidation {
 
 - [ ] **Step 6: Run to verify they pass**
 
-Same command as Step 3. Expected: PASS, 20 tests (Authorization 15, Validation 5). Set `expected-test-count.txt` to `246` and run the suite runner → `PASSED: 246 tests`.
+Same command as Step 3. Expected: PASS, 20 tests (Authorization 15, Validation 5). Set `expected-test-count.txt` to `252` and run the suite runner → `PASSED: 252 tests`.
 
 - [ ] **Step 7: Commit**
 
@@ -6318,7 +6479,7 @@ Via the project `commit` skill — subject: `feat(deploy): authorize staging hos
 - Create: `deploy/server/LoamsHost/LoamsHost.Converge.ps1`
 - Modify: `deploy/server/Test-LoamsServerHost.ps1` (add the `Converge` parameter set — full file below)
 - Create: `deploy/tests/Converge.Tests.ps1`
-- Modify: `deploy/tests/expected-test-count.txt` → `281`
+- Modify: `deploy/tests/expected-test-count.txt` → `290`
 
 **Interfaces:**
 - Consumes: everything from Tasks 1–16.
@@ -6326,8 +6487,8 @@ Via the project `commit` skill — subject: `feat(deploy): authorize staging hos
   - `Get-LoamsConvergePreflight -Report -Gate -Ack [-Staging] [-Additional <string[]>]` → `[pscustomobject]@{ Ok; Problems }`.
   - `Test-LoamsScheduledTaskPresent -TaskName <string>` → `[bool]` (via `Get-LoamsScheduledTaskXml`, Task 11).
   - `Test-LoamsPostChangeReportClean -Report <pscustomobject> [-Staging]` → `[pscustomobject]@{ Clean; Reasons }` — clean = elevated, Apache and MariaDB `Converged`, both ACL profiles compliant, event source registered, module inventory complete, and (production) report outcome `Success` / (staging) no runtime finding other than `ManifestNotFinal`.
-  - `New-LoamsConvergePlan -Report -Backup -Manifest -ManifestPath -XamppRoot -ProgramDataRoot -BaseUrl -ConnectionInfo [-Staging]` → checkpoints, in order: `ApacheServiceRegistration` (Apache FreshInstall/ControlPanel only), `MariaDbServiceRegistration` (MariaDB FreshInstall/ControlPanel only), `ServerLayout`, `Acl`, `MariaDbAcl`, `EventSource`, `BackupRetentionTask`, `MariaDbServiceAccount`, `ApacheServiceAccount`, `Validate`.
-  - `Test-LoamsProductionPlan -Plan <object[]>` → `[string[]]` mandatory checkpoint names missing from the plan (`Acl`, `MariaDbAcl`, `MariaDbServiceAccount`, `ApacheServiceAccount`, `Validate`).
+  - `New-LoamsConvergePlan -Report -Backup -Manifest -ManifestPath -XamppRoot -ProgramDataRoot -BaseUrl -ConnectionInfo [-Staging]` → checkpoints, in order: `ApacheServiceRegistration` (Apache FreshInstall/ControlPanel only), `MariaDbServiceRegistration` (MariaDB FreshInstall/ControlPanel only), `ServerLayout`, `Acl`, `MariaDbAcl`, `EventSource`, `BackupRetentionTask`, `MariaDbServiceAccount`, `MariaDbVerification`, `ApacheServiceAccount`, `Validate`.
+  - `Test-LoamsProductionPlan -Plan <object[]> [-Staging]` → `[string[]]` mandatory checkpoint names missing from the plan: every plan needs `Validate`; production also needs `Acl`, `MariaDbAcl`, `MariaDbServiceAccount`, `MariaDbVerification`, `ApacheServiceAccount`.
   - `Write-LoamsConvergeOutcome -Result -BackupPath -RestoreScript`.
   - `Invoke-LoamsHostConverge -XamppRoot -ManifestPath -ServiceName -MariaDbServiceName -ProgramDataRoot -BackupRoot -AcknowledgedReport -ReportPath -RecoveryCertificate -RecoveryCertSha256 [-OffHostDestination <path>] [-OffHostAttestation] [-Staging] [-BackupOnly] [-DbCredential] [-BaseUrl]` → `[pscustomobject]@{ Outcome='Refused'|'Success'|'RolledBack'|'RecoveryRequired'; Problems; BackupPath; Result }`.
 
@@ -6337,9 +6498,9 @@ Via the project `commit` skill — subject: `feat(deploy): authorize staging hos
 3. **Backup** (mode `Converge`): encrypted, verified backup set (Task 14). Failure ⇒ `Refused`, no host change.
 4. **Off-host copy:** `-OffHostDestination` ⇒ hash-verified export; `-OffHostAttestation` ⇒ operator types name, location and the SHA-256 of `SHA256SUMS.json` measured on the off-host copy. Then `Test-LoamsOffHostVerification` must pass. Otherwise ⇒ `Refused` (backup kept, host unchanged). `-BackupOnly` stops here (runbook Part B before a manual stack swap — D1).
 5. **Drift re-check immediately before the first change:** live fingerprint vs the acknowledged report's fingerprint (service configuration/accounts, config hashes, loaded modules, XAMPP-side ACLs). Any difference ⇒ `Refused`, no host change.
-6. **Production plan check:** without `-Staging`, a plan missing any mandatory checkpoint (incl. `MariaDbAcl`, `MariaDbServiceAccount`) is refused before execution; the secure MariaDB ACL is therefore a hard production gate.
-7. **Checkpoints** via `Invoke-LoamsCheckpointPlan` (Task 15); `MariaDbServiceAccount` verifies startup, reads, writes and backup/restore on the scratch schema; `BackupRetentionTask` rolls back to the **captured prior** task definition and tools (Task 14), never by blind deletion; `Validate` runs the read-only validation suite and requires a **clean post-change report** (`Test-LoamsPostChangeReportClean`). Any failure rolls back; any rollback failure is `RECOVERY REQUIRED`.
-8. **Outcome:** `Success` only when the checkpoints passed **and** the saved post-change report is clean; otherwise `RecoveryRequired` (failed checkpoint `PostChangeReport`) / `RolledBack` (exit 5) / `RecoveryRequired` (exit 4, `recovery-required.json`, manual steps, restore script; never a success message).
+6. **Plan check:** every plan must contain `Validate`; without `-Staging`, a plan missing any mandatory checkpoint (incl. `MariaDbAcl`, `MariaDbServiceAccount`, `MariaDbVerification`) is refused before execution; the secure MariaDB ACL is therefore a hard production gate.
+7. **Checkpoints** via `Invoke-LoamsCheckpointPlan` (Task 15). `MariaDbServiceAccount` switches the account and verifies the service runs; `MariaDbVerification` runs startup/read/write/backup-restore checks on this run's scratch schemas and its **undo drops exactly those schemas** (failure ⇒ `RECOVERY REQUIRED`); `BackupRetentionTask` rolls back to the **captured prior** task definition and `tools\` tree (Task 14), never by blind deletion; `Validate` runs the read-only validation suite and requires a **clean post-change report** (`Test-LoamsPostChangeReportClean`, incl. no leftover verification schemas). Any failure rolls back; any rollback failure is `RECOVERY REQUIRED`.
+8. **Outcome (decided):** a dirty post-change report fails the real `Validate` checkpoint ⇒ the engine rolls everything back ⇒ `RolledBack` (exit 5) with the dirty report **kept as evidence** in `<backup>\logs\post-change-report.json`; if any undo fails ⇒ `RecoveryRequired` (exit 4, `recovery-required.json`, manual steps, restore script). `Success` (exit 0) only when every checkpoint passed, and then the clean post-change report is saved to `-ReportPath` as well. An engine `Success` without a clean `Validate` report is treated as an invariant breach (`RecoveryRequired`, failed checkpoint `PostChangeReport`) — unreachable while every plan contains `Validate`. Never a success message otherwise.
 
 MariaDB and Apache restarts in steps 7 are short attendance outages; the runbook schedules convergence inside the maintenance window (spec §7 step 3).
 
@@ -6400,7 +6561,9 @@ BeforeAll {
         Mock -ModuleName LoamsHost Test-LoamsOffHostVerification { [pscustomobject]@{ Verified = $true; Reason = 'hash-verified-export' } }
         Mock -ModuleName LoamsHost Get-LoamsLiveFingerprint { $global:LoamsTLiveFp }
         Mock -ModuleName LoamsHost New-LoamsConvergePlan {
-            @('Acl', 'MariaDbAcl', 'MariaDbServiceAccount', 'ApacheServiceAccount', 'Validate') | ForEach-Object { New-LoamsCheckpoint -Name $_ -ManualRestore 'none' -Do { } -Verify { $true } -Undo { } } }
+            $cps = @(@('Acl', 'MariaDbAcl', 'MariaDbServiceAccount', 'MariaDbVerification', 'ApacheServiceAccount') | ForEach-Object { New-LoamsCheckpoint -Name $_ -ManualRestore 'none' -Do { } -Verify { $true } -Undo { } })
+            $cps += New-LoamsCheckpoint -Name 'Validate' -ManualRestore 'none' -Context @{ PostReport = $null } -Do { } -Verify { param($c) $c.PostReport = [pscustomobject]@{ outcome = 'Success' }; $true } -Undo { }
+            $cps }
         Mock -ModuleName LoamsHost Test-LoamsPostChangeReportClean { [pscustomobject]@{ Clean = $true; Reasons = @() } }
     }
     function Converge { param([string] $Ack, [switch] $Staging, [switch] $BackupOnly, [string] $OffHost = 'E:\loams-offhost', [switch] $Attest)
@@ -6414,7 +6577,7 @@ BeforeAll {
     function Get-Text { param($All) ($All | Where-Object { $_ -is [System.Management.Automation.InformationRecord] } | ForEach-Object { $_.MessageData.ToString() }) -join "`n" }
     function Problems { param($All) ((Get-Outcome $All).Problems -join ' ') }
 }
-AfterAll { Remove-Variable -Name LoamsTReport, LoamsTManifest, LoamsTStagingAuth, LoamsTBackupDir, LoamsTLiveFp, LoamsTSuite, LoamsTPost, LoamsTTasks, LoamsTRemoveFails -Scope Global -ErrorAction SilentlyContinue }
+AfterAll { Remove-Variable -Name LoamsTReport, LoamsTManifest, LoamsTStagingAuth, LoamsTBackupDir, LoamsTLiveFp, LoamsTSuite, LoamsTPost, LoamsTTasks, LoamsTRemoveFails, LoamsTSql, LoamsTDropFailures, LoamsTProbeUndone, LoamsTHttpd, LoamsTMysqld, LoamsTMyIni, LoamsTAccount, LoamsTDbAccount, LoamsTModules -Scope Global -ErrorAction SilentlyContinue }
 
 Describe 'Converge gates (nothing changes when refused)' {
     It 'refuses a draft manifest without -Staging' {
@@ -6531,7 +6694,8 @@ Describe 'Converge execution' {
         $all = Converge -Ack (Write-Ack)
         (Get-Outcome $all).Outcome | Should -Be 'Success'
         (Get-Text $all) | Should -Match 'CONVERGE SUCCEEDED'
-        Should -Invoke -ModuleName LoamsHost Save-LoamsHostReport -Times 1 -Exactly
+        Should -Invoke -ModuleName LoamsHost Save-LoamsHostReport -Times 1 -Exactly -ParameterFilter { $Path -like '*post.json' }
+        Should -Invoke -ModuleName LoamsHost Save-LoamsHostReport -Times 1 -Exactly -ParameterFilter { $Path -like '*logs\post-change-report.json' }
         Get-LoamsMode | Should -Be 'Report'
     }
     It 'records an operator attestation when -OffHostAttestation is used' {
@@ -6548,6 +6712,7 @@ Describe 'Converge execution' {
             (New-LoamsCheckpoint -Name 'Acl' -ManualRestore 'restore acl' -Do { } -Verify { $true } -Undo { }),
             (New-LoamsCheckpoint -Name 'MariaDbAcl' -ManualRestore 'restore db acl' -Do { } -Verify { $true } -Undo { }),
             (New-LoamsCheckpoint -Name 'MariaDbServiceAccount' -ManualRestore 'restore db account' -Do { throw 'sc.exe failed' } -Verify { $true } -Undo { }),
+            (New-LoamsCheckpoint -Name 'MariaDbVerification' -ManualRestore 'x' -Do { } -Verify { $true } -Undo { }),
             (New-LoamsCheckpoint -Name 'ApacheServiceAccount' -ManualRestore 'x' -Do { } -Verify { $true } -Undo { }),
             (New-LoamsCheckpoint -Name 'Validate' -ManualRestore 'x' -Do { } -Verify { $true } -Undo { })) }
         $all = Converge -Ack (Write-Ack)
@@ -6560,6 +6725,7 @@ Describe 'Converge execution' {
             (New-LoamsCheckpoint -Name 'Acl' -ManualRestore 'icacls restore' -Do { } -Verify { $true } -Undo { throw 'icacls /restore failed' }),
             (New-LoamsCheckpoint -Name 'MariaDbAcl' -ManualRestore 'x' -Do { } -Verify { $true } -Undo { }),
             (New-LoamsCheckpoint -Name 'MariaDbServiceAccount' -ManualRestore 'x' -Do { } -Verify { $true } -Undo { }),
+            (New-LoamsCheckpoint -Name 'MariaDbVerification' -ManualRestore 'x' -Do { } -Verify { $true } -Undo { }),
             (New-LoamsCheckpoint -Name 'ApacheServiceAccount' -ManualRestore 'sc.exe config' -Do { throw 'sc.exe failed' } -Verify { $true } -Undo { }),
             (New-LoamsCheckpoint -Name 'Validate' -ManualRestore 'x' -Do { } -Verify { $true } -Undo { })) }
         $all = Converge -Ack (Write-Ack)
@@ -6572,14 +6738,18 @@ Describe 'Converge execution' {
         ($doc.manualSteps -join ' ') | Should -Match 'icacls restore'
         Should -Invoke -ModuleName LoamsHost Save-LoamsHostReport -Times 0
     }
-    It 'never reports success when the post-change report is not clean' {
+    It 'rolls back on a dirty post-change report, keeps that report as evidence and never reports success' {
         Set-ConvergeMocks
-        Mock -ModuleName LoamsHost Test-LoamsPostChangeReportClean { [pscustomobject]@{ Clean = $false; Reasons = @('MariaDB is ServiceNonVirtualAccount, not Converged') } }
+        Mock -ModuleName LoamsHost New-LoamsConvergePlan {
+            $cps = @(@('Acl', 'MariaDbAcl', 'MariaDbServiceAccount', 'MariaDbVerification', 'ApacheServiceAccount') | ForEach-Object { New-LoamsCheckpoint -Name $_ -ManualRestore 'none' -Do { } -Verify { $true } -Undo { } })
+            $cps += New-LoamsCheckpoint -Name 'Validate' -ManualRestore 'none' -Context @{ PostReport = $null } -Do { } -Verify { param($c) $c.PostReport = [pscustomobject]@{ outcome = 'StopAndReport' }; $false } -Undo { }
+            $cps }
         $all = Converge -Ack (Write-Ack)
-        (Get-Outcome $all).Outcome | Should -Be 'RecoveryRequired'
+        (Get-Outcome $all).Outcome | Should -Be 'RolledBack'
         (Get-Text $all) | Should -Not -Match 'CONVERGE SUCCEEDED'
-        (Get-Text $all) | Should -Match 'RECOVERY REQUIRED - failed checkpoint: PostChangeReport'
-        Should -Invoke -ModuleName LoamsHost Save-LoamsHostReport -Times 1 -Exactly
+        (Get-Text $all) | Should -Match "CONVERGE FAILED at checkpoint 'Validate'"
+        Should -Invoke -ModuleName LoamsHost Save-LoamsHostReport -Times 1 -Exactly -ParameterFilter { $Path -like '*logs\post-change-report.json' }
+        Should -Invoke -ModuleName LoamsHost Save-LoamsHostReport -Times 0 -ParameterFilter { $Path -like '*post.json' }
     }
     It 'keeps the DB password out of output, log and transcript even when the dump fails' {
         Set-ConvergeMocks
@@ -6601,15 +6771,30 @@ Describe 'Converge execution' {
 Describe 'New-LoamsConvergePlan' {
     BeforeAll {
         $script:Prior = [pscustomobject]@{ retention = [pscustomobject]@{ taskName = 'LOAMS Backup Retention'; taskExists = $false; taskHash = 'absent' }; tools = @() }
-        $script:Backup = [pscustomobject]@{ Path = $TestDrive; AclSaves = @(); PriorState = $script:Prior }
+        $script:Backup = [pscustomobject]@{ Path = $TestDrive; AclSaves = @(); PriorState = $script:Prior; VerifySchemas = @('loams_s1b_verify_testrun', 'loams_s1b_verify_testrun_r') }
+        New-Item -ItemType Directory -Force -Path (Join-Path $TestDrive 'logs') | Out-Null
+        $script:PlanManifest = Join-Path $TestDrive 'm-plan.json'
+        Save-LoamsTestManifest -Manifest (New-LoamsTestManifest -XamppRoot $script:Root) -Path $script:PlanManifest
+        $script:ApprovedModulePaths = @(foreach ($c in $script:Approved.server.components) { foreach ($mod in $c.modules) { Join-Path $script:Root ($mod.relativePath -replace '/', '\') } })
         function Plan { param($Report, [switch] $Staging, [string] $Pd = $script:Pd)
-            New-LoamsConvergePlan -Report $Report -Backup $script:Backup -Manifest $script:Approved -ManifestPath 'm.json' -XamppRoot $script:Root -ProgramDataRoot $Pd `
+            New-LoamsConvergePlan -Report $Report -Backup $script:Backup -Manifest $script:Approved -ManifestPath $script:PlanManifest -XamppRoot $script:Root -ProgramDataRoot $Pd `
                 -BaseUrl 'http://127.0.0.1/loams_api/' -ConnectionInfo $script:Conn -Staging:$Staging
         }
-        function New-PostReport { param([string] $Outcome = 'Success', [string] $Status = 'Match', [object[]] $Findings = @(), [bool] $Complete = $true)
+        function Use-SchemaMocks { param([int] $DropFailures)
+            $global:LoamsTSql = New-Object System.Collections.Generic.List[string]; $global:LoamsTDropFailures = $DropFailures
+            Mock -ModuleName LoamsHost Invoke-LoamsExternal { [pscustomobject]@{ ExitCode = 0; StdOut = ''; StdErr = '' } } -ParameterFilter { $FilePath -like '*icacls.exe' }
+            Mock -ModuleName LoamsHost Copy-LoamsDbSchemaPipe { }
+            Mock -ModuleName LoamsHost Invoke-LoamsMysqlQuery {
+                $global:LoamsTSql.Add($Sql)
+                if ($Sql -match '^DROP' -and $Sql -notmatch 'CREATE' -and $global:LoamsTDropFailures -gt 0) { $global:LoamsTDropFailures--; throw 'ERROR 1010 (HY000): Error dropping database' }
+                if ($Sql -match 'SCHEMA_NAME') { return '' }
+                if ($Sql -match 'COUNT\(\*\)') { return '3' }
+                return '10.4.28-MariaDB' }
+        }
+        function New-PostReport { param([string] $Outcome = 'Success', [string] $Status = 'Match', [object[]] $Findings = @(), [bool] $Complete = $true, [string[]] $Leftover = @())
             [pscustomobject]@{ elevated = $true; outcome = $Outcome; inventoryComplete = $Complete
                 classification = [pscustomobject]@{ Situation = 'Converged' }; acl = [pscustomobject]@{ Compliant = $true }
-                mariaDb = [pscustomobject]@{ classification = [pscustomobject]@{ Situation = 'Converged' }; acl = [pscustomobject]@{ Compliant = $true } }
+                mariaDb = [pscustomobject]@{ classification = [pscustomobject]@{ Situation = 'Converged' }; acl = [pscustomobject]@{ Compliant = $true }; leftoverVerifySchemas = $Leftover }
                 eventSource = [pscustomobject]@{ Registered = $true }
                 runtime = [pscustomobject]@{ Status = $Status; Findings = $Findings } }
         }
@@ -6623,9 +6808,9 @@ Describe 'New-LoamsConvergePlan' {
     BeforeEach { Mock -ModuleName LoamsHost Get-LoamsBridgeTaskAccount { '' } }
     It 'orders the checkpoints and registers services only for Control Panel / fresh hosts' {
         ((Plan -Report (New-TestReport -Situation 'ControlPanel' -DbSituation 'ControlPanel')).Name -join ',') |
-            Should -Be 'ApacheServiceRegistration,MariaDbServiceRegistration,ServerLayout,Acl,MariaDbAcl,EventSource,BackupRetentionTask,MariaDbServiceAccount,ApacheServiceAccount,Validate'
+            Should -Be 'ApacheServiceRegistration,MariaDbServiceRegistration,ServerLayout,Acl,MariaDbAcl,EventSource,BackupRetentionTask,MariaDbServiceAccount,MariaDbVerification,ApacheServiceAccount,Validate'
         ((Plan -Report (New-TestReport)).Name -join ',') |
-            Should -Be 'ServerLayout,Acl,MariaDbAcl,EventSource,BackupRetentionTask,MariaDbServiceAccount,ApacheServiceAccount,Validate'
+            Should -Be 'ServerLayout,Acl,MariaDbAcl,EventSource,BackupRetentionTask,MariaDbServiceAccount,MariaDbVerification,ApacheServiceAccount,Validate'
     }
     It 'ApacheServiceAccount undo restores the original account and restarts the service' {
         Set-LoamsMode -Mode Converge
@@ -6641,14 +6826,54 @@ Describe 'New-LoamsConvergePlan' {
             Should -Invoke -ModuleName LoamsHost Start-LoamsWindowsService -Times 1 -Exactly -ParameterFilter { $ServiceName -eq 'Apache2.4' }
         } finally { Set-LoamsMode -Mode Report }
     }
-    It 'MariaDbServiceAccount fails verification when the scratch-schema DB verification fails' {
+    It 'drops exactly this run''s verification schemas on rollback after a failed verification cleanup (real checkpoint, real engine)' {
         Set-LoamsMode -Mode Converge
         try {
-            Mock -ModuleName LoamsHost Get-LoamsServiceSnapshot { [pscustomobject]@{ Exists = $true; State = 'Running'; StartName = 'NT SERVICE\mysql' } }
-            Mock -ModuleName LoamsHost Invoke-LoamsDbVerification { [pscustomobject]@{ Passed = $false; Steps = @() } }
-            $db = (Plan -Report (New-TestReport)) | Where-Object Name -eq 'MariaDbServiceAccount'
-            (& $db.Verify $db.Context) | Should -BeFalse
+            Use-SchemaMocks -DropFailures 1
+            $v = (Plan -Report (New-TestReport)) | Where-Object Name -eq 'MariaDbVerification'
+            $r = Invoke-LoamsCheckpointPlan -Checkpoints @($v) -StatePath (Join-Path $TestDrive 'mv1-state.json')
+            $r.Outcome | Should -Be 'RolledBack'
+            $r.FailedCheckpoint | Should -Be 'MariaDbVerification'
+            @($global:LoamsTSql | Where-Object { $_ -match '^DROP' -and $_ -notmatch 'CREATE' })[-1] | Should -Be 'DROP DATABASE IF EXISTS loams_s1b_verify_testrun; DROP DATABASE IF EXISTS loams_s1b_verify_testrun_r;'
         } finally { Set-LoamsMode -Mode Report }
+    }
+    It 'declares RECOVERY REQUIRED when the verification schemas cannot be dropped on rollback (real checkpoint, real engine)' {
+        Set-LoamsMode -Mode Converge
+        try {
+            Use-SchemaMocks -DropFailures 2
+            $v = (Plan -Report (New-TestReport)) | Where-Object Name -eq 'MariaDbVerification'
+            $r = Invoke-LoamsCheckpointPlan -Checkpoints @($v) -StatePath (Join-Path $TestDrive 'mv2-state.json')
+            $r.Outcome | Should -Be 'RecoveryRequired'
+            $r.RollbackFailures[0].Checkpoint | Should -Be 'MariaDbVerification'
+        } finally { Set-LoamsMode -Mode Report }
+    }
+    It 'a dirty post-change report fails the real Validate checkpoint and the real engine rolls back' {
+        Set-LoamsMode -Mode Converge
+        try {
+            # Only system boundaries are mocked: CIM/processes/externals/registry (Set-LoamsReportMocks), HTTP, MySQL client, icacls.
+            Set-LoamsReportMocks -XamppRoot $script:Root -ModulePaths $script:ApprovedModulePaths
+            Mock -ModuleName LoamsHost Invoke-LoamsExternal { [pscustomobject]@{ ExitCode = 0; StdOut = ''; StdErr = '' } } -ParameterFilter { $FilePath -like '*icacls.exe' }
+            Mock -ModuleName LoamsHost Invoke-LoamsHttpGet {
+                if ($Url -like '*default.jpg') { return [pscustomobject]@{ StatusCode = 200; ContentType = 'image/jpeg'; Body = ''; Error = '' } }
+                [pscustomobject]@{ StatusCode = 200; ContentType = 'application/json'; Body = '[]'; Error = '' } }
+            Mock -ModuleName LoamsHost Invoke-LoamsMysqlQuery { '12' }
+            $global:LoamsTProbeUndone = $false
+            $probe = New-LoamsCheckpoint -Name 'Probe' -ManualRestore 'none' -Do { } -Verify { $true } -Undo { $global:LoamsTProbeUndone = $true }
+            $v = (Plan -Report (New-TestReport)) | Where-Object Name -eq 'Validate'
+            $r = Invoke-LoamsCheckpointPlan -Checkpoints @($probe, $v) -StatePath (Join-Path $TestDrive 'validate-state.json')
+            $r.Outcome | Should -Be 'RolledBack'
+            $r.FailedCheckpoint | Should -Be 'Validate'
+            $global:LoamsTProbeUndone | Should -BeTrue
+            $v.Context.PostReport | Should -Not -BeNullOrEmpty
+            $clean = Test-LoamsPostChangeReportClean -Report $v.Context.PostReport
+            $clean.Clean | Should -BeFalse
+            ($clean.Reasons -join ' ') | Should -Match 'ACL profile not compliant'
+        } finally { Set-LoamsMode -Mode Report }
+    }
+    It 'Validate fails when verification schemas were left behind' {
+        Use-ValidateMocks -PostReport (New-PostReport -Leftover @('loams_s1b_verify_testrun'))
+        $v = (Plan -Report (New-TestReport)) | Where-Object Name -eq 'Validate'
+        (& $v.Verify $v.Context) | Should -BeFalse
     }
     It 'Validate fails in production when the post-change report is not Success (e.g. Incomplete or a stack mismatch)' {
         Use-ValidateMocks -PostReport (New-PostReport -Outcome 'Incomplete' -Complete $false)
@@ -6715,7 +6940,8 @@ Expected: FAIL — `Invoke-LoamsHostConverge` not recognised.
 # -Converge: report-first, authorized, encrypted backup + verified off-host copy, drift re-check,
 # checkpointed Apache + MariaDB identity/ACL convergence, read-only validation (spec §4 + owner changes).
 
-$script:LoamsMandatoryProductionCheckpoints = @('Acl', 'MariaDbAcl', 'MariaDbServiceAccount', 'ApacheServiceAccount', 'Validate')
+$script:LoamsMandatoryProductionCheckpoints = @('Acl', 'MariaDbAcl', 'MariaDbServiceAccount', 'MariaDbVerification', 'ApacheServiceAccount', 'Validate')
+$script:LoamsMandatoryStagingCheckpoints = @('Validate')
 
 function Get-LoamsConvergePreflight {
     [CmdletBinding()]
@@ -6752,6 +6978,7 @@ function Test-LoamsPostChangeReportClean {
     if ($null -eq $Report.acl -or -not $Report.acl.Compliant) { $r += 'Apache ACL profile not compliant' }
     if ($null -eq $Report.mariaDb.acl -or -not $Report.mariaDb.acl.Compliant) { $r += 'MariaDB ACL profile not compliant' }
     if (-not $Report.eventSource.Registered) { $r += 'LOAMS-Transport event source not registered' }
+    if (@($Report.mariaDb.leftoverVerifySchemas).Count -gt 0) { $r += 'MariaDB verification schemas left behind: ' + (@($Report.mariaDb.leftoverVerifySchemas) -join ', ') }
     if (-not $Report.inventoryComplete) { $r += 'loaded-module inventory incomplete' }
     if ($Staging) {
         $bad = @(@($Report.runtime.Findings) | Where-Object { $_.Kind -ne 'ManifestNotFinal' })
@@ -6764,9 +6991,11 @@ function Test-LoamsPostChangeReportClean {
 
 function Test-LoamsProductionPlan {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][object[]] $Plan)
+    param([Parameter(Mandatory)][object[]] $Plan, [switch] $Staging)
     $names = @($Plan | ForEach-Object { $_.Name })
-    return , @($script:LoamsMandatoryProductionCheckpoints | Where-Object { $names -notcontains $_ })
+    $required = $script:LoamsMandatoryProductionCheckpoints
+    if ($Staging) { $required = $script:LoamsMandatoryStagingCheckpoints }
+    return , @($required | Where-Object { $names -notcontains $_ })
 }
 
 function New-LoamsConvergePlan {
@@ -6792,7 +7021,7 @@ function New-LoamsConvergePlan {
         ApacheAclSaves = @($Backup.AclSaves | Where-Object { $dbPaths -notcontains $_.path })
         DbAclSaves = @($Backup.AclSaves | Where-Object { $dbPaths -contains $_.path })
         Manifest = $Manifest; ManifestPath = $ManifestPath; Staging = [bool]$Staging; ConnectionInfo = $ConnectionInfo
-        PriorState = $Backup.PriorState; PostReport = $null
+        PriorState = $Backup.PriorState; PostReport = $null; VerifySchemas = @($Backup.VerifySchemas); DbVerification = $null
         ApacheProfile = $apacheProfile; ApacheSid = (Get-LoamsServiceSid -ServiceName $a.ServiceName)
         DbProfile = $dbProfile; DbSid = (Get-LoamsServiceSid -ServiceName $d.ServiceName)
         CreatedPaths = @(); EventSourceCreated = $false; ApacheWasRunning = $false; DbWasRunning = $false
@@ -6871,14 +7100,20 @@ function New-LoamsConvergePlan {
             Start-LoamsWindowsService -ServiceName $x.DbServiceName -TimeoutSec 120 } `
         -Verify { param($x)
             $s = Get-LoamsServiceSnapshot -ServiceName $x.DbServiceName
-            if ($s.StartName -ne $x.DbTargetAccount -or $s.State -ne 'Running') { return $false }
-            (Invoke-LoamsDbVerification -MysqlExe $x.DbLayout.MysqlExe -MysqldumpExe $x.DbLayout.MysqldumpExe -ConnectionInfo $x.ConnectionInfo -WorkDirectory $x.WorkDirectory).Passed } `
+            ($s.StartName -eq $x.DbTargetAccount) -and ($s.State -eq 'Running') } `
         -Undo { param($x)
             $s = Get-LoamsServiceSnapshot -ServiceName $x.DbServiceName
             if (-not $s.Exists) { return }
             if ($s.State -eq 'Running') { Stop-LoamsWindowsService -ServiceName $x.DbServiceName -TimeoutSec 120 }
             Set-LoamsServiceAccount -ServiceName $x.DbServiceName -Account (& $orig $x.DbOriginalAccount)
             if ($x.DbWasRunning -and $x.DbSituation -notin @('FreshInstall', 'ControlPanel')) { Start-LoamsWindowsService -ServiceName $x.DbServiceName -TimeoutSec 120 } }
+    $plan += New-LoamsCheckpoint -Name 'MariaDbVerification' -Context $ctx `
+        -ManualRestore "With MariaDB running, elevated: mysql.exe --defaults-extra-file=<admin-only file> -e `"$((@($ctx.VerifySchemas) | ForEach-Object { "DROP DATABASE IF EXISTS $_;" }) -join ' ')`" (or run the backup set's Restore-LoamsHostBackup.ps1)." `
+        -Do { param($x)
+            $x.DbVerification = Invoke-LoamsDbVerification -MysqlExe $x.DbLayout.MysqlExe -MysqldumpExe $x.DbLayout.MysqldumpExe -ConnectionInfo $x.ConnectionInfo `
+                -WorkDirectory $x.WorkDirectory -Schema $x.VerifySchemas[0] -RestoreSchema $x.VerifySchemas[1] } `
+        -Verify { param($x) [bool]$x.DbVerification.Passed } `
+        -Undo { param($x) Remove-LoamsVerifySchemas -MysqlExe $x.DbLayout.MysqlExe -ConnectionInfo $x.ConnectionInfo -WorkDirectory $x.WorkDirectory -Schemas @($x.VerifySchemas) }
     $plan += New-LoamsCheckpoint -Name 'ApacheServiceAccount' -Context $ctx `
         -ManualRestore "Elevated: sc.exe config $($ctx.ServiceName) obj= `"$(& $orig $ctx.OriginalAccount)`" password= `"`"; then Start-Service $($ctx.ServiceName)." `
         -Do { param($x)
@@ -7032,25 +7267,31 @@ function Invoke-LoamsHostConverge {
         if (-not $drift.NoDrift) { return (& $refuse (@('host drifted since the acknowledged report:') + $drift.Differences) $backup.Path) }
 
         $plan = New-LoamsConvergePlan -Report $report -Backup $backup -Manifest $manifest -ManifestPath $ManifestPath -XamppRoot $XamppRoot -ProgramDataRoot $ProgramDataRoot -BaseUrl $BaseUrl -ConnectionInfo $conn -Staging:$Staging
-        if (-not $Staging) {
-            $missing = Test-LoamsProductionPlan -Plan $plan
-            if ($missing.Count -gt 0) { return (& $refuse @("production plan lacks mandatory checkpoints: $($missing -join ', ')") $backup.Path) }
-        }
+        $missing = Test-LoamsProductionPlan -Plan $plan -Staging:$Staging
+        if ($missing.Count -gt 0) { return (& $refuse @("plan lacks mandatory checkpoints: $($missing -join ', ')") $backup.Path) }
         $result = Invoke-LoamsCheckpointPlan -Checkpoints $plan -StatePath (Join-Path $backup.Path 'logs\converge-state.json')
+        $validate = @($plan | Where-Object { $_.Name -eq 'Validate' }) | Select-Object -First 1
+        $post = $null
+        if ($null -ne $validate -and $validate.Context.ContainsKey('PostReport')) { $post = $validate.Context.PostReport }
+        Set-LoamsMode -Mode Report
+        if ($null -ne $post) {
+            # Kept for every outcome: after a rollback it is the evidence of why Validate failed.
+            $evidence = Join-Path $backup.Path 'logs\post-change-report.json'
+            Save-LoamsHostReport -Report $post -Path $evidence
+            Write-LoamsLog -Message "Post-change report saved as evidence: $evidence (outcome $($post.outcome))"
+        }
         if ($result.Outcome -eq 'Success') {
-            $validate = @($plan | Where-Object { $_.Name -eq 'Validate' }) | Select-Object -First 1
-            $post = $null
-            if ($null -ne $validate -and $validate.Context.ContainsKey('PostReport')) { $post = $validate.Context.PostReport }
-            Set-LoamsMode -Mode Report
-            if ($null -eq $post) { $post = New-LoamsHostReport -XamppRoot $XamppRoot -ManifestPath $ManifestPath -ProgramDataRoot $ProgramDataRoot -ServiceName $ServiceName -MariaDbServiceName $MariaDbServiceName }
-            Save-LoamsHostReport -Report $post -Path $ReportPath
-            Write-LoamsLog -Message "Post-change report: $ReportPath (outcome $($post.outcome))"
-            $clean = Test-LoamsPostChangeReportClean -Report $post -Staging:$Staging
-            if (-not $clean.Clean) {
+            if ($null -eq $post) { $clean = [pscustomobject]@{ Clean = $false; Reasons = @('the Validate checkpoint produced no post-change report') } }
+            else { $clean = Test-LoamsPostChangeReportClean -Report $post -Staging:$Staging }
+            if ($clean.Clean) {
+                Save-LoamsHostReport -Report $post -Path $ReportPath
+                Write-LoamsLog -Message "Post-change report: $ReportPath"
+            } else {
+                # Invariant breach (unreachable while every plan contains Validate): never report success.
                 $result = [pscustomobject]@{
                     Outcome = 'RecoveryRequired'; FailedCheckpoint = 'PostChangeReport'; Failure = ($clean.Reasons -join '; ')
                     Completed = $result.Completed; RollbackFailures = @()
-                    ManualSteps = @("PostChangeReport: the changes were applied but the post-change report is not clean; validate manually (runbook Part C) or restore with $($backup.RestoreScript) (runbook Part D2).")
+                    ManualSteps = @("PostChangeReport: the changes were applied but no clean post-change report exists; validate manually (runbook Part C) or restore with $($backup.RestoreScript) (runbook Part D2).")
                 }
             }
         }
@@ -7124,7 +7365,7 @@ exit (Get-LoamsExitCode -Outcome $result.outcome)
 
 - [ ] **Step 5: Run to verify it passes**
 
-Same command as Step 2. Expected: PASS, 35 tests. Set `expected-test-count.txt` to `281` and run the suite runner → `PASSED: 281 tests` (Report.Tests still passes: the default parameter set is unchanged).
+Same command as Step 2. Expected: PASS, 38 tests. Set `expected-test-count.txt` to `290` and run the suite runner → `PASSED: 290 tests` (Report.Tests still passes: the default parameter set is unchanged).
 
 - [ ] **Step 6: Commit**
 
@@ -7140,7 +7381,7 @@ Unit tests cannot prove what the **real** `NT SERVICE\Apache2.4` and `NT SERVICE
 - Create: `deploy/server/staging/LoamsIdentityProbe.php`
 - Create: `docs/security/runbooks/stack-upgrade-staging.md`
 - Create: `deploy/tests/StagingArtifacts.Tests.ps1`
-- Modify: `deploy/tests/expected-test-count.txt` → `284`
+- Modify: `deploy/tests/expected-test-count.txt` → `293`
 
 **Interfaces:**
 - Consumes: Tasks 1–17.
@@ -7341,6 +7582,14 @@ On the offline CA machine (spec §5), never on the server:
 ### B0. Staging host
 
 - Windows 11 PC/VM with the gate PC's XAMPP layout and versions, the deployed legacy `WITS.exe` binary copy, the bridge, and a **synthetic** dataset (never the production DB).
+- **Provision the report folder (elevated, once, before the first `-Report`).** `-Report` is read-only and never creates directories; it fails with `... -Report never creates directories ...` if the target folder is missing. This administrative step is not part of `-Report`:
+  ```powershell
+  $reports = 'C:\ProgramData\LOAMS\reports'
+  New-Item -ItemType Directory -Force -Path $reports | Out-Null
+  icacls $reports /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F'
+  icacls $reports
+  ```
+  Expected: only `BUILTIN\Administrators` and `NT AUTHORITY\SYSTEM`, both `(OI)(CI)(F)`. (Convergence later finds the folder present and leaves it as is.)
 - Mark and approve it (elevated):
   ```powershell
   $pd = 'C:\ProgramData\LOAMS'; New-Item -ItemType Directory -Force $pd | Out-Null
@@ -7433,7 +7682,7 @@ After B5, elevated:
 ```powershell
 $pd = 'C:\ProgramData\LOAMS'; $probe = Join-Path $pd 'staging-probe'
 New-Item -ItemType Directory -Force $probe | Out-Null
-icacls $probe /inheritance:r /grant:r *S-1-5-32-544:(OI)(CI)F *S-1-5-18:(OI)(CI)F "NT SERVICE\Apache2.4:(OI)(CI)M"
+icacls $probe /inheritance:r /grant:r '*S-1-5-32-544:(OI)(CI)F' '*S-1-5-18:(OI)(CI)F' "NT SERVICE\Apache2.4:(OI)(CI)M"
 Copy-Item <repo>\deploy\server\staging\LoamsIdentityProbe.php $probe
 Set-Content -Path '<XamppRoot>\apache\conf\extra\loams-staging-probe.conf' -Value 'CustomLog "|C:/xampp/php/php.exe -n -f C:/ProgramData/LOAMS/staging-probe/LoamsIdentityProbe.php" common'
 Add-Content -Path '<XamppRoot>\apache\conf\httpd.conf' -Value 'Include conf/extra/loams-staging-probe.conf'
@@ -7486,7 +7735,7 @@ Restart-Service mysql; Get-Content '<XamppRoot>\mysql\data\mysql_error.log' -Tai
 Select-String -Path '<backup>\logs\converge.log' -Pattern 'MariaDB verification'
 ```
 
-Expected: `StartName = NT SERVICE\mysql`, owner `NT SERVICE` / `mysql`, a clean restart in the error log, and `read=ok, write=ok, backup-restore=ok, cleanup=ok`. The verification used only the scratch schemas `loams_s1b_verify` / `loams_s1b_verify_restore` (dropped afterwards); no application or attendance table was touched.
+Expected: `StartName = NT SERVICE\mysql`, owner `NT SERVICE` / `mysql`, a clean restart in the error log, and `read=ok, write=ok, backup-restore=ok, cleanup=ok`. The verification used only this run's scratch schemas `loams_s1b_verify_<set id>` / `…_r` (listed in the backup set's `backup-manifest.json` `verifySchemas`, dropped afterwards; `-Report` shows `verifySchemas=none` in the fingerprint); no application or attendance table was touched.
 
 ## Part D — Rollback, recovery, backups
 
@@ -7501,7 +7750,7 @@ Expected: `StartName = NT SERVICE\mysql`, owner `NT SERVICE` / `mysql`, a clean 
 3. Elevated: `& '<backup>\Restore-LoamsHostBackup.ps1'` (services + ACLs). Exit 0 → step 5.
 4. If it reports `RECOVERY REQUIRED`, apply the listed manual steps one by one (`sc.exe config …`, `icacls <parent> /restore <file> /c`, `httpd -k uninstall -n …`, `mysqld --remove …`).
 5. `-Report` and compare `profileHash` with the pre-change report (the fingerprint includes service configuration, ACLs, event source, retention task, deployed tools and the `ProgramData\LOAMS` layout); never declare success until it matches and B6 rows 2–4, 7 and 8 pass.
-6. If `converge.log` shows the MariaDB verification `cleanup` failed, drop the scratch schemas by hand: `& '<XamppRoot>\mysql\bin\mysql.exe' --defaults-extra-file=<admin-only file> -e "DROP DATABASE IF EXISTS loams_s1b_verify; DROP DATABASE IF EXISTS loams_s1b_verify_restore;"`.
+6. Leftover verification schemas are dropped by the restore script's step `drop verification schemas left by converge`. If that step fails, drop the names listed in `backup-manifest.json` `verifySchemas` by hand (MariaDB running): `& '<XamppRoot>\mysql\bin\mysql.exe' --defaults-extra-file=<admin-only file> -e "DROP DATABASE IF EXISTS <name>; DROP DATABASE IF EXISTS <name>_r;"`, then confirm `-Report` shows `verifySchemas=none`.
 
 The generated `Restore-LoamsHostBackup.ps1` first checks every rollback file against `SHA256SUMS.json` and then runs the module copy stored in the backup set; a missing or altered file, or any failed step, ends with exit 4 and `RECOVERY REQUIRED - step '<name>' failed`. It never deletes `C:\ProgramData\LOAMS` or `backups\` (they hold the recovery data).
 
@@ -7551,6 +7800,7 @@ Restores known vulnerabilities (R11): time-limited exposure with restricted acce
 - First run on any gate PC is report-only: `Test-LoamsServerHost.ps1 -Report` (elevated); compare with the staging-validated profile (cutover step 1).
 - Confirm `C:\ProgramData\LOAMS\STAGING-HOST.marker` and `approved-staging-hosts.json` do **not** exist.
 - Confirm `loams_api\uploads\default.jpg` is deployed and MariaDB is running.
+- Provision `C:\ProgramData\LOAMS\reports` exactly as in B0 before the first `-Report` (it never creates directories).
 - Install the recovery certificate (A6) and confirm its fingerprint out of band; have `<offhost>` media ready.
 - `-Converge` only inside the S1f window, with an `approved` manifest, the step-1 report as `-AcknowledgedReport`, `-RecoveryCertSha256`, and `-OffHostDestination` (or `-OffHostAttestation`). The secure MariaDB ACL and identity checkpoints are mandatory: a production run cannot report success without them.
 - Apache and MariaDB restarts interrupt attendance for seconds; the window plan covers it.
@@ -7559,7 +7809,7 @@ Restores known vulnerabilities (R11): time-limited exposure with restricted acce
 
 - [ ] **Step 5: Run to verify it passes**
 
-Same command as Step 2. Expected: PASS, 3 tests. Set `expected-test-count.txt` to `284` and run the suite runner → `PASSED: 284 tests`.
+Same command as Step 2. Expected: PASS, 3 tests. Set `expected-test-count.txt` to `293` and run the suite runner → `PASSED: 293 tests`.
 
 - [ ] **Step 6: Commit**
 
@@ -7594,7 +7844,7 @@ Expected while still `draft`: no output.
 - [ ] **Step 6: Identity convergence + probes** — runbook B5, C1, C2, C3, C4; every expected value met (or a reviewed D8 widening / escalation recorded).
 - [ ] **Step 7: Integration list, rollback rehearsal and restore drill** — runbook B6 (all rows pass) and B7 (restore script exit 0, `profileHash` equal to `pre-upgrade.json`, encrypted restore drill from the **off-host** copy with matching row counts and file hashes, restore time measured).
 - [ ] **Step 8: Write the evidence file** — date, manifest version, component versions and hashes, MariaDB version, B6 results, C1 `results.json`, C4 output, restore-drill results, restore time, deviations. Set `approval.stagingEvidence` and `status: staging-validated`.
-- [ ] **Step 9: Run the suite** — `powershell -NoProfile -ExecutionPolicy Bypass -File deploy\tests\Invoke-LoamsPesterSuite.ps1` → `PASSED: 284 tests` (the committed-manifest tests now validate the real values).
+- [ ] **Step 9: Run the suite** — `powershell -NoProfile -ExecutionPolicy Bypass -File deploy\tests\Invoke-LoamsPesterSuite.ps1` → `PASSED: 293 tests` (the committed-manifest tests now validate the real values).
 - [ ] **Step 10: Commit** — via the project `commit` skill: `chore(stack): record LOAMS Server Stack v1.0 (staging-validated)`. Owner approval (`status: approved`, `approvedBy`, `approvedOn`) is a separate, owner-made commit: `chore(stack): approve LOAMS Server Stack v1.0`.
 
 ---
@@ -7605,7 +7855,7 @@ Expected while still `draft`: no output.
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File deploy\tests\Invoke-LoamsPesterSuite.ps1
    ```
-   Expected: `LOAMS Pester suite PASSED: 284 tests (minimum 284)`, exit 0 — 0 failed, 0 skipped, 0 not run. Per file (counted mechanically from the `It` blocks in this plan): Common 14, Manifest 28, ManifestRecord 7, Detection 11, RuntimeModules 11, Acl 19, EventSource 9, ServiceIdentity 11, Classification 17, MariaDb 17, Report 12, Crypto 17, Secrets 11, Database 8, Backup 25, Checkpoints 9, Authorization 15, Validation 5, Converge 35, StagingArtifacts 3.
+   Expected: `LOAMS Pester suite PASSED: 293 tests (minimum 293)`, exit 0 — 0 failed, 0 skipped, 0 not run. Per file (counted mechanically from the `It` blocks in this plan): Common 14, Manifest 28, ManifestRecord 7, Detection 11, RuntimeModules 11, Acl 19, EventSource 9, ServiceIdentity 11, Classification 17, MariaDb 17, Report 14, Crypto 17, Secrets 11, Database 10, Backup 27, Checkpoints 9, Authorization 15, Validation 5, Converge 38, StagingArtifacts 3.
 2. **PowerShell 5.1 compatibility:** the suite runs under `powershell.exe` 5.1 (not `pwsh`). Additionally:
    ```powershell
    Get-ChildItem deploy -Recurse -Include *.ps1,*.psm1 | Select-String -Pattern '\?\?|\?\.|ConvertFrom-Json\s+-AsHashtable|Test-Json|\s&&\s|\s\|\|\s' | Select-Object Path, LineNumber, Line
@@ -7642,7 +7892,7 @@ Expected while still `draft`: no output.
 
 ## Completion Criteria
 
-- [ ] Tasks 1–18 merge-ready: suite `PASSED: 284 tests`, 0 failed / skipped / not run, on Windows PowerShell 5.1.
+- [ ] Tasks 1–18 merge-ready: suite `PASSED: 293 tests`, 0 failed / skipped / not run, on Windows PowerShell 5.1.
 - [ ] Task 11 Step 7 read-only proof recorded (dev box unchanged, incl. `mysql\data` ACL and both services).
 - [ ] `/claude-review` (project workflow) — or `/codex-review` if the owner prefers — reaches **APPROVE** (≤ 3 rounds); Critical/Important findings fixed.
 - [ ] Project `create-pr` gate passes with exactly the three agents `dry-checker`, `security-reviewer`, `general-code-reviewer` (diff-scoped); security-reviewer findings on secret handling, encryption, off-host copy, ACLs (incl. MariaDB) and the probe resolved.
@@ -7699,11 +7949,17 @@ Expected while still `draft`: no output.
 | Codex R1-8 — counts mechanically recounted | every task's count lines, Acceptance 1, Task 19, Self-review |
 | Codex R1-9 — contained tool paths (validator + execution, junction) | Task 2 (`Test-LoamsManifestRelativePath` + tests), Task 12 (`Resolve-LoamsContainedPath` + tests) |
 | Codex R1-10 — future-dated acknowledged reports | Task 16 (5-minute skew + test) |
+| Codex R2-1 — verification-schema cleanup undo, restore step, fingerprint, post-check, inventory row 16 | Task 13 (`Remove-LoamsVerifySchemas` + tests), Task 11 (`verifySchemas`, `leftoverVerifySchemas` + test), Task 14 (manifest `verifySchemas`, restore step), Task 17 (`MariaDbVerification` + two real-engine tests, leftover post-check test) |
+| Codex R2-2 — `reports` provisioned in B0; `-Report` fails closed | Task 11 (`Save-LoamsHostReport` check + test), runbook B0/F |
+| Codex R2-3 — dirty post-change report outcome via the real `Validate` path | Task 17 (outcome text, evidence save, real Validate + engine test, converge evidence test) |
+| Codex R2-4 — exact `tools\` tree capture/restore incl. directories | Task 11 (`Get-LoamsToolsState` dirs), Task 14 (`Restore-LoamsRetentionTaskState` + empty-folder test) |
+| Codex R2-5 — child-process success test of the generated restore wrapper | Task 14 (TestDrive fixture, real wrapper + module copy, exit 0 + restored state) |
 
-## Self-review (revision 3)
+## Self-review (revision 4)
 
 - **Spec/owner coverage:** every row above maps to a task with tests or to a runbook step explicitly marked as staging verification.
+- **Codex round 2:** each finding was confirmed in the plan text first (cleanup failure ended `RolledBack` with schemas left; `Save-LoamsHostReport` cannot create `reports`; the old dirty-report test mocked the whole plan; tools directories were not tracked; both child tests exited before the module import); fixes and tests are listed in the Spec Coverage rows `Codex R2-*`.
 - **Codex round 1:** each finding was checked against the plan before fixing (finding 1 reproduced in Windows PowerShell 5.1: `@(f)` where `f` returns `, $array` has `Count` 1); the fixes and their tests are listed in the Spec Coverage rows `Codex R1-*`.
 - **Placeholders:** none in plan steps; `REPLACE_ME` appears only in the committed draft manifest by design (schema-enforced, refused for production).
 - **Interface consistency checked:** `Get-LoamsServiceSituation` (Tasks 9, 10); `Stop-LoamsWindowsService` / `Start-LoamsWindowsService` / `Stop-LoamsControlPanelProcesses` (Task 8, used in Task 17); `Get-LoamsLiveFingerprint` + `Get-LoamsFingerprintAclPaths` (Task 11, used in Task 17); `Invoke-LoamsEncryptStream` (Task 12, used in Tasks 13, 14); `Invoke-LoamsEncryptedDatabaseDump` (Task 13, used in Task 14); `New-LoamsBackupSet -Recipient` (Task 14) receives `Test-LoamsRecipientCertificate` output (Task 12); `Test-LoamsAcknowledgedReport` returns `.Report` consumed by `Test-LoamsPreChangeDrift` (Task 16); checkpoint `-Context` engine (Task 15) used by every plan checkpoint (Task 17); `Invoke-LoamsHostRestore` reads `services.<role>.{name, situation, snapshot}`, `aclSaves`, `programDataRoot`, `httpdExe`, `mysqldExe`, `myIni` from `backup-manifest.json` and `eventSource`, `layout`, `retention`, `tools` from `rollback\loams-state.json`, all written by Task 14; `New-LoamsConvergePlan -ManifestPath` and `Get-LoamsLiveFingerprint -ProgramDataRoot` updated at every call site (Tasks 11, 17 and their tests); `Stop-LoamsControlPanelMysqld -Port -DataDir` passed from `DbLayout` (Task 17).
-- **Counts:** recounted mechanically (regex over the `It` blocks of every test file in this plan); cumulative `expected-test-count.txt` values 14, 42, 49, 60, 71, 90, 99, 110, 127, 144, 156, 173, 192, 217, 226, 246, 281, 284 match the per-file totals in Acceptance 1.
+- **Counts:** recounted mechanically (regex over the `It` blocks of every test file in this plan); cumulative `expected-test-count.txt` values 14, 42, 49, 60, 71, 90, 99, 110, 127, 144, 158, 175, 196, 223, 232, 252, 290, 293 match the per-file totals in Acceptance 1.
