@@ -3164,7 +3164,7 @@ Expected: all pass (QuickTests unchanged in content, now running through the fac
 #include "transport/policyenforcingnam.h"
 ```
 
-inject every `SequencedNam` through an `HttpClient` (13 sites; `http` is declared after `nam` and before `hub`, so it is destroyed after the hub and before `nam`), and make the never-initialized default hub at line 261 offline too:
+inject every `SequencedNam` through an `HttpClient` (13 sites; `http` is declared after `nam` and before `hub`, so it is destroyed after the hub and before `nam`), and make the never-initialized default hub at line 261 offline too. By-type audit on `master` (`grep -nE "AccessControlHub\s+\w+\s*[;({]|new\s+AccessControlHub" qt-app/quick/tests/*.cpp qt-app/tests/*.cpp`): every test construction uses the variable `hub` — 13 × `hub(&nam)` and 1 × `hub;` in this file, plus 1 × `hub;` in `tst_appshell.cpp:30` (handled below); each test function holds at most one hub, so the single name `http` cannot collide:
 
 ```bash
 sed -i 's/^\(\s*\)AccessControlHub hub(&nam);/\1HttpClient http(nullptr, \&nam);\n\1AccessControlHub hub(nullptr, \&http);/' qt-app/quick/tests/tst_accesscontrolhub.cpp
@@ -3367,17 +3367,20 @@ done
 
 Expected: dashboard `4 offline, 0 default left`; visitlogs `8 offline, 0 default left`; accesscontrol `8 offline, 0 default left`.
 
-Then inject through `HttpClient` at every existing CapturingNam site:
+Then route every existing fake-manager construction through an `HttpClient`. The match is **by class name, for any variable name and any manager variable** (audit on `master`, `grep -nE "(Dashboard|VisitLogs|AccessControl)ViewModel \w+\(nullptr, &\w+\);" qt-app/quick/tests/*.cpp`: dashboard `vm`×2 at 91, 107; visit logs `vm`×2 at 183, 199; access control `vm`×10, `authVm` at 207, `vm2` at 341 = 12). Each site gets its own client named after the ViewModel variable (`vmClient`, `authVmClient`, `vm2Client`), because `vm` (line 190) and `authVm` (line 207) share one function and one `nam`:
 
 ```bash
 for f in dashboardviewmodel:DashboardViewModel visitlogsviewmodel:VisitLogsViewModel accesscontrolviewmodel:AccessControlViewModel; do
   t=${f%%:*}; c=${f##*:}
-  sed -i "s/^\(\s*\)$c \(vm2\?\)(nullptr, &nam);/\1HttpClient http(nullptr, \&nam);\n\1$c \2(nullptr, \&http);/" qt-app/quick/tests/tst_$t.cpp
-  echo "$t: $(grep -c '(nullptr, &http);' qt-app/quick/tests/tst_$t.cpp) injected, $(grep -c '(nullptr, &nam);' qt-app/quick/tests/tst_$t.cpp) left"
+  sed -i "s/^\(\s*\)$c \([A-Za-z_][A-Za-z0-9_]*\)(nullptr, &\([A-Za-z_][A-Za-z0-9_]*\));/\1HttpClient \2Client(nullptr, \&\3);\n\1$c \2(nullptr, \&\2Client);/" qt-app/quick/tests/tst_$t.cpp
+  routed=$(grep -cE "$c \w+\(nullptr, &\w+Client\);" qt-app/quick/tests/tst_$t.cpp || true)
+  unrouted=$(grep -E "$c \w+\(nullptr, &\w+\);" qt-app/quick/tests/tst_$t.cpp | grep -vcE "&\w+Client\);" || true)
+  echo "$t: $routed routed, $unrouted unrouted"
 done
+grep -nE "(Dashboard|VisitLogs|AccessControl)ViewModel \w+\(nullptr, &\w+\);" qt-app/quick/tests/*.cpp | grep -vE "&\w+(Client|Http\.http)\);"   # expect: no output
 ```
 
-Expected counts: dashboard `2 injected, 0 left`; visitlogs `2 injected, 0 left`; accesscontrol `11 injected, 0 left`. (In `tst_accesscontrolviewmodel.cpp:334-341` the `http` declared before `vm2` does not clash: the default-constructed `vm` in that function declares no `http`.)
+Expected: dashboard `2 routed, 0 unrouted`; visitlogs `2 routed, 0 unrouted`; accesscontrol `12 routed, 0 unrouted`; the final `grep` prints nothing (trailing comments such as `// mode defaults to Student` at `tst_visitlogsviewmodel.cpp:183` stay on the rewritten ViewModel line).
 
 In each of the three test files add after the `#include "capturingnam.h"` line:
 
@@ -4604,14 +4607,16 @@ QT_QPA_PLATFORM=offscreen ctest --test-dir C:/b/s1a-legacy -R '^(tst_legacywidge
 
 Expected: all three pass (`WITS` builds; S1a did not change the core controller signatures it uses).
 
-- [ ] **Step 3: Passthrough evidence — tests changed only by injection plumbing.** A pre-existing test line may be removed or modified (a modified line shows as a removed `-` line) **only** at these **248** plumbing sites:
-  - 33 fake-manager re-routes: 13 `AccessControlHub hub(&nam);` (Task 8) + 15 `XViewModel vm(nullptr, &nam);` (Task 9: dashboard 2, visit logs 2, access control 11) + 5 `Controller controller(nullptr);` (Task 4b);
+- [ ] **Step 3: Passthrough evidence — tests changed only by injection plumbing.** A pre-existing test line may be removed or modified (a modified line shows as a removed `-` line) **only** at these **249** plumbing sites:
+  - 34 fake-manager re-routes: 13 `AccessControlHub hub(&nam);` (Task 8) + 16 `XViewModel <any>(nullptr, &<any>);` (Task 9: dashboard 2, visit logs 2, access control 12 incl. `authVm`) + 5 `XController controller(nullptr);` (Task 4b);
   - 215 offline safety injections: 213 default-constructed ViewModels (Tasks 9-12: dashboard 4, visit logs 8, access control 8, kiosk 18, guest 3, search 9, database 63, import 5, reporting 57, settings 38) + 2 default-constructed hubs (`tst_accesscontrolhub.cpp:261`, `tst_appshell.cpp:30`; Task 8).
+
+The patterns match by class name and accept **any** variable name:
 
 ```bash
 git diff master...HEAD -U0 -- 'qt-app/tests/*' 'qt-app/quick/tests/*' | grep -E '^-[^-]' > C:/b/s1a-removed.txt
-PLUMBING='AccessControlHub hub(\(&nam\))?;|ViewModel vm2?\(nullptr, &nam\);|Controller controller\(nullptr\);|^-\s*\w+ViewModel \w+;'
-grep -cE "$PLUMBING" C:/b/s1a-removed.txt    # expect 248
+PLUMBING='AccessControlHub \w+(\(&\w+\))?;|ViewModel \w+\(nullptr, &\w+\);|Controller \w+\(nullptr\);|^-\s*\w+ViewModel \w+;'
+grep -cE "$PLUMBING" C:/b/s1a-removed.txt    # expect 249
 grep -vE "$PLUMBING" C:/b/s1a-removed.txt    # expect: no output
 ```
 
@@ -4627,31 +4632,193 @@ cmake -LA -N C:/b/s1a | grep LOAMS_BUILD_LEGACY_WIDGETS    # expect: LOAMS_BUILD
 git diff --stat master...HEAD -- qt-app/quick/qml   # expect: no output (S1a changes no production QML, so no Theme-token risk)
 ```
 
-- [ ] **Step 5: Prepare an isolated smoke backend (MANDATORY before Step 6).** The smoke mutates persistent state (student register/delete, bulk edit, department deactivate/delete, imports, visit reset, school settings, logo import, admin-key rotation). **Never** smoke against the production gate PC, the client's real database, or any shared or real-data database, and never with real student data or the real production admin key. Use synthetic data and a smoke-only admin key (`s1a-smoke-key-<random suffix>`, never committed or pasted into the proof doc). Choose one option and record which in the proof doc:
+- [ ] **Step 5: Prepare an isolated smoke environment with a reproducible start state (MANDATORY before Step 6).** The smoke mutates persistent state on both sides: server (student register/delete, bulk edit, department deactivate/delete, imports, visit reset, admin-info save, admin-key rotation, uploaded photos) and client (`HKCU\Software\MyCompany\MyApp` QSettings — school info, guest toggle, theme; `%APPDATA%\MyCompany\MyApp` imported logos). **Never** smoke against the production gate PC, the client's real database, or any shared or real-data database, and never with real student data or the real production admin key. Use synthetic data and a smoke-only admin key (`s1a-smoke-key-<random suffix>`, never committed or pasted into the proof doc). The Layer 9 comparison runs the smoke **twice** — once with the `master` build, once with the branch build — and both passes MUST start from the **same** state, proven by an identical state fingerprint (below).
 
-  - **Option A (preferred) — disposable backend:** a throwaway Windows VM or spare machine with its own XAMPP and the `loams_api` code from this repo, its database created from a **synthetic-only** seed (no copy of real student data), and the smoke-only admin key set through `hash_admin.php` on that machine. Point `WITSQuick` at it with `WITS_API_BASE_URL=http://<disposable-host>/loams_api/` (dev builds keep the env override, spec §3) or its own `config.ini` `[Server] BaseURL`. Destroy the VM/database after the smoke; nothing to restore.
-  - **Option B — verified snapshot of the developer's local dev backend:** allowed **only** if that dev database already contains synthetic data exclusively. Before any smoke action, with Apache stopped and from an elevated Git Bash on the dev box (`<DB_USER>` / `<DB_NAME>` are the values in the dev `deliverables/loams_api/config.php` copy deployed under `C:/xampp/htdocs/loams_api/`; enter the DB password interactively, never on the command line):
+  **Option A — DEFAULT: disposable VM with a golden checkpoint.** Use a throwaway Windows VM (Hyper-V or VirtualBox) that holds the whole environment, server **and** client, so one checkpoint resets everything:
+  1. In the VM install the dev XAMPP version, Git for Windows (for the helper below), and deploy `deliverables/loams_api` from this branch to `C:\xampp\htdocs\loams_api\`.
+  2. Create the database from **structure only** taken on the dev box (`mysqldump --no-data <DB_NAME>` — no rows leave the dev box), set the smoke-only admin key with `hash_admin.php`, then create synthetic records through `WITSQuick` itself (Register, and Import of a synthetic CSV + ZIP with names like `Test Student A`, IDs like `21-1-0001`).
+  3. Deploy both clients into the VM: on the dev box run `C:/Qt/6.11.1/mingw_64/bin/windeployqt.exe --qmldir qt-app/quick/qml <exe>` for the `master` build's `WITSQuick.exe` and for `C:/b/s1a/quick/WITSQuick.exe`, copy the two deployed folders to `C:\s1a-smoke\master\` and `C:\s1a-smoke\branch\` in the VM (no `config.ini` in either → both use `http://localhost/loams_api/` inside the VM). Start one of them once, set school name/logo/guest toggle, quit.
+  4. Shut down Apache and both clients, save the helper below as `C:\s1a-smoke\smoke-state.sh` in the VM, record `bash smoke-state.sh fingerprint > golden.fingerprint`, and take the VM checkpoint **`S1A-GOLDEN`**.
+  5. Destroy the VM after Step 7. Nothing on the dev box or anywhere else is mutated.
+
+  **Option B — SECONDARY, only if no VM is available:** the developer's local dev backend, allowed **only** if its database already contains synthetic data exclusively. All state handling goes through the fail-fast helper below (every command checked via `set -euo pipefail`; every backup hash-manifested and verified; DB and registry backups restore-tested into scratch copies before anything is touched; restores are copy-then-swap). With Apache and both `WITSQuick` builds stopped and MySQL running:
 
 ```bash
-SNAP=C:/b/s1a-smoke/$(date -u +%Y%m%dT%H%M%SZ); mkdir -p "$SNAP"
-/c/xampp/mysql/bin/mysqldump.exe -u <DB_USER> -p --single-transaction --routines --triggers <DB_NAME> > "$SNAP/db.sql"
-/c/xampp/mysql/bin/mysqldump.exe -u <DB_USER> -p <DB_NAME> admin > "$SNAP/admin.sql"             # admin-key hash, for fast key recovery
-/c/xampp/mysql/bin/mysql.exe -u <DB_USER> -p -e "SELECT COUNT(*) FROM <DB_NAME>.students; SELECT COUNT(*) FROM <DB_NAME>.library_visits;" > "$SNAP/counts-before.txt"
-cp -r /c/xampp/htdocs/loams_api/uploads "$SNAP/uploads"                                          # photos written by register/import
-cp -r /c/xampp/htdocs/loams_api/loams_api.uploads "$SNAP/loams_api.uploads" 2>/dev/null || true
-reg export 'HKCU\Software\MyCompany\MyApp' "$(cygpath -w "$SNAP")\\qsettings.reg" /y            # QSettings (AppSettings)
-cp -r "$APPDATA/MyCompany/MyApp" "$SNAP/appdata" 2>/dev/null || true                             # imported logos/posters
-cp C:/b/s1a/quick/config.ini "$SNAP/config.ini" 2>/dev/null || true
-( cd "$SNAP" && find . -type f -exec sha256sum {} + > SHA256SUMS )
-# Verify the dump restores before relying on it:
-/c/xampp/mysql/bin/mysql.exe -u <DB_USER> -p -e "CREATE DATABASE <DB_NAME>_s1a_verify"
-/c/xampp/mysql/bin/mysql.exe -u <DB_USER> -p <DB_NAME>_s1a_verify < "$SNAP/db.sql"
-/c/xampp/mysql/bin/mysql.exe -u <DB_USER> -p -e "SELECT COUNT(*) FROM <DB_NAME>_s1a_verify.students; SELECT COUNT(*) FROM <DB_NAME>_s1a_verify.library_visits; DROP DATABASE <DB_NAME>_s1a_verify;"
+bash C:/b/s1a-smoke/smoke-state.sh snapshot C:/b/s1a-smoke/S0     # creates, manifests AND verifies the snapshot
+bash C:/b/s1a-smoke/smoke-state.sh verify C:/b/s1a-smoke/S0       # re-verify immediately before the smoke starts
 ```
 
-  Expected: the verify counts equal `counts-before.txt`. If the dump does not restore cleanly, **do not start the smoke** — use Option A.
+  If either command exits non-zero, **do not start the smoke** — use Option A.
 
-- [ ] **Step 6: Manual Layer 9 smoke on `WITSQuick`** — run `C:/b/s1a/quick/WITSQuick.exe` (the binary from **this** branch's build dir — stale-binary trap) against the isolated backend from Step 5, with **synthetic** data only, and compare side by side with a `master` build of `WITSQuick` on the same backend/data. Record pass/fail per item:
+  **Helper `smoke-state.sh`** (operator scratch file outside the repo — `C:/b/s1a-smoke/smoke-state.sh` on the dev box, `C:\s1a-smoke\smoke-state.sh` in the VM; never committed). It prompts for the MySQL password once per run and keeps it in a private temp option file that is deleted on exit (never on a command line). `DB_USER` / `DB_NAME` come from the deployed `loams_api/config.php`:
+
+```bash
+#!/usr/bin/env bash
+# S1a Layer 9 smoke-state helper. usage:
+#   DB_USER=<user> DB_NAME=<db> bash smoke-state.sh snapshot|verify|restore <dir>
+#   DB_USER=<user> DB_NAME=<db> bash smoke-state.sh fingerprint
+set -euo pipefail
+export MSYS_NO_PATHCONV=1                       # keep reg.exe switches (/s /f /y) intact under Git Bash
+
+: "${DB_USER:?set DB_USER}"; : "${DB_NAME:?set DB_NAME}"
+MYSQLBIN=/c/xampp/mysql/bin
+HTDOCS=/c/xampp/htdocs/loams_api
+UPLOAD_DIRS=(uploads loams_api.uploads)
+REGKEY='HKCU\Software\MyCompany\MyApp'
+REGSCRATCH_ROOT='HKCU\Software\S1aSmokeVerify'
+REGSCRATCH="$REGSCRATCH_ROOT\\MyApp"
+APPDATA_DIR="$(cygpath -u "$APPDATA")/MyCompany/MyApp"
+
+TMPD="$(mktemp -d)"; CNF="$TMPD/client.cnf"
+trap 'rm -rf "$TMPD"' EXIT
+read -rs -p "MySQL password for $DB_USER (empty if none): " DBPW; echo
+umask 077; printf '[client]\nuser=%s\npassword=%s\n' "$DB_USER" "$DBPW" > "$CNF"; unset DBPW
+
+mysqlc()  { "$MYSQLBIN/mysql.exe" --defaults-extra-file="$CNF" "$@"; }
+dumpc()   { "$MYSQLBIN/mysqldump.exe" --defaults-extra-file="$CNF" --single-transaction \
+              --routines --triggers --skip-dump-date --skip-comments --order-by-primary "$@"; }
+normdump(){ sed -E 's/ AUTO_INCREMENT=[0-9]+//'; }     # restore-invariant form of a dump
+dbhash()  { dumpc "$1" | normdump | sha256sum | cut -d' ' -f1; }
+dirmanifest() { ( cd "$1" && find . -type f -print0 | sort -z | xargs -0 -r sha256sum ); }
+dircount(){ find "$1" -type f | wc -l | tr -d ' '; }
+reghash() { reg query "$1" /s | tr -d '\r' \
+              | sed -E 's#HKEY_CURRENT_USER\\Software\\[^\\]+\\MyApp#KEY#' | sha256sum | cut -d' ' -f1; }
+fail()    { echo "smoke-state: $*" >&2; exit 1; }
+
+fingerprint() {
+  echo "db $(dbhash "$DB_NAME")"
+  for d in "${UPLOAD_DIRS[@]}"; do
+    if [ -d "$HTDOCS/$d" ]; then echo "$d $(dirmanifest "$HTDOCS/$d" | sha256sum | cut -d' ' -f1) $(dircount "$HTDOCS/$d")"
+    else echo "$d absent"; fi
+  done
+  if reg query "$REGKEY" >/dev/null 2>&1; then echo "registry $(reghash "$REGKEY")"; else echo "registry absent"; fi
+  if [ -d "$APPDATA_DIR" ]; then echo "appdata $(dirmanifest "$APPDATA_DIR" | sha256sum | cut -d' ' -f1) $(dircount "$APPDATA_DIR")"
+  else echo "appdata absent"; fi
+  for t in $(mysqlc -N -e "SELECT table_name FROM information_schema.tables WHERE table_schema='$DB_NAME' AND table_type='BASE TABLE' ORDER BY table_name"); do
+    echo "count $t $(mysqlc -N -e "SELECT COUNT(*) FROM \`$DB_NAME\`.\`$t\`")"
+  done
+}
+
+verify() {
+  local S="$1"
+  [ -f "$S/MANIFEST.sha256" ] || fail "no manifest in $S"
+  ( cd "$S" && sha256sum -c --quiet MANIFEST.sha256 ) || fail "snapshot artifacts changed or unreadable"
+  # DB: restore into a scratch database and require the identical normalized dump.
+  local SCRATCH="${DB_NAME}_s1a_verify"
+  mysqlc -e "DROP DATABASE IF EXISTS \`$SCRATCH\`; CREATE DATABASE \`$SCRATCH\`"
+  mysqlc "$SCRATCH" < "$S/db.sql"
+  [ "$(dbhash "$SCRATCH")" = "$(cat "$S/db.normhash")" ] || fail "DB snapshot does not restore identically"
+  mysqlc -e "DROP DATABASE \`$SCRATCH\`"
+  # Upload / app-data copies: per-file hashes and file counts.
+  for d in "${UPLOAD_DIRS[@]}" appdata; do
+    [ -e "$S/$d.absent" ] && continue
+    ( cd "$S/$d" && sha256sum -c --quiet "$S/$d.manifest" ) || fail "$d copy does not match its manifest"
+    [ "$(dircount "$S/$d")" -eq "$(wc -l < "$S/$d.manifest")" ] || fail "$d copy file count differs"
+  done
+  # Registry: import a re-rooted copy into a scratch key; it must equal the snapshot tree.
+  if [ ! -e "$S/registry.absent" ]; then
+    reg delete "$REGSCRATCH_ROOT" /f >/dev/null 2>&1 || true
+    iconv -f UTF-16LE -t UTF-8 "$S/qsettings.reg" \
+      | sed 's#\\Software\\MyCompany\\MyApp#\\Software\\S1aSmokeVerify\\MyApp#g' \
+      | iconv -f UTF-8 -t UTF-16LE > "$TMPD/regverify.reg"
+    reg import "$(cygpath -w "$TMPD/regverify.reg")"
+    [ "$(reghash "$REGSCRATCH")" = "$(cat "$S/reg.hash")" ] || fail "registry export does not re-import identically"
+    reg delete "$REGSCRATCH_ROOT" /f
+  fi
+  echo "snapshot $S verified"
+}
+
+snapshot() {
+  local S="$1"
+  [ ! -e "$S" ] || fail "refusing to overwrite $S"
+  mkdir -p "$S"
+  dumpc "$DB_NAME" > "$S/db.sql";            [ -s "$S/db.sql" ]    || fail "empty DB dump"
+  dumpc "$DB_NAME" admin > "$S/admin.sql";   [ -s "$S/admin.sql" ] || fail "empty admin dump"
+  normdump < "$S/db.sql" | sha256sum | cut -d' ' -f1 > "$S/db.normhash"
+  [ "$(cat "$S/db.normhash")" = "$(dbhash "$DB_NAME")" ] || fail "DB changed while dumping"
+  for d in "${UPLOAD_DIRS[@]}"; do
+    if [ -d "$HTDOCS/$d" ]; then
+      dirmanifest "$HTDOCS/$d" > "$S/$d.manifest"
+      cp -a "$HTDOCS/$d" "$S/$d"
+    else : > "$S/$d.absent"; fi
+  done
+  if reg query "$REGKEY" >/dev/null 2>&1; then
+    reg export "$REGKEY" "$(cygpath -w "$S/qsettings.reg")" /y
+    [ -s "$S/qsettings.reg" ] || fail "empty registry export"
+    reghash "$REGKEY" > "$S/reg.hash"
+  else : > "$S/registry.absent"; fi
+  if [ -d "$APPDATA_DIR" ]; then
+    dirmanifest "$APPDATA_DIR" > "$S/appdata.manifest"
+    cp -a "$APPDATA_DIR" "$S/appdata"
+  else : > "$S/appdata.absent"; fi
+  fingerprint > "$S/fingerprint.txt"
+  ( cd "$S" && find . -type f ! -name MANIFEST.sha256 -print0 | sort -z | xargs -0 -r sha256sum ) > "$S/MANIFEST.sha256"
+  verify "$S"
+}
+
+restore_dir() {   # copy-then-swap: the live dir is replaced only after the staged copy is verified
+  local S="$1" name="$2" dst="$3"
+  if [ -e "$S/$name.absent" ]; then
+    if [ -e "$dst" ]; then mv "$dst" "$dst.s1a-old"; rm -rf "$dst.s1a-old"; fi
+    return
+  fi
+  mkdir -p "$(dirname "$dst")"
+  rm -rf "$dst.s1a-stage"
+  cp -a "$S/$name" "$dst.s1a-stage"
+  ( cd "$dst.s1a-stage" && sha256sum -c --quiet "$S/$name.manifest" ) || fail "staged $name does not verify"
+  [ "$(dircount "$dst.s1a-stage")" -eq "$(wc -l < "$S/$name.manifest")" ] || fail "staged $name file count differs"
+  if [ -e "$dst" ]; then mv "$dst" "$dst.s1a-old"; fi
+  mv "$dst.s1a-stage" "$dst"
+  rm -rf "$dst.s1a-old"
+}
+
+restore() {
+  local S="$1"
+  verify "$S"                                   # nothing is touched unless the snapshot verifies NOW
+  # DB: the verified snapshot is the authority and is never deleted; the live
+  # content being replaced is post-smoke data. Reload, then prove equality.
+  mysqlc "$DB_NAME" < "$S/db.sql"
+  [ "$(dbhash "$DB_NAME")" = "$(cat "$S/db.normhash")" ] \
+    || fail "live DB differs from snapshot after reload (snapshot intact; re-run restore)"
+  for d in "${UPLOAD_DIRS[@]}"; do restore_dir "$S" "$d" "$HTDOCS/$d"; done
+  restore_dir "$S" appdata "$APPDATA_DIR"
+  if [ -e "$S/registry.absent" ]; then
+    reg delete "$REGKEY" /f >/dev/null 2>&1 || true
+  else
+    local POST="${S}.post-smoke-$(date -u +%Y%m%dT%H%M%SZ).reg"
+    if reg query "$REGKEY" >/dev/null 2>&1; then
+      reg export "$REGKEY" "$(cygpath -w "$POST")" /y   # kept until the restore verifies
+      reg delete "$REGKEY" /f
+    fi
+    reg import "$(cygpath -w "$S/qsettings.reg")"
+    [ "$(reghash "$REGKEY")" = "$(cat "$S/reg.hash")" ] || fail "registry restore mismatch (post-smoke tree kept at $POST)"
+    rm -f "$POST"
+  fi
+  [ "$(fingerprint)" = "$(cat "$S/fingerprint.txt")" ] || fail "post-restore fingerprint differs from snapshot"
+  echo "restore of $S verified: fingerprint matches"
+}
+
+case "${1:-}" in
+  snapshot)    snapshot "${2:?dir}" ;;
+  verify)      verify "${2:?dir}" ;;
+  restore)     restore "${2:?dir}" ;;
+  fingerprint) fingerprint ;;
+  *) echo "usage: $0 snapshot|verify|restore <dir> | fingerprint" >&2; exit 2 ;;
+esac
+```
+
+- [ ] **Step 6: Manual Layer 9 smoke — `master` pass, then branch pass, from the identical start state.** Order (record every fingerprint in the proof doc):
+
+  | Order | Option A (VM) | Option B (dev box) |
+  |---|---|---|
+  | 1 | Revert the VM to `S1A-GOLDEN`; `bash smoke-state.sh fingerprint > start-master.fp`; `diff golden.fingerprint start-master.fp` must be empty | `bash smoke-state.sh fingerprint > start-master.fp`; `diff C:/b/s1a-smoke/S0/fingerprint.txt start-master.fp` must be empty |
+  | 2 | Start Apache; run the table below with `C:\s1a-smoke\master\WITSQuick.exe`; stop Apache + client | Start Apache; run the table below with the `master` `WITSQuick.exe`; stop Apache + client |
+  | 3 | Revert the VM to `S1A-GOLDEN`; `bash smoke-state.sh fingerprint > start-branch.fp`; `diff golden.fingerprint start-branch.fp` must be empty | `bash smoke-state.sh restore C:/b/s1a-smoke/S0` (exits 0 only if the restored fingerprint equals `S0/fingerprint.txt`); `bash smoke-state.sh fingerprint > start-branch.fp`; `diff start-master.fp start-branch.fp` must be empty |
+  | 4 | Start Apache; run the table below with `C:\s1a-smoke\branch\WITSQuick.exe` (built from this branch — stale-binary trap); stop Apache + client | Start Apache; run the table below with `C:/b/s1a/quick/WITSQuick.exe` (this branch's build dir — stale-binary trap); stop Apache + client |
+
+  The proof that both passes started from the same state is `diff start-master.fp start-branch.fp` = empty: the fingerprint covers the normalized DB dump hash, every table's row count, the upload directories' hash manifests + file counts, the QSettings registry tree hash and the app-data hash manifest + file count. A non-empty diff invalidates the comparison — fix the environment and rerun both passes.
+
+  Run each item in both passes and record pass/fail per pass:
 
 | # | Area | Check |
 |---|---|---|
@@ -4669,30 +4836,19 @@ cp C:/b/s1a/quick/config.ini "$SNAP/config.ini" 2>/dev/null || true
 | A7 | Settings | Save school info; import logo → preview, sidebar and kiosk BrandPanel update; admin info save; admin key change to a second synthetic key **and back** (verify login with the smoke-only key afterwards); reset visits on a synthetic department with manifest |
 | A8 | Guarded ops | Wrong admin key → auth-failure message on a guarded operation |
 | A9 | Access Control page | Feed loads; monitoring toggle on/off |
-| T1 | Turnstile polling | Monitoring on (gate-PC-like bench, or the documented bench/bridge simulation — never the production gate PC) → entry appears on kiosk with photo |
+| T1 | Turnstile polling | Monitoring on (bench/bridge simulation inside the isolated environment — never the production gate PC) → entry appears on kiosk with photo |
 | T2 | Reconnect + cursor | Stop Apache → connection state degrades; restart → reconnects; no duplicated or skipped entries |
 | R | Assets | Remote photos (kiosk + search); `default.jpg` → initials; missing photo → initials; imported logo (kiosk, sidebar, settings preview); bundled QML renders; `--software` backend still renders |
 
-Any difference from the `master` build is a regression: route it through `superpowers:systematic-debugging`, fix with a failing test first, and re-run Steps 1-6.
+Any difference between the two passes is a regression: route it through `superpowers:systematic-debugging`, fix with a failing test first, and re-run Steps 1-6 (both passes, from the reset start state).
 
-- [ ] **Step 7: Restore and verify the backend (Option B only; Option A: destroy the disposable backend).** With Apache stopped:
+- [ ] **Step 7: Return the environment to its pre-smoke state.**
+  - **Option A:** delete the VM (and its checkpoints). Nothing else was touched.
+  - **Option B:** with Apache and both clients stopped: `bash C:/b/s1a-smoke/smoke-state.sh restore C:/b/s1a-smoke/S0` — it re-verifies the snapshot first (manifest, scratch DB restore, scratch registry import), reloads the DB and proves its normalized dump equals the snapshot, restores uploads/app-data by copy-then-swap (live directories are replaced only after the staged copy verifies by hash and file count), re-imports the registry (keeping the post-smoke export until the restored tree verifies), and exits 0 only if the final fingerprint equals `S0/fingerprint.txt`. Then start Apache and confirm with the `master` `WITSQuick` that login with the **pre-smoke** dev admin key succeeds and dashboard counts match.
 
-```bash
-/c/xampp/mysql/bin/mysql.exe -u <DB_USER> -p <DB_NAME> < "$SNAP/db.sql"                       # dump carries DROP TABLE IF EXISTS
-rm -rf /c/xampp/htdocs/loams_api/uploads && cp -r "$SNAP/uploads" /c/xampp/htdocs/loams_api/uploads
-[ -d "$SNAP/loams_api.uploads" ] && rm -rf /c/xampp/htdocs/loams_api/loams_api.uploads && cp -r "$SNAP/loams_api.uploads" /c/xampp/htdocs/loams_api/loams_api.uploads
-reg delete 'HKCU\Software\MyCompany\MyApp' /f && reg import "$(cygpath -w "$SNAP")\\qsettings.reg"
-[ -d "$SNAP/appdata" ] && rm -rf "$APPDATA/MyCompany/MyApp" && cp -r "$SNAP/appdata" "$APPDATA/MyCompany/MyApp"
-[ -f "$SNAP/config.ini" ] && cp "$SNAP/config.ini" C:/b/s1a/quick/config.ini
-/c/xampp/mysql/bin/mysql.exe -u <DB_USER> -p -e "SELECT COUNT(*) FROM <DB_NAME>.students; SELECT COUNT(*) FROM <DB_NAME>.library_visits;" > "$SNAP/counts-after.txt"
-diff "$SNAP/counts-before.txt" "$SNAP/counts-after.txt" && echo "row counts restored"
-```
+  **If admin-key reversion fails** (A7 left an unknown key) the `restore` above already resets the `admin` table with the rest of the verified DB. If `restore` itself fails it changes nothing before its verification passes; fix the reported cause and re-run it — the snapshot is never modified or deleted. If the snapshot is unusable, rebuild the dev database from structure + synthetic data and set a new dev key with `hash_admin.php`. Record any incident in the proof doc. Keep `C:/b/s1a-smoke/S0` until the proof doc is committed, then delete it (it holds only synthetic data).
 
-Then start Apache and verify with the `master` `WITSQuick`: admin login with the **pre-smoke** dev admin key succeeds, dashboard counts match the pre-smoke values, the school logo/settings are as before.
-
-**If admin-key reversion fails** (A7 left an unknown key, or login with the pre-smoke key fails after restore): restore just the admin row from the snapshot — `/c/xampp/mysql/bin/mysql.exe -u <DB_USER> -p <DB_NAME> < "$SNAP/admin.sql"` — and re-test login. If that still fails, restore the full `db.sql` again; if the dump itself is unusable, rebuild the dev database from the synthetic seed and set a new dev key with `hash_admin.php`. Record the incident in the proof doc. None of this can touch production: Steps 5-7 only ever operate on the disposable or dev backend.
-
-- [ ] **Step 8: Write the proof doc** `docs/superpowers/proofs/2026-10-05-loams-s1a-proof.md` with: the commit SHA tested, the ctest summary (68/68, 0 Not Run) with the access-log offline evidence, the GATE G1/G2 results (incl. the `GATE G2:` thread log line), the ON-config result, the Step 3 diff output, the Step 4 grep outputs, which smoke backend option was used and (Option B) the snapshot `SHA256SUMS` plus `counts-before.txt` / `counts-after.txt`, the Step 6 smoke table with pass/fail and which turnstile setup was used, and a link to this plan's Rollback Considerations. No real student data, no admin key (real or smoke), no DB password, no screenshots containing PII.
+- [ ] **Step 8: Write the proof doc** `docs/superpowers/proofs/2026-10-05-loams-s1a-proof.md` with: the commit SHA tested, the ctest summary (68/68, 0 Not Run) with the access-log offline evidence, the GATE G1/G2 results (incl. the `GATE G2:` thread log line), the ON-config result, the Step 3 diff output, the Step 4 grep outputs, which smoke option was used (A: VM + `S1A-GOLDEN`; B: the `S0` snapshot's `MANIFEST.sha256` hash and the `snapshot`/`verify`/`restore` exit status), the fingerprints `start-master.fp` / `start-branch.fp` (and `golden.fingerprint` or `S0/fingerprint.txt`) with the empty `diff`, the Step 6 smoke table with pass/fail per pass and which turnstile setup was used, the Step 7 result, and a link to this plan's Rollback Considerations. No real student data, no admin key (real or smoke), no DB password, no screenshots containing PII.
 
 - [ ] **Step 9: Commit** via the project `commit` skill. Intended subject: `docs(security): record S1a Layer 9 regression evidence`.
 
@@ -4710,7 +4866,7 @@ Then start Apache and verify with the `master` `WITSQuick`: admin login with the
 - Unchanged and green: the remaining pre-existing targets listed in Task 14 Step 1, including every `tst_qml_*` QuickTest (now running on factory-made managers) and all core `CapturingNam` / `SequencedNam` controller suites.
 - Developer config `-DLOAMS_BUILD_LEGACY_WIDGETS=ON`: `WITS`, `tst_rfidkeyboardfilter`, `tst_responsive_ui` build; `tst_legacywidgetsgate`, `tst_rfidkeyboardfilter`, `tst_responsive_ui` pass.
 
-**Manual:** Layer 9 smoke table (Task 14 Step 6) all PASS on `WITSQuick` built from this branch, side by side with `master`, against an isolated backend (Task 14 Step 5: disposable backend, or a verified snapshot of a synthetic-only dev backend), followed by the Step 7 restore + verification.
+**Manual:** Layer 9 smoke table (Task 14 Step 6) all PASS on `WITSQuick` built from this branch with zero differences from the `master` pass, both passes run in an isolated environment (default: disposable VM reverted to checkpoint `S1A-GOLDEN` before each pass; secondary: verified `S0` snapshot of a synthetic-only dev backend restored between passes) and proven to start from the same state (`diff start-master.fp start-branch.fp` empty), followed by the Step 7 reset.
 
 **"Passthrough proves no behaviour change" — evidence required in the proof doc and PR body:**
 
@@ -4725,7 +4881,7 @@ Then start Apache and verify with the `master` `WITSQuick`: admin login with the
 - **Nature of the change:** S1a is behaviour-neutral (Passthrough), client-only and confined to source + build configuration. No server, database, PHP endpoint, `config.ini` key, `QSettings` key or on-disk format changes; no migration to undo.
 - **How to revert:** revert the squash/merge commit of the S1a PR on `master` (`git revert <merge-sha>` via a normal PR). Each task is also an independent commit, so a single faulty migration (e.g. one ViewModel) can be reverted alone; the guard's `kPendingMigration` entry for that file (and its test file's `kPendingTestMigration` entry) must be restored in the same revert. Reverting Task 4b alone (the core non-null contract) also requires removing `coreNetworkClassesRequireInjectedManager` from the guard; it changes no runtime behaviour for correctly wired callers.
 - **Legacy Widgets:** the freeze only changes the default. Developers who need the Widgets build use `-DLOAMS_BUILD_LEGACY_WIDGETS=ON` (no revert needed). Existing build directories that cached the old `BUILD_LEGACY_WIDGETS=ON` get a warning and must reconfigure (`cmake -U BUILD_LEGACY_WIDGETS -B <dir> -DLOAMS_BUILD_LEGACY_WIDGETS=ON`).
-- **Smoke-test state (Task 14 Steps 5-7):** the manual smoke is the only S1a activity that mutates data. It runs only against a disposable backend (Option A: destroy it afterwards) or a synthetic-only dev backend with a **verified** pre-smoke snapshot (Option B: DB dump verified by a scratch restore, separate `admin` table dump, uploads folders, `HKCU\Software\MyCompany\MyApp` QSettings export, `%APPDATA%\MyCompany\MyApp` assets, `config.ini`, all with SHA-256 sums). Restoration = reload the dump, restore folders/registry/config, confirm row counts and login with the pre-smoke admin key. If admin-key reversion fails: reload `admin.sql`, then the full dump, then (last resort) rebuild the dev DB from the synthetic seed and set a new dev key with `hash_admin.php`. Never against production, the gate PC, or any shared/real-data database.
+- **Smoke-test state (Task 14 Steps 5-7):** the manual smoke is the only S1a activity that mutates data, server and client side. **Default (Option A):** a disposable VM holding server and both clients, reverted to checkpoint `S1A-GOLDEN` before each pass and deleted afterwards — nothing to restore. **Secondary (Option B, synthetic-only dev backend):** the fail-fast `smoke-state.sh` helper snapshots the DB, the `admin` table, the upload directories, the `HKCU\Software\MyCompany\MyApp` QSettings tree and `%APPDATA%\MyCompany\MyApp`; writes a SHA-256 manifest of every artifact; and verifies the snapshot (manifest check, scratch-database restore with identical normalized dump, per-file hashes + file counts, scratch-key registry re-import) at creation, immediately before the smoke, and again at the start of every restore. Restore reloads the DB and proves equality, swaps directories in only after the staged copy verifies, keeps the post-smoke registry export until the restored tree verifies, and succeeds only if the final state fingerprint equals the snapshot's. A failed restore changes nothing before its verification and never modifies the snapshot. Never against production, the gate PC, or any shared/real-data database.
 - **Production impact:** none possible — S1a is **never shipped to production before S1f** (spec invariant 8; only S1f packaging can produce a release, and it requires S1e, which deletes Passthrough). The deployed gate-PC `WITS.exe` is untouched by this slice and is not rebuilt from this tree.
 - **Forward compatibility:** reverting S1a after S1e work has started would also revert S1e's call-site assumptions; S1e must therefore start from a merged, green S1a.
 
@@ -4738,7 +4894,7 @@ Then start Apache and verify with the `master` `WITSQuick`: admin login with the
 - [ ] Factory ordering enforced: `PolicyNamFactory::installOn` refusal tests (Task 5) and `quickMainInstallsTransportBeforeLoad` (Task 7) green.
 - [ ] `-DLOAMS_BUILD_LEGACY_WIDGETS=ON` configures and builds `WITS` + its two tests; default is `OFF` (`cmake -LA -N C:/b/s1a | grep LOAMS_BUILD_LEGACY_WIDGETS` → `OFF`).
 - [ ] No test can reach a backend: `tst_transportseamguard::ownersInTestsUseFakeManagers` green with an **empty** `kPendingTestMigration`, and the Task 14 Step 1 run added 0 lines to the running dev Apache's access log.
-- [ ] Layer 9 manual smoke done on `WITSQuick` from this branch against an isolated backend (Task 14 Step 5), zero differences from `master`, backend restored and verified (Step 7), recorded in `docs/superpowers/proofs/2026-10-05-loams-s1a-proof.md`.
+- [ ] Layer 9 manual smoke done on `WITSQuick` from this branch in an isolated environment (Task 14 Step 5; Option A VM by default), both passes started from the same fingerprinted state (`diff start-master.fp start-branch.fp` empty), zero differences from the `master` pass, environment reset (Step 7), recorded in `docs/superpowers/proofs/2026-10-05-loams-s1a-proof.md`.
 - [ ] Passthrough evidence items 1-5 (Acceptance Tests) present in the proof doc and PR body.
 - [ ] No raw manager outside the seam — `tst_transportseamguard` green with an **empty** `kPendingMigration`, and `grep -rnE "new\s+QNetworkAccessManager|make_(unique|shared)\s*<\s*QNetworkAccessManager" qt-app/core qt-app/quick --include=*.cpp --include=*.h | grep -v "/build" | grep -v "quick/tests/"` prints nothing.
 - [ ] No `ignoreSslErrors` in client source — `tst_transportseamguard::noSslErrorBypassInClientSource` green and `grep -rn "ignoreSslErrors" qt-app --include=*.cpp --include=*.h --include=*.qml --include=*.js | grep -v "^qt-app/libs/" | grep -v "/build"` prints nothing.
