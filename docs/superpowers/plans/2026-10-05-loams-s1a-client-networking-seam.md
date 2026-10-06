@@ -4650,40 +4650,103 @@ bash C:/b/s1a-smoke/smoke-state.sh verify C:/b/s1a-smoke/S0       # re-verify im
 
   If either command exits non-zero, **do not start the smoke** — use Option A.
 
-  **Helper `smoke-state.sh`** (operator scratch file outside the repo — `C:/b/s1a-smoke/smoke-state.sh` on the dev box, `C:\s1a-smoke\smoke-state.sh` in the VM; never committed). It prompts for the MySQL password once per run and keeps it in a private temp option file that is deleted on exit (never on a command line). `DB_USER` / `DB_NAME` come from the deployed `loams_api/config.php`:
+  **Helper `smoke-state.sh`** (operator scratch file outside the repo — `C:/b/s1a-smoke/smoke-state.sh` on the dev box, `C:\s1a-smoke\smoke-state.sh` in the VM; never committed). Database subcommands prompt for the MySQL password once per run and keep it in a private temp option file, passed to the native MariaDB tools as a Windows path (`cygpath -w`) and deleted on exit — never on a command line. Git Bash path conversion is suppressed **only** per `reg.exe` call (`regx`), never globally. `verify` restores into a scratch database and a scratch registry key whose names are unique per run (`<DB_NAME>_s1av_<UTC timestamp>_<random>`, `HKCU\Software\S1aSmokeVerify_<UTC timestamp>_<random>`); it refuses to proceed if either already exists, and the exit trap drops/deletes only the exact database/key this run created. `backend` pins a client install's effective backend (env override > `config.ini` > default) to the intended URL and prints it as evidence. `DB_USER` / `DB_NAME` come from the deployed `loams_api/config.php`:
 
 ```bash
 #!/usr/bin/env bash
 # S1a Layer 9 smoke-state helper. usage:
 #   DB_USER=<user> DB_NAME=<db> bash smoke-state.sh snapshot|verify|restore <dir>
 #   DB_USER=<user> DB_NAME=<db> bash smoke-state.sh fingerprint
+#   bash smoke-state.sh backend <exe-dir> <intended-base-url>
 set -euo pipefail
-export MSYS_NO_PATHCONV=1                       # keep reg.exe switches (/s /f /y) intact under Git Bash
+# NOTE: no global MSYS_NO_PATHCONV. Paths handed to native .exe tools are
+# converted explicitly with `cygpath -w`; only reg.exe calls (whose /s /f /y
+# switches Git Bash would otherwise rewrite) disable path conversion, per call.
 
-: "${DB_USER:?set DB_USER}"; : "${DB_NAME:?set DB_NAME}"
 MYSQLBIN=/c/xampp/mysql/bin
 HTDOCS=/c/xampp/htdocs/loams_api
 UPLOAD_DIRS=(uploads loams_api.uploads)
 REGKEY='HKCU\Software\MyCompany\MyApp'
-REGSCRATCH_ROOT='HKCU\Software\S1aSmokeVerify'
-REGSCRATCH="$REGSCRATCH_ROOT\\MyApp"
 APPDATA_DIR="$(cygpath -u "$APPDATA")/MyCompany/MyApp"
+DEFAULT_BASE_URL='http://localhost/loams_api/'     # ApiConfig::defaultBaseUrl()
 
 TMPD="$(mktemp -d)"; CNF="$TMPD/client.cnf"
-trap 'rm -rf "$TMPD"' EXIT
-read -rs -p "MySQL password for $DB_USER (empty if none): " DBPW; echo
-umask 077; printf '[client]\nuser=%s\npassword=%s\n' "$DB_USER" "$DBPW" > "$CNF"; unset DBPW
+CREATED_DB=""        # scratch database created by THIS run (the only one we may drop)
+CREATED_REGKEY=""    # scratch registry root created by THIS run (the only one we may delete)
 
-mysqlc()  { "$MYSQLBIN/mysql.exe" --defaults-extra-file="$CNF" "$@"; }
-dumpc()   { "$MYSQLBIN/mysqldump.exe" --defaults-extra-file="$CNF" --single-transaction \
-              --routines --triggers --skip-dump-date --skip-comments --order-by-primary "$@"; }
-normdump(){ sed -E 's/ AUTO_INCREMENT=[0-9]+//'; }     # restore-invariant form of a dump
-dbhash()  { dumpc "$1" | normdump | sha256sum | cut -d' ' -f1; }
+regx()   { MSYS_NO_PATHCONV=1 reg "$@"; }                 # reg.exe with switches left intact
+mysqlc() { "$MYSQLBIN/mysql.exe" --defaults-extra-file="$(cygpath -w "$CNF")" "$@"; }
+dumpc()  { "$MYSQLBIN/mysqldump.exe" --defaults-extra-file="$(cygpath -w "$CNF")" --single-transaction \
+             --routines --triggers --skip-dump-date --skip-comments --order-by-primary "$@"; }
+fail()   { echo "smoke-state: $*" >&2; exit 1; }
+
+cleanup() {
+  if [ -n "$CREATED_DB" ]; then
+    mysqlc -e "DROP DATABASE \`$CREATED_DB\`" || echo "smoke-state: WARNING could not drop scratch DB $CREATED_DB" >&2
+  fi
+  if [ -n "$CREATED_REGKEY" ]; then
+    regx delete "$CREATED_REGKEY" /f >/dev/null 2>&1 || echo "smoke-state: WARNING could not delete $CREATED_REGKEY" >&2
+  fi
+  rm -rf "$TMPD"
+}
+trap cleanup EXIT
+
+need_db() {
+  : "${DB_USER:?set DB_USER}"; : "${DB_NAME:?set DB_NAME}"
+  read -rs -p "MySQL password for $DB_USER (empty if none): " DBPW; echo
+  ( umask 077; printf '[client]\nuser=%s\npassword=%s\n' "$DB_USER" "$DBPW" > "$CNF" ); unset DBPW
+}
+
+uniq_suffix() { printf '%s_%05d%05d' "$(date -u +%Y%m%d%H%M%S)" "$RANDOM" "$RANDOM"; }
+normdump() { sed -E 's/ AUTO_INCREMENT=[0-9]+//'; }     # restore-invariant form of a dump
+dbhash()   { dumpc "$1" | normdump | sha256sum | cut -d' ' -f1; }
 dirmanifest() { ( cd "$1" && find . -type f -print0 | sort -z | xargs -0 -r sha256sum ); }
-dircount(){ find "$1" -type f | wc -l | tr -d ' '; }
-reghash() { reg query "$1" /s | tr -d '\r' \
-              | sed -E 's#HKEY_CURRENT_USER\\Software\\[^\\]+\\MyApp#KEY#' | sha256sum | cut -d' ' -f1; }
-fail()    { echo "smoke-state: $*" >&2; exit 1; }
+dircount() { find "$1" -type f | wc -l | tr -d ' '; }
+reghash()  { regx query "$1" /s | tr -d '\r' \
+               | sed -E 's#HKEY_CURRENT_USER\\Software\\[^\\]+\\MyApp#KEY#' | sha256sum | cut -d' ' -f1; }
+db_exists() { [ -n "$(mysqlc -N -e "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$1'")" ]; }
+
+# Value of WITS_API_BASE_URL in a registry environment block ('' if absent).
+regenv() { regx query "$1" /v WITS_API_BASE_URL 2>/dev/null | tr -d '\r' \
+             | awk '$1 == "WITS_API_BASE_URL" { print $3; exit }' || true; }
+
+# Effective backend of a WITSQuick install: WITS_API_BASE_URL (env) > config.ini
+# [Server] BaseURL next to the exe > built-in default (apiconfigloader.cpp).
+# Every source a launch can inherit the override from (this shell; the user and
+# system environments that Explorer/GUI launches inherit) must be unset OR equal
+# the intended backend; a config.ini BaseURL, when present, must equal it too;
+# and the resulting effective URL must equal it. Prints one evidence line.
+backend() {
+  local dir="$1" intended="${2%/}/"
+  [ -f "$dir/WITSQuick.exe" ] || fail "no WITSQuick.exe in $dir"
+  local shellenv="${WITS_API_BASE_URL:-}"
+  local userenv;   userenv="$(regenv 'HKCU\Environment')"
+  local systemenv; systemenv="$(regenv 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment')"
+  local src v
+  for src in shell user system; do
+    case "$src" in shell) v="$shellenv" ;; user) v="$userenv" ;; system) v="$systemenv" ;; esac
+    [ -z "$v" ] || [ "${v%/}/" = "$intended" ] \
+      || fail "WITS_API_BASE_URL in the $src environment is '$v', not the intended '$intended' — unset it"
+  done
+  local ini="$dir/config.ini" inihash="absent" configured=""
+  if [ -f "$ini" ]; then
+    inihash="$(sha256sum "$ini" | cut -d' ' -f1)"
+    configured="$(tr -d '\r' < "$ini" | awk -F= '
+        /^\[/ { sec = $0; next }
+        sec == "[Server]" && $1 ~ /^[ \t]*BaseURL[ \t]*$/ { sub(/^[^=]*=[ \t]*/, ""); print; exit }')"
+    [ -z "$configured" ] || [ "${configured%/}/" = "$intended" ] \
+      || fail "config.ini [Server] BaseURL in $dir is '$configured', not the intended '$intended'"
+  fi
+  local effective source
+  if   [ -n "$shellenv" ];   then effective="$shellenv";   source="env(shell)"
+  elif [ -n "$userenv" ];    then effective="$userenv";    source="env(user)"
+  elif [ -n "$systemenv" ];  then effective="$systemenv";  source="env(system)"
+  elif [ -n "$configured" ]; then effective="$configured"; source="config.ini"
+  else                            effective="$DEFAULT_BASE_URL"; source="default"; fi
+  [ "${effective%/}/" = "$intended" ] \
+    || fail "effective backend for $dir is '$effective' ($source), not the intended '$intended'"
+  echo "backend $(basename "$dir") effective=${effective%/}/ source=$source env.shell=${shellenv:-unset} env.user=${userenv:-unset} env.system=${systemenv:-unset} config.ini=$inihash config.BaseURL=${configured:-absent}"
+}
 
 fingerprint() {
   echo "db $(dbhash "$DB_NAME")"
@@ -4691,9 +4754,10 @@ fingerprint() {
     if [ -d "$HTDOCS/$d" ]; then echo "$d $(dirmanifest "$HTDOCS/$d" | sha256sum | cut -d' ' -f1) $(dircount "$HTDOCS/$d")"
     else echo "$d absent"; fi
   done
-  if reg query "$REGKEY" >/dev/null 2>&1; then echo "registry $(reghash "$REGKEY")"; else echo "registry absent"; fi
+  if regx query "$REGKEY" >/dev/null 2>&1; then echo "registry $(reghash "$REGKEY")"; else echo "registry absent"; fi
   if [ -d "$APPDATA_DIR" ]; then echo "appdata $(dirmanifest "$APPDATA_DIR" | sha256sum | cut -d' ' -f1) $(dircount "$APPDATA_DIR")"
   else echo "appdata absent"; fi
+  local t
   for t in $(mysqlc -N -e "SELECT table_name FROM information_schema.tables WHERE table_schema='$DB_NAME' AND table_type='BASE TABLE' ORDER BY table_name"); do
     echo "count $t $(mysqlc -N -e "SELECT COUNT(*) FROM \`$DB_NAME\`.\`$t\`")"
   done
@@ -4703,27 +4767,34 @@ verify() {
   local S="$1"
   [ -f "$S/MANIFEST.sha256" ] || fail "no manifest in $S"
   ( cd "$S" && sha256sum -c --quiet MANIFEST.sha256 ) || fail "snapshot artifacts changed or unreadable"
-  # DB: restore into a scratch database and require the identical normalized dump.
-  local SCRATCH="${DB_NAME}_s1a_verify"
-  mysqlc -e "DROP DATABASE IF EXISTS \`$SCRATCH\`; CREATE DATABASE \`$SCRATCH\`"
-  mysqlc "$SCRATCH" < "$S/db.sql"
-  [ "$(dbhash "$SCRATCH")" = "$(cat "$S/db.normhash")" ] || fail "DB snapshot does not restore identically"
-  mysqlc -e "DROP DATABASE \`$SCRATCH\`"
+  # DB: restore into a scratch database unique to this run and require the
+  # identical normalized dump. Never reuse or drop a database we did not create.
+  local scratch="${DB_NAME}_s1av_$(uniq_suffix)"
+  ! db_exists "$scratch" || fail "scratch database $scratch already exists — refusing"
+  mysqlc -e "CREATE DATABASE \`$scratch\`"            # no IF NOT EXISTS: errors if it appeared meanwhile
+  CREATED_DB="$scratch"
+  mysqlc "$scratch" < "$S/db.sql"
+  [ "$(dbhash "$scratch")" = "$(cat "$S/db.normhash")" ] || fail "DB snapshot does not restore identically"
+  mysqlc -e "DROP DATABASE \`$scratch\`"; CREATED_DB=""
   # Upload / app-data copies: per-file hashes and file counts.
+  local d
   for d in "${UPLOAD_DIRS[@]}" appdata; do
     [ -e "$S/$d.absent" ] && continue
     ( cd "$S/$d" && sha256sum -c --quiet "$S/$d.manifest" ) || fail "$d copy does not match its manifest"
     [ "$(dircount "$S/$d")" -eq "$(wc -l < "$S/$d.manifest")" ] || fail "$d copy file count differs"
   done
-  # Registry: import a re-rooted copy into a scratch key; it must equal the snapshot tree.
+  # Registry: import a re-rooted copy under a scratch key unique to this run.
   if [ ! -e "$S/registry.absent" ]; then
-    reg delete "$REGSCRATCH_ROOT" /f >/dev/null 2>&1 || true
+    local name="S1aSmokeVerify_$(uniq_suffix)"
+    local root="HKCU\\Software\\$name"
+    ! regx query "$root" >/dev/null 2>&1 || fail "scratch registry key $root already exists — refusing"
     iconv -f UTF-16LE -t UTF-8 "$S/qsettings.reg" \
-      | sed 's#\\Software\\MyCompany\\MyApp#\\Software\\S1aSmokeVerify\\MyApp#g' \
+      | sed "s#\\\\Software\\\\MyCompany\\\\MyApp#\\\\Software\\\\$name\\\\MyApp#g" \
       | iconv -f UTF-8 -t UTF-16LE > "$TMPD/regverify.reg"
-    reg import "$(cygpath -w "$TMPD/regverify.reg")"
-    [ "$(reghash "$REGSCRATCH")" = "$(cat "$S/reg.hash")" ] || fail "registry export does not re-import identically"
-    reg delete "$REGSCRATCH_ROOT" /f
+    CREATED_REGKEY="$root"
+    regx import "$(cygpath -w "$TMPD/regverify.reg")"
+    [ "$(reghash "$root\\MyApp")" = "$(cat "$S/reg.hash")" ] || fail "registry export does not re-import identically"
+    regx delete "$root" /f; CREATED_REGKEY=""
   fi
   echo "snapshot $S verified"
 }
@@ -4736,14 +4807,15 @@ snapshot() {
   dumpc "$DB_NAME" admin > "$S/admin.sql";   [ -s "$S/admin.sql" ] || fail "empty admin dump"
   normdump < "$S/db.sql" | sha256sum | cut -d' ' -f1 > "$S/db.normhash"
   [ "$(cat "$S/db.normhash")" = "$(dbhash "$DB_NAME")" ] || fail "DB changed while dumping"
+  local d
   for d in "${UPLOAD_DIRS[@]}"; do
     if [ -d "$HTDOCS/$d" ]; then
       dirmanifest "$HTDOCS/$d" > "$S/$d.manifest"
       cp -a "$HTDOCS/$d" "$S/$d"
     else : > "$S/$d.absent"; fi
   done
-  if reg query "$REGKEY" >/dev/null 2>&1; then
-    reg export "$REGKEY" "$(cygpath -w "$S/qsettings.reg")" /y
+  if regx query "$REGKEY" >/dev/null 2>&1; then
+    regx export "$REGKEY" "$(cygpath -w "$S/qsettings.reg")" /y
     [ -s "$S/qsettings.reg" ] || fail "empty registry export"
     reghash "$REGKEY" > "$S/reg.hash"
   else : > "$S/registry.absent"; fi
@@ -4780,30 +4852,32 @@ restore() {
   mysqlc "$DB_NAME" < "$S/db.sql"
   [ "$(dbhash "$DB_NAME")" = "$(cat "$S/db.normhash")" ] \
     || fail "live DB differs from snapshot after reload (snapshot intact; re-run restore)"
+  local d
   for d in "${UPLOAD_DIRS[@]}"; do restore_dir "$S" "$d" "$HTDOCS/$d"; done
   restore_dir "$S" appdata "$APPDATA_DIR"
   if [ -e "$S/registry.absent" ]; then
-    reg delete "$REGKEY" /f >/dev/null 2>&1 || true
+    regx delete "$REGKEY" /f >/dev/null 2>&1 || true
   else
-    local POST="${S}.post-smoke-$(date -u +%Y%m%dT%H%M%SZ).reg"
-    if reg query "$REGKEY" >/dev/null 2>&1; then
-      reg export "$REGKEY" "$(cygpath -w "$POST")" /y   # kept until the restore verifies
-      reg delete "$REGKEY" /f
+    local post="${S}.post-smoke-$(date -u +%Y%m%dT%H%M%SZ).reg"
+    if regx query "$REGKEY" >/dev/null 2>&1; then
+      regx export "$REGKEY" "$(cygpath -w "$post")" /y   # kept until the restore verifies
+      regx delete "$REGKEY" /f
     fi
-    reg import "$(cygpath -w "$S/qsettings.reg")"
-    [ "$(reghash "$REGKEY")" = "$(cat "$S/reg.hash")" ] || fail "registry restore mismatch (post-smoke tree kept at $POST)"
-    rm -f "$POST"
+    regx import "$(cygpath -w "$S/qsettings.reg")"
+    [ "$(reghash "$REGKEY")" = "$(cat "$S/reg.hash")" ] || fail "registry restore mismatch (post-smoke tree kept at $post)"
+    rm -f "$post"
   fi
   [ "$(fingerprint)" = "$(cat "$S/fingerprint.txt")" ] || fail "post-restore fingerprint differs from snapshot"
   echo "restore of $S verified: fingerprint matches"
 }
 
 case "${1:-}" in
-  snapshot)    snapshot "${2:?dir}" ;;
-  verify)      verify "${2:?dir}" ;;
-  restore)     restore "${2:?dir}" ;;
-  fingerprint) fingerprint ;;
-  *) echo "usage: $0 snapshot|verify|restore <dir> | fingerprint" >&2; exit 2 ;;
+  snapshot)    need_db; snapshot "${2:?dir}" ;;
+  verify)      need_db; verify "${2:?dir}" ;;
+  restore)     need_db; restore "${2:?dir}" ;;
+  fingerprint) need_db; fingerprint ;;
+  backend)     backend "${2:?exe-dir}" "${3:?intended-base-url}" ;;
+  *) echo "usage: $0 snapshot|verify|restore <dir> | fingerprint | backend <exe-dir> <intended-base-url>" >&2; exit 2 ;;
 esac
 ```
 
@@ -4812,11 +4886,13 @@ esac
   | Order | Option A (VM) | Option B (dev box) |
   |---|---|---|
   | 1 | Revert the VM to `S1A-GOLDEN`; `bash smoke-state.sh fingerprint > start-master.fp`; `diff golden.fingerprint start-master.fp` must be empty | `bash smoke-state.sh fingerprint > start-master.fp`; `diff C:/b/s1a-smoke/S0/fingerprint.txt start-master.fp` must be empty |
-  | 2 | Start Apache; run the table below with `C:\s1a-smoke\master\WITSQuick.exe`; stop Apache + client | Start Apache; run the table below with the `master` `WITSQuick.exe`; stop Apache + client |
+  | 2 | `bash smoke-state.sh backend C:/s1a-smoke/master http://localhost/loams_api/ > master.backend` (must exit 0); start Apache; from that same shell run `C:/s1a-smoke/master/WITSQuick.exe` and the table below; stop Apache + client | `bash C:/b/s1a-smoke/smoke-state.sh backend <master build>/quick http://localhost/loams_api/ > master.backend` (must exit 0); start Apache; from that same shell run `<master build>/quick/WITSQuick.exe` and the table below; stop Apache + client |
   | 3 | Revert the VM to `S1A-GOLDEN`; `bash smoke-state.sh fingerprint > start-branch.fp`; `diff golden.fingerprint start-branch.fp` must be empty | `bash smoke-state.sh restore C:/b/s1a-smoke/S0` (exits 0 only if the restored fingerprint equals `S0/fingerprint.txt`); `bash smoke-state.sh fingerprint > start-branch.fp`; `diff start-master.fp start-branch.fp` must be empty |
-  | 4 | Start Apache; run the table below with `C:\s1a-smoke\branch\WITSQuick.exe` (built from this branch — stale-binary trap); stop Apache + client | Start Apache; run the table below with `C:/b/s1a/quick/WITSQuick.exe` (this branch's build dir — stale-binary trap); stop Apache + client |
+  | 4 | `bash smoke-state.sh backend C:/s1a-smoke/branch http://localhost/loams_api/ > branch.backend` (must exit 0); start Apache; from that same shell run `C:/s1a-smoke/branch/WITSQuick.exe` (built from this branch — stale-binary trap) and the table below; stop Apache + client | `bash C:/b/s1a-smoke/smoke-state.sh backend C:/b/s1a/quick http://localhost/loams_api/ > branch.backend` (must exit 0); start Apache; from that same shell run `C:/b/s1a/quick/WITSQuick.exe` (this branch's build dir — stale-binary trap) and the table below; stop Apache + client |
 
   The proof that both passes started from the same state is `diff start-master.fp start-branch.fp` = empty: the fingerprint covers the normalized DB dump hash, every table's row count, the upload directories' hash manifests + file counts, the QSettings registry tree hash and the app-data hash manifest + file count. A non-empty diff invalidates the comparison — fix the environment and rerun both passes.
+
+  The proof that both passes talked to the intended isolated backend is `master.backend` and `branch.backend`: `backend` aborts (non-zero exit, pass not started) unless `WITS_API_BASE_URL` is unset or equal to the intended URL in the launching shell **and** in the user (`HKCU\Environment`) and system environments that GUI launches inherit, any `config.ini` `[Server] BaseURL` next to that exe equals it, and the resulting effective URL (env > `config.ini` > built-in default) equals it. Each line records the effective URL, its source, all three env values, the `config.ini` SHA-256 (or `absent`) and its `BaseURL`; both lines must show the same `effective=` value. Launch each client from the shell that ran its `backend` check (Option B: the dev box shell; Option A: the VM's Git Bash).
 
   Run each item in both passes and record pass/fail per pass:
 
@@ -4848,7 +4924,7 @@ Any difference between the two passes is a regression: route it through `superpo
 
   **If admin-key reversion fails** (A7 left an unknown key) the `restore` above already resets the `admin` table with the rest of the verified DB. If `restore` itself fails it changes nothing before its verification passes; fix the reported cause and re-run it — the snapshot is never modified or deleted. If the snapshot is unusable, rebuild the dev database from structure + synthetic data and set a new dev key with `hash_admin.php`. Record any incident in the proof doc. Keep `C:/b/s1a-smoke/S0` until the proof doc is committed, then delete it (it holds only synthetic data).
 
-- [ ] **Step 8: Write the proof doc** `docs/superpowers/proofs/2026-10-05-loams-s1a-proof.md` with: the commit SHA tested, the ctest summary (68/68, 0 Not Run) with the access-log offline evidence, the GATE G1/G2 results (incl. the `GATE G2:` thread log line), the ON-config result, the Step 3 diff output, the Step 4 grep outputs, which smoke option was used (A: VM + `S1A-GOLDEN`; B: the `S0` snapshot's `MANIFEST.sha256` hash and the `snapshot`/`verify`/`restore` exit status), the fingerprints `start-master.fp` / `start-branch.fp` (and `golden.fingerprint` or `S0/fingerprint.txt`) with the empty `diff`, the Step 6 smoke table with pass/fail per pass and which turnstile setup was used, the Step 7 result, and a link to this plan's Rollback Considerations. No real student data, no admin key (real or smoke), no DB password, no screenshots containing PII.
+- [ ] **Step 8: Write the proof doc** `docs/superpowers/proofs/2026-10-05-loams-s1a-proof.md` with: the commit SHA tested, the ctest summary (68/68, 0 Not Run) with the access-log offline evidence, the GATE G1/G2 results (incl. the `GATE G2:` thread log line), the ON-config result, the Step 3 diff output, the Step 4 grep outputs, which smoke option was used (A: VM + `S1A-GOLDEN`; B: the `S0` snapshot's `MANIFEST.sha256` hash and the `snapshot`/`verify`/`restore` exit status), the fingerprints `start-master.fp` / `start-branch.fp` (and `golden.fingerprint` or `S0/fingerprint.txt`) with the empty `diff`, the backend-pinning lines `master.backend` / `branch.backend` (same `effective=` URL, env values, `config.ini` hashes), the Step 6 smoke table with pass/fail per pass and which turnstile setup was used, the Step 7 result, and a link to this plan's Rollback Considerations. No real student data, no admin key (real or smoke), no DB password, no screenshots containing PII.
 
 - [ ] **Step 9: Commit** via the project `commit` skill. Intended subject: `docs(security): record S1a Layer 9 regression evidence`.
 
@@ -4881,7 +4957,7 @@ Any difference between the two passes is a regression: route it through `superpo
 - **Nature of the change:** S1a is behaviour-neutral (Passthrough), client-only and confined to source + build configuration. No server, database, PHP endpoint, `config.ini` key, `QSettings` key or on-disk format changes; no migration to undo.
 - **How to revert:** revert the squash/merge commit of the S1a PR on `master` (`git revert <merge-sha>` via a normal PR). Each task is also an independent commit, so a single faulty migration (e.g. one ViewModel) can be reverted alone; the guard's `kPendingMigration` entry for that file (and its test file's `kPendingTestMigration` entry) must be restored in the same revert. Reverting Task 4b alone (the core non-null contract) also requires removing `coreNetworkClassesRequireInjectedManager` from the guard; it changes no runtime behaviour for correctly wired callers.
 - **Legacy Widgets:** the freeze only changes the default. Developers who need the Widgets build use `-DLOAMS_BUILD_LEGACY_WIDGETS=ON` (no revert needed). Existing build directories that cached the old `BUILD_LEGACY_WIDGETS=ON` get a warning and must reconfigure (`cmake -U BUILD_LEGACY_WIDGETS -B <dir> -DLOAMS_BUILD_LEGACY_WIDGETS=ON`).
-- **Smoke-test state (Task 14 Steps 5-7):** the manual smoke is the only S1a activity that mutates data, server and client side. **Default (Option A):** a disposable VM holding server and both clients, reverted to checkpoint `S1A-GOLDEN` before each pass and deleted afterwards — nothing to restore. **Secondary (Option B, synthetic-only dev backend):** the fail-fast `smoke-state.sh` helper snapshots the DB, the `admin` table, the upload directories, the `HKCU\Software\MyCompany\MyApp` QSettings tree and `%APPDATA%\MyCompany\MyApp`; writes a SHA-256 manifest of every artifact; and verifies the snapshot (manifest check, scratch-database restore with identical normalized dump, per-file hashes + file counts, scratch-key registry re-import) at creation, immediately before the smoke, and again at the start of every restore. Restore reloads the DB and proves equality, swaps directories in only after the staged copy verifies, keeps the post-smoke registry export until the restored tree verifies, and succeeds only if the final state fingerprint equals the snapshot's. A failed restore changes nothing before its verification and never modifies the snapshot. Never against production, the gate PC, or any shared/real-data database.
+- **Smoke-test state (Task 14 Steps 5-7):** the manual smoke is the only S1a activity that mutates data, server and client side. **Default (Option A):** a disposable VM holding server and both clients, reverted to checkpoint `S1A-GOLDEN` before each pass and deleted afterwards — nothing to restore. **Secondary (Option B, synthetic-only dev backend):** the fail-fast `smoke-state.sh` helper snapshots the DB, the `admin` table, the upload directories, the `HKCU\Software\MyCompany\MyApp` QSettings tree and `%APPDATA%\MyCompany\MyApp`; writes a SHA-256 manifest of every artifact; and verifies the snapshot (manifest check, restore into a per-run uniquely named scratch database with identical normalized dump, per-file hashes + file counts, re-import into a per-run uniquely named scratch registry key — it refuses if either name exists and only ever drops/deletes what that run created) at creation, immediately before the smoke, and again at the start of every restore. Restore reloads the DB and proves equality, swaps directories in only after the staged copy verifies, keeps the post-smoke registry export until the restored tree verifies, and succeeds only if the final state fingerprint equals the snapshot's. A failed restore changes nothing before its verification and never modifies the snapshot. Never against production, the gate PC, or any shared/real-data database.
 - **Production impact:** none possible — S1a is **never shipped to production before S1f** (spec invariant 8; only S1f packaging can produce a release, and it requires S1e, which deletes Passthrough). The deployed gate-PC `WITS.exe` is untouched by this slice and is not rebuilt from this tree.
 - **Forward compatibility:** reverting S1a after S1e work has started would also revert S1e's call-site assumptions; S1e must therefore start from a merged, green S1a.
 
@@ -4894,7 +4970,7 @@ Any difference between the two passes is a regression: route it through `superpo
 - [ ] Factory ordering enforced: `PolicyNamFactory::installOn` refusal tests (Task 5) and `quickMainInstallsTransportBeforeLoad` (Task 7) green.
 - [ ] `-DLOAMS_BUILD_LEGACY_WIDGETS=ON` configures and builds `WITS` + its two tests; default is `OFF` (`cmake -LA -N C:/b/s1a | grep LOAMS_BUILD_LEGACY_WIDGETS` → `OFF`).
 - [ ] No test can reach a backend: `tst_transportseamguard::ownersInTestsUseFakeManagers` green with an **empty** `kPendingTestMigration`, and the Task 14 Step 1 run added 0 lines to the running dev Apache's access log.
-- [ ] Layer 9 manual smoke done on `WITSQuick` from this branch in an isolated environment (Task 14 Step 5; Option A VM by default), both passes started from the same fingerprinted state (`diff start-master.fp start-branch.fp` empty), zero differences from the `master` pass, environment reset (Step 7), recorded in `docs/superpowers/proofs/2026-10-05-loams-s1a-proof.md`.
+- [ ] Layer 9 manual smoke done on `WITSQuick` from this branch in an isolated environment (Task 14 Step 5; Option A VM by default), both passes started from the same fingerprinted state (`diff start-master.fp start-branch.fp` empty) against the same pinned isolated backend (`master.backend` / `branch.backend` from `smoke-state.sh backend`, identical `effective=` URL), zero differences from the `master` pass, environment reset (Step 7), recorded in `docs/superpowers/proofs/2026-10-05-loams-s1a-proof.md`.
 - [ ] Passthrough evidence items 1-5 (Acceptance Tests) present in the proof doc and PR body.
 - [ ] No raw manager outside the seam — `tst_transportseamguard` green with an **empty** `kPendingMigration`, and `grep -rnE "new\s+QNetworkAccessManager|make_(unique|shared)\s*<\s*QNetworkAccessManager" qt-app/core qt-app/quick --include=*.cpp --include=*.h | grep -v "/build" | grep -v "quick/tests/"` prints nothing.
 - [ ] No `ignoreSslErrors` in client source — `tst_transportseamguard::noSslErrorBypassInClientSource` green and `grep -rn "ignoreSslErrors" qt-app --include=*.cpp --include=*.h --include=*.qml --include=*.js | grep -v "^qt-app/libs/" | grep -v "/build"` prints nothing.
