@@ -4634,6 +4634,12 @@ git diff --stat master...HEAD -- qt-app/quick/qml   # expect: no output (S1a cha
 
 - [ ] **Step 5: Prepare an isolated smoke environment with a reproducible start state (MANDATORY before Step 6).** The smoke mutates persistent state on both sides: server (student register/delete, bulk edit, department deactivate/delete, imports, visit reset, admin-info save, admin-key rotation, uploaded photos) and client (`HKCU\Software\MyCompany\MyApp` QSettings — school info, guest toggle, theme; `%APPDATA%\MyCompany\MyApp` imported logos). **Never** smoke against the production gate PC, the client's real database, or any shared or real-data database, and never with real student data or the real production admin key. Use synthetic data and a smoke-only admin key (`s1a-smoke-key-<random suffix>`, never committed or pasted into the proof doc). The Layer 9 comparison runs the smoke **twice** — once with the `master` build, once with the branch build — and both passes MUST start from the **same** state, proven by an identical state fingerprint (below).
 
+  **One-time shell setup for Steps 5-7.** In every Git Bash shell that runs `smoke-state.sh` (on the dev box for Option B; inside the VM for Option A), first export the database identity the helper's `snapshot` / `verify` / `restore` / `fingerprint` subcommands require (`backend` does not need them). Take the values from the deployed `loams_api/config.php` (`DB_USER`, `DB_NAME`); the placeholders below are not real values, and real values are never written into the proof doc:
+
+```bash
+export DB_USER=<db-user> DB_NAME=<db-name>
+```
+
   **Option A — DEFAULT: disposable VM with a golden checkpoint.** Use a throwaway Windows VM (Hyper-V or VirtualBox) that holds the whole environment, server **and** client, so one checkpoint resets everything:
   1. In the VM install the dev XAMPP version, Git for Windows (for the helper below), and deploy `deliverables/loams_api` from this branch to `C:\xampp\htdocs\loams_api\`.
   2. Create the database from **structure only** taken on the dev box (`mysqldump --no-data <DB_NAME>` — no rows leave the dev box), set the smoke-only admin key with `hash_admin.php`, then create synthetic records through `WITSQuick` itself (Register, and Import of a synthetic CSV + ZIP with names like `Test Student A`, IDs like `21-1-0001`).
@@ -4650,7 +4656,7 @@ bash C:/b/s1a-smoke/smoke-state.sh verify C:/b/s1a-smoke/S0       # re-verify im
 
   If either command exits non-zero, **do not start the smoke** — use Option A.
 
-  **Helper `smoke-state.sh`** (operator scratch file outside the repo — `C:/b/s1a-smoke/smoke-state.sh` on the dev box, `C:\s1a-smoke\smoke-state.sh` in the VM; never committed). Database subcommands prompt for the MySQL password once per run and keep it in a private temp option file, passed to the native MariaDB tools as a Windows path (`cygpath -w`) and deleted on exit — never on a command line. Git Bash path conversion is suppressed **only** per `reg.exe` call (`regx`), never globally. `verify` restores into a scratch database and a scratch registry key whose names are unique per run (`<DB_NAME>_s1av_<UTC timestamp>_<random>`, `HKCU\Software\S1aSmokeVerify_<UTC timestamp>_<random>`); it refuses to proceed if either already exists, and the exit trap drops/deletes only the exact database/key this run created. `backend` pins a client install's effective backend (env override > `config.ini` > default) to the intended URL and prints it as evidence. `DB_USER` / `DB_NAME` come from the deployed `loams_api/config.php`:
+  **Helper `smoke-state.sh`** (operator scratch file outside the repo — `C:/b/s1a-smoke/smoke-state.sh` on the dev box, `C:\s1a-smoke\smoke-state.sh` in the VM; never committed). Database subcommands prompt for the MySQL password once per run and keep it in a private temp option file, passed to the native MariaDB tools as a Windows path (`cygpath -w`) and deleted on exit — never on a command line. Git Bash path conversion is suppressed **only** per `reg.exe` call (`regx`), never globally. `verify` restores into a scratch database and a scratch registry key whose names are unique per run (`<DB_NAME>_s1av_<UTC timestamp>_<random>`, `HKCU\Software\S1aSmokeVerify_<UTC timestamp>_<random>`); it refuses to proceed if either already exists, and the exit trap drops/deletes only the exact database/key this run created. `backend` pins a client install's effective backend (env override > `config.ini` > default) to the intended URL and prints it as evidence. It mirrors Windows/Qt resolution and fails closed wherever exact equivalence cannot be guaranteed: `WITS_API_BASE_URL` is matched case-insensitively in the shell, user and system environments (more than one case variant in a source aborts); a present `config.ini` must contain exactly one `[Server]` section (case-insensitive) holding exactly one `BaseURL` key (case-insensitive, no `Server\BaseURL` / `Server/BaseURL` spelling elsewhere, no `%`-escaped keys) with a plain value — duplicates, duplicate `[Server]` sections, quoted/list/empty values, or a `config.ini` without a `BaseURL` abort. `DB_USER` / `DB_NAME` come from the shell setup above:
 
 ```bash
 #!/usr/bin/env bash
@@ -4706,35 +4712,92 @@ reghash()  { regx query "$1" /s | tr -d '\r' \
                | sed -E 's#HKEY_CURRENT_USER\\Software\\[^\\]+\\MyApp#KEY#' | sha256sum | cut -d' ' -f1; }
 db_exists() { [ -n "$(mysqlc -N -e "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='$1'")" ]; }
 
-# Value of WITS_API_BASE_URL in a registry environment block ('' if absent).
-regenv() { regx query "$1" /v WITS_API_BASE_URL 2>/dev/null | tr -d '\r' \
-             | awk '$1 == "WITS_API_BASE_URL" { print $3; exit }' || true; }
-
-# Effective backend of a WITSQuick install: WITS_API_BASE_URL (env) > config.ini
+# --- Effective-backend pinning ------------------------------------------------
+# WITSQuick resolves its backend as: WITS_API_BASE_URL (env) > config.ini
 # [Server] BaseURL next to the exe > built-in default (apiconfigloader.cpp).
+# This checker must agree with how Windows/Qt resolve those inputs. Where exact
+# equivalence cannot be guaranteed, ANY ambiguity aborts (fail closed):
+#   - env lookup on Windows (qEnvironmentVariable) ignores case, so every source
+#     is enumerated case-insensitively; >1 case variant in one source aborts;
+#   - QSettings INI keys/groups are case-insensitive on Windows and a key can be
+#     spelled [Server] BaseURL= or Server\BaseURL= / Server/BaseURL= in any
+#     section; a present config.ini must define it exactly once, in exactly one
+#     [Server] section (case-insensitive), with a plain value — duplicates,
+#     duplicate [Server] sections, %-escaped keys, quoted/list/empty values abort.
+
+# All occurrences of WITS_API_BASE_URL (any case) in one source, one "V:<value>"
+# line each. shell = this process environment; otherwise a registry env key.
+env_occurrences() {
+  if [ "$1" = shell ]; then
+    env | tr -d '\r' | awk '{ eq = index($0, "="); if (eq > 0 && tolower(substr($0, 1, eq - 1)) == "wits_api_base_url") print "V:" substr($0, eq + 1) }' || true
+  else
+    regx query "$1" 2>/dev/null | tr -d '\r' \
+      | awk 'tolower($1) == "wits_api_base_url" { print "V:" $3 }' || true
+  fi
+}
+
+# The single value of WITS_API_BASE_URL in a source ('' if undefined); aborts on >1 case variant.
+env_value() {
+  local label="$1" occ n
+  occ="$(env_occurrences "$2")"
+  n="$(printf '%s\n' "$occ" | grep -c '^V:' || true)"
+  [ "$n" -le 1 ] || fail "WITS_API_BASE_URL is defined $n times (case variants) in the $label environment — ambiguous, keep at most one"
+  printf '%s\n' "$occ" | sed -n 's/^V://p' | head -n 1
+}
+
+# Strict config.ini read. Prints "VALUE <url>" or "AMBIGUOUS <reason>".
+ini_baseurl() {
+  tr -d '\r' < "$1" | awk '
+    function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
+    /^[ \t]*[;#]/ || /^[ \t]*$/ { next }
+    /^[ \t]*\[/ { sec = tolower(trim($0)); if (sec == "[server]") nserver++; next }
+    {
+      eq = index($0, "="); if (eq == 0) next
+      key = tolower(trim(substr($0, 1, eq - 1))); val = trim(substr($0, eq + 1))
+      if (index(key, "%") > 0) { bad = "escaped key " key; exit }
+      if ((sec == "[server]" && key == "baseurl") || key == "server\\baseurl" || key == "server/baseurl") {
+        n++; v = val
+        if (sec != "[server]") outside++
+      }
+    }
+    END {
+      if (bad != "")     { print "AMBIGUOUS " bad; exit }
+      if (nserver > 1)   { print "AMBIGUOUS " nserver + 0 " [Server] sections"; exit }
+      if (n != 1)        { print "AMBIGUOUS " n + 0 " BaseURL definitions (exactly 1 required)"; exit }
+      if (outside > 0)   { print "AMBIGUOUS BaseURL defined outside a [Server] section"; exit }
+      if (nserver != 1)  { print "AMBIGUOUS no [Server] section"; exit }
+      if (v == "" || v ~ /[",]/) { print "AMBIGUOUS BaseURL value is empty, quoted or a list"; exit }
+      print "VALUE " v
+    }'
+}
+
 # Every source a launch can inherit the override from (this shell; the user and
 # system environments that Explorer/GUI launches inherit) must be unset OR equal
-# the intended backend; a config.ini BaseURL, when present, must equal it too;
-# and the resulting effective URL must equal it. Prints one evidence line.
+# the intended backend; a present config.ini must define BaseURL unambiguously
+# and equal to it; the resulting effective URL must equal it. Prints one
+# evidence line.
 backend() {
   local dir="$1" intended="${2%/}/"
   [ -f "$dir/WITSQuick.exe" ] || fail "no WITSQuick.exe in $dir"
-  local shellenv="${WITS_API_BASE_URL:-}"
-  local userenv;   userenv="$(regenv 'HKCU\Environment')"
-  local systemenv; systemenv="$(regenv 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment')"
+  local shellenv userenv systemenv
+  shellenv="$(env_value shell shell)"
+  userenv="$(env_value user 'HKCU\Environment')"
+  systemenv="$(env_value system 'HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment')"
   local src v
   for src in shell user system; do
     case "$src" in shell) v="$shellenv" ;; user) v="$userenv" ;; system) v="$systemenv" ;; esac
     [ -z "$v" ] || [ "${v%/}/" = "$intended" ] \
       || fail "WITS_API_BASE_URL in the $src environment is '$v', not the intended '$intended' — unset it"
   done
-  local ini="$dir/config.ini" inihash="absent" configured=""
+  local ini="$dir/config.ini" inihash="absent" configured="" parsed
   if [ -f "$ini" ]; then
     inihash="$(sha256sum "$ini" | cut -d' ' -f1)"
-    configured="$(tr -d '\r' < "$ini" | awk -F= '
-        /^\[/ { sec = $0; next }
-        sec == "[Server]" && $1 ~ /^[ \t]*BaseURL[ \t]*$/ { sub(/^[^=]*=[ \t]*/, ""); print; exit }')"
-    [ -z "$configured" ] || [ "${configured%/}/" = "$intended" ] \
+    parsed="$(ini_baseurl "$ini")"
+    case "$parsed" in
+      VALUE\ *) configured="${parsed#VALUE }" ;;
+      *) fail "config.ini in $dir is ambiguous: ${parsed#AMBIGUOUS } — fail closed (fix or remove it)" ;;
+    esac
+    [ "${configured%/}/" = "$intended" ] \
       || fail "config.ini [Server] BaseURL in $dir is '$configured', not the intended '$intended'"
   fi
   local effective source
