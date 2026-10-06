@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Revision 7 (2026-10-07):** Codex plan review round 5 applied — every read and write of the credential ledger is preceded by `Assert-LoamsCredentialLedgerSafe` (no reparse point at `ProgramDataRoot`, `run\` or the ledger file itself), so a symbolic-link ledger stops the sweep, the restore step and runbook D7 before anything is touched; credential files are never zeroed through a link; `-Report`'s credential state verifies the store (folders, reparse points, ACLs, ledger) before enumerating anything, so a missing or junctioned store is `Incomplete` with `credentialFiles=unreadable`, never `none`, and every ledger entry counts as a leftover.
+
 **Revision 6 (2026-10-06):** Codex plan review round 4 applied — protected-folder provisioning refuses a junction or symbolic link at `ProgramDataRoot` or anywhere below it before creating or re-permissioning anything; the allowlist check now also requires each allowed entry to be explicit and inherit to subfolders and files (`(OI)(CI)`, no inherit-only/no-propagate); run-owned DB credential files live only in the protected `run\credentials` folder with a durable write-through ledger written before each file exists, so the restore script, `-Report`, the fingerprint, `Validate` and the converge preflight find orphans left by a killed process.
 
 **Revision 5 (2026-10-06):** Codex plan review round 3 applied — `-Converge` validates the final report location (inside the protected reports folder, allowlist ACL) in preflight before any backup or checkpoint, and a final-report save failure after success is deterministic (`SuccessReportNotSaved`, exit 6); every run-owned DB credential file is tracked from before creation and swept at undo and end of run, with any leftover ⇒ `RecoveryRequired`; the reports folder gets a fresh protected allowlist ACL (Administrators + SYSTEM only) that is verified programmatically and checked again on every write.
@@ -101,7 +103,7 @@
 - **D20 — Legacy photo fallback (new, Codex round 1):** `uploads\default.jpg` must be deployed and served as an image; its absence fails validation instead of passing silently.
 - **D21 — Restore covers every mutation (new, Codex round 1):** 17-row mutation inventory (Task 14); the backup set carries a module copy and prior-state capture (`loams-state.json`, task XML, tools copies); the generated restore script verifies its inputs inside the step machinery and exits 4 naming the failed step; the fingerprint includes LOAMS-owned state (event source, retention task, tools, layout).
 - **D24 — Round-3 decisions (new):** final-report save failure after success ⇒ `SuccessReportNotSaved` (exit 6); credential-file leftovers ⇒ `RecoveryRequired` (17th inventory row); the default `-ReportPath` for both modes is `<ProgramDataRoot>\reports\loams-host-report-<computer>-<UTC>.json`.
-- **D25 — Round-4 decisions (new):** the credential store `run\` + `run\credentials\` and its ledger are provisioned in runbook B0 next to `reports\` (administrative, persistent, never removed by restore); a credential file left behind makes `-Report` `StopAndReport` and is cleaned with runbook D7 or the restore script.
+- **D25 — Round-4/5 decisions (new):** the credential store `run\` + `run\credentials\` and its ledger are provisioned in runbook B0 next to `reports\` (administrative, persistent, never removed by restore). `-Report` verifies the store before looking inside it: a store that does not verify (missing folder, a junction or symbolic link at any level including the ledger file, an ACL off the allowlist, unreadable) is always a listed reason, makes an otherwise clean report `Incomplete` (never `Success`), records `credentialFiles=unreadable` in the fingerprint, fails the post-change check and makes `-Converge` refuse; nothing in it is enumerated. Once it verifies, any leftover — a `mysql-client-*.cnf` in the folder or any ledger entry — makes `-Report` `StopAndReport` and is cleaned with runbook D7 or the restore script. Every ledger read or write is preceded by `Assert-LoamsCredentialLedgerSafe`; a reparse-point ledger stops the sweep before anything is touched.
 - **D23 — Round-2 decisions (new):** dirty post-change report ⇒ rollback ⇒ `RolledBack` with the report kept as evidence (`RecoveryRequired` only if rollback fails); verification schema names are per run (`loams_s1b_verify_<set id>`, `…_r`) and only those are ever dropped; the restore requires elevation only when a step touches services, ACLs, the event log, a scheduled task or the database.
 - **D22 — Manifest access contract (new, Codex round 1):** `Get-LoamsProp` raw / `Get-LoamsPropList` enumerating, with tests that fail on the PS 5.1 nested-array bug.
 - **D18 — Cipher (new):** AES-256-CBC CMS EnvelopedData (`-aes256`) plus external SHA-256 hashes; CMS AuthEnvelopedData (GCM) to be evaluated on the pinned OpenSSL 3 in staging and adopted by reviewed change if supported end-to-end.
@@ -3503,19 +3505,19 @@ Via the project `commit` skill — subject: `feat(deploy): detect and harden the
 - Create: `deploy/server/Test-LoamsServerHost.ps1` (Report parameter set only; Task 17 adds `-Converge`)
 - Create: `deploy/tests/Report.Tests.ps1`
 - Modify: `deploy/tests/TestHelpers.ps1` (append `Get-LoamsTreeFingerprint`, `Set-LoamsReportMocks`)
-- Modify: `deploy/tests/expected-test-count.txt` → `170`
+- Modify: `deploy/tests/expected-test-count.txt` → `173`
 
 **Interfaces:**
 - Consumes: Tasks 2–10.
 - Produces:
   - `Get-LoamsFingerprintAclPaths -AclProfile <object[]> -ProgramDataRoot <string>` → `[string[]]` XAMPP-side ACL paths (LOAMS-owned `ProgramData` paths are excluded: the tool creates them itself, so they would always "drift").
-  - `LoamsHost.HostState.ps1` (read-only): `Get-LoamsScheduledTaskXml -TaskName` → task XML or `$null`; `Get-LoamsTaskDefinitionHash -Xml` → SHA-256 of the definition without `RegistrationInfo`, or `'absent'`; `Get-LoamsLayoutState -ProgramDataRoot` → `{ path; exists }` for `server`, `server\logs`, `server\logs\compat-guard.log`, `server\tls`, `server\tls\private`, `tools`; `Get-LoamsToolsState -ProgramDataRoot` → the whole tree below `tools\`: `{ path (relative); type='dir'|'file'; sha256 (files) }`; `Get-LoamsVerifySchemaFolders -DataDir` → names of `loams_s1b_verify*` schema folders in the MariaDB datadir (read-only folder listing, no credentials); `Get-LoamsLoamsState -ProgramDataRoot [-MariaDbDataDir]` → hashtable `eventSource`, `retentionTask`, `layout:<path>` (SDDL or `absent`), `tool:<path>` (hash or `dir`), `verifySchemas` (names or `none`), `credentialFiles` (names or `none` / `unreadable`); `Get-LoamsCredentialStorePaths -ProgramDataRoot` → `{ Root; RunDirectory = <root>\run; Directory = <root>\run\credentials; Ledger = <root>\run\credential-ledger.txt }`; `Get-LoamsCredentialFileState -ProgramDataRoot` → `{ Directory; Readable; Files (names of mysql-client-*.cnf, contents never read); Problem }`. These make every LOAMS-owned mutation (Task 14 inventory) part of the fingerprint.
+  - `LoamsHost.HostState.ps1` (read-only): `Get-LoamsScheduledTaskXml -TaskName` → task XML or `$null`; `Get-LoamsTaskDefinitionHash -Xml` → SHA-256 of the definition without `RegistrationInfo`, or `'absent'`; `Get-LoamsLayoutState -ProgramDataRoot` → `{ path; exists }` for `server`, `server\logs`, `server\logs\compat-guard.log`, `server\tls`, `server\tls\private`, `tools`; `Get-LoamsToolsState -ProgramDataRoot` → the whole tree below `tools\`: `{ path (relative); type='dir'|'file'; sha256 (files) }`; `Get-LoamsVerifySchemaFolders -DataDir` → names of `loams_s1b_verify*` schema folders in the MariaDB datadir (read-only folder listing, no credentials); `Get-LoamsLoamsState -ProgramDataRoot [-MariaDbDataDir]` → hashtable `eventSource`, `retentionTask`, `layout:<path>` (SDDL or `absent`), `tool:<path>` (hash or `dir`), `verifySchemas` (names or `none`), `credentialFiles` (leftover names, `none`, or `unreadable` when the store does not verify); `Get-LoamsCredentialStorePaths -ProgramDataRoot` → `{ Root; RunDirectory = <root>\run; Directory = <root>\run\credentials; Ledger = <root>\run\credential-ledger.txt }`; `Assert-LoamsCredentialLedgerSafe -Store` (throws `STOP` when `ProgramDataRoot`, `run\` or the ledger file itself is a reparse point, or the ledger is not a plain file — called immediately before **every** ledger read or write); `Get-LoamsCredentialLedger -Store` → paths (asserts first; never follows a link); `Test-LoamsCredentialStore -ProgramDataRoot` → `{ Ok; Problems }` (read-only: `run` and `run\credentials` pass `Test-LoamsProtectedFolder`, the ledger passes `Assert-LoamsCredentialLedgerSafe`); `Get-LoamsCredentialFileState -ProgramDataRoot` → `{ Directory; Readable; Files; Problems }` — **verifies the store first** and enumerates nothing unless it passes (missing folder, reparse point at any level incl. the ledger, ACL off the allowlist ⇒ `Readable = $false`, no listing); `Files` = `mysql-client-*.cnf` names in the folder ∪ names of all ledger entries (contents never read). These make every LOAMS-owned mutation (Task 14 inventory) part of the fingerprint.
   - `Get-LoamsLiveFingerprint -XamppRoot <string> -ProgramDataRoot <string> -ApacheServiceName <string> -MariaDbServiceName <string> -MariaDbLayout <pscustomobject> -AclPaths <string[]>` → fingerprint (Task 9 shape, incl. `loamsState`) read **live** from the host: both service configurations, hashes of `httpd.conf`, `extra\httpd-xampp.conf`, `extra\httpd-ssl.conf`, `php.ini`, `my.ini` (never `config.php`: hashing a small file that contains the DB password would allow offline guessing), SDDL of every ACL path, and the loaded `httpd` modules. Used by the report **and** by the pre-change drift re-check (Task 16/17), so both are computed by one code path.
   - `New-LoamsHostReport -XamppRoot -ManifestPath -ProgramDataRoot [-ServiceName 'Apache2.4'] [-MariaDbServiceName 'mysql']` → `[pscustomobject]` with `reportVersion` (2), `generatedUtc`, `computerName`, `elevated`, `manifest`, Apache fields (`layout`, `services`, `processes`, `httpd`, `phpSapi`, `phpCli`, `classification`, `runtime`, `inventoryComplete`, `loadedModules`, `acl`), `mariaDb` {`layout`, `services`, `processes`, `classification`, `acl`}, `eventSource`, `credentialFiles` (`Get-LoamsCredentialFileState`), `fingerprint`, `profileHash` (= `Get-LoamsFingerprintHash fingerprint`), `convergenceNeeded`, `outcome` (`Success`|`StopAndReport`|`Incomplete`), `outcomeReasons`.
-  - `Format-LoamsHostReport -Report` → `[string[]]`; `Get-LoamsReportFolder -ProgramDataRoot` → `<ProgramDataRoot>\reports`; `Assert-LoamsNoReparsePath -Root -Path` (throws `STOP: ... junction or symbolic link ...` when `Root` or any existing component below it is a reparse point; works for paths that do not exist yet); `Test-LoamsProtectedFolder -Root -Path -Label` → `{ Ok; Problems }` (read-only: no reparse point, folder exists, ACL passes `Test-LoamsProtectedFolderAcl`); `Test-LoamsReportLocation -Path -ProgramDataRoot` → `{ Ok; Problems }` (file directly inside the reports folder + `Test-LoamsProtectedFolder`); `Initialize-LoamsProtectedFolder -Root -Path` (mutating, runbook B0/F only: refuses reparse points **before** creating or re-permissioning anything, creates the folder if needed, applies a **fresh protected** security descriptor with only Administrators + SYSTEM FullControl `(OI)(CI)` via `Set-LoamsDirectorySecurity`, then re-reads and **stops** on any allowlist mismatch); `Initialize-LoamsReportFolder -ProgramDataRoot` (= `Initialize-LoamsProtectedFolder` for `reports`); `Save-LoamsHostReport -Report -Path [-ProgramDataRoot]` (UTF-8 without BOM; writing into the LOAMS reports folder additionally requires `Test-LoamsReportLocation`; **never creates directories** — a missing folder throws `"... -Report never creates directories ..."`, so `C:\ProgramData\LOAMS\reports` is provisioned in runbook B0); `Invoke-LoamsHostReport -XamppRoot -ManifestPath -ProgramDataRoot -ServiceName -MariaDbServiceName -ReportPath` → report (forces Report mode).
+  - `Format-LoamsHostReport -Report` → `[string[]]`; `Get-LoamsReportFolder -ProgramDataRoot` → `<ProgramDataRoot>\reports`; `Get-LoamsPathAttributes -Path` → attributes of the path itself (never follows a link) or `$null` — the single reparse-point boundary, mocked in tests; `Assert-LoamsNoReparsePath -Root -Path` (throws `STOP: ... junction or symbolic link ...` when `Root` or any existing component below it, including a final file, is a reparse point; works for paths that do not exist yet); `Test-LoamsProtectedFolder -Root -Path -Label` → `{ Ok; Problems }` (read-only: no reparse point, folder exists, ACL passes `Test-LoamsProtectedFolderAcl`; an unreadable ACL is a problem, not an exception); `Test-LoamsReportLocation -Path -ProgramDataRoot` → `{ Ok; Problems }` (file directly inside the reports folder + `Test-LoamsProtectedFolder`); `Initialize-LoamsProtectedFolder -Root -Path` (mutating, runbook B0/F only: refuses reparse points **before** creating or re-permissioning anything, creates the folder if needed, applies a **fresh protected** security descriptor with only Administrators + SYSTEM FullControl `(OI)(CI)` via `Set-LoamsDirectorySecurity`, then re-reads and **stops** on any allowlist mismatch); `Initialize-LoamsReportFolder -ProgramDataRoot` (= `Initialize-LoamsProtectedFolder` for `reports`); `Save-LoamsHostReport -Report -Path [-ProgramDataRoot]` (UTF-8 without BOM; writing into the LOAMS reports folder additionally requires `Test-LoamsReportLocation`; **never creates directories** — a missing folder throws `"... -Report never creates directories ..."`, so `C:\ProgramData\LOAMS\reports` is provisioned in runbook B0); `Invoke-LoamsHostReport -XamppRoot -ManifestPath -ProgramDataRoot -ServiceName -MariaDbServiceName -ReportPath` → report (forces Report mode).
   - Entry: `Test-LoamsServerHost.ps1 [-Report] [-XamppRoot] [-ManifestPath] [-ServiceName] [-MariaDbServiceName] [-ProgramDataRoot] [-ReportPath]`.
 
-**Outcome rules:** manifest invalid, Apache stop, **MariaDB stop**, or a run-owned DB credential file left in `<ProgramDataRoot>\run\credentials` ⇒ `StopAndReport` (exit 2); not elevated, `httpd` not running, module list unreadable, or the credential folder unreadable ⇒ `Incomplete` (exit 3); runtime `Mismatch` or a draft manifest (`Unknown`) ⇒ `StopAndReport` ("stack does not match an approved manifest"); otherwise `Success` (exit 0). On this dev box today the expected result is `StopAndReport` elevated (draft manifest; OpenSSL 1.1.1t loaded) or `Incomplete` non-elevated.
+**Outcome rules:** manifest invalid, Apache stop, **MariaDB stop**, or a run-owned DB credential leftover (a `mysql-client-*.cnf` in `<ProgramDataRoot>\run\credentials` or any entry in `run\credential-ledger.txt`, only evaluated once the store verifies) ⇒ `StopAndReport` (exit 2); not elevated, `httpd` not running, or module list unreadable ⇒ `Incomplete` (exit 3); a credential store that does not verify (missing `run`/`run\credentials`, a junction or symbolic link at any level including the ledger, an ACL off the allowlist, unreadable) is always listed as a reason and turns an otherwise `Success` report into `Incomplete` (exit 3) — it never yields `Success`, and nothing in it is enumerated; runtime `Mismatch` or a draft manifest (`Unknown`) ⇒ `StopAndReport` ("stack does not match an approved manifest"); otherwise `Success` (exit 0). On this dev box today the expected result is `StopAndReport` elevated (draft manifest; OpenSSL 1.1.1t loaded) or `Incomplete` non-elevated, each also listing `credential store not verifiable: ... does not exist` (the store is provisioned only by runbook B0).
 
 - [ ] **Step 1: Append test helpers to `deploy/tests/TestHelpers.ps1`**
 
@@ -3574,6 +3576,8 @@ BeforeAll {
     . (Join-Path $PSScriptRoot 'TestHelpers.ps1')
     $script:Root = New-LoamsFakeXampp -Root (Join-Path $TestDrive 'xampp')
     $script:Pd = Join-Path $TestDrive 'pd\LOAMS'
+    # A provisioned (empty) credential store; its ACL reads come from the Get-LoamsAclSddl mock in Set-LoamsReportMocks.
+    New-Item -ItemType Directory -Force -Path (Join-Path $script:Pd 'run\credentials') | Out-Null
     $script:ManifestPath = Join-Path $TestDrive 'manifest.json'
     Save-LoamsTestManifest -Manifest (New-LoamsTestManifest -XamppRoot $script:Root) -Path $script:ManifestPath
     $m = Get-Content -Raw $script:ManifestPath | ConvertFrom-Json
@@ -3765,6 +3769,7 @@ Describe 'Host state helpers' {
         $pd = Join-Path $TestDrive 'pd-state'
         New-Item -ItemType Directory -Force -Path (Join-Path $pd 'tools') | Out-Null
         Set-Content -Path (Join-Path $pd 'tools\Invoke-LoamsBackupRetention.ps1') -Value 'x'
+        New-Item -ItemType Directory -Force -Path (Join-Path $pd 'run\credentials') | Out-Null
         $st = Get-LoamsLoamsState -ProgramDataRoot $pd
         $st['eventSource'] | Should -Be 'absent'
         $st['retentionTask'] | Should -Be 'absent'
@@ -3787,6 +3792,39 @@ Describe 'Host state helpers' {
             @($r.fingerprint.loamsState) | Should -Contain 'credentialFiles=mysql-client-0badc0de.cnf'
             ($r | ConvertTo-Json -Depth 8) | Should -Not -Match 'synthetic-not-read'
         } finally { Remove-Item -LiteralPath $orphan -Force }
+    }
+    It 'is Incomplete (never Success) when the credential store is missing, and says why' {
+        Set-LoamsReportMocks -XamppRoot $script:Root -ModulePaths $script:Mods
+        $r = New-LoamsHostReport -XamppRoot $script:Root -ManifestPath $script:ManifestPath -ProgramDataRoot (Join-Path $TestDrive 'pd-nostore')
+        $r.outcome | Should -Be 'Incomplete'
+        $r.credentialFiles.Readable | Should -BeFalse
+        ($r.outcomeReasons -join ' ') | Should -Match 'credential store not verifiable: .*credential folder .*does not exist'
+        @($r.fingerprint.loamsState) | Should -Contain 'credentialFiles=unreadable'
+    }
+    It 'never enumerates a junctioned credential folder: Incomplete, no file names' {
+        Set-LoamsReportMocks -XamppRoot $script:Root -ModulePaths $script:Mods
+        $pd = Join-Path $TestDrive 'pd-credjunction'; $target = Join-Path $TestDrive 'credjunction-target'
+        New-Item -ItemType Directory -Force -Path (Join-Path $pd 'run'), $target | Out-Null
+        Set-Content -Path (Join-Path $target 'mysql-client-elsewhere.cnf') -Value 'x'
+        $link = Join-Path $pd 'run\credentials'
+        New-Item -ItemType Junction -Path $link -Target $target | Out-Null
+        try {
+            $r = New-LoamsHostReport -XamppRoot $script:Root -ManifestPath $script:ManifestPath -ProgramDataRoot $pd
+            $r.outcome | Should -Be 'Incomplete'
+            @($r.credentialFiles.Files).Count | Should -Be 0
+            ($r.credentialFiles.Problems -join ' ') | Should -Match 'credentials is a junction or symbolic link'
+            @($r.fingerprint.loamsState) | Should -Contain 'credentialFiles=unreadable'
+        } finally { [IO.Directory]::Delete($link) }
+    }
+    It 'reports a ledger entry as a leftover even when its file is already gone' {
+        Set-LoamsReportMocks -XamppRoot $script:Root -ModulePaths $script:Mods
+        $p = Get-LoamsCredentialStorePaths -ProgramDataRoot $script:Pd
+        [IO.File]::WriteAllText($p.Ledger, (Join-Path $p.Directory 'mysql-client-ledgered.cnf') + "`r`n")
+        try {
+            $r = Run-Report
+            $r.outcome | Should -Be 'StopAndReport'
+            ($r.outcomeReasons -join ' ') | Should -Match 'run-owned DB credential files left behind .*mysql-client-ledgered\.cnf'
+        } finally { [IO.File]::Delete($p.Ledger) }
     }
     It 'reports leftover MariaDB verification schemas in the report and the fingerprint' {
         Set-LoamsReportMocks -XamppRoot $script:Root -ModulePaths $script:Mods
@@ -3883,18 +3921,58 @@ function Get-LoamsCredentialStorePaths {
     return [pscustomobject]@{ Root = $root; RunDirectory = "$root\run"; Directory = "$root\run\credentials"; Ledger = "$root\run\credential-ledger.txt" }
 }
 
+function Assert-LoamsCredentialLedgerSafe {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Store)
+    # Called immediately before EVERY read or write of the ledger. ProgramDataRoot, run\ and the ledger file itself must
+    # not be reparse points (a symbolic-link ledger would redirect the rewrite to an unrelated file), and an existing
+    # ledger must be a plain file. .NET file opens follow links, so this check, made right before each open, is the guard;
+    # the folder is admin-only, so only an administrator could swap the file in between.
+    Assert-LoamsNoReparsePath -Root $Store.Root -Path $Store.Ledger
+    $attr = Get-LoamsPathAttributes -Path $Store.Ledger
+    if ($null -ne $attr -and ($attr -band [IO.FileAttributes]::Directory) -ne 0) { throw "STOP: credential ledger $($Store.Ledger) is not a plain file" }
+}
+
+function Get-LoamsCredentialLedger {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Store)
+    Assert-LoamsCredentialLedgerSafe -Store $Store
+    if ($null -eq (Get-LoamsPathAttributes -Path $Store.Ledger)) { return }
+    [IO.File]::ReadAllLines($Store.Ledger) | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique
+}
+
+function Test-LoamsCredentialStore {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string] $ProgramDataRoot)
+    # Read-only: run\ and run\credentials exist, no reparse point from ProgramDataRoot down (incl. the ledger file),
+    # both ACLs on the protected allowlist, an existing ledger is a plain file.
+    $p = Get-LoamsCredentialStorePaths -ProgramDataRoot $ProgramDataRoot
+    $problems = @()
+    $problems += @((Test-LoamsProtectedFolder -Root $p.Root -Path $p.RunDirectory -Label 'credential run folder').Problems)
+    $problems += @((Test-LoamsProtectedFolder -Root $p.Root -Path $p.Directory -Label 'credential folder').Problems)
+    try { Assert-LoamsCredentialLedgerSafe -Store $p } catch { $problems += "credential ledger: $($_.Exception.Message)" }
+    return [pscustomobject]@{ Ok = ($problems.Count -eq 0); Problems = $problems }
+}
+
 function Get-LoamsCredentialFileState {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $ProgramDataRoot)
-    # Names of mysql-client-*.cnf in the run-owned credential folder; file contents are never read.
-    $dir = (Get-LoamsCredentialStorePaths -ProgramDataRoot $ProgramDataRoot).Directory
-    $files = @(); $readable = $true; $problem = ''
+    # Read-only. Nothing is enumerated, read or followed unless the store verifies first (Test-LoamsCredentialStore):
+    # a missing folder, a reparse point at any level (incl. the ledger) or an ACL off the allowlist ⇒ Readable = $false
+    # with the reasons. Leftovers = mysql-client-*.cnf names in the folder ∪ names of every ledger entry (a ledger that
+    # lists anything is a leftover). File contents are never read; the ledger holds paths only.
+    $p = Get-LoamsCredentialStorePaths -ProgramDataRoot $ProgramDataRoot
+    $files = @(); $problems = @()
     try {
-        if (Test-Path -LiteralPath $dir -PathType Container) {
-            $files = @(Get-ChildItem -LiteralPath $dir -File -Force -Filter 'mysql-client-*.cnf' -ErrorAction Stop | Sort-Object Name | ForEach-Object { $_.Name })
+        $check = Test-LoamsCredentialStore -ProgramDataRoot $ProgramDataRoot
+        $problems += @($check.Problems)
+        if ($check.Ok) {
+            $names = @(Get-ChildItem -LiteralPath $p.Directory -File -Force -Filter 'mysql-client-*.cnf' -ErrorAction Stop | ForEach-Object { $_.Name })
+            $names += @(Get-LoamsCredentialLedger -Store $p | ForEach-Object { Split-Path -Leaf $_ })
+            $files = @($names | Sort-Object -Unique)
         }
-    } catch { $readable = $false; $problem = $_.Exception.Message }
-    return [pscustomobject]@{ Directory = $dir; Readable = $readable; Files = $files; Problem = $problem }
+    } catch { $problems += "credential store could not be verified: $($_.Exception.Message)" }
+    return [pscustomobject]@{ Directory = $p.Directory; Readable = ($problems.Count -eq 0); Files = $files; Problems = $problems }
 }
 
 function Get-LoamsLoamsState {
@@ -4024,11 +4102,15 @@ function New-LoamsHostReport {
     elseif ($dbClass.StopAndReport) { $outcome = 'StopAndReport'; $reasons += @($dbClass.Reasons | ForEach-Object { "MariaDB: $_" }) }
     elseif ($credState.Files.Count -gt 0) { $outcome = 'StopAndReport'; $reasons += "run-owned DB credential files left behind in $($credState.Directory): $($credState.Files -join ', ') - remove them now (runbook Part D7)" }
     elseif (-not $elevated) { $outcome = 'Incomplete'; $reasons += 'not elevated: loaded modules of httpd cannot be read; re-run as Administrator' }
-    elseif (-not $credState.Readable) { $outcome = 'Incomplete'; $reasons += "credential folder $($credState.Directory) cannot be listed: $($credState.Problem)" }
     elseif ($processes.Count -eq 0) { $outcome = 'Incomplete'; $reasons += 'httpd is not running: runtime modules cannot be verified' }
     elseif (-not $inventory.Complete) { $outcome = 'Incomplete'; $reasons += $inventory.Reason }
     elseif ($runtime.Status -ne 'Match') { $outcome = 'StopAndReport'; $reasons += "stack does not match an approved manifest (runtime $($runtime.Status))" }
     else { $outcome = 'Success' }
+    if (-not $credState.Readable) {
+        # Always reported; an otherwise clean report becomes Incomplete (never Success) - a stronger outcome is kept.
+        $reasons += "credential store not verifiable: $($credState.Problems -join '; ') (runbook Part B0)"
+        if ($outcome -eq 'Success') { $outcome = 'Incomplete' }
+    }
 
     $needsConvergence = ($class.Situation -ne 'Converged') -or ($dbClass.Situation -ne 'Converged') -or
         ($null -ne $acl -and -not $acl.Compliant) -or ($null -ne $dbAcl -and -not $dbAcl.Compliant) -or (-not $eventSource.Registered)
@@ -4093,7 +4175,7 @@ function Format-LoamsHostReport {
     $write = if ($null -eq $es.ServiceCanWrite) { 'undetermined statically (verify on staging, runbook Part C)' } elseif ($es.ServiceCanWrite) { 'yes' } else { 'NO' }
     $lines += "Event source $($es.Source): registered: $(& $yn $es.Registered) $($es.LogName); Apache account can write: $write"
     $cf = $Report.credentialFiles
-    $lines += "Run-owned DB credential files ($($cf.Directory)): $(if (-not $cf.Readable) { 'UNREADABLE' } elseif (@($cf.Files).Count -gt 0) { 'LEFT BEHIND: ' + (@($cf.Files) -join ', ') } else { 'none' })"
+    $lines += "Run-owned DB credential files ($($cf.Directory)): $(if (-not $cf.Readable) { 'NOT VERIFIED: ' + (@($cf.Problems) -join '; ') } elseif (@($cf.Files).Count -gt 0) { 'LEFT BEHIND: ' + (@($cf.Files) -join ', ') } else { 'none' })"
     $lines += "Profile hash (host fingerprint): $($Report.profileHash)"
     $lines += "Convergence needed: $(& $yn $Report.convergenceNeeded)"
     return , $lines
@@ -4105,12 +4187,20 @@ function Get-LoamsReportFolder {
     return [IO.Path]::GetFullPath((Join-Path $ProgramDataRoot 'reports')).TrimEnd('\')
 }
 
+function Get-LoamsPathAttributes {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string] $Path)
+    # Attributes of the path itself (a link is never followed), or $null when it does not exist. The single
+    # reparse-point boundary: every junction/symbolic-link check goes through it, and tests mock it.
+    try { return [IO.File]::GetAttributes($Path) } catch [System.IO.FileNotFoundException], [System.IO.DirectoryNotFoundException] { return $null }
+}
+
 function Assert-LoamsNoReparsePath {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $Root, [Parameter(Mandatory)][string] $Path)
     # Same rule as Resolve-LoamsContainedPath, for paths that may not exist yet: Root itself and every existing
-    # component below it must be a plain directory. Checked BEFORE anything is created, re-permissioned or deleted.
-    # [IO.File]::GetAttributes reads the link itself, so a dangling junction is caught too.
+    # component below it (the last one may be a file) must not be a reparse point. Checked BEFORE anything is created,
+    # re-permissioned, read, rewritten or deleted through the path; a dangling link is caught too.
     $rootFull = [IO.Path]::GetFullPath($Root).TrimEnd('\')
     $full = [IO.Path]::GetFullPath($Path).TrimEnd('\')
     if ($full -ne $rootFull -and -not $full.StartsWith($rootFull + '\', [StringComparison]::OrdinalIgnoreCase)) { throw "STOP: $full is not inside $rootFull" }
@@ -4120,8 +4210,9 @@ function Assert-LoamsNoReparsePath {
         foreach ($seg in $full.Substring($rootFull.Length + 1).Split('\')) { $current = $current + '\' + $seg; $chain += $current }
     }
     foreach ($c in $chain) {
-        try { $attr = [IO.File]::GetAttributes($c) } catch [System.IO.FileNotFoundException], [System.IO.DirectoryNotFoundException] { break }
-        if (($attr -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "STOP: $c is a junction or symbolic link: refusing to create, re-permission or delete anything through it" }
+        $attr = Get-LoamsPathAttributes -Path $c
+        if ($null -eq $attr) { break }
+        if (($attr -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "STOP: $c is a junction or symbolic link: refusing to create, re-permission, read, rewrite or delete anything through it" }
     }
 }
 
@@ -4133,7 +4224,10 @@ function Test-LoamsProtectedFolder {
     try { Assert-LoamsNoReparsePath -Root $Root -Path $Path } catch { $problems += "$Label $($_.Exception.Message)" }
     if ($problems.Count -eq 0) {
         if (-not (Test-Path -LiteralPath $Path -PathType Container)) { $problems += "$Label $Path does not exist: provision it first (runbook Part B0, elevated)" }
-        else { foreach ($p in (Test-LoamsProtectedFolderAcl -Sddl (Get-LoamsAclSddl -Path $Path)).Problems) { $problems += "$Label ACL: $p" } }
+        else {
+            try { foreach ($p in (Test-LoamsProtectedFolderAcl -Sddl (Get-LoamsAclSddl -Path $Path)).Problems) { $problems += "$Label ACL: $p" } }
+            catch { $problems += "$Label ACL could not be read: $($_.Exception.Message)" }
+        }
     }
     return [pscustomobject]@{ Ok = ($problems.Count -eq 0); Problems = $problems }
 }
@@ -4257,7 +4351,7 @@ exit (Get-LoamsExitCode -Outcome $result.outcome)
 
 - [ ] **Step 6: Run to verify it passes**
 
-Same command as Step 3. Expected: PASS, 21 tests. Set `expected-test-count.txt` to `170` and run the suite runner → `PASSED: 170 tests`.
+Same command as Step 3. Expected: PASS, 24 tests. Set `expected-test-count.txt` to `173` and run the suite runner → `PASSED: 173 tests`.
 
 - [ ] **Step 7: Read-only smoke on this dev box (manual; non-elevated is fine)**
 
@@ -4270,7 +4364,7 @@ $svcAfter = Get-CimInstance Win32_Service -Filter "Name='Apache2.4' OR Name='mys
 Compare-Object $before $after; Compare-Object @($svcBefore) @($svcAfter) -Property Name, StartName, StartMode, State
 ```
 
-Expected: non-elevated → `Outcome: Incomplete`, `exit=3`; elevated → `Outcome: StopAndReport`, `exit=2` (draft manifest; `UnlistedCrypto` for Apache's OpenSSL 1.1.1t DLLs if both lineages are loaded). The report shows `MariaDB: ServiceNonVirtualAccount ... service: mysql; account now: 'LocalSystem'` and lists `MySQL80` as an ignored stopped service. Both `Compare-Object` calls print nothing. Do **not** commit the generated report (it names this machine).
+Expected: non-elevated → `Outcome: Incomplete`, `exit=3`; elevated → `Outcome: StopAndReport`, `exit=2` (draft manifest; `UnlistedCrypto` for Apache's OpenSSL 1.1.1t DLLs if both lineages are loaded); both also list `credential store not verifiable: ... does not exist (runbook Part B0)` because `C:\ProgramData\LOAMS` is absent here. The report shows `MariaDB: ServiceNonVirtualAccount ... service: mysql; account now: 'LocalSystem'` and lists `MySQL80` as an ignored stopped service. Both `Compare-Object` calls print nothing. Do **not** commit the generated report (it names this machine).
 
 - [ ] **Step 8: Commit**
 
@@ -4287,7 +4381,7 @@ Via the project `commit` skill — subject: `feat(deploy): add read-only Test-Lo
 - Create: `deploy/server/LoamsHost/LoamsHost.BackupArchive.ps1`
 - Create: `deploy/tests/Crypto.Tests.ps1`
 - Modify: `deploy/tests/TestHelpers.ps1` (append `Get-LoamsTestOpenSsl`, `New-LoamsTestRecoveryCert`)
-- Modify: `deploy/tests/expected-test-count.txt` → `187`
+- Modify: `deploy/tests/expected-test-count.txt` → `190`
 
 **Interfaces:**
 - Consumes: `Invoke-LoamsExternal`, `ConvertTo-LoamsArgumentString`, `Protect-LoamsText`, `Assert-LoamsMutationAllowed`, `Write-LoamsLog` (Task 1); `Get-LoamsProp` (Task 2).
@@ -4715,7 +4809,7 @@ The temporary plaintext in `Expand-LoamsEncryptedArchive` exists only on the rec
 
 - [ ] **Step 6: Run to verify it passes**
 
-Same command as Step 3. Expected: PASS, 17 tests. Set `expected-test-count.txt` to `187` and run the suite runner → `PASSED: 187 tests`.
+Same command as Step 3. Expected: PASS, 17 tests. Set `expected-test-count.txt` to `190` and run the suite runner → `PASSED: 190 tests`.
 
 - [ ] **Step 7: Commit**
 
@@ -4731,10 +4825,10 @@ Via the project `commit` skill — subject: `feat(deploy): add streaming CMS bac
 - Create: `deploy/tests/Secrets.Tests.ps1`
 - Create: `deploy/tests/Database.Tests.ps1`
 - Modify: `deploy/tests/TestHelpers.ps1` (append `Use-LoamsTestCredentialStore`)
-- Modify: `deploy/tests/expected-test-count.txt` → `213`
+- Modify: `deploy/tests/expected-test-count.txt` → `219`
 
 **Interfaces:**
-- Consumes: Task 1 helpers; `Start-LoamsRedirectedProcess`, `Invoke-LoamsEncryptStream` (Task 12); `Get-LoamsCredentialStorePaths`, `Assert-LoamsNoReparsePath`, `Test-LoamsProtectedFolder`, `Initialize-LoamsProtectedFolder` (Task 11).
+- Consumes: Task 1 helpers; `Start-LoamsRedirectedProcess`, `Invoke-LoamsEncryptStream` (Task 12); `Get-LoamsCredentialStorePaths`, `Get-LoamsPathAttributes`, `Assert-LoamsNoReparsePath`, `Assert-LoamsCredentialLedgerSafe`, `Get-LoamsCredentialLedger`, `Test-LoamsCredentialStore`, `Test-LoamsProtectedFolder`, `Initialize-LoamsProtectedFolder` (Task 11).
 - Produces (`LoamsHost.Secrets.ps1`):
   - `Get-LoamsPhpDefine -Text <string> -Name <string>` → `[string]` or `$null` (string-literal `define()` only).
   - `ConvertFrom-LoamsSecureString -Secure <SecureString>` → `[string]` (BSTR zero-freed).
@@ -4742,11 +4836,11 @@ Via the project `commit` skill — subject: `feat(deploy): add streaming CMS bac
   - `Get-LoamsDbConnectionInfo -ApiRoot <string> [-DbCredential <pscredential>]` → `[pscustomobject]@{ Host; User; Database; Password=[SecureString]; Source='credential'|'config.php'|'prompt' }`; registers the plaintext for redaction.
   - `ConvertTo-LoamsMyCnfValue -Value <string>` → quoted option-file value.
   - **Credential store** (durable, verifiable): run-owned credential files `mysql-client-<guid>.cnf` are created **only** in `<ProgramDataRoot>\run\credentials` (protected allowlist ACL, no reparse point; provisioned with `run\` in runbook B0) and recorded in the ledger `<ProgramDataRoot>\run\credential-ledger.txt` (one full path per line, write-through + `Flush($true)`) **before** the file is created; an entry is removed only after its file is confirmed gone. Orphans of a killed process are found again from the ledger **and** a names-only listing of the folder.
-  - `Initialize-LoamsCredentialStore -ProgramDataRoot` (mutating, runbook B0/F only: `Initialize-LoamsProtectedFolder` for `run` and `run\credentials`); `Test-LoamsCredentialStore -ProgramDataRoot` → `{ Ok; Problems }` (read-only; both folders pass `Test-LoamsProtectedFolder`, the ledger is a plain file if present); `Open-LoamsCredentialStore -ProgramDataRoot` (verifies, then `Set-LoamsCredentialStore`); `Set-LoamsCredentialStore -Directory -LedgerPath` (low-level seam used by `Open-LoamsCredentialStore` and tests).
-  - `Write-LoamsDurableText -Path -Text [-Append]` (write-through, flushed); `Get-LoamsCredentialLedger -LedgerPath` → paths; `Add-LoamsCredentialLedgerEntry -LedgerPath -Path`; `Remove-LoamsCredentialLedgerEntry -LedgerPath -Path`.
-  - `New-LoamsMysqlDefaultsFile -ConnectionInfo` → `[string]`: refuses when no store is open; appends the path to the ledger **before** the file exists; the admin-only ACL is applied before the password is written.
-  - `Remove-LoamsFileSecurely -Path` (overwrite with zeros, then delete; throws on failure — the deletion boundary, mocked in tests); `Remove-LoamsMysqlDefaultsFile -Path [-LedgerPath]` (removes via `Remove-LoamsFileSecurely`, confirms the file is gone, only then drops the ledger entry).
-  - `Get-LoamsCredentialFiles [-ProgramDataRoot]` → `[string[]]` = ledger entries inside the credential folder ∪ `mysql-client-*.cnf` found there (ledger entries outside it are logged and never touched); without `-ProgramDataRoot` it uses the open store. `Clear-LoamsCredentialFiles [-ProgramDataRoot]` → overwrites + deletes every one of them (with `-ProgramDataRoot` it first refuses reparse points via `Assert-LoamsNoReparsePath`), throws `"credential files could not be overwritten and deleted (they contain the DB password): <paths>"` if any remains. Used by the `MariaDbVerification` undo, the end-of-run sweep (Task 17), the restore step `remove run-owned credential files` (Task 14) and runbook D7; any failure ⇒ `RECOVERY REQUIRED`.
+  - A store is the `Get-LoamsCredentialStorePaths` object `{ Root; RunDirectory; Directory; Ledger }` (Task 11). `Initialize-LoamsCredentialStore -ProgramDataRoot` (mutating, runbook B0/F only: `Initialize-LoamsProtectedFolder` for `run` and `run\credentials`); `Open-LoamsCredentialStore -ProgramDataRoot` (`Test-LoamsCredentialStore` from Task 11, then `Set-LoamsCredentialStore`); `Set-LoamsCredentialStore -ProgramDataRoot` (low-level seam used by `Open-LoamsCredentialStore` and tests).
+  - `Write-LoamsDurableText -Path -Text [-Append]` (write-through, flushed); `Add-LoamsCredentialLedgerEntry -Store -Path` and `Remove-LoamsCredentialLedgerEntry -Store -Path` call `Assert-LoamsCredentialLedgerSafe` (Task 11) **immediately before** writing, and reading goes through `Get-LoamsCredentialLedger -Store` (Task 11, asserts first) — no ledger read or write anywhere bypasses the check; `Test-LoamsCredentialPathInStore -Store -Path` → `[bool]` (directly inside the credential folder and named `mysql-client-*.cnf`).
+  - `New-LoamsMysqlDefaultsFile -ConnectionInfo` → `[string]`: refuses when no store is open; appends the path to the ledger **before** the file exists; creates it with `CreateNew` (never opens or follows an existing name); the admin-only ACL is applied before the password is written.
+  - `Remove-LoamsFileSecurely -Path` (refuses a symbolic link, junction or folder via `Get-LoamsPathAttributes` — never zeroes a link target; otherwise overwrite with zeros, then delete; throws on failure — the deletion boundary, mocked in tests); `Remove-LoamsMysqlDefaultsFile -Path [-Store]` (asserts the ledger first, removes via `Remove-LoamsFileSecurely`, confirms the file is gone, only then drops the ledger entry).
+  - `Get-LoamsCredentialFiles [-ProgramDataRoot]` → `[string[]]` = ledger entries inside the credential folder ∪ `mysql-client-*.cnf` found there (never enumerated through a junction); without `-ProgramDataRoot` it uses the open store. `Clear-LoamsCredentialFiles [-ProgramDataRoot]` → first refuses (touching nothing: no ledger write, no deletion) when `ProgramDataRoot`, `run`, `run\credentials` or the ledger file is a reparse point; drops ledger entries outside the folder without touching their targets; then overwrites + deletes every file; throws `"credential files could not be overwritten and deleted (they contain the DB password): <paths>"` if any remains. Used by the `MariaDbVerification` undo, the end-of-run sweep (Task 17), the restore step `remove run-owned credential files` (Task 14) and runbook D7; any failure ⇒ `RECOVERY REQUIRED`.
   - `Invoke-LoamsEncryptedDatabaseDump -MysqldumpExe -ConnectionInfo -OpenSslExe -RecipientCert -OutFile [-Database <string>]` → `[pscustomobject]@{ Path; PlainSha256; CipherSha256 }`. `mysqldump` stdout is streamed straight into `Invoke-LoamsEncryptStream`; **no plaintext dump file exists at any point**; throws (redacted) on failure or a missing `-- Dump completed` trailer, leaving no partial file.
 - Produces (`LoamsHost.Database.ps1`):
   - `Invoke-LoamsMysqlQuery -MysqlExe -DefaultsFile -Sql` → `[string]` trimmed stdout (`--defaults-extra-file` first, `--batch --skip-column-names -e <sql>`).
@@ -4775,7 +4869,7 @@ function Use-LoamsTestCredentialStore {
     param([Parameter(Mandatory)][string] $ProgramDataRoot)
     $p = Get-LoamsCredentialStorePaths -ProgramDataRoot $ProgramDataRoot
     New-Item -ItemType Directory -Force -Path $p.Directory | Out-Null
-    Set-LoamsCredentialStore -Directory $p.Directory -LedgerPath $p.Ledger
+    Set-LoamsCredentialStore -ProgramDataRoot $ProgramDataRoot
     return $p
 }
 ```
@@ -4856,7 +4950,7 @@ Describe 'Run-owned credential files' {
     }
     AfterEach {
         Set-LoamsMode -Mode Report
-        Set-LoamsCredentialStore -Directory $script:FileStore.Directory -LedgerPath $script:FileStore.Ledger
+        Set-LoamsCredentialStore -ProgramDataRoot $script:FileStore.Root
         Remove-Variable -Name LoamsTExistedAtLedger -Scope Global -ErrorAction SilentlyContinue
     }
     It 'records the path in the durable ledger before the file exists, and creates no file when the ledger cannot be written' {
@@ -4868,22 +4962,22 @@ Describe 'Run-owned credential files' {
     It 'keeps a file whose creation failed in the ledger, and the sweep removes the file and its entry' {
         Mock -ModuleName LoamsHost Invoke-LoamsExternal { throw 'icacls failed' } -ParameterFilter { $FilePath -like '*icacls.exe' }
         { New-LoamsMysqlDefaultsFile -ConnectionInfo $script:CredConn } | Should -Throw -ExpectedMessage '*icacls failed*'
-        $ledger = @(Get-LoamsCredentialLedger -LedgerPath $script:CredPaths.Ledger)
+        $ledger = @(Get-LoamsCredentialLedger -Store $script:CredPaths)
         $ledger.Count | Should -Be 1
         (Split-Path -Parent $ledger[0]) | Should -Be $script:CredPaths.Directory
         Test-Path $ledger[0] | Should -BeTrue
         Clear-LoamsCredentialFiles
         Test-Path $ledger[0] | Should -BeFalse
-        @(Get-LoamsCredentialLedger -LedgerPath $script:CredPaths.Ledger).Count | Should -Be 0
+        @(Get-LoamsCredentialLedger -Store $script:CredPaths).Count | Should -Be 0
     }
     It 'Clear-LoamsCredentialFiles throws, names the file and keeps its ledger entry when it cannot delete it' {
         $path = New-LoamsMysqlDefaultsFile -ConnectionInfo $script:CredConn
         Mock -ModuleName LoamsHost Remove-LoamsFileSecurely { throw 'The process cannot access the file because it is being used by another process' }
         { Clear-LoamsCredentialFiles } | Should -Throw -ExpectedMessage "*credential files could not be overwritten and deleted*$(Split-Path -Leaf $path)*"
-        Get-LoamsCredentialLedger -LedgerPath $script:CredPaths.Ledger | Should -Contain $path
+        Get-LoamsCredentialLedger -Store $script:CredPaths | Should -Contain $path
         [IO.File]::Delete($path)
         Clear-LoamsCredentialFiles
-        @(Get-LoamsCredentialLedger -LedgerPath $script:CredPaths.Ledger).Count | Should -Be 0
+        @(Get-LoamsCredentialLedger -Store $script:CredPaths).Count | Should -Be 0
     }
     It 'finds and removes an orphan left by another process from the folder alone (no ledger entry, nothing in memory)' {
         $orphan = Join-Path $script:CredPaths.Directory 'mysql-client-0123456789abcdef.cnf'
@@ -4891,6 +4985,39 @@ Describe 'Run-owned credential files' {
         Get-LoamsCredentialFiles -ProgramDataRoot $script:CredPd | Should -Contain $orphan
         Clear-LoamsCredentialFiles -ProgramDataRoot $script:CredPd
         Test-Path $orphan | Should -BeFalse
+    }
+    It 'refuses a reparse-point ledger before touching anything: no ledger write, no credential-file deletion' {
+        $path = New-LoamsMysqlDefaultsFile -ConnectionInfo $script:CredConn
+        $ledgerBefore = [Convert]::ToBase64String([IO.File]::ReadAllBytes($script:CredPaths.Ledger))
+        Mock -ModuleName LoamsHost Get-LoamsPathAttributes {
+            if ($Path -like '*credential-ledger.txt') { return [IO.FileAttributes]'Archive, ReparsePoint' }
+            try { [IO.File]::GetAttributes($Path) } catch { $null } }
+        Mock -ModuleName LoamsHost Remove-LoamsFileSecurely { }
+        Mock -ModuleName LoamsHost Write-LoamsDurableText { }
+        { Clear-LoamsCredentialFiles -ProgramDataRoot $script:CredPd } | Should -Throw -ExpectedMessage 'STOP:*credential-ledger.txt is a junction or symbolic link*'
+        { Clear-LoamsCredentialFiles } | Should -Throw -ExpectedMessage 'STOP:*credential-ledger.txt is a junction or symbolic link*'
+        { Remove-LoamsMysqlDefaultsFile -Path $path } | Should -Throw -ExpectedMessage 'STOP:*credential-ledger.txt*'
+        { Get-LoamsCredentialFiles } | Should -Throw -ExpectedMessage 'STOP:*credential-ledger.txt*'
+        Should -Invoke -ModuleName LoamsHost Remove-LoamsFileSecurely -Times 0
+        Should -Invoke -ModuleName LoamsHost Write-LoamsDurableText -Times 0
+        Test-Path $path | Should -BeTrue
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes($script:CredPaths.Ledger)) | Should -Be $ledgerBefore
+    }
+    It 'refuses to append to a reparse-point ledger and creates no credential file' {
+        Mock -ModuleName LoamsHost Get-LoamsPathAttributes {
+            if ($Path -like '*credential-ledger.txt') { return [IO.FileAttributes]'Archive, ReparsePoint' }
+            try { [IO.File]::GetAttributes($Path) } catch { $null } }
+        { New-LoamsMysqlDefaultsFile -ConnectionInfo $script:CredConn } | Should -Throw -ExpectedMessage 'STOP:*credential-ledger.txt is a junction or symbolic link*'
+        @(Get-ChildItem -LiteralPath $script:CredPaths.Directory -File).Count | Should -Be 0
+    }
+    It 'Remove-LoamsFileSecurely never overwrites or deletes through a symbolic link' {
+        $f = Join-Path $script:CredPaths.Directory 'mysql-client-link.cnf'
+        Set-Content -Path $f -Value 'target-content'
+        Mock -ModuleName LoamsHost Get-LoamsPathAttributes {
+            if ($Path -like '*mysql-client-link.cnf') { return [IO.FileAttributes]'Archive, ReparsePoint' }
+            try { [IO.File]::GetAttributes($Path) } catch { $null } }
+        { Remove-LoamsFileSecurely -Path $f } | Should -Throw -ExpectedMessage 'STOP:*symbolic link*'
+        Get-Content -LiteralPath $f | Should -Be 'target-content'
     }
     It 'Test-LoamsCredentialStore refuses a missing folder and a junction in the store path' {
         Mock -ModuleName LoamsHost Get-LoamsAclSddl { 'O:BAG:SYD:PAI(A;OICI;FA;;;BA)(A;OICI;FA;;;SY)' }
@@ -4943,7 +5070,7 @@ Describe 'Invoke-LoamsEncryptedDatabaseDump' {
         $err | Should -Not -Match 'S1b-test-db-pass'
         @(Get-ChildItem -Path $script:Work -File).Count | Should -Be 0
         @(Get-LoamsCredentialFiles).Count | Should -Be 0
-        @(Get-LoamsCredentialLedger -LedgerPath $script:FileStore.Ledger).Count | Should -Be 0
+        @(Get-LoamsCredentialLedger -Store $script:FileStore).Count | Should -Be 0
     }
     It 'rejects a dump without the completion trailer' {
         Use-FakeDump -Fixture $global:LoamsTNoTrailer
@@ -5145,29 +5272,18 @@ function ConvertTo-LoamsMyCnfValue {
 # Run-owned credential files (mysql-client-*.cnf, they contain the DB password) are created ONLY in the protected
 # credential folder <ProgramDataRoot>\run\credentials (runbook B0) and recorded in the durable ledger
 # <ProgramDataRoot>\run\credential-ledger.txt BEFORE they are created; an entry is removed only after its file is
-# confirmed gone. Orphans of a killed process are found again by the next sweep, -Report, Validate and the restore
-# script (ledger entries plus a names-only folder listing; contents are never read).
+# confirmed gone. Every ledger read or write is preceded by Assert-LoamsCredentialLedgerSafe (Task 11), and no
+# credential file is ever overwritten through a link. Orphans of a killed process are found again by the next sweep,
+# -Report, Validate and the restore script (ledger entries plus a names-only folder listing; contents never read).
 $script:LoamsCredentialStore = $null
 
 function Set-LoamsCredentialStore {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string] $Directory, [Parameter(Mandatory)][string] $LedgerPath)
-    # Low-level seam: production reaches it only through Open-LoamsCredentialStore (verified folder); tests use TestDrive.
-    if (-not (Test-Path -LiteralPath $Directory -PathType Container)) { throw "credential folder $Directory does not exist" }
-    $script:LoamsCredentialStore = [pscustomobject]@{ Directory = [IO.Path]::GetFullPath($Directory).TrimEnd('\'); Ledger = [IO.Path]::GetFullPath($LedgerPath) }
-}
-
-function Test-LoamsCredentialStore {
-    [CmdletBinding()]
     param([Parameter(Mandatory)][string] $ProgramDataRoot)
+    # Low-level seam: production reaches it only through Open-LoamsCredentialStore (verified store); tests use TestDrive.
     $p = Get-LoamsCredentialStorePaths -ProgramDataRoot $ProgramDataRoot
-    $problems = @()
-    $problems += @((Test-LoamsProtectedFolder -Root $p.Root -Path $p.RunDirectory -Label 'credential run folder').Problems)
-    $problems += @((Test-LoamsProtectedFolder -Root $p.Root -Path $p.Directory -Label 'credential folder').Problems)
-    if (Test-Path -LiteralPath $p.Ledger) {
-        if (([IO.File]::GetAttributes($p.Ledger) -band ([IO.FileAttributes]::Directory -bor [IO.FileAttributes]::ReparsePoint)) -ne 0) { $problems += "credential ledger $($p.Ledger) is not a plain file" }
-    }
-    return [pscustomobject]@{ Ok = ($problems.Count -eq 0); Problems = $problems }
+    if (-not (Test-Path -LiteralPath $p.Directory -PathType Container)) { throw "credential folder $($p.Directory) does not exist" }
+    $script:LoamsCredentialStore = $p
 }
 
 function Initialize-LoamsCredentialStore {
@@ -5185,8 +5301,7 @@ function Open-LoamsCredentialStore {
     param([Parameter(Mandatory)][string] $ProgramDataRoot)
     $t = Test-LoamsCredentialStore -ProgramDataRoot $ProgramDataRoot
     if (-not $t.Ok) { throw ('credential store not usable: ' + ($t.Problems -join '; ')) }
-    $p = Get-LoamsCredentialStorePaths -ProgramDataRoot $ProgramDataRoot
-    Set-LoamsCredentialStore -Directory $p.Directory -LedgerPath $p.Ledger
+    Set-LoamsCredentialStore -ProgramDataRoot $ProgramDataRoot
 }
 
 function Write-LoamsDurableText {
@@ -5201,24 +5316,25 @@ function Write-LoamsDurableText {
     } finally { $fs.Dispose() }
 }
 
-function Get-LoamsCredentialLedger {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string] $LedgerPath)
-    if (-not (Test-Path -LiteralPath $LedgerPath -PathType Leaf)) { return }
-    [IO.File]::ReadAllLines($LedgerPath) | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique
-}
-
 function Add-LoamsCredentialLedgerEntry {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string] $LedgerPath, [Parameter(Mandatory)][string] $Path)
-    Write-LoamsDurableText -Path $LedgerPath -Text ($Path + "`r`n") -Append
+    param([Parameter(Mandatory)] $Store, [Parameter(Mandatory)][string] $Path)
+    Assert-LoamsCredentialLedgerSafe -Store $Store
+    Write-LoamsDurableText -Path $Store.Ledger -Text ($Path + "`r`n") -Append
 }
 
 function Remove-LoamsCredentialLedgerEntry {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string] $LedgerPath, [Parameter(Mandatory)][string] $Path)
-    $rest = @(Get-LoamsCredentialLedger -LedgerPath $LedgerPath | Where-Object { $_ -ne $Path })
-    Write-LoamsDurableText -Path $LedgerPath -Text $(if ($rest.Count -gt 0) { ($rest -join "`r`n") + "`r`n" } else { '' })
+    param([Parameter(Mandatory)] $Store, [Parameter(Mandatory)][string] $Path)
+    $rest = @(Get-LoamsCredentialLedger -Store $Store | Where-Object { $_ -ne $Path })
+    Assert-LoamsCredentialLedgerSafe -Store $Store
+    Write-LoamsDurableText -Path $Store.Ledger -Text $(if ($rest.Count -gt 0) { ($rest -join "`r`n") + "`r`n" } else { '' })
+}
+
+function Test-LoamsCredentialPathInStore {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Store, [Parameter(Mandatory)][string] $Path)
+    return ((Split-Path -Parent $Path).TrimEnd('\') -eq $Store.Directory -and (Split-Path -Leaf $Path) -like 'mysql-client-*.cnf')
 }
 
 function New-LoamsMysqlDefaultsFile {
@@ -5228,8 +5344,9 @@ function New-LoamsMysqlDefaultsFile {
     $store = $script:LoamsCredentialStore
     if ($null -eq $store) { throw 'credential store not opened: DB credential files are only ever created in the protected credential folder (Open-LoamsCredentialStore)' }
     $path = Join-Path $store.Directory ('mysql-client-{0}.cnf' -f [guid]::NewGuid().ToString('N'))
-    Add-LoamsCredentialLedgerEntry -LedgerPath $store.Ledger -Path $path   # durable record first: no file can exist unrecorded
-    [IO.File]::WriteAllBytes($path, [byte[]]@())
+    Add-LoamsCredentialLedgerEntry -Store $store -Path $path   # durable record first: no file can exist unrecorded
+    # CreateNew never opens (or follows) an existing name.
+    (New-Object System.IO.FileStream($path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)).Dispose()
     Invoke-LoamsExternal -FilePath (Join-Path $env:SystemRoot 'System32\icacls.exe') -ArgumentList @($path, '/inheritance:r', '/grant:r', '*S-1-5-32-544:F', '*S-1-5-18:F') | Out-Null
     $plain = ConvertFrom-LoamsSecureString -Secure $ConnectionInfo.Password
     try {
@@ -5244,6 +5361,11 @@ function New-LoamsMysqlDefaultsFile {
 function Remove-LoamsFileSecurely {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $Path)
+    $attr = Get-LoamsPathAttributes -Path $Path
+    if ($null -eq $attr) { return }
+    # Never overwrite or delete through a link: zeroing a symbolic link would zero its target.
+    if (($attr -band ([IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Directory)) -ne 0) {
+        throw "STOP: $Path is a symbolic link, junction or folder: not overwritten or deleted (investigate, runbook Part D7)" }
     $len = (Get-Item -LiteralPath $Path -Force).Length
     [IO.File]::WriteAllBytes($Path, (New-Object byte[] $len))
     Remove-Item -LiteralPath $Path -Force -ErrorAction Stop
@@ -5251,21 +5373,18 @@ function Remove-LoamsFileSecurely {
 
 function Remove-LoamsMysqlDefaultsFile {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string] $Path, [string] $LedgerPath = '')
-    if (-not $LedgerPath -and $null -ne $script:LoamsCredentialStore) { $LedgerPath = $script:LoamsCredentialStore.Ledger }
-    if (Test-Path -LiteralPath $Path) { Remove-LoamsFileSecurely -Path $Path }
-    if (Test-Path -LiteralPath $Path) { throw "credential file $Path still exists after deletion" }
+    param([Parameter(Mandatory)][string] $Path, $Store = $script:LoamsCredentialStore)
+    if ($null -ne $Store) { Assert-LoamsCredentialLedgerSafe -Store $Store }   # refuse before touching anything
+    if ($null -ne (Get-LoamsPathAttributes -Path $Path)) { Remove-LoamsFileSecurely -Path $Path }
+    if ($null -ne (Get-LoamsPathAttributes -Path $Path)) { throw "credential file $Path still exists after deletion" }
     # The ledger entry goes only after the file is confirmed gone.
-    if ($LedgerPath -and (Test-Path -LiteralPath $LedgerPath -PathType Leaf)) { Remove-LoamsCredentialLedgerEntry -LedgerPath $LedgerPath -Path $Path }
+    if ($null -ne $Store -and $null -ne (Get-LoamsPathAttributes -Path $Store.Ledger)) { Remove-LoamsCredentialLedgerEntry -Store $Store -Path $Path }
 }
 
 function Get-LoamsCredentialLocation {
     [CmdletBinding()]
     param([AllowEmptyString()][string] $ProgramDataRoot = '')
-    if ($ProgramDataRoot) {
-        $p = Get-LoamsCredentialStorePaths -ProgramDataRoot $ProgramDataRoot
-        return [pscustomobject]@{ Directory = $p.Directory; Ledger = $p.Ledger }
-    }
+    if ($ProgramDataRoot) { return (Get-LoamsCredentialStorePaths -ProgramDataRoot $ProgramDataRoot) }
     return $script:LoamsCredentialStore
 }
 
@@ -5274,11 +5393,8 @@ function Get-LoamsCredentialFiles {
     param([AllowEmptyString()][string] $ProgramDataRoot = '')
     $loc = Get-LoamsCredentialLocation -ProgramDataRoot $ProgramDataRoot
     if ($null -eq $loc) { return }
-    $found = @()
-    foreach ($e in @(Get-LoamsCredentialLedger -LedgerPath $loc.Ledger)) {
-        if ((Split-Path -Parent $e).TrimEnd('\') -eq $loc.Directory -and (Split-Path -Leaf $e) -like 'mysql-client-*.cnf') { $found += $e }
-        else { Write-LoamsLog -Level Warn -Message "Ignoring credential ledger entry outside $($loc.Directory) (never deleted): $e" }
-    }
+    $found = @(Get-LoamsCredentialLedger -Store $loc | Where-Object { Test-LoamsCredentialPathInStore -Store $loc -Path $_ })
+    Assert-LoamsNoReparsePath -Root $loc.Root -Path $loc.Directory   # never enumerate through a junction
     if (Test-Path -LiteralPath $loc.Directory -PathType Container) {
         $found += @(Get-ChildItem -LiteralPath $loc.Directory -File -Force -Filter 'mysql-client-*.cnf' -ErrorAction Stop | ForEach-Object { $_.FullName })
     }
@@ -5290,11 +5406,16 @@ function Clear-LoamsCredentialFiles {
     param([AllowEmptyString()][string] $ProgramDataRoot = '')
     $loc = Get-LoamsCredentialLocation -ProgramDataRoot $ProgramDataRoot
     if ($null -eq $loc) { return }
-    # Restore/runbook path: never overwrite or delete through a junction (the in-run store was verified when opened).
-    if ($ProgramDataRoot) { Assert-LoamsNoReparsePath -Root $ProgramDataRoot -Path $loc.Directory }
+    # Refuse BEFORE touching anything: no reparse point from ProgramDataRoot down to the folder, run\ or the ledger file.
+    Assert-LoamsNoReparsePath -Root $loc.Root -Path $loc.Directory
+    Assert-LoamsCredentialLedgerSafe -Store $loc
+    foreach ($e in @(Get-LoamsCredentialLedger -Store $loc | Where-Object { -not (Test-LoamsCredentialPathInStore -Store $loc -Path $_) })) {
+        Write-LoamsLog -Level Warn -Message "Dropping credential ledger entry outside $($loc.Directory) (its target is never touched): $e"
+        Remove-LoamsCredentialLedgerEntry -Store $loc -Path $e
+    }
     $failed = @()
     foreach ($p in @(Get-LoamsCredentialFiles -ProgramDataRoot $ProgramDataRoot)) {
-        try { Remove-LoamsMysqlDefaultsFile -Path $p -LedgerPath $loc.Ledger } catch { $failed += $p }
+        try { Remove-LoamsMysqlDefaultsFile -Path $p -Store $loc } catch { $failed += $p }
     }
     if ($failed.Count -gt 0) { throw ("credential files could not be overwritten and deleted (they contain the DB password): " + ($failed -join ', ')) }
 }
@@ -5453,7 +5574,7 @@ function Remove-LoamsVerifySchemas {
 
 - [ ] **Step 6: Run to verify they pass**
 
-Same command as Step 3. Expected: PASS, 26 tests (Secrets 16, Database 10). Set `expected-test-count.txt` to `213` and run the suite runner → `PASSED: 213 tests`.
+Same command as Step 3. Expected: PASS, 29 tests (Secrets 19, Database 10). Set `expected-test-count.txt` to `219` and run the suite runner → `PASSED: 219 tests`.
 
 - [ ] **Step 7: Commit**
 
@@ -5469,7 +5590,7 @@ Via the project `commit` skill — subject: `feat(deploy): stream an encrypted D
 - Create: `deploy/server/LoamsHost/LoamsHost.OffHost.ps1`
 - Create: `deploy/server/LoamsHost/Restore-LoamsHostBackup.template.ps1` (not dot-sourced: the module loads only `LoamsHost.*.ps1`)
 - Create: `deploy/tests/Backup.Tests.ps1`
-- Modify: `deploy/tests/expected-test-count.txt` → `242`
+- Modify: `deploy/tests/expected-test-count.txt` → `249`
 
 **Interfaces:**
 - Consumes: Task 1 helpers; `Get-LoamsServiceSnapshot`, `Set-LoamsServiceAccount`, `Stop-/Start-LoamsWindowsService`, `Start-LoamsControlPanelHttpd`, `Unregister-LoamsApacheService` (Task 8); `Unregister-LoamsMariaDbService`, `Start-LoamsControlPanelMysqld` (Task 10); `Get-LoamsEventSourceState`, `Unregister-LoamsEventSource` (Task 7); `Get-LoamsScheduledTaskXml`, `Get-LoamsTaskDefinitionHash`, `Get-LoamsLayoutState`, `Get-LoamsToolsState` (Task 11); `Invoke-LoamsEncryptStream`, `Test-LoamsCmsFile`, `Write-LoamsBackupArchive` (Task 12); `Invoke-LoamsEncryptedDatabaseDump` (Task 13); ACL profiles (Tasks 6, 10).
@@ -5483,7 +5604,7 @@ Via the project `commit` skill — subject: `feat(deploy): stream an encrypted D
 - Produces (`LoamsHost.Restore.ps1`):
   - `Set-LoamsServiceStartMode -ServiceName -StartMode <'Auto'|'Manual'|'Disabled'>` (mutating: `sc.exe config <name> start= auto|demand|disabled`).
   - `Test-LoamsRestoreNeedsElevation -Manifest -State` → `[bool]` — true when any step would touch services, ACLs, the event log, a scheduled task or the database (then the restore requires elevation; a restore of filesystem-only state does not).
-  - `Invoke-LoamsHostRestore -BackupPath` → `[pscustomobject]@{ Outcome='Restored'|'RecoveryRequired'; Steps=[pscustomobject[]] (Name, Ok, Detail); FailedSteps=[string[]] }` — every step (including reading and checking the backup) runs inside the step machinery; any failed step ⇒ `RecoveryRequired`. It then drops this run's verification schemas if their folders still exist (credentials from the deployed `config.php`, defaults file in the verified credential store), and its last step `remove run-owned credential files` runs `Clear-LoamsCredentialFiles -ProgramDataRoot` — ledger entries plus a folder listing, so orphans of an earlier, killed process are removed even though this process starts with nothing in memory; a file it cannot delete fails the step (exit 4) and is named.
+  - `Invoke-LoamsHostRestore -BackupPath` → `[pscustomobject]@{ Outcome='Restored'|'RecoveryRequired'; Steps=[pscustomobject[]] (Name, Ok, Detail); FailedSteps=[string[]] }` — every step (including reading and checking the backup) runs inside the step machinery; any failed step ⇒ `RecoveryRequired`. It then drops this run's verification schemas if their folders still exist (credentials from the deployed `config.php`, defaults file in the verified credential store), and its last step `remove run-owned credential files` runs `Clear-LoamsCredentialFiles -ProgramDataRoot` — ledger entries plus a folder listing, so orphans of an earlier, killed process are removed even though this process starts with nothing in memory; a file it cannot delete fails the step (exit 4) and is named; a reparse point at `ProgramDataRoot`, `run`, `run\credentials` or the ledger file fails the step before anything is read, rewritten or deleted (exit 4).
 - Produces (`LoamsHost.OffHost.ps1`): `Get-LoamsDestinationKind`, `Copy-LoamsSetTree`, `Export-LoamsBackupSet`, `Set-LoamsOffHostAttestation`, `Test-LoamsOffHostVerification` (unchanged contract, below).
 
 **Mutation inventory — everything `-Converge` can change, and how each is captured, undone and verified (17 mutations):**
@@ -5794,7 +5915,27 @@ Describe 'Restore (generated script and Invoke-LoamsHostRestore)' {
         $r.Outcome | Should -Be 'Restored'
         Test-Path $listed | Should -BeFalse
         Test-Path $unlisted | Should -BeFalse
-        @(Get-LoamsCredentialLedger -LedgerPath $p.Ledger).Count | Should -Be 0
+        @(Get-LoamsCredentialLedger -Store $p).Count | Should -Be 0
+    }
+    It 'refuses a reparse-point credential ledger: RecoveryRequired, nothing deleted, ledger unchanged' {
+        Use-RestoreMocks
+        Use-TaskStore
+        $p = Get-LoamsCredentialStorePaths -ProgramDataRoot $script:Pd
+        New-Item -ItemType Directory -Force -Path $p.Directory | Out-Null
+        $cnf = Join-Path $p.Directory 'mysql-client-keep.cnf'
+        Set-Content -Path $cnf -Value "[client]`r`npassword=synthetic"
+        [IO.File]::WriteAllText($p.Ledger, "$cnf`r`n")
+        Mock -ModuleName LoamsHost Get-LoamsPathAttributes {
+            if ($Path -like '*credential-ledger.txt') { return [IO.FileAttributes]'Archive, ReparsePoint' }
+            try { [IO.File]::GetAttributes($Path) } catch { $null } }
+        try {
+            $r = Invoke-LoamsHostRestore -BackupPath $script:Set
+            $r.Outcome | Should -Be 'RecoveryRequired'
+            $r.FailedSteps | Should -Contain 'remove run-owned credential files'
+            @($r.Steps | Where-Object Name -eq 'remove run-owned credential files')[0].Detail | Should -Match 'credential-ledger\.txt is a junction or symbolic link'
+            Test-Path $cnf | Should -BeTrue
+            [IO.File]::ReadAllText($p.Ledger) | Should -Be "$cnf`r`n"
+        } finally { [IO.File]::Delete($cnf); [IO.File]::Delete($p.Ledger) }
     }
     It 'reports RecoveryRequired naming a credential file it cannot delete' {
         Use-RestoreMocks
@@ -6453,7 +6594,7 @@ function Test-LoamsOffHostVerification {
 
 - [ ] **Step 7: Run to verify it passes**
 
-Same command as Step 3. Expected: PASS, 29 tests. Set `expected-test-count.txt` to `242` and run the suite runner → `PASSED: 242 tests`.
+Same command as Step 3. Expected: PASS, 30 tests. Set `expected-test-count.txt` to `249` and run the suite runner → `PASSED: 249 tests`.
 
 - [ ] **Step 8: Commit**
 
@@ -6466,7 +6607,7 @@ Via the project `commit` skill — subjects (two concerns): `feat(deploy): take 
 **Files:**
 - Create: `deploy/server/LoamsHost/LoamsHost.Checkpoints.ps1`
 - Create: `deploy/tests/Checkpoints.Tests.ps1`
-- Modify: `deploy/tests/expected-test-count.txt` → `251`
+- Modify: `deploy/tests/expected-test-count.txt` → `258`
 
 **Interfaces:**
 - Consumes: `Write-LoamsLog`, `Protect-LoamsText` (Task 1).
@@ -6648,7 +6789,7 @@ function Invoke-LoamsCheckpointPlan {
 
 - [ ] **Step 4: Run to verify it passes**
 
-Same command as Step 2. Expected: PASS, 9 tests. Set `expected-test-count.txt` to `251` and run the suite runner → `PASSED: 251 tests`.
+Same command as Step 2. Expected: PASS, 9 tests. Set `expected-test-count.txt` to `258` and run the suite runner → `PASSED: 258 tests`.
 
 - [ ] **Step 5: Commit**
 
@@ -6667,7 +6808,7 @@ Via the project `commit` skill — subject: `feat(deploy): add checkpoint engine
 - Create: `deploy/server/LoamsHost/LoamsHost.Validation.ps1`
 - Create: `deploy/tests/Authorization.Tests.ps1`
 - Create: `deploy/tests/Validation.Tests.ps1`
-- Modify: `deploy/tests/expected-test-count.txt` → `271`
+- Modify: `deploy/tests/expected-test-count.txt` → `278`
 
 **Interfaces:**
 - Consumes: `Test-LoamsAdminOnlyAcl`, `Get-LoamsAclSddl` (Task 6); `Compare-LoamsHostFingerprint` (Task 9); `Get-LoamsServiceSnapshot` (Task 8); `New-LoamsMysqlDefaultsFile`, `Remove-LoamsMysqlDefaultsFile` (Task 13); `Invoke-LoamsMysqlQuery` (Task 13).
@@ -6995,7 +7136,7 @@ function Invoke-LoamsPostConvergeValidation {
 
 - [ ] **Step 6: Run to verify they pass**
 
-Same command as Step 3. Expected: PASS, 20 tests (Authorization 15, Validation 5). Set `expected-test-count.txt` to `271` and run the suite runner → `PASSED: 271 tests`.
+Same command as Step 3. Expected: PASS, 20 tests (Authorization 15, Validation 5). Set `expected-test-count.txt` to `278` and run the suite runner → `PASSED: 278 tests`.
 
 - [ ] **Step 7: Commit**
 
@@ -7009,14 +7150,14 @@ Via the project `commit` skill — subject: `feat(deploy): authorize staging hos
 - Create: `deploy/server/LoamsHost/LoamsHost.Converge.ps1`
 - Modify: `deploy/server/Test-LoamsServerHost.ps1` (add the `Converge` parameter set — full file below)
 - Create: `deploy/tests/Converge.Tests.ps1`
-- Modify: `deploy/tests/expected-test-count.txt` → `318`
+- Modify: `deploy/tests/expected-test-count.txt` → `326`
 
 **Interfaces:**
 - Consumes: everything from Tasks 1–16.
 - Produces:
   - `Get-LoamsConvergePreflight -Report -Gate -Ack [-Staging] [-Additional <string[]>]` → `[pscustomobject]@{ Ok; Problems }`. The prerequisites passed in include, for every mode except `-BackupOnly`, `Test-LoamsReportLocation -ReportPath` (Task 11): the final report location is validated **before** any backup or checkpoint. For every mode they also include `Test-LoamsCredentialStore` (Task 13), and the preflight refuses while the current report lists run-owned credential files from an earlier run; after the operator confirmation `Open-LoamsCredentialStore` points every credential file of the run at the verified folder.
   - `Test-LoamsScheduledTaskPresent -TaskName <string>` → `[bool]` (via `Get-LoamsScheduledTaskXml`, Task 11).
-  - `Test-LoamsPostChangeReportClean -Report <pscustomobject> [-Staging]` → `[pscustomobject]@{ Clean; Reasons }` — clean = elevated, Apache and MariaDB `Converged`, both ACL profiles compliant, event source registered, no verification schema and no run-owned credential file left (`credentialFiles`; a report without that check is not clean), module inventory complete, and (production) report outcome `Success` / (staging) no runtime finding other than `ManifestNotFinal`.
+  - `Test-LoamsPostChangeReportClean -Report <pscustomobject> [-Staging]` → `[pscustomobject]@{ Clean; Reasons }` — clean = elevated, Apache and MariaDB `Converged`, both ACL profiles compliant, event source registered, no verification schema and no run-owned credential leftover (`credentialFiles`: the store verified — otherwise not clean — and neither the folder nor the ledger lists anything; a report without that check is not clean), module inventory complete, and (production) report outcome `Success` / (staging) no runtime finding other than `ManifestNotFinal`.
   - `New-LoamsConvergePlan -Report -Backup -Manifest -ManifestPath -XamppRoot -ProgramDataRoot -BaseUrl -ConnectionInfo [-Staging]` → checkpoints, in order: `ApacheServiceRegistration` (Apache FreshInstall/ControlPanel only), `MariaDbServiceRegistration` (MariaDB FreshInstall/ControlPanel only), `ServerLayout`, `Acl`, `MariaDbAcl`, `EventSource`, `BackupRetentionTask`, `MariaDbServiceAccount`, `MariaDbVerification`, `ApacheServiceAccount`, `Validate`.
   - `Test-LoamsProductionPlan -Plan <object[]> [-Staging]` → `[string[]]` mandatory checkpoint names missing from the plan: every plan needs `Validate`; production also needs `Acl`, `MariaDbAcl`, `MariaDbServiceAccount`, `MariaDbVerification`, `ApacheServiceAccount`.
   - `Write-LoamsConvergeOutcome -Result -BackupPath -RestoreScript`.
@@ -7377,7 +7518,7 @@ Describe 'New-LoamsConvergePlan' {
                 classification = [pscustomobject]@{ Situation = 'Converged' }; acl = [pscustomobject]@{ Compliant = $true }
                 mariaDb = [pscustomobject]@{ classification = [pscustomobject]@{ Situation = 'Converged' }; acl = [pscustomobject]@{ Compliant = $true }; leftoverVerifySchemas = $Leftover }
                 eventSource = [pscustomobject]@{ Registered = $true }
-                credentialFiles = [pscustomobject]@{ Directory = 'C:\ProgramData\LOAMS\run\credentials'; Readable = $true; Files = $CredFiles; Problem = '' }
+                credentialFiles = [pscustomobject]@{ Directory = 'C:\ProgramData\LOAMS\run\credentials'; Readable = $true; Files = $CredFiles; Problems = @() }
                 runtime = [pscustomobject]@{ Status = $Status; Findings = $Findings } }
         }
         function Use-ValidateMocks { param([bool] $SuitePasses = $true, $PostReport = (New-PostReport))
@@ -7497,6 +7638,14 @@ Describe 'New-LoamsConvergePlan' {
         (& $v.Verify $v.Context) | Should -BeFalse
         (Test-LoamsPostChangeReportClean -Report $v.Context.PostReport).Reasons | Should -Contain 'run-owned DB credential files left behind: mysql-client-0123.cnf'
     }
+    It 'Validate fails when the credential store could not be verified' {
+        $post = New-PostReport
+        $post.credentialFiles = [pscustomobject]@{ Directory = 'C:\ProgramData\LOAMS\run\credentials'; Readable = $false; Files = @(); Problems = @('credential folder STOP: C:\ProgramData\LOAMS\run\credentials is a junction or symbolic link') }
+        Use-ValidateMocks -PostReport $post
+        $v = (Plan -Report (New-TestReport)) | Where-Object Name -eq 'Validate'
+        (& $v.Verify $v.Context) | Should -BeFalse
+        ((Test-LoamsPostChangeReportClean -Report $v.Context.PostReport).Reasons -join ' ') | Should -Match 'credential store could not be verified: .*junction'
+    }
     It 'Validate fails when verification schemas were left behind' {
         Use-ValidateMocks -PostReport (New-PostReport -Leftover @('loams_s1b_verify_testrun'))
         $v = (Plan -Report (New-TestReport)) | Where-Object Name -eq 'Validate'
@@ -7611,7 +7760,7 @@ function Test-LoamsPostChangeReportClean {
     if (-not $Report.eventSource.Registered) { $r += 'LOAMS-Transport event source not registered' }
     if (@($Report.mariaDb.leftoverVerifySchemas).Count -gt 0) { $r += 'MariaDB verification schemas left behind: ' + (@($Report.mariaDb.leftoverVerifySchemas) -join ', ') }
     if ($null -eq $Report.credentialFiles) { $r += 'post-change report has no credential-file check' }
-    elseif (-not $Report.credentialFiles.Readable) { $r += "credential folder $($Report.credentialFiles.Directory) could not be listed" }
+    elseif (-not $Report.credentialFiles.Readable) { $r += "credential store could not be verified: $(@($Report.credentialFiles.Problems) -join '; ')" }
     elseif (@($Report.credentialFiles.Files | Where-Object { $_ }).Count -gt 0) { $r += 'run-owned DB credential files left behind: ' + (@($Report.credentialFiles.Files) -join ', ') }
     if (-not $Report.inventoryComplete) { $r += 'loaded-module inventory incomplete' }
     if ($Staging) {
@@ -8044,7 +8193,7 @@ exit (Get-LoamsExitCode -Outcome $result.outcome)
 
 - [ ] **Step 5: Run to verify it passes**
 
-Same command as Step 2. Expected: PASS, 47 tests. Set `expected-test-count.txt` to `318` and run the suite runner → `PASSED: 318 tests` (Report.Tests still passes: the default parameter set is unchanged).
+Same command as Step 2. Expected: PASS, 48 tests. Set `expected-test-count.txt` to `326` and run the suite runner → `PASSED: 326 tests` (Report.Tests still passes: the default parameter set is unchanged).
 
 - [ ] **Step 6: Commit**
 
@@ -8060,7 +8209,7 @@ Unit tests cannot prove what the **real** `NT SERVICE\Apache2.4` and `NT SERVICE
 - Create: `deploy/server/staging/LoamsIdentityProbe.php`
 - Create: `docs/security/runbooks/stack-upgrade-staging.md`
 - Create: `deploy/tests/StagingArtifacts.Tests.ps1`
-- Modify: `deploy/tests/expected-test-count.txt` → `321`
+- Modify: `deploy/tests/expected-test-count.txt` → `329`
 
 **Interfaces:**
 - Consumes: Tasks 1–17.
@@ -8481,11 +8630,12 @@ Restores known vulnerabilities (R11): time-limited exposure with restricted acce
 
 ```powershell
 Import-Module <repo>\deploy\server\LoamsHost\LoamsHost.psm1 -Force
+Test-LoamsCredentialStore -ProgramDataRoot 'C:\ProgramData\LOAMS'     # must be Ok: no junction/symbolic link incl. the ledger, allowlist ACLs
 Get-LoamsCredentialFiles -ProgramDataRoot 'C:\ProgramData\LOAMS'      # names only; never open or copy the files
-Clear-LoamsCredentialFiles -ProgramDataRoot 'C:\ProgramData\LOAMS'    # overwrite + delete every ledger entry and folder match; refuses junctions
+Clear-LoamsCredentialFiles -ProgramDataRoot 'C:\ProgramData\LOAMS'    # overwrite + delete every ledger entry and folder match
 ```
 
-If it throws (file in use), find and stop the process holding it (Resource Monitor → CPU → Associated Handles, search `mysql-client-`), then repeat. Finish with `-Report`: `credentialFiles=none` in the fingerprint and no credential reason. Treat the DB password as exposed if a file was ever outside the protected folder (it never should be) and rotate it via the owner role.
+If it throws `STOP: ... is a junction or symbolic link` (the folder, `run\` or `credential-ledger.txt`), nothing was read, rewritten or deleted: do **not** delete or edit through the link — record it, remove the link itself (`[IO.Directory]::Delete(<junction>)` or `[IO.File]::Delete(<file link>)`, which never touch the target), re-provision with B0 and repeat. If it throws `could not be overwritten and deleted` (file in use), find and stop the process holding it (Resource Monitor → CPU → Associated Handles, search `mysql-client-`), then repeat. Finish with `-Report`: `credentialFiles=none` in the fingerprint and no credential reason. Treat the DB password as exposed if a file was ever outside the protected folder (it never should be) and rotate it via the owner role.
 
 ## Part E — Patch review and approval of new stack versions (v1.1, v1.2, …)
 
@@ -8509,7 +8659,7 @@ If it throws (file in use), find and stop the process holding it (Resource Monit
 
 - [ ] **Step 5: Run to verify it passes**
 
-Same command as Step 2. Expected: PASS, 3 tests. Set `expected-test-count.txt` to `321` and run the suite runner → `PASSED: 321 tests`.
+Same command as Step 2. Expected: PASS, 3 tests. Set `expected-test-count.txt` to `329` and run the suite runner → `PASSED: 329 tests`.
 
 - [ ] **Step 6: Commit**
 
@@ -8544,7 +8694,7 @@ Expected while still `draft`: no output.
 - [ ] **Step 6: Identity convergence + probes** — runbook B5, C1, C2, C3, C4; every expected value met (or a reviewed D8 widening / escalation recorded).
 - [ ] **Step 7: Integration list, rollback rehearsal and restore drill** — runbook B6 (all rows pass) and B7 (restore script exit 0, `profileHash` equal to `pre-upgrade.json`, encrypted restore drill from the **off-host** copy with matching row counts and file hashes, restore time measured).
 - [ ] **Step 8: Write the evidence file** — date, manifest version, component versions and hashes, MariaDB version, B6 results, C1 `results.json`, C4 output, restore-drill results, restore time, deviations. Set `approval.stagingEvidence` and `status: staging-validated`.
-- [ ] **Step 9: Run the suite** — `powershell -NoProfile -ExecutionPolicy Bypass -File deploy\tests\Invoke-LoamsPesterSuite.ps1` → `PASSED: 321 tests` (the committed-manifest tests now validate the real values).
+- [ ] **Step 9: Run the suite** — `powershell -NoProfile -ExecutionPolicy Bypass -File deploy\tests\Invoke-LoamsPesterSuite.ps1` → `PASSED: 329 tests` (the committed-manifest tests now validate the real values).
 - [ ] **Step 10: Commit** — via the project `commit` skill: `chore(stack): record LOAMS Server Stack v1.0 (staging-validated)`. Owner approval (`status: approved`, `approvedBy`, `approvedOn`) is a separate, owner-made commit: `chore(stack): approve LOAMS Server Stack v1.0`.
 
 ---
@@ -8555,7 +8705,7 @@ Expected while still `draft`: no output.
    ```powershell
    powershell -NoProfile -ExecutionPolicy Bypass -File deploy\tests\Invoke-LoamsPesterSuite.ps1
    ```
-   Expected: `LOAMS Pester suite PASSED: 321 tests (minimum 321)`, exit 0 — 0 failed, 0 skipped, 0 not run. Per file (counted mechanically from the `It` blocks in this plan): Common 14, Manifest 28, ManifestRecord 7, Detection 11, RuntimeModules 11, Acl 24, EventSource 9, ServiceIdentity 11, Classification 17, MariaDb 17, Report 21, Crypto 17, Secrets 16, Database 10, Backup 29, Checkpoints 9, Authorization 15, Validation 5, Converge 47, StagingArtifacts 3.
+   Expected: `LOAMS Pester suite PASSED: 329 tests (minimum 329)`, exit 0 — 0 failed, 0 skipped, 0 not run. Per file (counted mechanically from the `It` blocks in this plan): Common 14, Manifest 28, ManifestRecord 7, Detection 11, RuntimeModules 11, Acl 24, EventSource 9, ServiceIdentity 11, Classification 17, MariaDb 17, Report 24, Crypto 17, Secrets 19, Database 10, Backup 30, Checkpoints 9, Authorization 15, Validation 5, Converge 48, StagingArtifacts 3.
 2. **PowerShell 5.1 compatibility:** the suite runs under `powershell.exe` 5.1 (not `pwsh`). Additionally:
    ```powershell
    Get-ChildItem deploy -Recurse -Include *.ps1,*.psm1 | Select-String -Pattern '\?\?|\?\.|ConvertFrom-Json\s+-AsHashtable|Test-Json|\s&&\s|\s\|\|\s' | Select-Object Path, LineNumber, Line
@@ -8593,7 +8743,7 @@ Expected while still `draft`: no output.
 
 ## Completion Criteria
 
-- [ ] Tasks 1–18 merge-ready: suite `PASSED: 321 tests`, 0 failed / skipped / not run, on Windows PowerShell 5.1.
+- [ ] Tasks 1–18 merge-ready: suite `PASSED: 329 tests`, 0 failed / skipped / not run, on Windows PowerShell 5.1.
 - [ ] Task 11 Step 7 read-only proof recorded (dev box unchanged, incl. `mysql\data` ACL and both services).
 - [ ] `/claude-review` (project workflow) — or `/codex-review` if the owner prefers — reaches **APPROVE** (≤ 3 rounds); Critical/Important findings fixed.
 - [ ] Project `create-pr` gate passes with exactly the three agents `dry-checker`, `security-reviewer`, `general-code-reviewer` (diff-scoped); security-reviewer findings on secret handling, encryption, off-host copy, ACLs (incl. MariaDB) and the probe resolved.
@@ -8659,16 +8809,19 @@ Expected while still `draft`: no output.
 | Codex R3-2 — tracked credential files; leftovers ⇒ `RecoveryRequired` | Task 13 (`Remove-LoamsFileSecurely`, `Clear-LoamsCredentialFiles` + tests), Task 14 (row 17), Task 17 (undo + end-of-run sweep; two real checkpoint/engine tests mocking only the deletion boundary; converge sweep test) |
 | Codex R4-1 — no provisioning through a junction | Task 11 (`Assert-LoamsNoReparsePath`, `Initialize-LoamsProtectedFolder`, `Test-LoamsProtectedFolder` + two junction tests with zero mutation), Task 13 (`Test-LoamsCredentialStore` junction test), runbook B0/F |
 | Codex R4-2 — allowlist requires explicit `(OI)(CI)` entries | Task 6 (`Test-LoamsProtectedFolderAcl` + two tests), Task 11 (provisioning test asserts flags) |
+| Codex R5-1 — reparse-safe ledger I/O in sweep, helpers, restore and D7 | Task 11 (`Get-LoamsPathAttributes`, `Assert-LoamsCredentialLedgerSafe`, guarded `Get-LoamsCredentialLedger`), Task 13 (guarded add/remove, `Remove-LoamsFileSecurely` link refusal, `Clear-LoamsCredentialFiles` up-front refusal + 3 tests), Task 14 (restore refusal test), runbook D7 |
+| Codex R5-2 — credential state verifies the store before enumerating | Task 11 (`Test-LoamsCredentialStore` moved here, `Get-LoamsCredentialFileState`, outcome rule + 3 tests), Task 16 (post-change check + test), D25, outcome rules, fingerprint docs |
 | Codex R4-3 — durable, verifiable credential-file tracking | Task 13 (credential store, ledger, sweep + 5 tests), Task 11 (`Get-LoamsCredentialFileState`, fingerprint `credentialFiles`, report outcome + test), Task 14 (row 17, restore step + 2 in-process tests, child-process orphan), Task 16 (`credentialFiles` post-change check), Task 17 (store preflight/open, orphan refusal + 3 tests), runbook B0/D2/D7/F |
 | Codex R3-3 — protected allowlist ACL for the reports folder, verified programmatically | Task 6 (`Test-LoamsProtectedFolderAcl` + tests), Task 11 (`Initialize-LoamsReportFolder`, Save check + tests), runbook B0/F |
 
-## Self-review (revision 6)
+## Self-review (revision 7)
 
 - **Spec/owner coverage:** every row above maps to a task with tests or to a runbook step explicitly marked as staging verification.
+- **Codex round 5:** confirmed in the plan text first (`Clear-LoamsCredentialFiles` checked only the path to `run\credentials` and then read and rewrote `credential-ledger.txt`; `Get-LoamsCredentialFileState` returned `Readable = $true` with no files for a missing folder and enumerated through a junction). Every caller of a touched function was re-checked: ledger reads (`Get-LoamsCredentialLedger` in `Get-LoamsCredentialFiles`, `Clear-LoamsCredentialFiles`, `Remove-LoamsCredentialLedgerEntry`, `Get-LoamsCredentialFileState`) and writes (`Add-`/`Remove-LoamsCredentialLedgerEntry`, reached from `New-LoamsMysqlDefaultsFile`, `Remove-LoamsMysqlDefaultsFile` and the sweep) all assert immediately before the open; the restore step, the wrapper (which only calls `Invoke-LoamsHostRestore`) and D7 reach the ledger only through these functions; `Set-LoamsCredentialStore` now takes `-ProgramDataRoot` (callers: `Open-LoamsCredentialStore`, `Use-LoamsTestCredentialStore`, the Secrets `AfterEach`); `Test-LoamsCredentialStore` moved to Task 11 because the Task 11 report needs it (callers: `Get-LoamsCredentialFileState`, `Open-LoamsCredentialStore`, converge preflight, tests). The dev-box smoke expectations stay exit 3/2 because an unverifiable store only downgrades an otherwise `Success` report.
 - **Codex round 4:** confirmed in the plan text first (`Initialize-LoamsReportFolder` created and re-permissioned before any reparse check, and `Test-LoamsReportLocation` checked only the last component; `Test-LoamsProtectedFolderAcl` never looked at inheritance flags, so `(A;;FA;;;BA)(A;;FA;;;SY)` passed; credential files were tracked only in memory and written into backup `logs\`, so a killed process left untracked orphans). Re-checked adjacent paths after the fix: every `New-LoamsMysqlDefaultsFile` caller (dump, verification, schema drop, validation, Control-Panel shutdown, restore) now goes through the open store — the `-WorkDirectory` plumbing is gone; tests that create credential files open a TestDrive store (`Use-LoamsTestCredentialStore`); `Test-LoamsPostChangeReportClean` fails closed without the credential check; the restore never deletes `run\`; the sweep refuses junctions and never deletes ledger entries outside the credential folder.
 - **Codex round 3:** confirmed in the plan text first (`Save-LoamsHostReport -Path $ReportPath` ran only after all checkpoints, outside the outcome handling; `Invoke-LoamsDbVerification` removed its defaults file in `finally` and a failure there was untracked while the undo created a different file; B0's `icacls /inheritance:r /grant:r` kept unrelated explicit ACEs); fixes and tests are in the Spec Coverage rows `Codex R3-*`.
 - **Codex round 2:** each finding was confirmed in the plan text first (cleanup failure ended `RolledBack` with schemas left; `Save-LoamsHostReport` cannot create `reports`; the old dirty-report test mocked the whole plan; tools directories were not tracked; both child tests exited before the module import); fixes and tests are listed in the Spec Coverage rows `Codex R2-*`.
 - **Codex round 1:** each finding was checked against the plan before fixing (finding 1 reproduced in Windows PowerShell 5.1: `@(f)` where `f` returns `, $array` has `Count` 1); the fixes and their tests are listed in the Spec Coverage rows `Codex R1-*`.
 - **Placeholders:** none in plan steps; `REPLACE_ME` appears only in the committed draft manifest by design (schema-enforced, refused for production).
 - **Interface consistency checked:** `Get-LoamsServiceSituation` (Tasks 9, 10); `Stop-LoamsWindowsService` / `Start-LoamsWindowsService` / `Stop-LoamsControlPanelProcesses` (Task 8, used in Task 17); `Get-LoamsLiveFingerprint` + `Get-LoamsFingerprintAclPaths` (Task 11, used in Task 17); `Invoke-LoamsEncryptStream` (Task 12, used in Tasks 13, 14); `Invoke-LoamsEncryptedDatabaseDump` (Task 13, used in Task 14); `New-LoamsBackupSet -Recipient` (Task 14) receives `Test-LoamsRecipientCertificate` output (Task 12); `Test-LoamsAcknowledgedReport` returns `.Report` consumed by `Test-LoamsPreChangeDrift` (Task 16); checkpoint `-Context` engine (Task 15) used by every plan checkpoint (Task 17); `Invoke-LoamsHostRestore` reads `services.<role>.{name, situation, snapshot}`, `aclSaves`, `programDataRoot`, `httpdExe`, `mysqldExe`, `myIni` from `backup-manifest.json` and `eventSource`, `layout`, `retention`, `tools` from `rollback\loams-state.json`, all written by Task 14; `New-LoamsConvergePlan -ManifestPath` and `Get-LoamsLiveFingerprint -ProgramDataRoot` updated at every call site (Tasks 11, 17 and their tests); `Stop-LoamsControlPanelMysqld -Port -DataDir` passed from `DbLayout` (Task 17).
-- **Counts:** recounted mechanically (regex over the `It` blocks of every test file in this plan); cumulative `expected-test-count.txt` values 14, 42, 49, 60, 71, 95, 104, 115, 132, 149, 170, 187, 213, 242, 251, 271, 318, 321 match the per-file totals in Acceptance 1.
+- **Counts:** recounted mechanically (regex over the `It` blocks of every test file in this plan); cumulative `expected-test-count.txt` values 14, 42, 49, 60, 71, 95, 104, 115, 132, 149, 173, 190, 219, 249, 258, 278, 326, 329 match the per-file totals in Acceptance 1.
