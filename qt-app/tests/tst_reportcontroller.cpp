@@ -69,6 +69,7 @@ private:
         QJsonObject o{{"status", status}, {"byHour", byHour}, {"byWeekday", byWeekday}};
         return QJsonDocument(o).toJson(QJsonDocument::Compact);
     }
+    void networkManagerIsTheInjectedOne();
 };
 
 void TstReportController::getPalette_blue_hasHeaderAnd8Colors() {
@@ -294,6 +295,13 @@ void TstReportController::computeDateRange_outOfRange_invalid() {
     const DateRange r = ReportController::computeDateRange(
         9, QDate(2023, 5, 17), 0, 0, QString(), 0, QDate(), QDate());
     QVERIFY(!r.valid);
+}
+
+void TstReportController::networkManagerIsTheInjectedOne()
+{
+    CapturingNam nam;
+    ReportController controller(&nam);
+    QCOMPARE(controller.networkManager(), static_cast<QNetworkAccessManager *>(&nam));
 }
 
 QTEST_GUILESS_MAIN(TstReportController)

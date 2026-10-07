@@ -85,6 +85,7 @@ private slots:
 
     // importTemplateCsv
     void importTemplateCsvHasHeadersAndExampleRow();
+    void networkManagerIsTheInjectedOne();
 };
 
 void TestImportController::normalizeHeaderTrimsLowersStrips()
@@ -483,7 +484,8 @@ void TestImportController::parseExcelRoundTrip()
         QVERIFY(doc.saveAs(filePath));
     }
 
-    ImportController controller(nullptr);   // parseExcel never touches the manager
+    QNetworkAccessManager unusedNam;   // contract: non-null manager (this path never uses it)
+    ImportController controller(&unusedNam);
     ExcelParseError err = ExcelParseError::OpenFailed;
     const ParsedTable table = controller.parseExcel(filePath, &err);
 
@@ -510,7 +512,8 @@ void TestImportController::parseExcelHeaderOnlyNoDataRows()
         QVERIFY(doc.saveAs(filePath));
     }
 
-    ImportController controller(nullptr);
+    QNetworkAccessManager unusedNam;   // contract: non-null manager (this path never uses it)
+    ImportController controller(&unusedNam);
     ExcelParseError err = ExcelParseError::OpenFailed;
     const ParsedTable table = controller.parseExcel(filePath, &err);
 
@@ -521,7 +524,8 @@ void TestImportController::parseExcelHeaderOnlyNoDataRows()
 
 void TestImportController::parseExcelOpenFailedOnBadPath()
 {
-    ImportController controller(nullptr);
+    QNetworkAccessManager unusedNam;   // contract: non-null manager (this path never uses it)
+    ImportController controller(&unusedNam);
     ExcelParseError err = ExcelParseError::None;
     const ParsedTable table = controller.parseExcel(
         QStringLiteral("nonexistent_path_does_not_exist.xlsx"), &err);
@@ -707,6 +711,13 @@ void TestImportController::importTemplateCsvHasHeadersAndExampleRow()
     // The example row uses an opaque hyphenated School ID (reinforces that it is
     // a School ID, not an admin key) and must NOT leak real PII.
     QVERIFY(lines.at(1).contains("21-1-0001"));
+}
+
+void TestImportController::networkManagerIsTheInjectedOne()
+{
+    CapturingNam nam;
+    ImportController controller(&nam);
+    QCOMPARE(controller.networkManager(), static_cast<QNetworkAccessManager *>(&nam));
 }
 
 QTEST_MAIN(TestImportController)

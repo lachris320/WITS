@@ -15,7 +15,9 @@
 ReportController::ReportController(QNetworkAccessManager *nam, QObject *parent)
     : QObject(parent)
     , m_nam(nam)
-{}
+{
+    Q_ASSERT_X(nam, "ReportController", "null QNetworkAccessManager: pass the owner's HttpClient::manager()");
+}
 
 // Ported verbatim from adminWindow::getPalette (adminwindow.cpp:2478-2508).
 ReportPalette ReportController::getPalette(const QString &choice) {

@@ -18,7 +18,9 @@
 VisitorController::VisitorController(QNetworkAccessManager *nam, QObject *parent)
     : QObject(parent)
     , m_nam(nam)
-{}
+{
+    Q_ASSERT_X(nam, "VisitorController", "null QNetworkAccessManager: pass the owner's HttpClient::manager()");
+}
 
 void VisitorController::fetchVisitors(const VisitorFilter &filter)
 {
