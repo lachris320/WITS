@@ -19,7 +19,7 @@
 - **Injection boundary:** "`HttpClient` accepts an injected `QNetworkAccessManager` / manager factory, so the existing `CapturingNam` / `SequencedNam` tests stay realistic." ViewModels/hubs that construct managers internally "MUST obtain them from the seam instead."
 - **Owner invariant (S1a plan approval condition):** every production network request passes through the authoritative transport policy. In LOAMS 2.0 production every core network class (`StudentController`, `VisitorController`, `ReportController`, `ImportController`, `BrandingController`, `AccessControl::AccessDecisionService`, `AccessControl::TurnstileProvider`) receives the manager supplied by its owner's `HttpClient::manager()` (a `PolicyEnforcingNam`). Raw `QNetworkAccessManager*` injection on these classes remains **only** as a test seam; no production constructor may create an unprotected manager, and a null manager is a contract violation (`Q_ASSERT_X`, Task 4b). Frozen Widgets compatibility never weakens this rule — a resulting Widgets incompatibility is documented, not worked around.
 - **Mandatory gates (S1a plan approval condition):** GATE G1 (Task 2: `std::atomic_load`/`std::atomic_store` on `shared_ptr` compiles warning-free under `-Wall -Wextra -Werror`) and GATE G2 (Task 5b: Qt 6.11.1's image/Canvas loading uses the manager from the installed factory) run before any task that depends on them. **If a gate fails: STOP — do not continue dependent tasks and do not substitute a workaround; escalate to the owner for a design review.**
-- **Factory ordering:** the QML network factory is installed on the engine before any QML is loaded and before any request is initiated. Enforcement is two-part and its limits are explicit: (1) `quick/main.cpp` installs on a freshly constructed `QQmlApplicationEngine` immediately before `loadFromModule`, pinned by source-order guard `quickMainInstallsTransportBeforeLoad` (Task 7); (2) at runtime `PolicyNamFactory::installOn()` (Task 5) refuses — and `main.cpp` fails closed — in exactly three detectable cases: the engine already has a factory, the engine has already created its own manager, or a `QQmlApplicationEngine` already has root objects. It does **not** detect a plain `QQmlEngine`/`QQuickView` that compiled components without creating a manager; that case is covered only by the fresh-engine + source-order rule.
+- **Factory ordering:** the QML network factory is installed on the engine before any QML is loaded and before any request is initiated. Enforcement is two-part and its limits are explicit: (1) `quick/main.cpp` installs on a freshly constructed `QQmlApplicationEngine` immediately before `loadFromModule`, pinned by source-order guard `quickMainInstallsTransportBeforeLoad` (Task 7); (2) at runtime `PolicyNamFactory::installOn()` (Task 5) returns `false` — and every caller MUST abort initialization (`main.cpp` fails closed) — when the engine already has a factory, when a `QQmlApplicationEngine` already has root objects, or when, **after installing**, the engine's common (GUI-thread) manager is not a `PolicyEnforcingNam` (Qt keeps a manager created before the factory was set and does not guarantee that changing the factory replaces it; a pre-created manager is therefore detected by post-install verification, not by an ownership check — owner decision 2026-10-07). The verification covers only the engine's common manager, not the managers Qt creates on QML worker threads (those come from `create()` and are proven by GATE G2, Task 5b), and it does **not** detect a plain `QQmlEngine`/`QQuickView` that compiled components before the call; installation must still occur before any QML executes, which is covered by the fresh-engine + source-order rule.
 - **SSL errors:** "`ignoreSslErrors` MUST NOT appear anywhere in client source; a source grep check enforces this." (Enforced from S1a onward by `tst_transportseamguard`.)
 - **Legacy Widgets:** "The target sits behind CMake option `LOAMS_BUILD_LEGACY_WIDGETS=OFF` by default; release packaging explicitly rejects the legacy target." Source is "deprecated / reference-only: no new features, security migrations or routine maintenance." Widgets app migration is a spec non-goal: `mainwindow.cpp`, `adminwindow.cpp`, `guestwindow.cpp` are **not** migrated.
 - **Release boundary:** "No production deployment before S1f." "S1a–S1e MAY merge independently after review, but incomplete security changes MUST NOT reach production." No release-packaging logic in S1a.
@@ -86,7 +86,7 @@ Every command block below assumes the `export PATH=...` line ran in the same inv
 | `qt-app/tests/tst_httpclient.cpp` | Create | Ownership / injection / snapshot semantics | 4 |
 | `qt-app/core/{studentcontroller,visitorcontroller,reportcontroller,importcontroller,brandingcontroller}.h/.cpp`, `qt-app/core/accesscontrol/{accessdecisionservice,turnstileprovider}.h/.cpp` | Modify (ctor + one accessor) | Non-null manager contract (`Q_ASSERT_X`) + `networkManager()` test accessor | 4b |
 | `qt-app/tests/tst_{studentcontroller,visitorcontroller,reportcontroller,importcontroller,brandingcontroller,accessdecisionservice,turnstileprovider}.cpp` | Modify | Accessor-identity test; 5 `nullptr` constructions → unused test manager | 4b |
-| `qt-app/quick/PolicyNamFactory.h/.cpp` | Create | QML engine factory: new `PolicyEnforcingNam` per `create()`; `installOn()` refuses a late install | 5 |
+| `qt-app/quick/PolicyNamFactory.h/.cpp` | Create | QML engine factory: new `PolicyEnforcingNam` per `create()`; `installOn()` verifies the engine's common manager and refuses a late install | 5 |
 | `qt-app/quick/tests/tst_qmlfactorygate.cpp` | Create | GATE G2: Qt image + Canvas loads use the installed factory's manager | 5b |
 | `qt-app/quick/tests/RecordingPolicyNam.h` | Create | Test-only recording `PolicyEnforcingNam` + `PolicyNamFactory` subclass (request log = proof of seam use) | 5b, 13 |
 | `qt-app/testsupport/sequencednam.h/.cpp` | Modify | `setStallWhenEmpty(bool)` (default off: existing suites unchanged) | 6b |
@@ -1734,7 +1734,7 @@ Expected: all pass (no test anywhere constructs these classes with `nullptr` any
   - `class PolicyNamFactory : public QQmlNetworkAccessManagerFactory`
   - `QNetworkAccessManager *PolicyNamFactory::create(QObject *parent) override;` — a **new** `PolicyEnforcingNam(TransportPolicy::current(), parent)` per call; thread-safe
   - `int PolicyNamFactory::createdCount() const;` (atomic diagnostic counter)
-  - `static bool PolicyNamFactory::installOn(QQmlEngine &engine, PolicyNamFactory &factory);` — installs `factory` only if the engine has no factory yet, has not created its own manager yet, and (for a `QQmlApplicationEngine`) has no root objects; otherwise logs `qCritical` and returns `false` without installing. Guarantee is limited to those three detectable states; it cannot see components compiled on a plain `QQmlEngine` without a manager — the production ordering rule relies on the fresh engine + `quickMainInstallsTransportBeforeLoad` (Task 7) for that
+  - `static bool PolicyNamFactory::installOn(QQmlEngine &engine, PolicyNamFactory &factory);` — returns `false` (after `qCritical`) when the engine already has a factory or a `QQmlApplicationEngine` already has root objects (engine untouched in both), or when, after `setNetworkAccessManagerFactory`, `engine.networkAccessManager()` is not a `PolicyEnforcingNam` (the factory stays set; the engine is unusable for the seam). `false` means the caller MUST abort initialization. Installing eagerly creates the engine's common manager via `create()`. The verification checks only the common (GUI-thread) manager, and it cannot see components compiled on a plain `QQmlEngine` before the call — installation must still occur on a fresh engine before any QML executes (`quickMainInstallsTransportBeforeLoad`, Task 7)
 
 - [ ] **Step 1: Write the failing test.** Create `qt-app/quick/tests/tst_policynamfactory.cpp`:
 
@@ -1847,6 +1847,8 @@ void TestPolicyNamFactory::installOnFreshEngineSucceeds()
     QVERIFY(PolicyNamFactory::installOn(engine, factory));
     QCOMPARE(engine.networkAccessManagerFactory(),
              static_cast<QQmlNetworkAccessManagerFactory *>(&factory));
+    QVERIFY(qobject_cast<PolicyEnforcingNam *>(engine.networkAccessManager()));
+    QCOMPARE(factory.createdCount(), 1);               // the eager common manager
 }
 
 void TestPolicyNamFactory::installRefusedAfterEngineCreatedAManager()
@@ -1858,8 +1860,10 @@ void TestPolicyNamFactory::installRefusedAfterEngineCreatedAManager()
     QVERIFY(!qobject_cast<PolicyEnforcingNam *>(early));
     QTest::ignoreMessage(QtCriticalMsg, QRegularExpression(QStringLiteral("PolicyNamFactory::installOn")));
     QVERIFY(!PolicyNamFactory::installOn(engine, factory));
-    QVERIFY(engine.networkAccessManagerFactory() == nullptr);
     QCOMPARE(factory.createdCount(), 0);
+    // Qt keeps the plain cached manager: failure is not self-healing, so the
+    // caller must abort initialization.
+    QCOMPARE(engine.networkAccessManager(), early);
 }
 
 void TestPolicyNamFactory::installRefusedAfterQmlLoaded()
@@ -1934,15 +1938,23 @@ public:
     // Diagnostic: how many managers this factory has created (thread-safe).
     int createdCount() const { return m_created.load(); }
 
-    // The only sanctioned way to install the factory. Refuses (qCritical +
-    // false, nothing installed) in exactly three detectable "too late" states:
-    // the engine already has a factory; it has already created its own
-    // manager (QQmlEngine parents that manager to itself); or it is a
-    // QQmlApplicationEngine that already has root objects. It cannot detect
-    // components compiled on a plain QQmlEngine/QQuickView that never created
-    // a manager — callers must install on a freshly constructed engine before
-    // any load (quick/main.cpp is pinned by a source-order guard test).
-    // Callers treat false as a fatal startup error.
+    // The only sanctioned way to install the factory. Returns false (after a
+    // qCritical) when the engine is already unusable for the seam, and the
+    // caller MUST then abort initialization. Refusal cases:
+    //  1. the engine already has a factory;
+    //  2. a QQmlApplicationEngine already has root objects;
+    //  3. after installing, the engine's common (GUI-thread) manager is not a
+    //     PolicyEnforcingNam — Qt keeps a manager the engine created before the
+    //     factory was set, and does not guarantee that changing the factory
+    //     replaces it. Cases 1-2 leave the engine untouched; in case 3 the
+    //     factory stays set and the engine must not be used.
+    // Limits: case 3 checks only the engine's common manager (this call
+    // eagerly creates it through create()), not the managers Qt creates on QML
+    // worker threads (those come from create(); proven by the image-loading
+    // test). It also cannot see components compiled on a plain
+    // QQmlEngine/QQuickView before the call. Installation must therefore
+    // still happen on a freshly constructed engine before any QML executes
+    // (quick/main.cpp is pinned by a source-order guard test).
     static bool installOn(QQmlEngine &engine, PolicyNamFactory &factory);
 
 private:
@@ -1976,16 +1988,19 @@ bool PolicyNamFactory::installOn(QQmlEngine &engine, PolicyNamFactory &factory)
         qCritical("PolicyNamFactory::installOn: engine already has a network factory");
         return false;
     }
-    if (!engine.findChildren<QNetworkAccessManager *>(Qt::FindDirectChildrenOnly).isEmpty()) {
-        qCritical("PolicyNamFactory::installOn: engine already created a network manager");
-        return false;
-    }
     if (auto *app = qobject_cast<QQmlApplicationEngine *>(&engine);
         app && !app->rootObjects().isEmpty()) {
         qCritical("PolicyNamFactory::installOn: QML already loaded");
         return false;
     }
     engine.setNetworkAccessManagerFactory(&factory);
+    // Qt keeps a manager the engine created before the factory was set, so
+    // verify rather than assume. A real runtime branch (not Q_ASSERT): it must
+    // hold in Release builds.
+    if (!qobject_cast<PolicyEnforcingNam *>(engine.networkAccessManager())) {
+        qCritical("PolicyNamFactory::installOn: engine already created a network manager");
+        return false;
+    }
     return true;
 }
 ```
@@ -2005,7 +2020,7 @@ QT_QPA_PLATFORM=offscreen QT_QUICK_CONTROLS_STYLE=Basic QT_QPA_FONTDIR=C:/Window
   ctest --test-dir C:/b/s1a -R '^tst_policynamfactory$' --output-on-failure
 ```
 
-Expected: `100% tests passed` (9 functions). `installRefusedAfterEngineCreatedAManager` is part of the mandatory ordering gate: it relies on Qt 6.11.1 parenting the engine's own manager to the engine. **If it fails, STOP** — do not continue to Task 5b or later and do not weaken `installOn()`; escalate to the owner for a design review of how the factory-before-any-request rule is enforced.
+Expected: `100% tests passed` (9 functions). Owner decision 2026-10-07: the originally planned ownership check (`findChildren` for a manager parented to the engine) cannot work on Qt 6.11.1 — a probe showed the engine's own manager has no parent, and a manager created before the factory is set stays cached and in use (`create()` is not called). `installOn()` therefore verifies after installing that `engine.networkAccessManager()` is a `PolicyEnforcingNam`; `installRefusedAfterEngineCreatedAManager` pins that a pre-created plain manager is detected and kept (failure is not self-healing, so callers abort).
 
 - [ ] **Step 5: Commit** via the project `commit` skill. Intended subject: `feat(quick): add PolicyNamFactory for QML engine networking`.
 
