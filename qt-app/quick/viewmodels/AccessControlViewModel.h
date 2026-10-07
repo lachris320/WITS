@@ -8,6 +8,7 @@
 #include "AccessEntriesModel.h"
 
 class QNetworkAccessManager;
+class HttpClient;
 
 // Access Control page VM (Sub-plan 4). Owns the admin-authenticated SNAPSHOT
 // of access_recent.php: the recent-entries table, entries_today /
@@ -40,9 +41,9 @@ class AccessControlViewModel : public QObject
     Q_PROPERTY(AccessEntriesModel *entries READ entries CONSTANT)
 
 public:
-    // nam: injection seam for tests (CapturingNam). Null in production: the VM
-    // owns a fresh QNetworkAccessManager.
-    explicit AccessControlViewModel(QObject *parent = nullptr, QNetworkAccessManager *nam = nullptr);
+    // http: injection seam for tests (HttpClient wrapping a CapturingNam).
+    // Null in production: the VM owns an HttpClient (transport seam).
+    explicit AccessControlViewModel(QObject *parent = nullptr, HttpClient *http = nullptr);
 
     int entriesToday() const { return m_entriesToday; }
     QString lastEntryAt() const { return m_lastEntryAt; }
@@ -81,7 +82,8 @@ private:
     void setError(const QString &e);
     void setAuthFailure(bool v);
 
-    QNetworkAccessManager *m_nam = nullptr;
+    HttpClient *m_http = nullptr;              // injected, or an owned child
+    QNetworkAccessManager *m_nam = nullptr;    // m_http->manager(); non-owning
     AccessEntriesModel m_entries;
     int m_entriesToday = 0;
     QString m_lastEntryAt;

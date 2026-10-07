@@ -7,10 +7,12 @@
 #include "HttpForm.h"
 #include "apiconfig.h"
 #include "dashboardparser.h"
+#include "transport/httpclient.h"
 
-DashboardViewModel::DashboardViewModel(QObject *parent, QNetworkAccessManager *nam)
+DashboardViewModel::DashboardViewModel(QObject *parent, HttpClient *http)
     : QObject(parent)
-    , m_nam(nam ? nam : new QNetworkAccessManager(this))
+    , m_http(http ? http : new HttpClient(this))
+    , m_nam(m_http->manager())
 {
 }
 

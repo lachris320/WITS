@@ -8,11 +8,15 @@
 #include "VisitLogRowsModel.h"
 #include "AdminSession.h"
 #include "capturingnam.h"
+#include "offlinehttp.h"
+#include "transport/httpclient.h"
+#include "transport/policyenforcingnam.h"
 
 class TestVisitLogsViewModel : public QObject
 {
     Q_OBJECT
 private slots:
+    void defaultConstructionUsesTransportSeam();
     void defaultsToStudentToday();
     void applyStudentVisitsPopulatesRowsWithDashTimeOut();
     void applyGuestVisitsPopulatesGuestColumns();
@@ -28,14 +32,16 @@ private slots:
 
 void TestVisitLogsViewModel::defaultsToStudentToday()
 {
-    VisitLogsViewModel vm;
+    OfflineHttp vmHttp;
+    VisitLogsViewModel vm(nullptr, &vmHttp.http);
     QCOMPARE(vm.mode(), VisitLogsViewModel::Student);
     QCOMPARE(vm.range(), VisitLogsViewModel::Today);
 }
 
 void TestVisitLogsViewModel::applyStudentVisitsPopulatesRowsWithDashTimeOut()
 {
-    VisitLogsViewModel vm;
+    OfflineHttp vmHttp;
+    VisitLogsViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy spy(&vm, &VisitLogsViewModel::dataChanged);
     vm.applyStudentVisits(R"({
         "status":"success","count":1,
@@ -55,7 +61,8 @@ void TestVisitLogsViewModel::applyStudentVisitsPopulatesRowsWithDashTimeOut()
 
 void TestVisitLogsViewModel::applyGuestVisitsPopulatesGuestColumns()
 {
-    VisitLogsViewModel vm;
+    OfflineHttp vmHttp;
+    VisitLogsViewModel vm(nullptr, &vmHttp.http);
     vm.setMode(VisitLogsViewModel::Guest);
     vm.applyGuestVisits(R"({
         "status":"success","count":1,
@@ -72,7 +79,8 @@ void TestVisitLogsViewModel::applyGuestVisitsPopulatesGuestColumns()
 
 void TestVisitLogsViewModel::applyInvalidSetsErrorText()
 {
-    VisitLogsViewModel vm;
+    OfflineHttp vmHttp;
+    VisitLogsViewModel vm(nullptr, &vmHttp.http);
     vm.applyStudentVisits(R"({"status":"error"})");
     QVERIFY(!vm.errorText().isEmpty());
     QCOMPARE(vm.count(), 0);
@@ -80,7 +88,8 @@ void TestVisitLogsViewModel::applyInvalidSetsErrorText()
 
 void TestVisitLogsViewModel::setModeEmitsAndChanges()
 {
-    VisitLogsViewModel vm;
+    OfflineHttp vmHttp;
+    VisitLogsViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy spy(&vm, &VisitLogsViewModel::modeChanged);
     vm.setMode(VisitLogsViewModel::Guest);
     QCOMPARE(vm.mode(), VisitLogsViewModel::Guest);
@@ -112,7 +121,8 @@ void TestVisitLogsViewModel::formatWeekLabelSpansMonToSun()
 // by inspection of VisitLogsViewModel.cpp instead.
 void TestVisitLogsViewModel::supersededRequestSeqIsNotCurrent()
 {
-    VisitLogsViewModel vm;
+    OfflineHttp vmHttp;
+    VisitLogsViewModel vm(nullptr, &vmHttp.http);
     const quint64 first = vm.nextRequestSeq();     // e.g. Guest click -> POST in flight
     QVERIFY(vm.isCurrentRequest(first));           // still the only request outstanding
 
@@ -131,7 +141,8 @@ void TestVisitLogsViewModel::supersededRequestSeqIsNotCurrent()
 // the user's selection eagerly, not from the last successful reply.
 void TestVisitLogsViewModel::setRangeUpdatesRangeLabelImmediately()
 {
-    VisitLogsViewModel vm;
+    OfflineHttp vmHttp;
+    VisitLogsViewModel vm(nullptr, &vmHttp.http);
     QCOMPARE(vm.range(), VisitLogsViewModel::Today);
     QVERIFY(!vm.rangeLabel().contains(QStringLiteral("–")));   // "Today, ..." has no en-dash range
 
@@ -153,7 +164,8 @@ void TestVisitLogsViewModel::setRangeUpdatesRangeLabelImmediately()
 // seam and asserts the stale row is actually dropped, not merely absent.
 void TestVisitLogsViewModel::parseErrorAfterGoodDataClearsStaleRowsAndRecomputesLabel()
 {
-    VisitLogsViewModel vm;
+    OfflineHttp vmHttp;
+    VisitLogsViewModel vm(nullptr, &vmHttp.http);
     vm.applyStudentVisits(R"({
         "status":"success","count":1,
         "visits":[{"date":"2026-07-13","name":"Maria Santos","course":"BSCE",
@@ -180,7 +192,8 @@ void TestVisitLogsViewModel::studentRefresh_postsWithAdminKeyBodyAndRangeInQuery
 {
     AdminSession::instance().setKey("test-key");
     CapturingNam nam;
-    VisitLogsViewModel vm(nullptr, &nam);   // mode defaults to Student
+    HttpClient vmClient(nullptr, &nam);
+    VisitLogsViewModel vm(nullptr, &vmClient);   // mode defaults to Student
     vm.refresh();
 
     QCOMPARE(nam.lastOp, QNetworkAccessManager::PostOperation);
@@ -196,13 +209,29 @@ void TestVisitLogsViewModel::guestRefresh_addsAdminKeyToJsonPayload()
 {
     AdminSession::instance().setKey("test-key");
     CapturingNam nam;
-    VisitLogsViewModel vm(nullptr, &nam);
+    HttpClient vmClient(nullptr, &nam);
+    VisitLogsViewModel vm(nullptr, &vmClient);
     vm.setMode(VisitLogsViewModel::Guest);   // setMode() itself fires refresh() (cpp:52) — captures the guest POST
 
     QCOMPARE(nam.lastOp, QNetworkAccessManager::PostOperation);
     const QJsonObject body = QJsonDocument::fromJson(nam.lastBody).object();
     QCOMPARE(body.value("admin_key").toString(), QStringLiteral("test-key"));
     AdminSession::instance().clear();
+}
+
+void TestVisitLogsViewModel::defaultConstructionUsesTransportSeam()
+{
+    // Production path (QML default construction): the VM owns an HttpClient
+    // whose manager is a PolicyEnforcingNam — never a raw QNetworkAccessManager.
+    VisitLogsViewModel vm;
+    QVERIFY(vm.findChild<HttpClient *>());
+    QCOMPARE(vm.findChildren<PolicyEnforcingNam *>().size(), 1);
+
+    // Injected path: the test's manager is used; nothing is created.
+    CapturingNam nam;
+    HttpClient http(nullptr, &nam);
+    VisitLogsViewModel injected(nullptr, &http);
+    QVERIFY(injected.findChildren<PolicyEnforcingNam *>().isEmpty());
 }
 
 QTEST_MAIN(TestVisitLogsViewModel)

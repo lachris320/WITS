@@ -10,10 +10,12 @@
 #include "SettingsViewModel.h"
 #include "apiconfig.h"
 #include "loginparser.h"
+#include "transport/httpclient.h"
 
-AccessControlViewModel::AccessControlViewModel(QObject *parent, QNetworkAccessManager *nam)
+AccessControlViewModel::AccessControlViewModel(QObject *parent, HttpClient *http)
     : QObject(parent)
-    , m_nam(nam ? nam : new QNetworkAccessManager(this))
+    , m_http(http ? http : new HttpClient(this))
+    , m_nam(m_http->manager())
 {
 }
 

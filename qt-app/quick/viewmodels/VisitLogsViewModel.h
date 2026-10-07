@@ -9,6 +9,7 @@
 #include "VisitLogRowsModel.h"
 
 class QNetworkAccessManager;
+class HttpClient;
 
 // Visit Logs screen VM (spec §6.3/§7.3). Student attendance is the primary
 // view (get_library_visits.php); Guest is a secondary toggle (get_visitors.php
@@ -31,10 +32,10 @@ public:
     enum Range { Today, Week };
     Q_ENUM(Range)
 
-    // nam: injection seam for tests (CapturingNam) — when null (production,
-    // and every existing QML default-construction path), the VM owns a fresh
-    // QNetworkAccessManager exactly as before.
-    explicit VisitLogsViewModel(QObject *parent = nullptr, QNetworkAccessManager *nam = nullptr);
+    // http: injection seam for tests (HttpClient wrapping a CapturingNam) —
+    // when null (production, and every existing QML default-construction
+    // path), the VM owns an HttpClient (transport seam).
+    explicit VisitLogsViewModel(QObject *parent = nullptr, HttpClient *http = nullptr);
 
     Mode mode() const { return m_mode; }
     Range range() const { return m_range; }
@@ -85,7 +86,8 @@ private:
     // "Monday of this week" arithmetic can't drift between the two copies.
     static QDate weekMonday(const QDate &d);
 
-    QNetworkAccessManager *m_nam = nullptr;
+    HttpClient *m_http = nullptr;              // injected, or an owned child
+    QNetworkAccessManager *m_nam = nullptr;    // m_http->manager(); non-owning
     VisitLogRowsModel m_rows;
     Mode m_mode = Student;
     Range m_range = Today;
