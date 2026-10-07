@@ -518,6 +518,20 @@ wits_add_qttest(tst_transportseamguard
     SOURCES tests/tst_transportseamguard.cpp
     DEFINES SRC_ROOT="${CMAKE_SOURCE_DIR}")
 
+# --- S1a resource inventory (C++ QtTest, offscreen): every resource the 2.0
+# client loads (remote photos, fallback avatars, imported logos, bundled QML)
+# still loads through PolicyNamFactory managers. Loopback TinyHttpServer only. ---
+wits_add_qttest(tst_qmlresourceinventory
+    SOURCES tests/tst_qmlresourceinventory.cpp tests/RecordingPolicyNam.h
+        ${CMAKE_SOURCE_DIR}/testsupport/tinyhttpserver.cpp
+        ${CMAKE_SOURCE_DIR}/testsupport/tinyhttpserver.h
+        ${WITS_TEST_NAM_SOURCES}
+    LIBS ${WITS_LOAMS_STATIC_LIBS}
+         Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick Qt${QT_VERSION_MAJOR}::Network
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport ${CMAKE_CURRENT_SOURCE_DIR}/tests
+    DEFINES SRC_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
+    OFFSCREEN)
+
 # Coverage guard: before wits_add_qmltest, every QuickTest target scanned the
 # whole tests/ directory, so a new tst_*.qml was picked up automatically. Now
 # each target runs one file, so a tst_*.qml without its own wits_add_qmltest
