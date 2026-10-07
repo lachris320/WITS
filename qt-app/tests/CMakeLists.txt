@@ -434,3 +434,18 @@ wits_add_qttest(tst_policyenforcingnam
         ${CMAKE_SOURCE_DIR}/testsupport/tinyhttpserver.h
     LIBS Qt${QT_VERSION_MAJOR}::Network
     INCLUDES ${CMAKE_SOURCE_DIR}/core ${CMAKE_SOURCE_DIR}/testsupport)
+
+# --- S1a transport seam: HttpClient ownership / injection (Network; no offscreen) ---
+wits_add_qttest(tst_httpclient
+    SOURCES
+        tst_httpclient.cpp
+        ${CMAKE_SOURCE_DIR}/core/transport/httpclient.cpp
+        ${CMAKE_SOURCE_DIR}/core/transport/httpclient.h
+        ${CMAKE_SOURCE_DIR}/core/transport/policyenforcingnam.cpp
+        ${CMAKE_SOURCE_DIR}/core/transport/policyenforcingnam.h
+        ${CMAKE_SOURCE_DIR}/core/transport/transportpolicy.cpp
+        ${CMAKE_SOURCE_DIR}/core/transport/transportpolicy.h
+        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
+        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
+    LIBS Qt${QT_VERSION_MAJOR}::Network
+    INCLUDES ${CMAKE_SOURCE_DIR}/core ${CMAKE_SOURCE_DIR}/testsupport)
