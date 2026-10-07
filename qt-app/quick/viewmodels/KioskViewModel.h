@@ -12,6 +12,7 @@
 #include "RecentLoginsModel.h"
 
 class QNetworkAccessManager;
+class HttpClient;
 class QQuickWindow;
 class QSettings;
 class QTimer;
@@ -63,7 +64,9 @@ class KioskViewModel : public QObject
     Q_PROPERTY(QString statusSeverity READ statusSeverity NOTIFY statusChanged)
 
 public:
-    explicit KioskViewModel(QObject *parent = nullptr);
+    // http: injection seam for tests (HttpClient wrapping a CapturingNam).
+    // Null in production: the VM owns an HttpClient (transport seam).
+    explicit KioskViewModel(QObject *parent = nullptr, HttpClient *http = nullptr);
 
     RecentLoginsModel *recentLogins() { return &m_recent; }
     bool hasStudent() const { return m_hasStudent; }
@@ -148,7 +151,8 @@ private:
                   bool rfid);
 
     RecentLoginsModel m_recent;
-    QNetworkAccessManager *m_nam = nullptr;
+    HttpClient *m_http = nullptr;              // injected, or an owned child
+    QNetworkAccessManager *m_nam = nullptr;    // m_http->manager(); non-owning
     QTimer *m_clockTimer = nullptr;
     RfidQuickFilter *m_rfid = nullptr;
 

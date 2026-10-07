@@ -9,6 +9,12 @@
 #include "RecentLoginsModel.h"
 #include "AdminSession.h"
 #include "appsettings.h"
+#include <QUrlQuery>
+#include "apiconfig.h"
+#include "capturingnam.h"
+#include "offlinehttp.h"
+#include "transport/httpclient.h"
+#include "transport/policyenforcingnam.h"
 
 static QJsonObject student(const QString &name, const QString &course,
                            const QString &year, const QString &dept,
@@ -36,6 +42,8 @@ private slots:
     void requestGuestEmitsSignal();
     void adminLoginResponseCapturesHeldKey();
     void studentLoginResponseDoesNotCaptureKey();
+    void defaultConstructionUsesTransportSeam();
+    void studentLoginGoesThroughInjectedClient();
 
     // Kiosk BrandPanel logo — same contract SchoolInfoViewModel already
     // implements for the admin sidebar (see tst_schoolinfoviewmodel.cpp).
@@ -104,7 +112,8 @@ void TestKioskViewModel::formatLoginTimeUsesTwelveHourMeridiem()
 
 void TestKioskViewModel::applyStudentStampsLocalTimeNotBackendTimeDate()
 {
-    KioskViewModel vm;
+    OfflineHttp vmHttp;
+    KioskViewModel vm(nullptr, &vmHttp.http);
     const QString sentinel = QStringLiteral("2020-01-01 00:00:00");  // a registration-style stamp
     const QString before = KioskViewModel::formatLoginTime(QDateTime::currentDateTime());
     vm.applyStudentLogin(student("Maria Santos", "BSCE", "3rd Year",
@@ -122,7 +131,8 @@ void TestKioskViewModel::applyStudentStampsLocalTimeNotBackendTimeDate()
 
 void TestKioskViewModel::applyStudentSetsCurrentAndBumpsStats()
 {
-    KioskViewModel vm;
+    OfflineHttp vmHttp;
+    KioskViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy cur(&vm, &KioskViewModel::currentChanged);
     QSignalSpy stat(&vm, &KioskViewModel::statsChanged);
 
@@ -140,7 +150,8 @@ void TestKioskViewModel::applyStudentSetsCurrentAndBumpsStats()
 
 void TestKioskViewModel::applyStudentPrependsRowFresh()
 {
-    KioskViewModel vm;
+    OfflineHttp vmHttp;
+    KioskViewModel vm(nullptr, &vmHttp.http);
     vm.applyStudentLogin(student("Maria Santos", "BSCE", "3rd Year", "CE", "8:04 AM"));
     vm.applyStudentLogin(student("Jose Ramirez", "BSEE", "2nd Year", "EE", "8:06 AM"));
 
@@ -158,7 +169,8 @@ void TestKioskViewModel::applyStudentPrependsRowFresh()
 
 void TestKioskViewModel::modelCapsAtForty()
 {
-    KioskViewModel vm;
+    OfflineHttp vmHttp;
+    KioskViewModel vm(nullptr, &vmHttp.http);
     for (int i = 0; i < 45; ++i)
         vm.applyStudentLogin(student(QStringLiteral("S%1 Name").arg(i),
                                      "BSIT", "1st Year", "IT", "9:00 AM"));
@@ -167,7 +179,8 @@ void TestKioskViewModel::modelCapsAtForty()
 
 void TestKioskViewModel::invalidRfidCodeSetsErrorStatusNoCrash()
 {
-    KioskViewModel vm;
+    OfflineHttp vmHttp;
+    KioskViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy st(&vm, &KioskViewModel::statusChanged);
     vm.handleRfidScan(QStringLiteral("A;"));   // fails isValidRfidCode -> no POST
     QVERIFY(!vm.statusMessage().isEmpty());
@@ -178,7 +191,8 @@ void TestKioskViewModel::invalidRfidCodeSetsErrorStatusNoCrash()
 
 void TestKioskViewModel::requestGuestEmitsSignal()
 {
-    KioskViewModel vm;
+    OfflineHttp vmHttp;
+    KioskViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy g(&vm, &KioskViewModel::guestRequested);
     vm.requestGuest();
     QCOMPARE(g.count(), 1);
@@ -187,7 +201,8 @@ void TestKioskViewModel::requestGuestEmitsSignal()
 void TestKioskViewModel::adminLoginResponseCapturesHeldKey()
 {
     AdminSession::instance().clear();
-    KioskViewModel vm;
+    OfflineHttp vmHttp;
+    KioskViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy admin(&vm, &KioskViewModel::adminRequested);
     // Network-free seam: a parsed admin-success payload (status=success, NO
     // "student" object -> isAdmin), plus the key that was posted.
@@ -199,7 +214,8 @@ void TestKioskViewModel::adminLoginResponseCapturesHeldKey()
 void TestKioskViewModel::studentLoginResponseDoesNotCaptureKey()
 {
     AdminSession::instance().clear();
-    KioskViewModel vm;
+    OfflineHttp vmHttp;
+    KioskViewModel vm(nullptr, &vmHttp.http);
     vm.applyLoginResponse(R"({"status":"success","student":{"name":"Ana","course":"BSCE"}})",
                           QStringLiteral("ignored"));
     QVERIFY(!AdminSession::instance().hasKey());   // student branch never captures
@@ -209,7 +225,8 @@ void TestKioskViewModel::logoAbsentWhenUnset()
 {
     clearSchoolInfo();
 
-    KioskViewModel vm;
+    OfflineHttp vmHttp;
+    KioskViewModel vm(nullptr, &vmHttp.http);
     QVERIFY(!vm.hasLogo());
     QVERIFY(vm.logoUrl().isEmpty());
 }
@@ -227,7 +244,8 @@ void TestKioskViewModel::logoExposedWhenFileExists()
         s.sync();
     }
 
-    KioskViewModel vm;
+    OfflineHttp vmHttp;
+    KioskViewModel vm(nullptr, &vmHttp.http);
     QVERIFY(vm.hasLogo());
     QCOMPARE(vm.logoUrl(), QUrl::fromLocalFile(logoPath));
     QVERIFY(vm.logoUrl().isLocalFile());
@@ -246,7 +264,8 @@ void TestKioskViewModel::logoAbsentWhenPathRotted()
         s.sync();
     }
 
-    KioskViewModel vm;
+    OfflineHttp vmHttp;
+    KioskViewModel vm(nullptr, &vmHttp.http);
     QVERIFY(!vm.hasLogo());
     QVERIFY(vm.logoUrl().isEmpty());
 }
@@ -259,7 +278,8 @@ void TestKioskViewModel::reloadPicksUpChangedSchoolInfo()
     QVERIFY(m_dir.isValid());
     clearSchoolInfo();
 
-    KioskViewModel vm;
+    OfflineHttp vmHttp;
+    KioskViewModel vm(nullptr, &vmHttp.http);
     QCOMPARE(vm.schoolName(), QString());
     QVERIFY(!vm.hasLogo());
 
@@ -293,7 +313,8 @@ void TestKioskViewModel::reloadIsQuietWhenNothingChanged()
         s.sync();
     }
 
-    KioskViewModel vm;
+    OfflineHttp vmHttp;
+    KioskViewModel vm(nullptr, &vmHttp.http);
     QCOMPARE(vm.schoolName(), QStringLiteral("Steady State Academy"));
 
     QSignalSpy info(&vm, &KioskViewModel::schoolInfoChanged);
@@ -327,7 +348,8 @@ void TestKioskViewModel::reloadClearsRemovedLogo()
         s.sync();
     }
 
-    KioskViewModel vm;
+    OfflineHttp vmHttp;
+    KioskViewModel vm(nullptr, &vmHttp.http);
     QVERIFY(vm.hasLogo());
 
     QSignalSpy info(&vm, &KioskViewModel::schoolInfoChanged);
@@ -341,7 +363,8 @@ void TestKioskViewModel::reloadClearsRemovedLogo()
 
 void TestKioskViewModel::test_applyStudentLoginSetsPhotoUrlAndInitials()
 {
-    KioskViewModel vm;
+    OfflineHttp vmHttp;
+    KioskViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy cur(&vm, &KioskViewModel::currentChanged);
     QJsonObject s;
     s["name"] = "Maria Santos";
@@ -358,7 +381,8 @@ void TestKioskViewModel::test_applyStudentLoginSetsPhotoUrlAndInitials()
 
 void TestKioskViewModel::test_applyStudentLoginEmptyPhotoUrlStaysEmpty()
 {
-    KioskViewModel vm;
+    OfflineHttp vmHttp;
+    KioskViewModel vm(nullptr, &vmHttp.http);
     QJsonObject s; s["name"] = "Ana Cruz";   // no photo_url
     vm.applyStudentLogin(s);
     QCOMPARE(vm.currentPhotoUrl(), QString());
@@ -367,7 +391,8 @@ void TestKioskViewModel::test_applyStudentLoginEmptyPhotoUrlStaysEmpty()
 
 void TestKioskViewModel::onEntryObserved_knownStudentDisplaysAndCounts()
 {
-    KioskViewModel vm;
+    OfflineHttp vmHttp;
+    KioskViewModel vm(nullptr, &vmHttp.http);
     const int before = vm.visitorsToday();
     QVariantMap entry{
         {"hasStudent", true},
@@ -383,7 +408,8 @@ void TestKioskViewModel::onEntryObserved_knownStudentDisplaysAndCounts()
 
 void TestKioskViewModel::onEntryObserved_unknownShowsNeutralToastNoCount()
 {
-    KioskViewModel vm;
+    OfflineHttp vmHttp;
+    KioskViewModel vm(nullptr, &vmHttp.http);
     const int before = vm.visitorsToday();
     QSignalSpy status(&vm, &KioskViewModel::statusChanged);
     QVariantMap entry{{"hasStudent", false}, {"student", QVariantMap{}},
@@ -394,6 +420,30 @@ void TestKioskViewModel::onEntryObserved_unknownShowsNeutralToastNoCount()
     QCOMPARE(vm.statusSeverity(), QStringLiteral("Info"));   // neutral, not Error
     QCOMPARE(vm.visitorsToday(), before);                    // no count bump
     QVERIFY(!vm.hasStudent());
+}
+
+void TestKioskViewModel::defaultConstructionUsesTransportSeam()
+{
+    KioskViewModel vm;
+    QVERIFY(vm.findChild<HttpClient *>());
+    QCOMPARE(vm.findChildren<PolicyEnforcingNam *>().size(), 1);
+}
+
+void TestKioskViewModel::studentLoginGoesThroughInjectedClient()
+{
+    CapturingNam nam(QByteArrayLiteral(
+        "{\"status\":\"success\",\"student\":{\"name\":\"Test Student A\",\"course\":\"BSIT\"}}"));
+    HttpClient http(nullptr, &nam);
+    KioskViewModel vm(nullptr, &http);
+    QVERIFY(vm.findChildren<PolicyEnforcingNam *>().isEmpty());
+
+    vm.submitLogin(QStringLiteral("20260001"));
+    QCOMPARE(nam.lastOp, QNetworkAccessManager::PostOperation);
+    QCOMPARE(nam.lastUrl, ApiConfig::endpoint(QStringLiteral("student_login.php")));
+    QCOMPARE(QUrlQuery(QString::fromUtf8(nam.lastBody)).queryItemValue(QStringLiteral("school_id")),
+             QStringLiteral("20260001"));
+    QTRY_VERIFY(vm.hasStudent());   // reply decoded through the production path
+    QCOMPARE(vm.currentFullName(), QStringLiteral("Test Student A"));
 }
 
 QTEST_MAIN(TestKioskViewModel)

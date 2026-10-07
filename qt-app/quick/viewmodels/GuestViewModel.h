@@ -7,6 +7,7 @@
 #include <qqml.h>
 
 class QNetworkAccessManager;
+class HttpClient;
 
 // Guest sign-in: validates + POSTs guest_login.php. Mirrors guestwindow.cpp.
 class GuestViewModel : public QObject
@@ -14,7 +15,9 @@ class GuestViewModel : public QObject
     Q_OBJECT
     QML_ELEMENT
 public:
-    explicit GuestViewModel(QObject *parent = nullptr);
+    // http: injection seam for tests (HttpClient wrapping a CapturingNam).
+    // Null in production: the VM owns an HttpClient (transport seam).
+    explicit GuestViewModel(QObject *parent = nullptr, HttpClient *http = nullptr);
 
     Q_INVOKABLE void submitGuest(const QString &name, const QString &contact,
                                  const QString &company, const QString &purpose);
@@ -30,7 +33,8 @@ signals:
     void guestFailed(const QString &message);
 
 private:
-    QNetworkAccessManager *m_nam = nullptr;
+    HttpClient *m_http = nullptr;              // injected, or an owned child
+    QNetworkAccessManager *m_nam = nullptr;    // m_http->manager(); non-owning
 };
 
 #endif // GUESTVIEWMODEL_H

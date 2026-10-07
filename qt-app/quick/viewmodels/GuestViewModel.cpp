@@ -5,10 +5,12 @@
 #include <QJsonObject>
 #include "apiconfig.h"
 #include "HttpForm.h"
+#include "transport/httpclient.h"
 
-GuestViewModel::GuestViewModel(QObject *parent)
+GuestViewModel::GuestViewModel(QObject *parent, HttpClient *http)
     : QObject(parent)
-    , m_nam(new QNetworkAccessManager(this))
+    , m_http(http ? http : new HttpClient(this))
+    , m_nam(m_http->manager())
 {
 }
 
