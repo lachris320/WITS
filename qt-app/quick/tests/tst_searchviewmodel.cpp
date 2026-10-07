@@ -3,6 +3,12 @@
 #include "SearchViewModel.h"
 #include "SearchResultsModel.h"
 #include "studentdata.h"
+#include "apiconfig.h"
+#include "capturingnam.h"
+#include "offlinehttp.h"
+#include "studentcontroller.h"
+#include "transport/httpclient.h"
+#include "transport/policyenforcingnam.h"
 
 class TestSearchViewModel : public QObject
 {
@@ -17,11 +23,14 @@ private slots:
     void supersededSearchFailedReplyIsDropped();
     void setDepartmentUpdatesPropertyAndEmits();
     void setDepartmentSameValueIsNoop();
+    void defaultConstructionUsesTransportSeam();
+    void searchGoesThroughInjectedClient();
 };
 
 void TestSearchViewModel::resultsPopulateWithVisits()
 {
-    SearchViewModel vm;
+    OfflineHttp vmHttp;
+    SearchViewModel vm(nullptr, &vmHttp.http);
     StudentRecord r;
     r.schoolId = "2023-0001";
     r.name = "Maria Santos";
@@ -39,7 +48,8 @@ void TestSearchViewModel::resultsPopulateWithVisits()
 
 void TestSearchViewModel::searchFailedSetsErrorText()
 {
-    SearchViewModel vm;
+    OfflineHttp vmHttp;
+    SearchViewModel vm(nullptr, &vmHttp.http);
     vm.onSearchFailed(QStringLiteral("boom"), 0);
     QVERIFY(!vm.errorText().isEmpty());
     // The user-facing string must not leak the raw transport error.
@@ -55,7 +65,8 @@ void TestSearchViewModel::searchFailedSetsErrorText()
 // error banner. Fully network-free: onSearchFailed is a public slot.
 void TestSearchViewModel::searchFailedClearsStaleResults()
 {
-    SearchViewModel vm;
+    OfflineHttp vmHttp;
+    SearchViewModel vm(nullptr, &vmHttp.http);
     StudentRecord r;
     r.schoolId = "2023-0001";
     r.name = "Maria Santos";
@@ -73,7 +84,8 @@ void TestSearchViewModel::searchFailedClearsStaleResults()
 
 void TestSearchViewModel::coursesLoadedExposesChips()
 {
-    SearchViewModel vm;
+    OfflineHttp vmHttp;
+    SearchViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy spy(&vm, &SearchViewModel::coursesChanged);
     vm.onCoursesLoaded({ QStringLiteral("BSCE"), QStringLiteral("BSEE") });
     QVERIFY(spy.count() >= 1);
@@ -86,7 +98,8 @@ void TestSearchViewModel::coursesLoadedExposesChips()
 // (network-free) since onDepartmentsLoaded is a public slot.
 void TestSearchViewModel::departmentsLoadedExposesList()
 {
-    SearchViewModel vm;
+    OfflineHttp vmHttp;
+    SearchViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy spy(&vm, &SearchViewModel::departmentsChanged);
     vm.onDepartmentsLoaded({ QStringLiteral("CE"), QStringLiteral("IT") });
     QVERIFY(spy.count() >= 1);
@@ -113,7 +126,8 @@ void TestSearchViewModel::departmentsLoadedExposesList()
 // asserts against.
 void TestSearchViewModel::supersededSearchFinishedReplyIsDropped()
 {
-    SearchViewModel vm;
+    OfflineHttp vmHttp;
+    SearchViewModel vm(nullptr, &vmHttp.http);
     StudentRecord newer;
     newer.schoolId = "2023-0002";
     newer.name = "Newer Result";
@@ -135,7 +149,8 @@ void TestSearchViewModel::supersededSearchFinishedReplyIsDropped()
 // clobber the newer, already-applied results with the generic error banner.
 void TestSearchViewModel::supersededSearchFailedReplyIsDropped()
 {
-    SearchViewModel vm;
+    OfflineHttp vmHttp;
+    SearchViewModel vm(nullptr, &vmHttp.http);
     StudentRecord r;
     r.schoolId = "2023-0001";
     r.name = "Maria Santos";
@@ -154,7 +169,8 @@ void TestSearchViewModel::supersededSearchFailedReplyIsDropped()
 // run — property/signal state is checked synchronously.
 void TestSearchViewModel::setDepartmentUpdatesPropertyAndEmits()
 {
-    SearchViewModel vm;
+    OfflineHttp vmHttp;
+    SearchViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy spy(&vm, &SearchViewModel::departmentChanged);
     vm.setDepartment(QStringLiteral("CE"));
     QCOMPARE(vm.department(), QStringLiteral("CE"));
@@ -165,11 +181,38 @@ void TestSearchViewModel::setDepartmentUpdatesPropertyAndEmits()
 // departmentChanged (and, by extension, must not re-issue a courses request).
 void TestSearchViewModel::setDepartmentSameValueIsNoop()
 {
-    SearchViewModel vm;
+    OfflineHttp vmHttp;
+    SearchViewModel vm(nullptr, &vmHttp.http);
     vm.setDepartment(QStringLiteral("CE"));
     QSignalSpy spy(&vm, &SearchViewModel::departmentChanged);
     vm.setDepartment(QStringLiteral("CE"));
     QCOMPARE(spy.count(), 0);
+}
+
+void TestSearchViewModel::defaultConstructionUsesTransportSeam()
+{
+    SearchViewModel vm;
+    auto *http = vm.findChild<HttpClient *>();
+    QVERIFY(http);
+    QCOMPARE(vm.findChildren<PolicyEnforcingNam *>().size(), 1);
+    // The controller's manager IS the VM's HttpClient manager (no bypass).
+    auto *controller = vm.findChild<StudentController *>();
+    QVERIFY(controller);
+    QVERIFY(qobject_cast<PolicyEnforcingNam *>(controller->networkManager()));
+    QCOMPARE(controller->networkManager(), http->manager());
+}
+
+void TestSearchViewModel::searchGoesThroughInjectedClient()
+{
+    CapturingNam nam;
+    HttpClient http(nullptr, &nam);
+    SearchViewModel vm(nullptr, &http);
+    QVERIFY(vm.findChildren<PolicyEnforcingNam *>().isEmpty());
+    QCOMPARE(vm.findChild<StudentController *>()->networkManager(),
+             static_cast<QNetworkAccessManager *>(&nam));
+    vm.search(QStringLiteral("Test Student"), QString());
+    QCOMPARE(nam.lastOp, QNetworkAccessManager::PostOperation);
+    QCOMPARE(nam.lastUrl, ApiConfig::endpoint(QStringLiteral("search_students.php")));
 }
 
 QTEST_MAIN(TestSearchViewModel)

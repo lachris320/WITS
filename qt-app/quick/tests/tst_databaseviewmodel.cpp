@@ -9,11 +9,18 @@
 #include "AdminSession.h"
 #include "SettingsViewModel.h"
 #include "studentcontroller.h"
+#include "apiconfig.h"
+#include "capturingnam.h"
+#include "offlinehttp.h"
+#include "transport/httpclient.h"
+#include "transport/policyenforcingnam.h"
 
 class TestDatabaseViewModel : public QObject
 {
     Q_OBJECT
 private slots:
+    void defaultConstructionUsesOneSeamManager();
+    void bothControllersUseInjectedClient();
     void departmentsLoadedPopulatesProp();
     void studentsLoadedFillTable();
     void setDepartmentReloadsCoursesAndClears();
@@ -83,14 +90,16 @@ private slots:
 // (they are public, like SearchViewModel's onSearchFinished).
 void TestDatabaseViewModel::departmentsLoadedPopulatesProp()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.onDepartmentsLoaded({"CCS","CBA"});
     QCOMPARE(vm.departments(), (QStringList{"CCS","CBA"}));
 }
 
 void TestDatabaseViewModel::studentsLoadedFillTable()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     StudentRecord r; r.schoolId="A"; r.name="Ann";
     vm.onSearchFinished(SearchOutcome::Results, {r}, "", "", 1);
     QCOMPARE(vm.students()->count(), 1);
@@ -99,7 +108,8 @@ void TestDatabaseViewModel::studentsLoadedFillTable()
 
 void TestDatabaseViewModel::setDepartmentReloadsCoursesAndClears()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.onCoursesLoaded({"BSIT"});
     QCOMPARE(vm.courses(), (QStringList{"BSIT"}));
     vm.setCourse("BSIT");
@@ -111,7 +121,8 @@ void TestDatabaseViewModel::setDepartmentReloadsCoursesAndClears()
 
 void TestDatabaseViewModel::networkErrorSetsErrorAndClearsRows()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     StudentRecord r; r.schoolId="A"; r.name="Ann";
     vm.onSearchFinished(SearchOutcome::Results, {r}, "", "", 1);
     vm.onSearchFailed("boom", 2);
@@ -127,7 +138,8 @@ void TestDatabaseViewModel::cleanup()
 
 void TestDatabaseViewModel::requiresTypedConfirmationBoundary()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     QCOMPARE(vm.requiresTypedConfirmation(9), false);
     QCOMPARE(vm.requiresTypedConfirmation(10), true);
     QCOMPARE(vm.requiresTypedConfirmation(11), true);
@@ -136,7 +148,8 @@ void TestDatabaseViewModel::requiresTypedConfirmationBoundary()
 void TestDatabaseViewModel::deleteSelectedPostsIdsAndAdminKey()
 {
     // Empty selection => no network call, no status change (guard).
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     AdminSession::instance().setKey("held-key");
     vm.deleteSelected();
     QVERIFY(vm.statusMessage().isEmpty());
@@ -160,7 +173,8 @@ void TestDatabaseViewModel::deleteSelectedPostsIdsAndAdminKey()
 
 void TestDatabaseViewModel::onDeleteFinishedSuccessRefreshesClearsAndSetsStatus()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     StudentRecord r; r.schoolId = "2023-001"; r.name = "Ann";
     vm.onSearchFinished(SearchOutcome::Results, {r}, "", "", 1);
     vm.students()->toggle("2023-001");
@@ -175,7 +189,8 @@ void TestDatabaseViewModel::onDeleteFinishedSuccessRefreshesClearsAndSetsStatus(
 
 void TestDatabaseViewModel::onDeleteFinishedAuthFailureSetsAuthState()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.onDeleteFinished(false, 2, QStringLiteral("Invalid admin key"));
     QVERIFY(vm.authFailure());
     QCOMPARE(vm.statusMessage(), SettingsViewModel::adminAuthFailureMessage());
@@ -183,7 +198,8 @@ void TestDatabaseViewModel::onDeleteFinishedAuthFailureSetsAuthState()
 
 void TestDatabaseViewModel::onDeleteFinishedGenericFailureSetsStatusNoAuth()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.onDeleteFinished(false, 2, QStringLiteral("Invalid data"));
     QVERIFY(!vm.authFailure());
     QCOMPARE(vm.statusMessage(), QStringLiteral("Invalid data"));
@@ -191,7 +207,8 @@ void TestDatabaseViewModel::onDeleteFinishedGenericFailureSetsStatusNoAuth()
 
 void TestDatabaseViewModel::onDeleteFailedSetsTransientStatus()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.onDeleteFailed(QStringLiteral("Connection refused"));
     QVERIFY(!vm.authFailure());
     QVERIFY(!vm.statusMessage().isEmpty());
@@ -199,7 +216,8 @@ void TestDatabaseViewModel::onDeleteFailedSetsTransientStatus()
 
 void TestDatabaseViewModel::exportCsvWritesAllRowsWhenNoneSelected()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     StudentRecord a; a.schoolId = "A"; a.name = "Ann";  a.visits = 1;
     StudentRecord b; b.schoolId = "B"; b.name = "Ben";  b.visits = 2;
     vm.onSearchFinished(SearchOutcome::Results, {a, b}, "", "", 1);
@@ -218,7 +236,8 @@ void TestDatabaseViewModel::exportCsvWritesAllRowsWhenNoneSelected()
 
 void TestDatabaseViewModel::exportCsvWritesOnlySelectedWhenSomeSelected()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     StudentRecord a; a.schoolId = "A"; a.name = "Ann";
     StudentRecord b; b.schoolId = "B"; b.name = "Ben";
     vm.onSearchFinished(SearchOutcome::Results, {a, b}, "", "", 1);
@@ -237,7 +256,8 @@ void TestDatabaseViewModel::exportCsvWritesOnlySelectedWhenSomeSelected()
 
 void TestDatabaseViewModel::exportCsvWriteFailureReturnsFalse()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     StudentRecord a; a.schoolId = "A"; a.name = "Ann";
     vm.onSearchFinished(SearchOutcome::Results, {a}, "", "", 1);
     // A path whose parent directory does not exist => QSaveFile::open fails.
@@ -249,7 +269,8 @@ void TestDatabaseViewModel::exportCsvWriteFailureReturnsFalse()
 
 void TestDatabaseViewModel::canEditIsTrueWhenAtLeastOneSelected()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     StudentRecord a; a.schoolId = "A"; a.name = "Ann";
     StudentRecord b; b.schoolId = "B"; b.name = "Ben";
     vm.onSearchFinished(SearchOutcome::Results, {a, b}, "", "", 1);
@@ -262,7 +283,8 @@ void TestDatabaseViewModel::canEditIsTrueWhenAtLeastOneSelected()
 
 void TestDatabaseViewModel::canEditChangedEmitsOnlyOnBooleanFlip()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     StudentRecord a; a.schoolId = "A"; a.name = "Ann";
     StudentRecord b; b.schoolId = "B"; b.name = "Ben";
     vm.onSearchFinished(SearchOutcome::Results, {a, b}, "", "", 1);
@@ -276,7 +298,8 @@ void TestDatabaseViewModel::canEditChangedEmitsOnlyOnBooleanFlip()
 
 void TestDatabaseViewModel::beginEditPrefillsAllFieldsAndEmitsReady()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     StudentRecord r;
     r.schoolId = "2023-001"; r.code = "C1"; r.name = "Juan Cruz"; r.course = "BSIT";
     r.department = "CCS"; r.yearLevel = "2"; r.gender = "Male"; r.status = "Active";
@@ -298,7 +321,8 @@ void TestDatabaseViewModel::beginEditPrefillsAllFieldsAndEmitsReady()
 
 void TestDatabaseViewModel::beginEditNoMatchIsNoOp()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     StudentRecord r; r.schoolId = "2023-001"; r.name = "Ann";
     vm.onSearchFinished(SearchOutcome::Results, {r}, "", "", 1);
 
@@ -310,7 +334,8 @@ void TestDatabaseViewModel::beginEditNoMatchIsNoOp()
 
 void TestDatabaseViewModel::beginEditSelectedUsesSingleSelectedId()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     StudentRecord a; a.schoolId = "A"; a.name = "Ann";
     StudentRecord b; b.schoolId = "B"; b.name = "Ben";
     vm.onSearchFinished(SearchOutcome::Results, {a, b}, "", "", 1);
@@ -325,7 +350,8 @@ void TestDatabaseViewModel::beginEditSelectedUsesSingleSelectedId()
 
 void TestDatabaseViewModel::setEditDepartmentClearsCourseAndReloads()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     StudentRecord r; r.schoolId = "A"; r.name = "Ann"; r.department = "CCS"; r.course = "BSIT";
     vm.onSearchFinished(SearchOutcome::Results, {r}, "", "", 1);
     vm.beginEdit("A");
@@ -338,14 +364,16 @@ void TestDatabaseViewModel::setEditDepartmentClearsCourseAndReloads()
 
 void TestDatabaseViewModel::onEditCoursesLoadedPopulatesEditCourses()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.onEditCoursesLoaded({"BSIT", "BSCS"});
     QCOMPARE(vm.editCourses(), (QStringList{"BSIT", "BSCS"}));
 }
 
 void TestDatabaseViewModel::onBulkUpdateFinishedSuccessSetsStatusReloadsAndFinishes()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     StudentRecord r; r.schoolId = "A"; r.name = "Ann";
     vm.onSearchFinished(SearchOutcome::Results, {r}, "", "", 1);
 
@@ -361,7 +389,8 @@ void TestDatabaseViewModel::onBulkUpdateFinishedSuccessSetsStatusReloadsAndFinis
 
 void TestDatabaseViewModel::onBulkUpdateFinishedNoChangeSetsStatusAndFinishes()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy finishedSpy(&vm, &DatabaseViewModel::editFinished);
     BulkUpdateResult res; res.ok = true; res.updatedCount = 0;
     vm.onBulkUpdateFinished(res);
@@ -373,7 +402,8 @@ void TestDatabaseViewModel::onBulkUpdateFinishedNoChangeSetsStatusAndFinishes()
 
 void TestDatabaseViewModel::onBulkUpdateFinishedAuthFailureSetsAuthStateKeepsOpen()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy finishedSpy(&vm, &DatabaseViewModel::editFinished);
     BulkUpdateResult res; res.ok = false; res.message = "Invalid admin key";
     vm.onBulkUpdateFinished(res);
@@ -385,7 +415,8 @@ void TestDatabaseViewModel::onBulkUpdateFinishedAuthFailureSetsAuthStateKeepsOpe
 
 void TestDatabaseViewModel::onBulkUpdateFinishedGenericFailureSetsStatusNoAuth()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy finishedSpy(&vm, &DatabaseViewModel::editFinished);
     BulkUpdateResult res; res.ok = false; res.message = "Some updates failed, rolled back";
     vm.onBulkUpdateFinished(res);
@@ -397,7 +428,8 @@ void TestDatabaseViewModel::onBulkUpdateFinishedGenericFailureSetsStatusNoAuth()
 
 void TestDatabaseViewModel::onBulkUpdateFailedSetsTransientStatus()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy finishedSpy(&vm, &DatabaseViewModel::editFinished);
     vm.onBulkUpdateFailed(QStringLiteral("Connection refused"));
     QVERIFY(!vm.authFailure());
@@ -409,9 +441,11 @@ void TestDatabaseViewModel::serverRejectionSharedByDeleteAndBulk()
 {
     // Same auth-failure message must produce the SAME auth state + toast on
     // both the delete and the bulk-update paths (proves the shared helper).
-    DatabaseViewModel del;
+    OfflineHttp delHttp;
+    DatabaseViewModel del(nullptr, &delHttp.http);
     del.onDeleteFinished(false, 2, QStringLiteral("Invalid admin key"));
-    DatabaseViewModel bulk;
+    OfflineHttp bulkHttp;
+    DatabaseViewModel bulk(nullptr, &bulkHttp.http);
     BulkUpdateResult res; res.ok = false; res.message = "Invalid admin key";
     bulk.onBulkUpdateFinished(res);
     QCOMPARE(del.authFailure(), true);
@@ -420,8 +454,10 @@ void TestDatabaseViewModel::serverRejectionSharedByDeleteAndBulk()
 
     // And a generic (non-auth) message stays non-auth on both, using each
     // path's own fallback when empty.
-    DatabaseViewModel del2;  del2.onDeleteFinished(false, 1, QString());
-    DatabaseViewModel bulk2; BulkUpdateResult r2; r2.ok = false; bulk2.onBulkUpdateFinished(r2);
+    OfflineHttp del2Http;
+    DatabaseViewModel del2(nullptr, &del2Http.http);  del2.onDeleteFinished(false, 1, QString());
+    OfflineHttp bulk2Http;
+    DatabaseViewModel bulk2(nullptr, &bulk2Http.http); BulkUpdateResult r2; r2.ok = false; bulk2.onBulkUpdateFinished(r2);
     QCOMPARE(del2.authFailure(), false);
     QCOMPARE(bulk2.authFailure(), false);
     QCOMPARE(del2.statusMessage(), QStringLiteral("Delete failed."));
@@ -436,7 +472,8 @@ void TestDatabaseViewModel::saveEditEntersGuardedPath()
     // tst_studentcontroller::bulkUpdate_buildsFormBodyWithStudentsJsonAndAdminKey.
     // Here we only prove saveEdit does not early-return: with a located record
     // it leaves edit state intact and fires without crashing.
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     AdminSession::instance().setKey("held-key");
     StudentRecord r; r.schoolId = "A"; r.name = "Ann"; r.department = "CCS"; r.course = "BSIT";
     vm.onSearchFinished(SearchOutcome::Results, {r}, "", "", 1);
@@ -480,7 +517,8 @@ void TestDatabaseViewModel::buildBulkUpdatesOverridesOnlyToggledFieldsAndCarries
 
 void TestDatabaseViewModel::couplingDepartmentDrivesCourseToggle()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.setChangeDepartment(true);
     QCOMPARE(vm.changeCourse(), true);           // dept ON forces course ON
     vm.setBulkCourse("BSBA");
@@ -491,28 +529,32 @@ void TestDatabaseViewModel::couplingDepartmentDrivesCourseToggle()
 
 void TestDatabaseViewModel::setChangeCourseWithoutDepartmentIsNoOp()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.setChangeCourse(true);                     // no department toggled
     QCOMPARE(vm.changeCourse(), false);           // guarded no-op
 }
 
 void TestDatabaseViewModel::setChangeCourseCannotDesyncFromDepartment()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.setChangeDepartment(true);          // couples: changeCourse becomes true
     QCOMPARE(vm.changeCourse(), true);
     vm.setChangeCourse(false);             // independent disable must be REJECTED
     QCOMPARE(vm.changeCourse(), true);     // stays coupled to department
 
     // Independent enable without department also stays a no-op (existing contract).
-    DatabaseViewModel vm2;
+    OfflineHttp vm2Http;
+    DatabaseViewModel vm2(nullptr, &vm2Http.http);
     vm2.setChangeCourse(true);
     QCOMPARE(vm2.changeCourse(), false);
 }
 
 void TestDatabaseViewModel::setBulkDepartmentClearsCourseValue()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.setChangeDepartment(true);
     vm.setBulkDepartment("CCS");
     vm.setBulkCourse("BSIT");
@@ -522,14 +564,16 @@ void TestDatabaseViewModel::setBulkDepartmentClearsCourseValue()
 
 void TestDatabaseViewModel::canApplyBulkGating()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     QCOMPARE(vm.canApplyBulk(), false);                    // nothing toggled
     vm.setChangeYearLevel(true);
     QCOMPARE(vm.canApplyBulk(), false);                    // toggled but empty value
     vm.setBulkYearLevel("3");
     QCOMPARE(vm.canApplyBulk(), true);                     // one valid change
     // Department requires a course too.
-    DatabaseViewModel vm2;
+    OfflineHttp vm2Http;
+    DatabaseViewModel vm2(nullptr, &vm2Http.http);
     vm2.setChangeDepartment(true);
     vm2.setBulkDepartment("CBA");
     QCOMPARE(vm2.canApplyBulk(), false);                   // dept set, course still empty
@@ -539,7 +583,8 @@ void TestDatabaseViewModel::canApplyBulkGating()
 
 void TestDatabaseViewModel::bulkChangeSummaryListsOnlyToggledInOrder()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.setChangeDepartment(true);  vm.setBulkDepartment("CBA");  vm.setBulkCourse("BSBA");
     vm.setChangeStatus(true);      vm.setBulkStatus("Inactive");
     QCOMPARE(vm.bulkChangeSummary(),
@@ -550,7 +595,8 @@ void TestDatabaseViewModel::bulkChangeSummaryListsOnlyToggledInOrder()
 
 void TestDatabaseViewModel::courseTargetRoutesBulkVsSingle()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.setBulkDepartment("CBA");                 // sets target = BulkEdit (+ fires a load)
     vm.onEditCoursesLoaded({"BSBA", "BSA"});
     QCOMPARE(vm.bulkCourses(), (QStringList{"BSBA", "BSA"}));
@@ -566,7 +612,8 @@ void TestDatabaseViewModel::courseTargetRoutesBulkVsSingle()
 
 void TestDatabaseViewModel::beginBulkEditSelectedGuardsBelowTwo()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     StudentRecord a; a.schoolId="A"; a.name="Ann";
     vm.onSearchFinished(SearchOutcome::Results, {a}, "", "", 1);
     vm.students()->toggle("A");                   // only 1 selected
@@ -577,7 +624,8 @@ void TestDatabaseViewModel::beginBulkEditSelectedGuardsBelowTwo()
 
 void TestDatabaseViewModel::beginBulkEditSelectedResetsStateAndEmitsReady()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     StudentRecord a; a.schoolId="A"; a.name="Ann";
     StudentRecord b; b.schoolId="B"; b.name="Ben";
     vm.onSearchFinished(SearchOutcome::Results, {a, b}, "", "", 1);
@@ -594,7 +642,8 @@ void TestDatabaseViewModel::beginBulkEditSelectedResetsStateAndEmitsReady()
 
 void TestDatabaseViewModel::onBulkUpdateFinishedPluralCountMessage()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     BulkUpdateResult res; res.ok = true; res.updatedCount = 3;
     vm.onBulkUpdateFinished(res);
     QCOMPARE(vm.statusMessage(), QStringLiteral("Updated 3 students"));
@@ -602,7 +651,8 @@ void TestDatabaseViewModel::onBulkUpdateFinishedPluralCountMessage()
 
 void TestDatabaseViewModel::applyBulkEditRoutesBulkFinishedAndClearsBusy()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     AdminSession::instance().setKey("held-key");
     StudentRecord a; a.schoolId="A"; a.name="Ann"; a.status="Active";
     StudentRecord b; b.schoolId="B"; b.name="Ben"; b.status="Active";
@@ -628,7 +678,8 @@ void TestDatabaseViewModel::applyBulkEditRoutesBulkFinishedAndClearsBusy()
 
 void TestDatabaseViewModel::applyBulkEditGuardsEmptyInvalidAndReentry()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     AdminSession::instance().setKey("held-key");
     // No selection -> no-op, never goes busy.
     vm.applyBulkEdit();
@@ -654,7 +705,8 @@ void TestDatabaseViewModel::applyBulkEditGuardsEmptyInvalidAndReentry()
 
 void TestDatabaseViewModel::canRegisterGatingRequiresSchoolIdAndName()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     QCOMPARE(vm.canRegister(), false);
     vm.setRegSchoolId("2023-050");
     QCOMPARE(vm.canRegister(), false);                 // name still empty
@@ -666,7 +718,8 @@ void TestDatabaseViewModel::canRegisterGatingRequiresSchoolIdAndName()
 
 void TestDatabaseViewModel::beginRegisterResetsFieldsClearsDuplicateAndEmitsReady()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.setRegSchoolId("2023-050"); vm.setRegName("Ana");
     vm.onRegisterFinished(RegisterOutcome::Duplicate, QString());   // set regDuplicate
     QVERIFY(vm.regDuplicate());
@@ -682,7 +735,8 @@ void TestDatabaseViewModel::beginRegisterResetsFieldsClearsDuplicateAndEmitsRead
 
 void TestDatabaseViewModel::setRegSchoolIdClearsDuplicate()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.onRegisterFinished(RegisterOutcome::Duplicate, QString());
     QVERIFY(vm.regDuplicate());
     vm.setRegSchoolId("2023-051");                     // editing the rejected value clears it
@@ -691,7 +745,8 @@ void TestDatabaseViewModel::setRegSchoolIdClearsDuplicate()
 
 void TestDatabaseViewModel::setRegDepartmentRoutesCoursesToRegisterTarget()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.setRegDepartment("CCS");                        // sets target = Register (+ fires a load)
     vm.onEditCoursesLoaded({"BSIT", "BSCS"});
     QCOMPARE(vm.regCourses(), (QStringList{"BSIT", "BSCS"}));
@@ -701,7 +756,8 @@ void TestDatabaseViewModel::setRegDepartmentRoutesCoursesToRegisterTarget()
 
 void TestDatabaseViewModel::setRegPhotoAndClearSetsAndClearsPhotoName()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.setRegPhoto(QUrl::fromLocalFile("C:/tmp/ana_photo.jpg"));
     QCOMPARE(vm.regPhotoName(), QStringLiteral("ana_photo.jpg"));
     vm.clearRegPhoto();
@@ -710,7 +766,8 @@ void TestDatabaseViewModel::setRegPhotoAndClearSetsAndClearsPhotoName()
 
 void TestDatabaseViewModel::onRegisterFinishedSuccessSetsStatusReloadsAndFinishes()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.setRegSchoolId("2023-050"); vm.setRegName("Ana Reyes");
     QSignalSpy finishedSpy(&vm, &DatabaseViewModel::registerFinished);
     vm.onRegisterFinished(RegisterOutcome::Success, QStringLiteral("Student registered successfully"));
@@ -722,7 +779,8 @@ void TestDatabaseViewModel::onRegisterFinishedSuccessSetsStatusReloadsAndFinishe
 
 void TestDatabaseViewModel::onRegisterFinishedDuplicateSetsFlagNoFinishNoReload()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.setRegSchoolId("2023-050"); vm.setRegName("Ana");
     QSignalSpy finishedSpy(&vm, &DatabaseViewModel::registerFinished);
     vm.onRegisterFinished(RegisterOutcome::Duplicate, QString());
@@ -733,7 +791,8 @@ void TestDatabaseViewModel::onRegisterFinishedDuplicateSetsFlagNoFinishNoReload(
 
 void TestDatabaseViewModel::onRegisterFinishedAuthFailureSetsAuthStateKeepsOpen()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy finishedSpy(&vm, &DatabaseViewModel::registerFinished);
     vm.onRegisterFinished(RegisterOutcome::Error, QStringLiteral("Invalid admin key"));
     QVERIFY(vm.authFailure());
@@ -743,7 +802,8 @@ void TestDatabaseViewModel::onRegisterFinishedAuthFailureSetsAuthStateKeepsOpen(
 
 void TestDatabaseViewModel::onRegisterFinishedGenericErrorSetsStatusNoAuth()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.onRegisterFinished(RegisterOutcome::Error, QStringLiteral("School ID and Name are required."));
     QVERIFY(!vm.authFailure());
     QCOMPARE(vm.statusMessage(), QStringLiteral("School ID and Name are required."));
@@ -751,7 +811,8 @@ void TestDatabaseViewModel::onRegisterFinishedGenericErrorSetsStatusNoAuth()
 
 void TestDatabaseViewModel::onRegisterFailedSetsTransientStatusClearsBusy()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.onRegisterFailed(QStringLiteral("Connection refused"));
     QVERIFY(!vm.authFailure());
     QVERIFY(!vm.statusMessage().isEmpty());
@@ -760,7 +821,8 @@ void TestDatabaseViewModel::onRegisterFailedSetsTransientStatusClearsBusy()
 
 void TestDatabaseViewModel::registerStudentReentryGuard()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     AdminSession::instance().setKey("held-key");
     // No School ID/Name -> canRegister false -> no-op, never goes busy.
     vm.registerStudent();
@@ -776,7 +838,8 @@ void TestDatabaseViewModel::registerStudentReentryGuard()
 
 void TestDatabaseViewModel::deactivateGuardsEmptyDepartmentAndReentry()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     AdminSession::instance().setKey("held-key");
 
     vm.deactivateDepartment();               // m_department is "" -> no-op
@@ -791,7 +854,8 @@ void TestDatabaseViewModel::deactivateGuardsEmptyDepartmentAndReentry()
 
 void TestDatabaseViewModel::deleteGuardsEmptyDepartmentAndReentry()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     AdminSession::instance().setKey("held-key");
 
     vm.deleteDepartment();                    // "" -> no-op
@@ -806,7 +870,8 @@ void TestDatabaseViewModel::deleteGuardsEmptyDepartmentAndReentry()
 
 void TestDatabaseViewModel::deptOpBusyTogglesAroundDeactivate()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     AdminSession::instance().setKey("k");
     vm.setDepartment("CE");
     QSignalSpy busySpy(&vm, &DatabaseViewModel::deptOpBusyChanged);
@@ -820,7 +885,8 @@ void TestDatabaseViewModel::deptOpBusyTogglesAroundDeactivate()
 
 void TestDatabaseViewModel::deactivateSuccessSetsStatusKeepsDepartment()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.setDepartment("CE");
     vm.onDepartmentOpFinished(StudentController::DeptOp::Deactivate, true, QString());
     QVERIFY(vm.statusMessage().contains("CE"));
@@ -829,7 +895,8 @@ void TestDatabaseViewModel::deactivateSuccessSetsStatusKeepsDepartment()
 
 void TestDatabaseViewModel::deleteSuccessResetsDepartmentFilterAndClearsCourse()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.setDepartment("CE");
     vm.setCourse("BSCpE");
     vm.onDepartmentOpFinished(StudentController::DeptOp::Delete, true, QString());
@@ -842,7 +909,8 @@ void TestDatabaseViewModel::deleteSuccessResetsDepartmentFilterAndClearsCourse()
 
 void TestDatabaseViewModel::deptOpSuccessClearsAuthFailure()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.setDepartment("CE");
     // Simulate a prior auth failure, then a recovered op.
     vm.onDepartmentOpFinished(StudentController::DeptOp::Deactivate, false,
@@ -854,7 +922,8 @@ void TestDatabaseViewModel::deptOpSuccessClearsAuthFailure()
 
 void TestDatabaseViewModel::deptOpAuthFailureSetsAuthState()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.setDepartment("CE");
     vm.onDepartmentOpFinished(StudentController::DeptOp::Delete, false,
                               QStringLiteral("Admin authentication required"));
@@ -864,13 +933,48 @@ void TestDatabaseViewModel::deptOpAuthFailureSetsAuthState()
 
 void TestDatabaseViewModel::deptOpTransportFailureSetsStatusNoAuth()
 {
-    DatabaseViewModel vm;
+    OfflineHttp vmHttp;
+    DatabaseViewModel vm(nullptr, &vmHttp.http);
     vm.setDepartment("CE");
     vm.onDepartmentOpFailed(StudentController::DeptOp::Delete,
                             QStringLiteral("Connection refused"));
     QCOMPARE(vm.authFailure(), false);
     QVERIFY(!vm.statusMessage().isEmpty());
     QCOMPARE(vm.deptOpBusy(), false);
+}
+
+void TestDatabaseViewModel::defaultConstructionUsesOneSeamManager()
+{
+    // One client per owner: the VM owns exactly one HttpClient, and both
+    // StudentControllers (table + edit) hold that client's PolicyEnforcingNam.
+    DatabaseViewModel vm;
+    const QList<HttpClient *> clients = vm.findChildren<HttpClient *>();
+    QCOMPARE(clients.size(), 1);
+    QCOMPARE(vm.findChildren<PolicyEnforcingNam *>().size(), 1);
+    QNetworkAccessManager *seamManager = clients.first()->manager();
+    QVERIFY(qobject_cast<PolicyEnforcingNam *>(seamManager));
+
+    const QList<StudentController *> controllers = vm.findChildren<StudentController *>();
+    QCOMPARE(controllers.size(), 2);
+    for (StudentController *c : controllers)
+        QCOMPARE(c->networkManager(), seamManager);
+}
+
+void TestDatabaseViewModel::bothControllersUseInjectedClient()
+{
+    CapturingNam nam;
+    HttpClient http(nullptr, &nam);
+    DatabaseViewModel vm(nullptr, &http);
+    QVERIFY(vm.findChildren<PolicyEnforcingNam *>().isEmpty());
+    const QList<StudentController *> controllers = vm.findChildren<StudentController *>();
+    QCOMPARE(controllers.size(), 2);
+    for (StudentController *c : controllers)
+        QCOMPARE(c->networkManager(), static_cast<QNetworkAccessManager *>(&nam));
+
+    vm.reloadTable();                                   // table controller
+    QCOMPARE(nam.lastUrl, ApiConfig::endpoint(QStringLiteral("search_students.php")));
+    vm.setEditDepartment(QStringLiteral("CCS"));        // edit controller
+    QCOMPARE(nam.lastUrl, ApiConfig::endpoint(QStringLiteral("get_courses_by_department.php")));
 }
 
 QTEST_MAIN(TestDatabaseViewModel)

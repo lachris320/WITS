@@ -9,6 +9,7 @@
 #include "studentdata.h"
 
 class QNetworkAccessManager;
+class HttpClient;
 class StudentController;
 
 // Search screen VM (spec §6.2). Wraps StudentController: no new query endpoint,
@@ -25,7 +26,9 @@ class SearchViewModel : public QObject
     Q_PROPERTY(QString errorText READ errorText NOTIFY errorTextChanged)
 
 public:
-    explicit SearchViewModel(QObject *parent = nullptr);
+    // http: injection seam for tests (HttpClient wrapping a CapturingNam).
+    // Null in production: the VM owns an HttpClient (transport seam).
+    explicit SearchViewModel(QObject *parent = nullptr, HttpClient *http = nullptr);
 
     SearchResultsModel *results() { return &m_results; }
     QStringList courses() const { return m_courses; }
@@ -90,7 +93,8 @@ private:
     // advances the high-water mark. See the class-level race-fix note below.
     bool acceptRequest(quint64 requestId);
 
-    QNetworkAccessManager *m_nam = nullptr;
+    HttpClient *m_http = nullptr;              // injected, or an owned child
+    QNetworkAccessManager *m_nam = nullptr;    // m_http->manager(); non-owning
     StudentController *m_controller = nullptr;
     SearchResultsModel m_results;
     QStringList m_courses;

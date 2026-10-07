@@ -27,8 +27,6 @@
 // stale, so the list can only shrink. It is empty once S1a is complete.
 namespace {
 const QStringList kPendingMigration = {
-    QStringLiteral("quick/viewmodels/DatabaseViewModel.cpp"),        // Task 11
-    QStringLiteral("quick/viewmodels/SearchViewModel.cpp"),          // Task 11
     QStringLiteral("quick/viewmodels/ImportViewModel.cpp"),          // Task 12
     QStringLiteral("quick/viewmodels/ReportingViewModel.cpp"),       // Task 12
     QStringLiteral("quick/viewmodels/SettingsViewModel.cpp"),        // Task 12
@@ -57,8 +55,6 @@ const QStringList kCoreNetworkClasses = {
 // entries; empty once S1a is complete. A listed file that no longer offends
 // FAILS as stale.
 const QStringList kPendingTestMigration = {
-    QStringLiteral("quick/tests/tst_databaseviewmodel.cpp"),      // Task 11
-    QStringLiteral("quick/tests/tst_searchviewmodel.cpp"),        // Task 11
     QStringLiteral("quick/tests/tst_importviewmodel.cpp"),        // Task 12
     QStringLiteral("quick/tests/tst_reportingviewmodel.cpp"),     // Task 12
     QStringLiteral("quick/tests/tst_settingsviewmodel.cpp"),      // Task 12

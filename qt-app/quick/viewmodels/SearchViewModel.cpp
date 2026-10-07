@@ -3,10 +3,12 @@
 #include <QNetworkAccessManager>
 #include "studentcontroller.h"
 #include "AdminSession.h"
+#include "transport/httpclient.h"
 
-SearchViewModel::SearchViewModel(QObject *parent)
+SearchViewModel::SearchViewModel(QObject *parent, HttpClient *http)
     : QObject(parent)
-    , m_nam(new QNetworkAccessManager(this))
+    , m_http(http ? http : new HttpClient(this))
+    , m_nam(m_http->manager())
     , m_controller(new StudentController(m_nam, this))
 {
     connect(m_controller, &StudentController::searchFinished,

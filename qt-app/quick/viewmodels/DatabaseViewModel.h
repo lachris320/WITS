@@ -10,6 +10,7 @@
 #include "studentcontroller.h"
 
 class QNetworkAccessManager;
+class HttpClient;
 
 // The operator's bulk-edit choices: a toggle + value per editable field.
 // Passed to DatabaseViewModel::buildBulkUpdates (pure, unit-tested).
@@ -76,7 +77,10 @@ class DatabaseViewModel : public QObject
     Q_PROPERTY(bool regDuplicate READ regDuplicate NOTIFY regDuplicateChanged)
     Q_PROPERTY(bool deptOpBusy READ deptOpBusy NOTIFY deptOpBusyChanged)
 public:
-    explicit DatabaseViewModel(QObject *parent = nullptr);
+    // http: injection seam for tests (HttpClient wrapping a CapturingNam /
+    // OfflineHttp). Null in production: the VM owns ONE HttpClient (transport
+    // seam); the table and the edit StudentController both use its manager.
+    explicit DatabaseViewModel(QObject *parent = nullptr, HttpClient *http = nullptr);
 
     enum class EditMode     { NoEdit, SingleEdit, BulkEdit };
     enum class CourseTarget { SingleEdit, BulkEdit, Register };
@@ -270,7 +274,8 @@ private:
     // Every setter re-emits the two derived read-outs.
     void emitBulkDerivedChanged();
 
-    QNetworkAccessManager *m_nam = nullptr;
+    HttpClient *m_http = nullptr;              // injected, or an owned child
+    QNetworkAccessManager *m_nam = nullptr;    // m_http->manager(); non-owning; both controllers
     StudentController *m_controller = nullptr;
     StudentsTableModel m_students;
     QStringList m_departments, m_courses;
@@ -282,7 +287,6 @@ private:
     bool m_lastCanEdit = false;
     quint64 m_latestAppliedRequestId = 0;
 
-    QNetworkAccessManager *m_editNam = nullptr;
     StudentController *m_editController = nullptr;
     QString m_editSchoolId, m_editName, m_editYearLevel, m_editGender, m_editStatus;
     QString m_editDepartment, m_editCourse, m_editCode;
