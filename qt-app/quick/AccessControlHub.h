@@ -11,6 +11,7 @@
 #include "accesscontrol/accessproviderfactory.h"
 #include "accesscontrol/accesstypes.h"
 
+class HttpClient;
 class QNetworkAccessManager;
 namespace AccessControl { class EventBus; class AccessControlService; }
 
@@ -31,8 +32,14 @@ class AccessControlHub : public QObject
     Q_PROPERTY(int connectionState READ connectionState NOTIFY connectionStateChanged)
     Q_PROPERTY(QDateTime lastContactAt READ lastContactAt NOTIFY lastContactChanged)
 public:
-    explicit AccessControlHub(QNetworkAccessManager *injectedNam = nullptr,
-                              QObject *parent = nullptr);
+    // http: test seam (an HttpClient wrapping SequencedNam / OfflineHttp).
+    // Null in production: the hub owns an HttpClient (transport seam, S1 spec
+    // section 3). Same (parent, http) order as every ViewModel.
+    explicit AccessControlHub(QObject *parent = nullptr, HttpClient *http = nullptr);
+
+    // The client's manager - the one handed to every TurnstileProvider this
+    // hub creates. Lets tests prove production wiring (PolicyEnforcingNam).
+    QNetworkAccessManager *networkManager() const { return m_nam; }
     ~AccessControlHub() override;
 
     // Must run before the QML engine loads (enableLocked is CONSTANT).
@@ -68,14 +75,15 @@ private:
     static void persistEnabled(bool on);
 
     // Declaration order fixes teardown order: reverse destruction is
-    // service -> factory -> owned NAM -> bus, so the service tears down the
-    // provider (which aborts its reply) while the NAM is still alive.
+    // service -> factory -> owned client (and its manager) -> bus, so the
+    // service tears down the provider (which aborts its reply) while the
+    // manager is still alive.
     std::unique_ptr<AccessControl::EventBus> m_bus;
-    std::unique_ptr<QNetworkAccessManager> m_ownedNam;   // only when self-created
+    std::unique_ptr<HttpClient> m_ownedClient;            // only when self-created
     AccessControl::AccessProviderFactory m_factory;      // plain value member
     std::unique_ptr<AccessControl::AccessControlService> m_service;
 
-    QNetworkAccessManager *m_nam = nullptr;   // owned-or-injected; non-owning ptr
+    QNetworkAccessManager *m_nam = nullptr;   // the client's manager; non-owning ptr
 
     // Retained by initialize() on EVERY path (incl. flag-off) so a later
     // runtime enable has a descriptor + config to pass.

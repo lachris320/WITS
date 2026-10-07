@@ -6,6 +6,7 @@
 
 #include "AccessControlHub.h"
 #include "PolicyNamFactory.h"
+#include "offlinehttp.h"
 #include "transport/policyenforcingnam.h"
 #include "transport/transportpolicy.h"
 
@@ -34,7 +35,8 @@ void TestAppShell::loadsWithZeroWarnings()
     TransportPolicy::setCurrent(TransportPolicy::makePassthrough());
     PolicyNamFactory namFactory;          // declared BEFORE engine -> outlives it
 
-    AccessControlHub hub;                 // default settings, no env -> disabled
+    OfflineHttp hubHttp;                  // the hub can never reach a backend in tests
+    AccessControlHub hub(nullptr, &hubHttp.http);   // default settings, no env -> disabled
     AccessControlHub::setInstance(&hub);
 
     QQmlApplicationEngine engine;         // declared AFTER hub -> engine dies first

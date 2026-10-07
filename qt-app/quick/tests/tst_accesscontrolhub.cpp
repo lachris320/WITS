@@ -5,6 +5,9 @@
 #include "apiconfig.h"
 #include "appsettings.h"
 #include "sequencednam.h"
+#include "offlinehttp.h"
+#include "transport/httpclient.h"
+#include "transport/policyenforcingnam.h"
 #include "accesscontrol/accesstypes.h"
 
 using namespace AccessControl;
@@ -38,6 +41,8 @@ private slots:
     void enableLocked_refusesDisable();
     void failedStartupKeepsIntent();
     void connectionStateRelaysService();
+    void defaultHubManagerIsSeamManager();
+    void injectedClientManagerReachesTheProvider();
     void lastContactAdvancesPerPoll();
     void stateOnlyHealthChangeDoesNotEmitLastContact();
     void contactAgeText_delegatesToPureFormatter();
@@ -87,7 +92,8 @@ void TestAccessControlHub::toAccessEntry_unknownStudent()
 void TestAccessControlHub::disabledByDefault_inert()
 {
     SequencedNam nam;
-    AccessControlHub hub(&nam);
+    HttpClient http(nullptr, &nam);
+    AccessControlHub hub(nullptr, &http);
     QSignalSpy spy(&hub, &AccessControlHub::entryObserved);
     hub.initialize();                       // accessControl/enabled defaults false
     QVERIFY(!hub.isAccessEnabled());
@@ -100,7 +106,8 @@ void TestAccessControlHub::settingEnables()
 {
     { AppSettings s; s.setValue("accessControl/enabled", true); s.sync(); }
     SequencedNam nam;
-    AccessControlHub hub(&nam);
+    HttpClient http(nullptr, &nam);
+    AccessControlHub hub(nullptr, &http);
     hub.initialize();
     QVERIFY(hub.isAccessEnabled());         // enabled by setting, no env
 }
@@ -110,7 +117,8 @@ void TestAccessControlHub::envZeroDoesNotForceOff_settingWins()
     qputenv("WITS_ACCESS_CONTROL", "0");    // 0 is NOT a force-off
     { AppSettings s; s.setValue("accessControl/enabled", true); s.sync(); }
     SequencedNam nam;
-    AccessControlHub hub(&nam);
+    HttpClient http(nullptr, &nam);
+    AccessControlHub hub(nullptr, &http);
     hub.initialize();
     QVERIFY(hub.isAccessEnabled());         // falls through to the (true) setting
 }
@@ -123,7 +131,8 @@ void TestAccessControlHub::envForceEnablesAndEmitsEntry()
     nam.enqueue(emptyPayload(3));           // baseline: cursor = 3
     nam.enqueue(entryPayload(4, 4));        // poll -> entry 4
     nam.enqueue(emptyPayload(4));           // drain end
-    AccessControlHub hub(&nam);
+    HttpClient http(nullptr, &nam);
+    AccessControlHub hub(nullptr, &http);
     QSignalSpy spy(&hub, &AccessControlHub::entryObserved);
     hub.initialize();
     QVERIFY(hub.isAccessEnabled());
@@ -146,7 +155,8 @@ void TestAccessControlHub::connectionStateEnumOrderPinned()
 void TestAccessControlHub::setAccessEnabled_persistsTogglesAndIsIdempotent()
 {
     SequencedNam nam;                        // unqueued requests: valid empty polls
-    AccessControlHub hub(&nam);
+    HttpClient http(nullptr, &nam);
+    AccessControlHub hub(nullptr, &http);
     hub.initialize();                        // flag off: descriptor/config still retained
     QVERIFY(!hub.isAccessEnabled());
     QSignalSpy spy(&hub, &AccessControlHub::accessEnabledChanged);
@@ -175,7 +185,8 @@ void TestAccessControlHub::notLockedWhenEnabledBySetting()
 {
     { AppSettings s; s.setValue("accessControl/enabled", true); s.sync(); }
     SequencedNam nam;
-    AccessControlHub hub(&nam);
+    HttpClient http(nullptr, &nam);
+    AccessControlHub hub(nullptr, &http);
     hub.initialize();
     QVERIFY(hub.isAccessEnabled());
     QVERIFY(!hub.isEnableLocked());          // only the env var locks
@@ -187,7 +198,8 @@ void TestAccessControlHub::enableLocked_refusesDisable()
 {
     qputenv("WITS_ACCESS_CONTROL", "1");
     SequencedNam nam;
-    AccessControlHub hub(&nam);
+    HttpClient http(nullptr, &nam);
+    AccessControlHub hub(nullptr, &http);
     hub.initialize();
     QVERIFY(hub.isEnableLocked());
     QVERIFY(hub.isAccessEnabled());
@@ -205,7 +217,8 @@ void TestAccessControlHub::failedStartupKeepsIntent()
     SequencedNam nam;
     for (int i = 0; i < 4; ++i)              // baseline + backoff retries all fail
         nam.enqueue(QByteArray(), QNetworkReply::HostNotFoundError);
-    AccessControlHub hub(&nam);
+    HttpClient http(nullptr, &nam);
+    AccessControlHub hub(nullptr, &http);
     hub.initialize();                        // flag off
     hub.setAccessEnabled(true);
     QTRY_COMPARE_WITH_TIMEOUT(hub.connectionState(), int(ConnectionState::Degraded), 3000);
@@ -218,7 +231,8 @@ void TestAccessControlHub::connectionStateRelaysService()
     { AppSettings s; s.setValue("accessControl/enabled", true);
       s.setValue("accessControl/pollIntervalMs", 250); s.sync(); }
     SequencedNam nam;
-    AccessControlHub hub(&nam);
+    HttpClient http(nullptr, &nam);
+    AccessControlHub hub(nullptr, &http);
     QSignalSpy spy(&hub, &AccessControlHub::connectionStateChanged);
     hub.initialize();
     QTRY_COMPARE_WITH_TIMEOUT(hub.connectionState(), int(ConnectionState::Connected), 3000);
@@ -230,7 +244,8 @@ void TestAccessControlHub::lastContactAdvancesPerPoll()
     { AppSettings s; s.setValue("accessControl/enabled", true);
       s.setValue("accessControl/pollIntervalMs", 250); s.sync(); }
     SequencedNam nam;                        // every poll is a valid empty poll
-    AccessControlHub hub(&nam);
+    HttpClient http(nullptr, &nam);
+    AccessControlHub hub(nullptr, &http);
     hub.initialize();
     QTRY_COMPARE_WITH_TIMEOUT(hub.connectionState(), int(ConnectionState::Connected), 3000);
     QTRY_VERIFY_WITH_TIMEOUT(hub.lastContactAt().isValid(), 3000);
@@ -245,7 +260,8 @@ void TestAccessControlHub::stateOnlyHealthChangeDoesNotEmitLastContact()
     SequencedNam nam;
     for (int i = 0; i < 4; ++i)
         nam.enqueue(QByteArray(), QNetworkReply::HostNotFoundError);
-    AccessControlHub hub(&nam);
+    HttpClient http(nullptr, &nam);
+    AccessControlHub hub(nullptr, &http);
     hub.initialize();
     QSignalSpy contact(&hub, &AccessControlHub::lastContactChanged);
     QSignalSpy state(&hub, &AccessControlHub::connectionStateChanged);
@@ -258,7 +274,8 @@ void TestAccessControlHub::stateOnlyHealthChangeDoesNotEmitLastContact()
 
 void TestAccessControlHub::contactAgeText_delegatesToPureFormatter()
 {
-    AccessControlHub hub;                    // never initialized: stateless helper still works
+    OfflineHttp hubHttp;
+    AccessControlHub hub(nullptr, &hubHttp.http);                    // never initialized: stateless helper still works
     const QDateTime t(QDate(2026, 9, 30), QTime(8, 0, 0), QTimeZone::UTC);
     QCOMPARE(hub.contactAgeText(true, QVariant(t), QVariant(t.addSecs(5))),
              QStringLiteral("Last contact 5 s ago"));
@@ -275,7 +292,8 @@ void TestAccessControlHub::initializeUsesRuntimeBaseUrl()
     QVERIFY(ApiConfig::setBaseUrl(QStringLiteral("http://kiosk-server.test/loams_api/")));
     { AppSettings s; s.setValue("accessControl/enabled", true); s.sync(); }
     SequencedNam nam;
-    AccessControlHub hub(&nam);
+    HttpClient http(nullptr, &nam);
+    AccessControlHub hub(nullptr, &http);
     hub.initialize();
     QTRY_VERIFY_WITH_TIMEOUT(nam.requestCount() >= 1, 3000);
     const QUrl first = nam.urls.first();
@@ -292,12 +310,33 @@ void TestAccessControlHub::initializeCapturesBaseUrl_laterChangeIgnored()
     { AppSettings s; s.setValue("accessControl/enabled", true);
       s.setValue("accessControl/pollIntervalMs", 250); s.sync(); }
     SequencedNam nam;
-    AccessControlHub hub(&nam);
+    HttpClient http(nullptr, &nam);
+    AccessControlHub hub(nullptr, &http);
     hub.initialize();
     QVERIFY(ApiConfig::setBaseUrl(QStringLiteral("http://too-late.test/loams_api/")));
     QTRY_VERIFY_WITH_TIMEOUT(nam.requestCount() >= 2, 3000);
     for (const QUrl &u : std::as_const(nam.urls))
         QCOMPARE(u.host(), QStringLiteral("localhost"));
+}
+
+void TestAccessControlHub::defaultHubManagerIsSeamManager()
+{
+    // Production path: the manager every TurnstileProvider receives is the
+    // hub's own HttpClient's PolicyEnforcingNam (never initialize()d -> no polling).
+    AccessControlHub hub;
+    QVERIFY(qobject_cast<PolicyEnforcingNam *>(hub.networkManager()));
+}
+
+void TestAccessControlHub::injectedClientManagerReachesTheProvider()
+{
+    SequencedNam nam;                        // unqueued requests: valid empty polls
+    HttpClient http(nullptr, &nam);
+    AccessControlHub hub(nullptr, &http);
+    QCOMPARE(hub.networkManager(), static_cast<QNetworkAccessManager *>(&nam));
+    hub.initialize();
+    hub.setAccessEnabled(true);              // provider is created with hub.networkManager()
+    QTRY_VERIFY_WITH_TIMEOUT(nam.requestCount() >= 1, 3000);
+    QVERIFY(nam.lastUrl.path().endsWith(QStringLiteral("turnstile_display.php")));
 }
 
 QTEST_MAIN(TestAccessControlHub)
