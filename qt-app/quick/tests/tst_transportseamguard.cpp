@@ -318,6 +318,14 @@ void TestTransportSeamGuard::quickMainInstallsTransportBeforeLoad()
              "PolicyNamFactory must be declared before (so it outlives) the engine");
     QVERIFY2(install > engine && load > install,
              "the factory must be installed on the engine before the first QML load");
+    // Fail closed: the install result must guard an immediate `return -1;`
+    // (a real return, so it also holds in Release builds).
+    const QLatin1String guard("if (!PolicyNamFactory::installOn(engine, namFactory))");
+    const qsizetype guardAt = code.indexOf(guard);
+    const QString afterGuard = guardAt < 0 ? QString()
+        : code.mid(guardAt + guard.size()).trimmed();
+    QVERIFY2(guardAt >= 0 && afterGuard.startsWith(QLatin1String("return -1;")),
+             "a failed installOn() must abort startup (return -1), in Release builds too");
 }
 
 QTEST_APPLESS_MAIN(TestTransportSeamGuard)
