@@ -19,6 +19,10 @@ public:
     void enqueue(const QByteArray &body,
                  QNetworkReply::NetworkError error = QNetworkReply::NoError);
     void enqueueStall();
+    // When on, a request with nothing queued STALLS (finishes only via abort())
+    // instead of getting the default valid-empty-poll answer. Used by
+    // OfflineHttp so tests can never reach — or be answered as if by — a backend.
+    void setStallWhenEmpty(bool on) { m_stallWhenEmpty = on; }
     int requestCount() const { return m_requestCount; }
     int abortCount() const { return m_abortCount; }
     int maxActive() const { return m_maxActive; }   // peak concurrent in-flight replies
@@ -39,6 +43,7 @@ private:
     int m_abortCount = 0;
     int m_active = 0;
     int m_maxActive = 0;
+    bool m_stallWhenEmpty = false;
 };
 
 #endif // SEQUENCEDNAM_H

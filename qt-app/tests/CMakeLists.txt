@@ -447,5 +447,8 @@ wits_add_qttest(tst_httpclient
         ${CMAKE_SOURCE_DIR}/core/transport/transportpolicy.h
         ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
         ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
+        ${CMAKE_SOURCE_DIR}/testsupport/sequencednam.cpp
+        ${CMAKE_SOURCE_DIR}/testsupport/sequencednam.h
+        ${CMAKE_SOURCE_DIR}/testsupport/offlinehttp.h
     LIBS Qt${QT_VERSION_MAJOR}::Network
     INCLUDES ${CMAKE_SOURCE_DIR}/core ${CMAKE_SOURCE_DIR}/testsupport)

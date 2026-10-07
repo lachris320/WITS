@@ -57,6 +57,29 @@ const QStringList kCoreNetworkClasses = {
     QStringLiteral("core/accesscontrol/accessdecisionservice.cpp"),
     QStringLiteral("core/accesscontrol/turnstileprovider.cpp"),
 };
+
+// Test files that still construct a seam owner (network-owning ViewModel or
+// AccessControlHub) WITHOUT an injected fake manager. Tasks 8-12 delete their
+// entries; empty once S1a is complete. A listed file that no longer offends
+// FAILS as stale.
+const QStringList kPendingTestMigration = {
+    QStringLiteral("quick/tests/tst_appshell.cpp"),               // Task 8 (needs the hub's HttpClient ctor)
+    QStringLiteral("quick/tests/tst_accesscontrolhub.cpp"),       // Task 8
+    QStringLiteral("quick/tests/tst_accesscontrolviewmodel.cpp"), // Task 9
+    QStringLiteral("quick/tests/tst_dashboardviewmodel.cpp"),     // Task 9
+    QStringLiteral("quick/tests/tst_visitlogsviewmodel.cpp"),     // Task 9
+    QStringLiteral("quick/tests/tst_guestviewmodel.cpp"),         // Task 10
+    QStringLiteral("quick/tests/tst_kioskviewmodel.cpp"),         // Task 10
+    QStringLiteral("quick/tests/tst_databaseviewmodel.cpp"),      // Task 11
+    QStringLiteral("quick/tests/tst_searchviewmodel.cpp"),        // Task 11
+    QStringLiteral("quick/tests/tst_importviewmodel.cpp"),        // Task 12
+    QStringLiteral("quick/tests/tst_reportingviewmodel.cpp"),     // Task 12
+    QStringLiteral("quick/tests/tst_settingsviewmodel.cpp"),      // Task 12
+};
+
+const QString kOwnerTypes = QStringLiteral(
+    "(?:(?:Dashboard|VisitLogs|AccessControl|Kiosk|Guest|Search|Database|Import|Reporting|Settings)"
+    "ViewModel|AccessControlHub)");
 } // namespace
 
 class TestTransportSeamGuard : public QObject
@@ -66,6 +89,7 @@ private slots:
     void namConstructedOnlyInsideSeam();
     void coreNetworkClassesRequireInjectedManager();
     void noSslErrorBypassInClientSource();
+    void ownersInTestsUseFakeManagers();
 
 private:
     static QStringList sourceFiles(const QString &subdir, const QStringList &globs,
@@ -201,6 +225,77 @@ void TestTransportSeamGuard::noSslErrorBypassInClientSource()
     }
     QVERIFY2(hits.isEmpty(), qPrintable(
         QStringLiteral("SSL errors must never be ignored (spec §3): ") + hits.join(QStringLiteral(", "))));
+}
+
+void TestTransportSeamGuard::ownersInTestsUseFakeManagers()
+{
+    // A seam owner constructed in a test with no HttpClient argument builds a
+    // real manager aimed at the configured backend (default
+    // http://localhost/loams_api/) and could mutate a running XAMPP. Every test
+    // must pass an HttpClient over CapturingNam / SequencedNam / OfflineHttp.
+    // Exempt: functions named defaultConstruction* / defaultHub*, which only
+    // assert seam ownership and issue no request.
+    const QStringList files = sourceFiles(QStringLiteral("quick/tests"), {QStringLiteral("tst_*.cpp")}, {});
+    QVERIFY2(files.size() > 20, "scan found too few test files — is SRC_ROOT wrong?");
+    const QRegularExpression header(QStringLiteral("^void\\s+\\w+::(\\w+)\\s*\\("),
+                                    QRegularExpression::MultilineOption);
+    const QRegularExpression stackDefault(
+        QStringLiteral("^[ \\t]*(?:static\\s+)?") + kOwnerTypes
+            + QStringLiteral("\\s+\\w+\\s*(?:;|\\{\\s*\\}|\\([^,()]*\\))"),
+        QRegularExpression::MultilineOption);
+    const QRegularExpression heapDefault(
+        QStringLiteral("\\b(?:new\\s+|make_unique\\s*<\\s*)") + kOwnerTypes
+            + QStringLiteral("\\s*>?\\s*\\([^,()]*\\)"));
+
+    QStringList offenders;
+    for (const QString &rel : files) {
+        bool ok = false;
+        const QString code = stripComments(readSource(rel, &ok));
+        QVERIFY2(ok, qPrintable(QStringLiteral("cannot read ") + rel));
+        QList<QPair<qsizetype, QString>> functions;   // (start offset, name), in order
+        for (auto it = header.globalMatch(code); it.hasNext();) {
+            const QRegularExpressionMatch m = it.next();
+            functions.append({m.capturedStart(), m.captured(1)});
+        }
+        auto enclosing = [&functions](qsizetype pos) {
+            QString name;
+            for (const auto &f : functions) {
+                if (f.first > pos)
+                    break;
+                name = f.second;
+            }
+            return name;
+        };
+        bool offends = false;
+        for (const QRegularExpression *re : {&stackDefault, &heapDefault}) {
+            for (auto it = re->globalMatch(code); it.hasNext();) {
+                const QString fn = enclosing(it.next().capturedStart());
+                if (!fn.startsWith(QLatin1String("defaultConstruction"))
+                    && !fn.startsWith(QLatin1String("defaultHub")))
+                    offends = true;
+            }
+        }
+        if (offends)
+            offenders << rel;
+    }
+
+    QStringList unexpected;
+    QStringList stale;
+    for (const QString &o : offenders) {
+        if (!kPendingTestMigration.contains(o))
+            unexpected << o;
+    }
+    for (const QString &p : kPendingTestMigration) {
+        if (!offenders.contains(p))
+            stale << p;
+    }
+    QVERIFY2(unexpected.isEmpty(), qPrintable(
+        QStringLiteral("test constructs a seam owner without a fake manager (inject "
+                       "OfflineHttp / CapturingNam / SequencedNam via HttpClient): ")
+        + unexpected.join(QStringLiteral(", "))));
+    QVERIFY2(stale.isEmpty(), qPrintable(
+        QStringLiteral("Stale kPendingTestMigration entries (already migrated — delete them): ")
+        + stale.join(QStringLiteral(", "))));
 }
 
 QTEST_APPLESS_MAIN(TestTransportSeamGuard)

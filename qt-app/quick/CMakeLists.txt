@@ -158,6 +158,17 @@ target_include_directories(witsquickmodule PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/mo
 set(WITS_LOAMS_STATIC_LIBS
     witsquickmodule witsquickmoduleplugin witsquickmoduleplugin_init)
 
+# Fake managers for tests that construct seam owners (S1a transport seam):
+# CapturingNam / SequencedNam + the header-only OfflineHttp. Every quick test
+# that builds a ViewModel or AccessControlHub compiles these and adds
+# ${CMAKE_SOURCE_DIR}/testsupport to INCLUDES.
+set(WITS_TEST_NAM_SOURCES
+    ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
+    ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
+    ${CMAKE_SOURCE_DIR}/testsupport/sequencednam.cpp
+    ${CMAKE_SOURCE_DIR}/testsupport/sequencednam.h
+    ${CMAKE_SOURCE_DIR}/testsupport/offlinehttp.h)
+
 qt_add_executable(WITSQuick main.cpp)
 target_link_libraries(WITSQuick PRIVATE
     ${WITS_LOAMS_STATIC_LIBS}
@@ -167,9 +178,10 @@ set_target_properties(WITSQuick PROPERTIES WIN32_EXECUTABLE TRUE)
 
 # --- AppShell load test (C++ QtTest, offscreen) ---
 wits_add_qttest(tst_appshell
-    SOURCES tests/tst_appshell.cpp
+    SOURCES tests/tst_appshell.cpp ${WITS_TEST_NAM_SOURCES}
     LIBS ${WITS_LOAMS_STATIC_LIBS}
          Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
     OFFSCREEN)
 
 # --- RFID-in-QML spike test (C++ QtTest, offscreen) ---
@@ -317,8 +329,9 @@ wits_add_qttest(tst_adminsession
 
 # --- KioskViewModel + RecentLoginsModel unit test (C++ QtTest, offscreen) ---
 wits_add_qttest(tst_kioskviewmodel
-    SOURCES tests/tst_kioskviewmodel.cpp
+    SOURCES tests/tst_kioskviewmodel.cpp ${WITS_TEST_NAM_SOURCES}
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Quick Qt${QT_VERSION_MAJOR}::Network
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
     OFFSCREEN)
 
 # --- SchoolInfoViewModel unit test (C++ QtTest, offscreen: house
@@ -340,8 +353,9 @@ wits_add_qttest(tst_schoolinfoutil
 
 # --- GuestViewModel unit test (C++ QtTest, offscreen) ---
 wits_add_qttest(tst_guestviewmodel
-    SOURCES tests/tst_guestviewmodel.cpp
+    SOURCES tests/tst_guestviewmodel.cpp ${WITS_TEST_NAM_SOURCES}
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
     OFFSCREEN)
 
 # --- HttpForm pure-helper unit test (C++ QtTest, offscreen) ---
@@ -400,10 +414,7 @@ wits_add_qmltest(tst_qml_kiosk)
 # the provider with no live network; AppSettings isolation is compiled in by
 # wits_add_qttest. ---
 wits_add_qttest(tst_accesscontrolhub
-    SOURCES
-        tests/tst_accesscontrolhub.cpp
-        ${CMAKE_SOURCE_DIR}/testsupport/sequencednam.cpp
-        ${CMAKE_SOURCE_DIR}/testsupport/sequencednam.h
+    SOURCES tests/tst_accesscontrolhub.cpp ${WITS_TEST_NAM_SOURCES}
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
     INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
     OFFSCREEN)
@@ -412,9 +423,7 @@ wits_add_qttest(tst_accesscontrolhub
 # AdminSession's key through refresh(), captured via the CapturingNam harness
 # (qt-app/testsupport) — mirrors tst_visitlogsviewmodel's approach. ---
 wits_add_qttest(tst_dashboardviewmodel
-    SOURCES tests/tst_dashboardviewmodel.cpp
-        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
-        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
+    SOURCES tests/tst_dashboardviewmodel.cpp ${WITS_TEST_NAM_SOURCES}
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
     INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
     OFFSCREEN)
@@ -423,9 +432,7 @@ wits_add_qttest(tst_dashboardviewmodel
 # AdminSession's key through refresh(), captured via the CapturingNam harness
 # (qt-app/testsupport) — mirrors tst_databaseviewmodel's approach. ---
 wits_add_qttest(tst_visitlogsviewmodel
-    SOURCES tests/tst_visitlogsviewmodel.cpp
-        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
-        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
+    SOURCES tests/tst_visitlogsviewmodel.cpp ${WITS_TEST_NAM_SOURCES}
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
     INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
     OFFSCREEN)
@@ -434,17 +441,16 @@ wits_add_qttest(tst_visitlogsviewmodel
 # the POST body, 401/5xx/transport paths and the generation guard, all via the
 # CapturingNam harness (qt-app/testsupport) — no live network. ---
 wits_add_qttest(tst_accesscontrolviewmodel
-    SOURCES tests/tst_accesscontrolviewmodel.cpp
-        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
-        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
+    SOURCES tests/tst_accesscontrolviewmodel.cpp ${WITS_TEST_NAM_SOURCES}
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
     INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
     OFFSCREEN)
 
 # --- SearchViewModel unit test (C++ QtTest, offscreen) ---
 wits_add_qttest(tst_searchviewmodel
-    SOURCES tests/tst_searchviewmodel.cpp
+    SOURCES tests/tst_searchviewmodel.cpp ${WITS_TEST_NAM_SOURCES}
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
     OFFSCREEN)
 
 # --- DatabaseViewModel unit test (C++ QtTest, offscreen). The VM builds a real
@@ -452,8 +458,9 @@ wits_add_qttest(tst_searchviewmodel
 # fire-and-forget post(), so this needs a QCoreApplication (QTEST_MAIN, not
 # APPLESS) + Network/Gui + OFFSCREEN — mirrors tst_searchviewmodel. ---
 wits_add_qttest(tst_databaseviewmodel
-    SOURCES tests/tst_databaseviewmodel.cpp
+    SOURCES tests/tst_databaseviewmodel.cpp ${WITS_TEST_NAM_SOURCES}
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
     OFFSCREEN)
 
 # --- Admin screens Quick test (offscreen) ---
@@ -468,8 +475,9 @@ wits_add_qmltest(tst_qml_accesscontrol)
 # --- SettingsViewModel unit test (C++ QtTest, offscreen). Uses Network for
 # the async POST paths (T10-T13) and Gui via witsquickmodule propagation. ---
 wits_add_qttest(tst_settingsviewmodel
-    SOURCES tests/tst_settingsviewmodel.cpp
+    SOURCES tests/tst_settingsviewmodel.cpp ${WITS_TEST_NAM_SOURCES}
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
     OFFSCREEN)
 
 # --- ImportViewModel unit test (C++ QtTest, offscreen). The VM builds a real
@@ -477,8 +485,9 @@ wits_add_qttest(tst_settingsviewmodel
 # fire-and-forget post() (harmless, never resolves in-test), and the state
 # machine is driven via the public on* slots — mirrors tst_databaseviewmodel. ---
 wits_add_qttest(tst_importviewmodel
-    SOURCES tests/tst_importviewmodel.cpp
+    SOURCES tests/tst_importviewmodel.cpp ${WITS_TEST_NAM_SOURCES}
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
     OFFSCREEN)
 
 # --- ReportingViewModel unit test (C++ QtTest, offscreen). Builds a real
@@ -486,8 +495,9 @@ wits_add_qttest(tst_importviewmodel
 # fire-and-forget post() (harmless in-test), and the reply handlers are driven
 # via the public on* slots — mirrors tst_databaseviewmodel. ---
 wits_add_qttest(tst_reportingviewmodel
-    SOURCES tests/tst_reportingviewmodel.cpp
+    SOURCES tests/tst_reportingviewmodel.cpp ${WITS_TEST_NAM_SOURCES}
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
     OFFSCREEN)
 
 # --- Deprecated-token grep-guard (Phase 4d Task 12, C++ QtTest). Pure file

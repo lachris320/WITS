@@ -70,9 +70,9 @@ QNetworkReply *SequencedNam::createRequest(Operation op, const QNetworkRequest &
     noteActive();                       // track peak concurrency (must stay 1)
     lastUrl = request.url();
     urls.append(request.url());
-    Canned c = m_queue.isEmpty()
-                   ? Canned{QByteArrayLiteral("{\"status\":\"success\",\"latest_id\":0,\"entry\":null}"),
-                            QNetworkReply::NoError, false}
-                   : m_queue.dequeue();
+    Canned c = !m_queue.isEmpty() ? m_queue.dequeue()
+               : m_stallWhenEmpty ? Canned{QByteArray(), QNetworkReply::NoError, true}
+                                  : Canned{QByteArrayLiteral("{\"status\":\"success\",\"latest_id\":0,\"entry\":null}"),
+                                           QNetworkReply::NoError, false};
     return new CannedReply(op, request, c.body, c.error, c.stall, this);
 }

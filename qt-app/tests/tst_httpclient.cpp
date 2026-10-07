@@ -4,6 +4,7 @@
 #include <memory>
 
 #include "capturingnam.h"
+#include "offlinehttp.h"
 #include "transport/httpclient.h"
 #include "transport/policyenforcingnam.h"
 #include "transport/transportpolicy.h"
@@ -20,6 +21,7 @@ private slots:
     void injectedManagerIsUsedNotOwned();
     void requestsThroughInjectedManagerReachIt();
     void policySnapshotTakenAtConstruction();
+    void offlineHttpNeverAnswers();
 };
 
 void TestHttpClient::cleanup()
@@ -101,6 +103,22 @@ void TestHttpClient::policySnapshotTakenAtConstruction()
     HttpClient late;
     QCOMPARE(early.policy().get(), first.get());
     QVERIFY(late.policy().get() != first.get());
+}
+
+void TestHttpClient::offlineHttpNeverAnswers()
+{
+    // Test-safety helper: a request through OfflineHttp is recorded and then
+    // stays in flight — no backend, no canned answer — until it is aborted.
+    OfflineHttp offline;
+    std::unique_ptr<QNetworkReply> reply(offline.http.manager()->get(
+        QNetworkRequest(QUrl(QStringLiteral("http://localhost/loams_api/get_departments.php")))));
+    QCOMPARE(offline.nam.requestCount(), 1);
+    QCOMPARE(offline.nam.lastUrl.path(), QStringLiteral("/loams_api/get_departments.php"));
+    QTest::qWait(100);                       // negative assertion: nothing may answer
+    QVERIFY(!reply->isFinished());
+    reply->abort();
+    QVERIFY(reply->isFinished());
+    QCOMPARE(reply->error(), QNetworkReply::OperationCanceledError);
 }
 
 QTEST_MAIN(TestHttpClient)
