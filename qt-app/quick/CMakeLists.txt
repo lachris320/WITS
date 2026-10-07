@@ -191,6 +191,17 @@ wits_add_qttest(tst_policynamfactory
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Network
     OFFSCREEN)
 
+# --- S1a GATE G2 (C++ QtTest, offscreen): Qt's QML Image / Canvas.loadImage
+# fetch through the installed QQmlNetworkAccessManagerFactory's managers.
+# Loopback TinyHttpServer (127.0.0.1, ephemeral port) only. ---
+wits_add_qttest(tst_qmlfactorygate
+    SOURCES tests/tst_qmlfactorygate.cpp tests/RecordingPolicyNam.h
+        ${CMAKE_SOURCE_DIR}/testsupport/tinyhttpserver.cpp
+        ${CMAKE_SOURCE_DIR}/testsupport/tinyhttpserver.h
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Quick Qt${QT_VERSION_MAJOR}::Network
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport ${CMAKE_CURRENT_SOURCE_DIR}/tests
+    OFFSCREEN)
+
 # wits_add_qmltest(<name>)
 #
 # Registers one QuickTest target from tests/<name>.qml alone: the target runs
