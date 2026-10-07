@@ -499,6 +499,14 @@ wits_add_qttest(tst_notokenaliases
     DEFINES SRC_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
             SRC_QML_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
 
+# --- S1a transport-seam source guard (C++ QtTest). Pure file I/O over qt-app/
+# (no GUI -> QTEST_APPLESS_MAIN, no OFFSCREEN): no QNetworkAccessManager built
+# outside HttpClient/PolicyNamFactory and no SSL-error bypass anywhere in client
+# source. (The quick/main.cpp install-order guard is added in Task 7.) ---
+wits_add_qttest(tst_transportseamguard
+    SOURCES tests/tst_transportseamguard.cpp
+    DEFINES SRC_ROOT="${CMAKE_SOURCE_DIR}")
+
 # Coverage guard: before wits_add_qmltest, every QuickTest target scanned the
 # whole tests/ directory, so a new tst_*.qml was picked up automatically. Now
 # each target runs one file, so a tst_*.qml without its own wits_add_qmltest
