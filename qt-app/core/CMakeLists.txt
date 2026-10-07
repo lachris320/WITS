@@ -55,6 +55,7 @@ add_library(witscore STATIC
     accesscontrol/turnstileprovider.h accesscontrol/turnstileprovider.cpp
     accesscontrol/contactage.h accesscontrol/contactage.cpp
     transport/transportpolicy.h transport/transportpolicy.cpp
+    transport/policyenforcingnam.h transport/policyenforcingnam.cpp
 )
 
 # AUTOMOC required (7 Q_OBJECT classes: the five *Controller + BrandingController

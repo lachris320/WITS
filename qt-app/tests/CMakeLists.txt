@@ -419,3 +419,18 @@ wits_add_qttest(tst_transportpolicy
 # our code is held to -Werror.
 set_source_files_properties(${CMAKE_SOURCE_DIR}/core/transport/transportpolicy.cpp
     PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror")
+
+# --- S1a transport seam: PolicyEnforcingNam wire-level parity vs a plain
+# QNetworkAccessManager against the in-process loopback TinyHttpServer
+# (Network; no offscreen; no external network) ---
+wits_add_qttest(tst_policyenforcingnam
+    SOURCES
+        tst_policyenforcingnam.cpp
+        ${CMAKE_SOURCE_DIR}/core/transport/policyenforcingnam.cpp
+        ${CMAKE_SOURCE_DIR}/core/transport/policyenforcingnam.h
+        ${CMAKE_SOURCE_DIR}/core/transport/transportpolicy.cpp
+        ${CMAKE_SOURCE_DIR}/core/transport/transportpolicy.h
+        ${CMAKE_SOURCE_DIR}/testsupport/tinyhttpserver.cpp
+        ${CMAKE_SOURCE_DIR}/testsupport/tinyhttpserver.h
+    LIBS Qt${QT_VERSION_MAJOR}::Network
+    INCLUDES ${CMAKE_SOURCE_DIR}/core ${CMAKE_SOURCE_DIR}/testsupport)
