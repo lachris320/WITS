@@ -80,6 +80,7 @@ qt_add_qml_module(witsquickmodule
         qml/kiosk/GuestDialog.qml
     SOURCES
         HttpForm.h HttpForm.cpp
+        PolicyNamFactory.h PolicyNamFactory.cpp
         Initials.h Initials.cpp
         AdminSession.h AdminSession.cpp
         RfidQuickFilter.h RfidQuickFilter.cpp
@@ -181,6 +182,13 @@ wits_add_qttest(tst_rfidquickfilter
 wits_add_qttest(tst_themeviewmodel
     SOURCES tests/tst_themeviewmodel.cpp
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Svg
+    OFFSCREEN)
+
+# --- S1a transport seam: QML engine manager factory (C++ QtTest, offscreen:
+# witsquickmodule PUBLIC-propagates Qt::Gui) ---
+wits_add_qttest(tst_policynamfactory
+    SOURCES tests/tst_policynamfactory.cpp
+    LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Qml Qt${QT_VERSION_MAJOR}::Network
     OFFSCREEN)
 
 # wits_add_qmltest(<name>)
