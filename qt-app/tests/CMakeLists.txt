@@ -11,6 +11,10 @@ set_tests_properties(tst_rfidscandetector PROPERTIES
     ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1"
 )
 
+# Widgets-only tests: they exercise frozen legacy sources (root
+# rfidkeyboardfilter.cpp / the *.ui forms), so they build only with the legacy
+# target (LOAMS_BUILD_LEGACY_WIDGETS=ON). See LEGACY-WIDGETS.md.
+if(LOAMS_BUILD_LEGACY_WIDGETS)
 qt_add_executable(tst_rfidkeyboardfilter
     tst_rfidkeyboardfilter.cpp
     ${CMAKE_SOURCE_DIR}/rfidkeyboardfilter.cpp
@@ -27,6 +31,7 @@ add_test(NAME tst_rfidkeyboardfilter COMMAND tst_rfidkeyboardfilter)
 set_tests_properties(tst_rfidkeyboardfilter PROPERTIES
     ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1;QT_QPA_PLATFORM=offscreen"
 )
+endif()
 
 qt_add_executable(tst_apiconfig
     tst_apiconfig.cpp
@@ -51,6 +56,7 @@ set_tests_properties(tst_theme PROPERTIES
     ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1;QT_QPA_PLATFORM=offscreen"
 )
 
+if(LOAMS_BUILD_LEGACY_WIDGETS)   # Widgets-only (*.ui forms); see above
 qt_add_executable(tst_responsive_ui
     tst_responsive_ui.cpp
 )
@@ -66,6 +72,7 @@ add_test(NAME tst_responsive_ui COMMAND tst_responsive_ui)
 set_tests_properties(tst_responsive_ui PROPERTIES
     ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1;QT_QPA_PLATFORM=offscreen"
 )
+endif()
 
 qt_add_executable(tst_visitorcontroller
     tst_visitorcontroller.cpp

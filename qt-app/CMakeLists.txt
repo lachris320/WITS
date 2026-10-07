@@ -9,9 +9,19 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Rollback gate (proposal §7.6 / spec §2 Strategy A): keeps the legacy Widgets
-# app building until Phase 6 declares parity. Default ON for all of Phases 1–5.
-option(BUILD_LEGACY_WIDGETS "Build the legacy WITS Widgets executable" ON)
+# Legacy Widgets freeze (S1 transport-security spec §3 "Legacy Widgets source"):
+# the WITS target is deprecated / reference-only and is NOT built by default.
+# Developers may still build it with -DLOAMS_BUILD_LEGACY_WIDGETS=ON. It is never
+# deployable or security-supported; S1f release packaging rejects it.
+# See LEGACY-WIDGETS.md.
+option(LOAMS_BUILD_LEGACY_WIDGETS
+    "Build the frozen legacy WITS Widgets executable (reference only)" OFF)
+if(DEFINED BUILD_LEGACY_WIDGETS)
+    message(WARNING
+        "BUILD_LEGACY_WIDGETS is obsolete and ignored; use "
+        "-DLOAMS_BUILD_LEGACY_WIDGETS=ON (default OFF). Remove the stale cache "
+        "entry with: cmake -U BUILD_LEGACY_WIDGETS -B <build dir>")
+endif()
 
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Network Charts Test UiTools PrintSupport Svg Qml Quick QuickControls2 QuickTest)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Network Charts Test UiTools PrintSupport Svg Qml Quick QuickControls2 QuickDialogs2 QuickTest)
@@ -35,8 +45,8 @@ add_subdirectory(core)
 # --- New Qt Quick app (WITSQuick) + its QML module ---
 add_subdirectory(quick)
 
-# --- Legacy Widgets app (rollback until Phase 6) ---
-if(BUILD_LEGACY_WIDGETS)
+# --- Legacy Widgets app (FROZEN, reference only — LEGACY-WIDGETS.md) ---
+if(LOAMS_BUILD_LEGACY_WIDGETS)
     set(PROJECT_SOURCES
         main.cpp
         mainwindow.cpp
@@ -101,3 +111,14 @@ if(BUILD_LEGACY_WIDGETS)
 endif()
 
 add_subdirectory(tests)
+
+# Legacy Widgets freeze self-check: WITS and its two Widgets-only test targets
+# exist exactly when LOAMS_BUILD_LEGACY_WIDGETS is ON (default OFF). A plain
+# add_test (no executable of its own), like a cmake -P guard.
+add_test(NAME tst_legacywidgetsgate
+    COMMAND ${CMAKE_COMMAND}
+        -DOPTION=${LOAMS_BUILD_LEGACY_WIDGETS}
+        -DHAS_WITS=$<TARGET_EXISTS:WITS>
+        -DHAS_RFIDKBD=$<TARGET_EXISTS:tst_rfidkeyboardfilter>
+        -DHAS_RESPONSIVE=$<TARGET_EXISTS:tst_responsive_ui>
+        -P ${CMAKE_SOURCE_DIR}/cmake/CheckLegacyWidgetsGate.cmake)

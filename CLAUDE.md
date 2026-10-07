@@ -41,7 +41,7 @@
 - Build: `cmake --build qt-app/build`
 - Tests (once a Qt Test target exists): `ctest --test-dir qt-app/build --output-on-failure`
 - It's a GUI app — a clean build is necessary but not sufficient; run the executable you touched to verify behavior.
-- **Two executables:** `WITS` = the legacy Qt Widgets app (kept as a rollback; this is what is deployed at the client). `WITSQuick` = the LOAMS 2.0 Qt Quick app, where all 2.0 work lands. Smoke-test the one you changed.
+- **Two executables:** `WITSQuick` = the LOAMS 2.0 Qt Quick app, where all work lands (built by default). `WITS` = the legacy Qt Widgets app — **frozen, reference-only** (`qt-app/LEGACY-WIDGETS.md`), built only with `-DLOAMS_BUILD_LEGACY_WIDGETS=ON` (default OFF); the binary deployed at the client is preserved separately and is never rebuilt from this tree. Smoke-test `WITSQuick`.
 - **Windows MAX_PATH:** from this checkout's long path, the in-tree `qt-app/build` (and Qt Creator's default build dir) overflows the ~250-char object path for the QML module. Configure into a short external build dir instead, e.g. `cmake -S qt-app -B C:/b/<name> -G Ninja -DCMAKE_PREFIX_PATH=<Qt kit>/mingw_64`. Qt tools may not be on `PATH` — prepend the kit's `bin`, MinGW, CMake and Ninja dirs.
 - **QML is compiled in:** production `.qml` under `qt-app/quick/qml/` is baked into `witsquickmodule` (qmlcachegen/rcc), so edits take effect only after a rebuild. QuickTest `.qml` under `qt-app/quick/tests/` is read at runtime.
 - **Stale-binary trap:** several build dirs/binaries may exist, and Qt Creator builds the main checkout, not a worktree. Run the binary from the build dir that matches the branch under test.
