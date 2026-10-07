@@ -30,6 +30,10 @@
 // rendered by the production QML component — on an engine whose managers come
 // from a (recording) PolicyNamFactory installed via installOn(), against the
 // in-process loopback TinyHttpServer (127.0.0.1, ephemeral port; never XAMPP).
+// Only R2, R3, R4 and R6 prove the seam (the request appears in the request log
+// of a factory-made PolicyEnforcingNam). R1, R5, R7, R8 and R10 are regression /
+// scope guards: qrc compile integrity, sentinel/empty logic, local file: assets
+// (for a future S1e scheme policy) and the poster source tripwire.
 namespace {
 constexpr int kImageReady = 1;   // QQuickImageBase::Ready (QML Image.Ready)
 constexpr int kImageError = 3;   // QQuickImageBase::Error (QML Image.Error)
@@ -257,6 +261,7 @@ void TestQmlResourceInventory::defaultSentinelAndEmptyPhotoNeverRequested()
 void TestQmlResourceInventory::missingRemotePhotoFallsBackToInitials()
 {
     auto view = makeView();
+    QVERIFY(qobject_cast<PolicyEnforcingNam *>(view->engine()->networkAccessManager()));
     const QString missing = m_server.url(QStringLiteral("/loams_api/uploads/students/missing.png")).toString();
     QQuickItem *avatar = create(*view, QStringLiteral(
         "import QtQuick\nimport LOAMS\nLAvatar { initials: \"TM\"; source: %1 }").arg(qmlString(missing)));
@@ -264,6 +269,9 @@ void TestQmlResourceInventory::missingRemotePhotoFallsBackToInitials()
     QTRY_COMPARE_WITH_TIMEOUT(avatar->property("imageStatus").toInt(), kImageError, 5000);
     QVERIFY(avatar->property("showInitials").toBool());
     QVERIFY(m_server.countFor("/loams_api/uploads/students/missing.png") >= 1);
+    // The request (which ended in a 404) was logged by a factory-made manager.
+    QVERIFY2(m_log.contains(QUrl(missing)),
+             qPrintable(QStringLiteral("not fetched through the seam: ") + missing));
 }
 
 void TestQmlResourceInventory::importedLogoFileUrlLoads()
