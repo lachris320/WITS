@@ -453,9 +453,10 @@ wits_add_qttest(tst_searchviewmodel
     INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
     OFFSCREEN)
 
-# --- DatabaseViewModel unit test (C++ QtTest, offscreen). The VM builds a real
-# QNetworkAccessManager + StudentController and some paths (setDepartment) fire a
-# fire-and-forget post(), so this needs a QCoreApplication (QTEST_MAIN, not
+# --- DatabaseViewModel unit test (C++ QtTest, offscreen). The VM owns an
+# HttpClient (transport seam) + StudentController; tests inject an offline fake
+# through it, and some paths (setDepartment) fire a fire-and-forget post(), so
+# this needs a QCoreApplication (QTEST_MAIN, not
 # APPLESS) + Network/Gui + OFFSCREEN — mirrors tst_searchviewmodel. ---
 wits_add_qttest(tst_databaseviewmodel
     SOURCES tests/tst_databaseviewmodel.cpp ${WITS_TEST_NAM_SOURCES}
@@ -480,9 +481,9 @@ wits_add_qttest(tst_settingsviewmodel
     INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
     OFFSCREEN)
 
-# --- ImportViewModel unit test (C++ QtTest, offscreen). The VM builds a real
-# QNetworkAccessManager + ImportController; startImport() fires a
-# fire-and-forget post() (harmless, never resolves in-test), and the state
+# --- ImportViewModel unit test (C++ QtTest, offscreen). The VM owns an
+# HttpClient (transport seam) + ImportController; tests inject an offline fake
+# through it, so startImport()'s post() never leaves the process, and the state
 # machine is driven via the public on* slots — mirrors tst_databaseviewmodel. ---
 wits_add_qttest(tst_importviewmodel
     SOURCES tests/tst_importviewmodel.cpp ${WITS_TEST_NAM_SOURCES}
@@ -490,10 +491,10 @@ wits_add_qttest(tst_importviewmodel
     INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
     OFFSCREEN)
 
-# --- ReportingViewModel unit test (C++ QtTest, offscreen). Builds a real
-# QNetworkAccessManager + ReportController; generateReport() fires a
-# fire-and-forget post() (harmless in-test), and the reply handlers are driven
-# via the public on* slots — mirrors tst_databaseviewmodel. ---
+# --- ReportingViewModel unit test (C++ QtTest, offscreen). The VM owns an
+# HttpClient (transport seam) + ReportController; tests inject an offline fake
+# through it, so generateReport()'s post() never leaves the process, and the
+# reply handlers are driven via the public on* slots — mirrors tst_databaseviewmodel. ---
 wits_add_qttest(tst_reportingviewmodel
     SOURCES tests/tst_reportingviewmodel.cpp ${WITS_TEST_NAM_SOURCES}
     LIBS witsquickmodule Qt${QT_VERSION_MAJOR}::Network Qt${QT_VERSION_MAJOR}::Gui

@@ -7,10 +7,12 @@
 #include "importcontroller.h"
 #include "AdminSession.h"
 #include "SettingsViewModel.h"
+#include "transport/httpclient.h"
 
-ImportViewModel::ImportViewModel(QObject *parent)
+ImportViewModel::ImportViewModel(QObject *parent, HttpClient *http)
     : QObject(parent)
-    , m_nam(new QNetworkAccessManager(this))
+    , m_http(http ? http : new HttpClient(this))
+    , m_nam(m_http->manager())
     , m_controller(new ImportController(m_nam, this))
 {
     connect(m_controller, &ImportController::duplicatesResolved,

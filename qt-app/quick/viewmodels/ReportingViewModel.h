@@ -18,6 +18,7 @@
 #include "timeanalytics.h"        // TimeAnalytics — computed in applyResult's sibling path
 
 class QNetworkAccessManager;
+class HttpClient;
 class QPagedPaintDevice;
 class ReportController;
 
@@ -81,7 +82,9 @@ class ReportingViewModel : public QObject
     Q_PROPERTY(BarsModel *hourlyBars READ hourlyBars CONSTANT)
     Q_PROPERTY(BarsModel *weekdayBars READ weekdayBars CONSTANT)
 public:
-    explicit ReportingViewModel(QObject *parent = nullptr);
+    // http: injection seam for tests (HttpClient wrapping a CapturingNam).
+    // Null in production: the VM owns an HttpClient (transport seam).
+    explicit ReportingViewModel(QObject *parent = nullptr, HttpClient *http = nullptr);
 
     // Pure statics (network-free test seams).
     static QJsonObject buildFilters(const QString &department, const QString &course,
@@ -258,7 +261,8 @@ private:
     QJsonObject currentExportFilters() const;
     static QDate parseDate(const QString &s) { return QDate::fromString(s, QStringLiteral("yyyy-MM-dd")); }
 
-    QNetworkAccessManager *m_nam = nullptr;
+    HttpClient *m_http = nullptr;              // injected, or an owned child
+    QNetworkAccessManager *m_nam = nullptr;    // m_http->manager(); non-owning
     ReportController *m_controller = nullptr;
     ReportRowsModel m_rows;
     BarsModel m_courseBars;

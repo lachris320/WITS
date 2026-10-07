@@ -13,12 +13,19 @@
 #include "AdminSession.h"
 #include "HttpForm.h"
 #include "appsettings.h"
+#include "apiconfig.h"
+#include "capturingnam.h"
+#include "offlinehttp.h"
+#include "transport/httpclient.h"
+#include "transport/policyenforcingnam.h"
 
 class TestSettingsViewModel : public QObject
 {
     Q_OBJECT
     QTemporaryDir m_tmp;
 private slots:
+    void defaultConstructionUsesTransportSeam();
+    void departmentsLoadGoesThroughInjectedClient();
     void initTestCase()
     {
         QVERIFY(m_tmp.isValid());
@@ -123,7 +130,8 @@ void TestSettingsViewModel::settingsStoreIsIsolatedFromTheRealUserStore()
 
 void TestSettingsViewModel::loadPopulatesPropertiesFromSettings()
 {
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     vm.load();
     QCOMPARE(vm.schoolName(), QStringLiteral("Acme Library"));
     QCOMPARE(vm.schoolAddress(), QStringLiteral("123 Main St"));
@@ -136,14 +144,16 @@ void TestSettingsViewModel::loadPopulatesPropertiesFromSettings()
 
 void TestSettingsViewModel::loadStartsClean()
 {
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     vm.load();
     QVERIFY(!vm.dirty());
 }
 
 void TestSettingsViewModel::editingASettingMarksDirtyAndSignals()
 {
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     vm.load();
     QSignalSpy dirtySpy(&vm, &SettingsViewModel::dirtyChanged);
     vm.setSchoolName(QStringLiteral("New Name"));
@@ -153,7 +163,8 @@ void TestSettingsViewModel::editingASettingMarksDirtyAndSignals()
 
 void TestSettingsViewModel::resettingToSavedValueClearsDirty()
 {
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     vm.load();
     vm.setSchoolName(QStringLiteral("New Name"));
     QVERIFY(vm.dirty());
@@ -163,7 +174,8 @@ void TestSettingsViewModel::resettingToSavedValueClearsDirty()
 
 void TestSettingsViewModel::saveePersistsAllFieldsAndEmitsSaved()
 {
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     vm.load();
     vm.setSchoolName(QStringLiteral("Renamed Library"));
     vm.setOpenHour(7);
@@ -177,7 +189,8 @@ void TestSettingsViewModel::saveePersistsAllFieldsAndEmitsSaved()
 
 void TestSettingsViewModel::saveMirrorsGuestFlagOntoKioskKey()
 {
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     vm.load();
     vm.setGuestEnabled(false);
     vm.save();
@@ -195,7 +208,8 @@ void TestSettingsViewModel::saveMirrorsGuestFlagOntoKioskKey()
 
 void TestSettingsViewModel::saveClearsDirty()
 {
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     vm.load();
     vm.setSchoolName(QStringLiteral("X"));
     QVERIFY(vm.dirty());
@@ -211,7 +225,9 @@ void TestSettingsViewModel::importLogoUpdatesPathAndEmitsLogoChanged()
     img.fill(Qt::blue);
     QVERIFY(img.save(src, "PNG"));
 
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     vm.load();
     QSignalSpy logo(&vm, &SettingsViewModel::logoChanged);
     vm.importLogo(QUrl::fromLocalFile(src));
@@ -236,7 +252,9 @@ void TestSettingsViewModel::importLogoAcceptsAFileUrl()
     const QUrl url = QUrl::fromLocalFile(src);
     QVERIFY(url.toString().startsWith(QStringLiteral("file:///")));
 
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     vm.load();
     vm.importLogo(url);
     QVERIFY(vm.hasLogo());
@@ -245,7 +263,8 @@ void TestSettingsViewModel::importLogoAcceptsAFileUrl()
 
 void TestSettingsViewModel::importBadPathLeavesLogoUnchanged()
 {
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     vm.load();
     const QString before = vm.logoPath();
     vm.importLogo(QUrl::fromLocalFile(m_tmp.path() + QStringLiteral("/does_not_exist.png")));
@@ -257,7 +276,8 @@ void TestSettingsViewModel::importMissingFileSurfacesTheControllersReason()
     // SettingsController::importImageFile emits importError with a PRECISE
     // reason. The VM must relay that reason instead of flattening every
     // failure into one generic string.
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     vm.load();
     vm.importLogo(QUrl::fromLocalFile(m_tmp.path() + QStringLiteral("/nope.png")));
     QVERIFY2(vm.statusMessage().contains(QStringLiteral("File not found")),
@@ -274,7 +294,9 @@ void TestSettingsViewModel::importNonImageSurfacesTheControllersReason()
     f.write("this is plain text, not a PNG");
     f.close();
 
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     vm.load();
     vm.importLogo(QUrl::fromLocalFile(bogus));
     QVERIFY2(vm.statusMessage().contains(QStringLiteral("Not a valid image")),
@@ -291,7 +313,9 @@ void TestSettingsViewModel::importLogoIsNotPersistedUntilSave()
     img.fill(Qt::green);
     QVERIFY(img.save(src, "PNG"));
 
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     vm.load();
     vm.importLogo(QUrl::fromLocalFile(src));
     QVERIFY(vm.dirty());
@@ -332,7 +356,9 @@ void TestSettingsViewModel::reimportingADifferentImageChangesTheLogoUrl()
     QVERIFY(blue.save(dirA + QStringLiteral("/same_name.png"), "PNG"));
     QVERIFY(red.save(dirB + QStringLiteral("/same_name.png"), "PNG"));
 
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     vm.load();
 
     vm.importLogo(QUrl::fromLocalFile(dirA + QStringLiteral("/same_name.png")));
@@ -358,7 +384,8 @@ void TestSettingsViewModel::loadKeepsUnsavedEdits()
 {
     // AdminScreen's Loader destroys/recreates SettingsScreen on every
     // navigation, so load() re-runs. It must not silently discard edits.
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     vm.load();
     vm.setSchoolName(QStringLiteral("Unsaved Draft"));
     QVERIFY(vm.dirty());
@@ -376,7 +403,8 @@ void TestSettingsViewModel::loadKeepsUnsavedEdits()
 
 void TestSettingsViewModel::defaultManifestUrlIsALocalFileNamedForTheDepartment()
 {
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     const QUrl url = vm.defaultManifestUrl(QStringLiteral("CE"));
     QVERIFY(url.isLocalFile());
     const QString base = QFileInfo(url.toLocalFile()).fileName();
@@ -390,7 +418,8 @@ void TestSettingsViewModel::defaultManifestUrlIsALocalFileNamedForTheDepartment(
 
 void TestSettingsViewModel::adminInfoSuccessEmitsSaved()
 {
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy ok(&vm, &SettingsViewModel::adminInfoSaved);
     vm.applyAdminInfoResponse(R"({"status":"success","message":"Admin info updated successfully."})");
     QCOMPARE(ok.count(), 1);
@@ -398,7 +427,8 @@ void TestSettingsViewModel::adminInfoSuccessEmitsSaved()
 
 void TestSettingsViewModel::adminInfoErrorEmitsFailedWithMessage()
 {
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy bad(&vm, &SettingsViewModel::adminInfoFailed);
     vm.applyAdminInfoResponse(R"({"status":"error","message":"Failed to update admin info."})");
     QCOMPARE(bad.count(), 1);
@@ -407,7 +437,8 @@ void TestSettingsViewModel::adminInfoErrorEmitsFailedWithMessage()
 
 void TestSettingsViewModel::adminInfoAuthFailureEmitsAuthFailed()
 {
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy auth(&vm, &SettingsViewModel::authFailed);
     vm.applyAdminInfoResponse(R"({"status":"error","message":"Invalid admin key"})");
     QCOMPARE(auth.count(), 1);
@@ -416,7 +447,8 @@ void TestSettingsViewModel::adminInfoAuthFailureEmitsAuthFailed()
 void TestSettingsViewModel::keyChangeSuccessRefreshesSession()
 {
     AdminSession::instance().setKey(QStringLiteral("OLDKEY"));
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy ok(&vm, &SettingsViewModel::keyChanged);
     vm.applyKeyChangeResponse(R"({"status":"success","message":"Password updated successfully."})",
                               QStringLiteral("NEWKEY"));
@@ -428,7 +460,8 @@ void TestSettingsViewModel::keyChangeSuccessRefreshesSession()
 void TestSettingsViewModel::keyChangeWrongOldKeyEmitsFailedAndKeepsSession()
 {
     AdminSession::instance().setKey(QStringLiteral("OLDKEY"));
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy bad(&vm, &SettingsViewModel::keyChangeFailed);
     vm.applyKeyChangeResponse(R"({"status":"error","message":"Old password is incorrect."})",
                               QStringLiteral("NEWKEY"));
@@ -439,7 +472,8 @@ void TestSettingsViewModel::keyChangeWrongOldKeyEmitsFailedAndKeepsSession()
 
 void TestSettingsViewModel::departmentsParseFillsList()
 {
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy spy(&vm, &SettingsViewModel::departmentsChanged);
     vm.applyDepartmentsResponse(R"({"status":"success","departments":["CE","IT","BA"]})");
     QCOMPARE(spy.count(), 1);
@@ -448,7 +482,8 @@ void TestSettingsViewModel::departmentsParseFillsList()
 
 void TestSettingsViewModel::departmentsErrorLeavesListEmpty()
 {
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     vm.applyDepartmentsResponse(R"({"status":"error","message":"No departments found"})");
     QVERIFY(vm.departments().isEmpty());
 }
@@ -458,7 +493,8 @@ void TestSettingsViewModel::departmentsErrorSurfacesStatusMessage()
     // get_departments.php signals failure IN-BAND (HTTP 200 +
     // {"status":"error"}), so an error body must not be degraded to an empty
     // list in silence — that is indistinguishable from "no departments".
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy changed(&vm, &SettingsViewModel::departmentsChanged);
     vm.applyDepartmentsResponse(R"({"status":"error","message":"No departments found"})");
     QCOMPARE(changed.count(), 0);
@@ -474,7 +510,8 @@ void TestSettingsViewModel::departmentsAuthFailureEmitsAuthFailed()
     const QByteArray badKey     = R"({"status":"error","message":"Invalid admin key"})";
 
     for (const QByteArray &body : {missingKey, badKey}) {
-        SettingsViewModel vm;
+        OfflineHttp vmHttp;
+        SettingsViewModel vm(nullptr, &vmHttp.http);
         QSignalSpy auth(&vm, &SettingsViewModel::authFailed);
         QSignalSpy changed(&vm, &SettingsViewModel::departmentsChanged);
         vm.applyDepartmentsResponse(body);
@@ -488,7 +525,8 @@ void TestSettingsViewModel::departmentsNonJsonBodySurfacesStatus()
 {
     // An HTML/PHP-fatal body is still the server answering; it must fail
     // visibly rather than leave a blank picker with no explanation.
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy auth(&vm, &SettingsViewModel::authFailed);
     vm.applyDepartmentsResponse("<b>Fatal error</b>: something broke");
     QCOMPARE(auth.count(), 0);
@@ -498,7 +536,8 @@ void TestSettingsViewModel::departmentsNonJsonBodySurfacesStatus()
 void TestSettingsViewModel::departmentsErrorKeepsThePreviouslyLoadedList()
 {
     // A later failure must not silently wipe a picker that is already good.
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     vm.applyDepartmentsResponse(R"({"status":"success","departments":["CE","IT"]})");
     QCOMPARE(vm.departments(), (QStringList{"CE","IT"}));
     vm.applyDepartmentsResponse(R"({"status":"error","message":"Query failed"})");
@@ -523,7 +562,8 @@ void TestSettingsViewModel::serializeCsvQuotesSpecialCells()
 
 void TestSettingsViewModel::resetVisitsEmptyDepartmentIsGuarded()
 {
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy reset(&vm, &SettingsViewModel::visitsReset);
     QSignalSpy failed(&vm, &SettingsViewModel::resetFailed);
     vm.resetVisits(QString(), QStringLiteral("key"));   // empty dept -> no POST
@@ -534,7 +574,8 @@ void TestSettingsViewModel::resetVisitsEmptyDepartmentIsGuarded()
 
 void TestSettingsViewModel::resetVisitsSuccessEmitsReset()
 {
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy reset(&vm, &SettingsViewModel::visitsReset);
     vm.applyResetVisitsResponse(R"({"status":"success","message":"Visit counts reset and visit history cleared for department: CE"})");
     QCOMPARE(reset.count(), 1);
@@ -542,7 +583,8 @@ void TestSettingsViewModel::resetVisitsSuccessEmitsReset()
 
 void TestSettingsViewModel::resetVisitsAuthFailureEmitsAuthFailed()
 {
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy auth(&vm, &SettingsViewModel::authFailed);
     vm.applyResetVisitsResponse(R"({"status":"error","message":"Invalid admin key"})");
     QCOMPARE(auth.count(), 1);
@@ -550,7 +592,8 @@ void TestSettingsViewModel::resetVisitsAuthFailureEmitsAuthFailed()
 
 void TestSettingsViewModel::writeResetManifestContainsMetadataNotBackup()
 {
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     vm.load();
     vm.setProperty("adminName", QStringLiteral("Jane Librarian"));   // Operator
     const QString path = m_tmp.path() + QStringLiteral("/manifest.csv");
@@ -584,7 +627,8 @@ void TestSettingsViewModel::http401AuthBodyReachesDecodeSeamNotNetworkError()
 
         // reset_visits.php — the tier-2 irreversible path, where telling the
         // user "network error" for a mistyped key is worst.
-        SettingsViewModel reset;
+        OfflineHttp resetHttp;
+        SettingsViewModel reset(nullptr, &resetHttp.http);
         QSignalSpy resetAuth(&reset, &SettingsViewModel::authFailed);
         QSignalSpy resetNet(&reset, &SettingsViewModel::networkError);
         reset.applyResetVisitsResponse(body);
@@ -592,7 +636,8 @@ void TestSettingsViewModel::http401AuthBodyReachesDecodeSeamNotNetworkError()
         QCOMPARE(resetNet.count(), 0);
 
         // update_admin_info.php — same guard, same classification.
-        SettingsViewModel info;
+        OfflineHttp infoHttp;
+        SettingsViewModel info(nullptr, &infoHttp.http);
         QSignalSpy infoAuth(&info, &SettingsViewModel::authFailed);
         QSignalSpy infoNet(&info, &SettingsViewModel::networkError);
         info.applyAdminInfoResponse(body);
@@ -606,7 +651,9 @@ void TestSettingsViewModel::http200SuccessBodyStillReachesDecodeSeam()
     const QByteArray body = R"({"status":"success","message":"Visit counts reset and visit history cleared for department: CE"})";
     QVERIFY(HttpForm::isServerAnswer(/*replyHadError=*/false, 200, body));
 
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy reset(&vm, &SettingsViewModel::visitsReset);
     QSignalSpy net(&vm, &SettingsViewModel::networkError);
     vm.applyResetVisitsResponse(body);
@@ -630,7 +677,9 @@ void TestSettingsViewModel::httpErrorWithNonJsonBodyFailsLoudlyNotSilently()
     const QByteArray html = "<b>Fatal error</b>: something broke";
     QVERIFY(HttpForm::isServerAnswer(/*replyHadError=*/true, 500, html));
 
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy failed(&vm, &SettingsViewModel::resetFailed);
     QSignalSpy auth(&vm, &SettingsViewModel::authFailed);
     QSignalSpy reset(&vm, &SettingsViewModel::visitsReset);
@@ -649,10 +698,12 @@ void TestSettingsViewModel::fallbackLogoHashPersistsAcrossVmInstances()
     // The record survives VM re-construction because it lives in AppSettings,
     // not the VM: AdminScreen's Loader destroys/recreates SettingsScreen on
     // every navigation, so the fire-once record must outlive the instance.
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     QCOMPARE(vm.lastFallbackLogoHash(), QString());   // cleared by init()
     vm.recordFallbackLogoHash(QStringLiteral("abc123"));
-    SettingsViewModel vm2;                            // fresh instance, same store
+    OfflineHttp vm2Http;
+    SettingsViewModel vm2(nullptr, &vm2Http.http);                            // fresh instance, same store
     QCOMPARE(vm2.lastFallbackLogoHash(), QStringLiteral("abc123"));
 }
 
@@ -666,12 +717,31 @@ void TestSettingsViewModel::logoHashForMatchesSha256HexAndEmptyOnUnreadable()
     QVERIFY(f.open(QIODevice::WriteOnly));
     f.write("wits");
     f.close();
-    SettingsViewModel vm;
+    OfflineHttp vmHttp;
+    SettingsViewModel vm(nullptr, &vmHttp.http);
     QCOMPARE(vm.logoHashFor(p), QString::fromLatin1(
         QCryptographicHash::hash(QByteArrayLiteral("wits"),
                                  QCryptographicHash::Sha256).toHex()));
     // Unreadable path contracts to an empty string.
     QCOMPARE(vm.logoHashFor(m_tmp.path() + QStringLiteral("/absent.bin")), QString());
+}
+
+void TestSettingsViewModel::defaultConstructionUsesTransportSeam()
+{
+    SettingsViewModel vm;
+    QVERIFY(vm.findChild<HttpClient *>());
+    QCOMPARE(vm.findChildren<PolicyEnforcingNam *>().size(), 1);
+}
+
+void TestSettingsViewModel::departmentsLoadGoesThroughInjectedClient()
+{
+    CapturingNam nam(QByteArrayLiteral("{\"status\":\"success\",\"departments\":[]}"));
+    HttpClient http(nullptr, &nam);
+    SettingsViewModel vm(nullptr, &http);
+    QVERIFY(vm.findChildren<PolicyEnforcingNam *>().isEmpty());
+    vm.loadDepartments();
+    QCOMPARE(nam.lastOp, QNetworkAccessManager::GetOperation);
+    QCOMPARE(nam.lastUrl, ApiConfig::endpoint(QStringLiteral("get_departments.php")));
 }
 
 QTEST_MAIN(TestSettingsViewModel)

@@ -9,10 +9,11 @@
 #include "importdata.h"
 
 class QNetworkAccessManager;
+class HttpClient;
 class ImportController;
 
 // Import screen VM (spec §4.1, increment 4a.3). The ONLY QML-facing surface for
-// bulk import. Owns an ImportController + its own QNetworkAccessManager
+// bulk import. Owns an ImportController + its own HttpClient (transport seam)
 // (mirrors DatabaseViewModel's ownership). Drives the idle -> check-duplicates
 // -> upload -> result flow; parse + client validation are delegated to the
 // ImportController pure statics. cancel() is pre-upload only (there is no
@@ -22,7 +23,9 @@ class ImportViewModel : public QObject
     Q_OBJECT
     QML_ELEMENT
 public:
-    explicit ImportViewModel(QObject *parent = nullptr);
+    // http: injection seam for tests (HttpClient wrapping a CapturingNam).
+    // Null in production: the VM owns an HttpClient (transport seam).
+    explicit ImportViewModel(QObject *parent = nullptr, HttpClient *http = nullptr);
 
     enum class Phase { Idle, CheckingDuplicates, AwaitingDuplicates,
                        Uploading, Processing, Done, Failed };
@@ -92,7 +95,8 @@ private:
     void failWith(const QString &message);
     void beginUpload();
 
-    QNetworkAccessManager *m_nam = nullptr;
+    HttpClient *m_http = nullptr;              // injected, or an owned child
+    QNetworkAccessManager *m_nam = nullptr;    // m_http->manager(); non-owning
     ImportController *m_controller = nullptr;
 
     QString m_dataFilePath, m_dataFileName;
