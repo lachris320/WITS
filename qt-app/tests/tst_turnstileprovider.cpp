@@ -12,6 +12,7 @@ class TestTurnstileProvider : public QObject
 {
     Q_OBJECT
 private slots:
+    void networkManagerIsTheInjectedOne();
     void initTestCase() { registerMetaTypes(); }
     void clampPollMs_rules();
     void blankGateIdFallsBack();
@@ -69,7 +70,6 @@ private:
             if (qvariant_cast<ConnectionState>(args.at(0)) == ConnectionState::Degraded) ++n;
         return n;
     }
-    void networkManagerIsTheInjectedOne();
 };
 
 void TestTurnstileProvider::clampPollMs_rules()

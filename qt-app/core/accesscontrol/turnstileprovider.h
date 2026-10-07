@@ -29,6 +29,7 @@ public:
 
     // The injected manager, unchanged — lets tests prove production wiring.
     QNetworkAccessManager *networkManager() const { return m_nam; }
+
     ~TurnstileProvider() override;
 
     static ProviderDescriptor defaultDescriptor();

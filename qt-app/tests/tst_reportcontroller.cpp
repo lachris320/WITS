@@ -14,6 +14,7 @@ class TstReportController : public QObject
     Q_OBJECT
 
 private slots:
+    void networkManagerIsTheInjectedOne();
     // ---- getPalette ----
     void getPalette_blue_hasHeaderAnd8Colors();
     void getPalette_green_hasHeaderAnd8Colors();
@@ -69,7 +70,6 @@ private:
         QJsonObject o{{"status", status}, {"byHour", byHour}, {"byWeekday", byWeekday}};
         return QJsonDocument(o).toJson(QJsonDocument::Compact);
     }
-    void networkManagerIsTheInjectedOne();
 };
 
 void TstReportController::getPalette_blue_hasHeaderAnd8Colors() {
