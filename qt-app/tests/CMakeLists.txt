@@ -403,3 +403,19 @@ wits_add_qttest(tst_apiconfigloader
         ${CMAKE_SOURCE_DIR}/core/apiconfigloader.cpp
         ${CMAKE_SOURCE_DIR}/core/apiconfigloader.h
     INCLUDES ${CMAKE_SOURCE_DIR}/core)
+
+# --- S1a transport seam: immutable policy + atomic snapshot (Network; no offscreen) ---
+wits_add_qttest(tst_transportpolicy
+    SOURCES
+        tst_transportpolicy.cpp
+        ${CMAKE_SOURCE_DIR}/core/transport/transportpolicy.cpp
+        ${CMAKE_SOURCE_DIR}/core/transport/transportpolicy.h
+    LIBS Qt${QT_VERSION_MAJOR}::Network
+    INCLUDES ${CMAKE_SOURCE_DIR}/core)
+# S1a GATE G1: std::atomic_load / std::atomic_store on shared_ptr must compile
+# warning-free (incl. no -Wdeprecated-declarations) on this MinGW GCC. Scoped to
+# the one source that uses them (every test target in this directory that
+# compiles it inherits it); Qt's imported include dirs are -isystem, so only
+# our code is held to -Werror.
+set_source_files_properties(${CMAKE_SOURCE_DIR}/core/transport/transportpolicy.cpp
+    PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror")
