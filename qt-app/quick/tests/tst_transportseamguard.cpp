@@ -90,6 +90,7 @@ private slots:
     void coreNetworkClassesRequireInjectedManager();
     void noSslErrorBypassInClientSource();
     void ownersInTestsUseFakeManagers();
+    void quickMainInstallsTransportBeforeLoad();
 
 private:
     static QStringList sourceFiles(const QString &subdir, const QStringList &globs,
@@ -296,6 +297,27 @@ void TestTransportSeamGuard::ownersInTestsUseFakeManagers()
     QVERIFY2(stale.isEmpty(), qPrintable(
         QStringLiteral("Stale kPendingTestMigration entries (already migrated — delete them): ")
         + stale.join(QStringLiteral(", "))));
+}
+
+void TestTransportSeamGuard::quickMainInstallsTransportBeforeLoad()
+{
+    bool ok = false;
+    const QString code = stripComments(readSource(QStringLiteral("quick/main.cpp"), &ok));
+    QVERIFY2(ok, "cannot read quick/main.cpp");
+    const qsizetype policy  = code.indexOf(QLatin1String("TransportPolicy::setCurrent("));
+    const qsizetype hub     = code.indexOf(QLatin1String("AccessControlHub accessControl"));
+    const qsizetype factory = code.indexOf(QLatin1String("PolicyNamFactory namFactory"));
+    const qsizetype engine  = code.indexOf(QLatin1String("QQmlApplicationEngine engine"));
+    const qsizetype install = code.indexOf(QLatin1String("PolicyNamFactory::installOn(engine, namFactory)"));
+    QVERIFY2(!code.contains(QLatin1String("setNetworkAccessManagerFactory(")),
+             "install the factory only via PolicyNamFactory::installOn (it refuses a late install)");
+    const qsizetype load    = code.indexOf(QLatin1String("engine.loadFromModule("));
+    QVERIFY2(policy >= 0 && hub >= 0 && policy < hub,
+             "the transport policy must be published before AccessControlHub builds its HttpClient");
+    QVERIFY2(factory >= 0 && engine >= 0 && factory < engine,
+             "PolicyNamFactory must be declared before (so it outlives) the engine");
+    QVERIFY2(install > engine && load > install,
+             "the factory must be installed on the engine before the first QML load");
 }
 
 QTEST_APPLESS_MAIN(TestTransportSeamGuard)
