@@ -2,12 +2,27 @@
 #include <QNetworkReply>
 #include <QPointer>
 #include <memory>
+#include <type_traits>
 
 #include "capturingnam.h"
 #include "offlinehttp.h"
 #include "transport/httpclient.h"
 #include "transport/policyenforcingnam.h"
 #include "transport/transportpolicy.h"
+
+// Compile-time pin of the constructor shape: a lone QNetworkAccessManager* would
+// silently become the PARENT (QObject*) and leave the client building a live
+// manager, so the single-manager form must not compile.
+static_assert(!std::is_constructible_v<HttpClient, QNetworkAccessManager *>,
+              "HttpClient(&nam) must be rejected: a lone manager would become the parent");
+static_assert(std::is_constructible_v<HttpClient, QObject *, QNetworkAccessManager *>,
+              "HttpClient(parent, injected) must stay the injection form");
+static_assert(std::is_constructible_v<HttpClient, std::nullptr_t, QNetworkAccessManager *>,
+              "HttpClient(nullptr, &nam) must stay valid");
+static_assert(std::is_constructible_v<HttpClient, QObject *>,
+              "HttpClient(parent) must stay valid");
+static_assert(std::is_default_constructible_v<HttpClient>,
+              "HttpClient() must stay valid");
 
 class TestHttpClient : public QObject
 {

@@ -18,12 +18,18 @@ class QNetworkAccessManager;
 // Tests: pass a CapturingNam / SequencedNam as `injected`; it is used as-is,
 // never reparented or deleted (the test owns it and must outlive the client).
 // Argument order mirrors the ViewModel idiom (parent first): HttpClient(&nam)
-// would make `nam` the PARENT, not the injected manager.
+// would make `nam` the PARENT, not the injected manager, and the client would
+// build a live PolicyEnforcingNam. That single-manager form is therefore
+// deleted below, so the mistake is a compile error (pinned by static_asserts
+// in tst_httpclient.cpp). Inject with HttpClient(nullptr, &nam).
 class HttpClient : public QObject
 {
     Q_OBJECT
 public:
     explicit HttpClient(QObject *parent = nullptr, QNetworkAccessManager *injected = nullptr);
+    // An exact pointer match beats the QNetworkAccessManager* -> QObject*
+    // conversion, so a lone manager is rejected instead of becoming the parent.
+    HttpClient(QNetworkAccessManager *) = delete;
 
     QNetworkAccessManager *manager() const { return m_manager; }
     std::shared_ptr<const TransportPolicy> policy() const { return m_policy; }

@@ -36,6 +36,10 @@ public:
     // Null in production: the hub owns an HttpClient (transport seam, S1 spec
     // section 3). Same (parent, http) order as every ViewModel.
     explicit AccessControlHub(QObject *parent = nullptr, HttpClient *http = nullptr);
+    // Rejects the pre-seam call form AccessControlHub(&nam): a lone manager
+    // would silently become the PARENT and the hub would build a live one.
+    // Inject with AccessControlHub(nullptr, &httpClient).
+    explicit AccessControlHub(QNetworkAccessManager *, QObject * = nullptr) = delete;
 
     // The client's manager - the one handed to every TurnstileProvider this
     // hub creates. Lets tests prove production wiring (PolicyEnforcingNam).

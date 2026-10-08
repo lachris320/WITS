@@ -1,6 +1,7 @@
 #include <QtTest>
 #include <QSignalSpy>
 #include <QTimeZone>
+#include <type_traits>
 #include "AccessControlHub.h"
 #include "apiconfig.h"
 #include "appsettings.h"
@@ -11,6 +12,18 @@
 #include "accesscontrol/accesstypes.h"
 
 using namespace AccessControl;
+
+// Compile-time pin of the constructor shape (see tst_httpclient.cpp): a lone
+// QNetworkAccessManager* would become the hub's PARENT and the hub would build
+// a live manager, so that form must not compile.
+static_assert(!std::is_constructible_v<AccessControlHub, QNetworkAccessManager *>,
+              "AccessControlHub(&nam) must be rejected: a lone manager would become the parent");
+static_assert(std::is_constructible_v<AccessControlHub, QObject *, HttpClient *>,
+              "AccessControlHub(parent, http) must stay the injection form");
+static_assert(std::is_constructible_v<AccessControlHub, std::nullptr_t, HttpClient *>,
+              "AccessControlHub(nullptr, &http) must stay valid");
+static_assert(std::is_default_constructible_v<AccessControlHub>,
+              "AccessControlHub() must stay valid");
 
 class TestAccessControlHub : public QObject
 {
