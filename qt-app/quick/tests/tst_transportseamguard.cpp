@@ -289,6 +289,10 @@ void TestTransportSeamGuard::quickMainInstallsTransportBeforeLoad()
     QVERIFY2(!code.contains(QLatin1String("setNetworkAccessManagerFactory(")),
              "install the factory only via PolicyNamFactory::installOn (it refuses a late install)");
     const qsizetype load    = code.indexOf(QLatin1String("engine.loadFromModule("));
+    // installOn() eagerly snapshots TransportPolicy::current() via create(), so
+    // a policy published after it would leave the common manager on the default.
+    QVERIFY2(policy >= 0 && install >= 0 && policy < install,
+             "the transport policy must be published before installOn(), which eagerly snapshots it via create()");
     QVERIFY2(policy >= 0 && hub >= 0 && policy < hub,
              "the transport policy must be published before AccessControlHub builds its HttpClient");
     QVERIFY2(factory >= 0 && engine >= 0 && factory < engine,
