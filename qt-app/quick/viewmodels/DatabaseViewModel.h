@@ -88,9 +88,9 @@ public:
     static constexpr int kTypeToConfirmThreshold = 10;
 
     // Pure: copies each selected record, overriding ONLY the toggled fields;
-    // name/schoolId/code/visits carry through untouched. A free static because
-    // the VM news up its own NAM (no injection seam) — this is the only way to
-    // unit-test the override/carry-through rules network-free.
+    // name/schoolId/code/visits carry through untouched. A static so the
+    // override/carry-through rules can be unit-tested without constructing a
+    // DatabaseViewModel (and so without any HttpClient / manager at all).
     static QList<StudentRecord> buildBulkUpdates(const QList<StudentRecord> &selected,
                                                  const BulkEditChanges &changes);
 
