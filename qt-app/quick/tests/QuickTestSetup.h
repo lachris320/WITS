@@ -7,6 +7,7 @@
 
 #include "AccessControlHub.h"
 #include "PolicyNamFactory.h"
+#include "offlinehttp.h"   // qt-app/testsupport (WITS_TEST_NAM_SOURCES)
 
 // Shared QUICK_TEST_MAIN_WITH_SETUP setup object for every generated QuickTest
 // main: the tst_qml_* targets (registered via wits_add_qmltest in
@@ -34,8 +35,12 @@ public slots:
         engine->addImportPath(QStringLiteral("qrc:/qt/qml"));
         // AccessControlScreen/KioskScreen resolve the AccessControl singleton.
         // Live-but-disabled hub (never initialize() -> no polling), robust
-        // against an inherited WITS_ACCESS_CONTROL.
-        static AccessControlHub hub;
+        // against an inherited WITS_ACCESS_CONTROL. Its HttpClient sits over
+        // OfflineHttp, so even a stray request can never reach a backend:
+        // offline is declared first, so it is constructed before and
+        // destroyed after the hub that uses it.
+        static OfflineHttp offline;
+        static AccessControlHub hub(nullptr, &offline.http);
         AccessControlHub::setInstance(&hub);
     }
 };

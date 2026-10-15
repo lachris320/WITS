@@ -219,7 +219,9 @@ wits_add_qttest(tst_qmlfactorygate
 # Registers one QuickTest target from tests/<name>.qml alone: the target runs
 # exactly that file, and its main is generated from tests/QuickTestMain.cpp.in
 # (configure_file, so it is rewritten only when its content changes) and uses
-# the shared tests/QuickTestSetup.h. The main passes quick_test_main the
+# the shared tests/QuickTestSetup.h (whose AccessControl singleton hub sits on
+# testsupport's OfflineHttp, hence WITS_TEST_NAM_SOURCES + the testsupport
+# include dir). The main passes quick_test_main the
 # single .qml FILE, not the tests/ directory: a directory makes it run every
 # tst_*.qml in it, so each target re-ran the whole QML suite.
 #
@@ -261,9 +263,9 @@ function(wits_add_qmltest name)
     endif()
     _wits_qmltest_main(${name} "${_qml}" _main)
     wits_add_qttest(${name}
-        SOURCES "${_main}" tests/QuickTestSetup.h
+        SOURCES "${_main}" tests/QuickTestSetup.h ${WITS_TEST_NAM_SOURCES}
         LIBS ${WITS_QMLTEST_LIBS}
-        INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/tests
+        INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/tests ${CMAKE_SOURCE_DIR}/testsupport
         OFFSCREEN)
     set_property(GLOBAL APPEND PROPERTY WITS_QMLTEST_TARGETS ${name})
 endfunction()
@@ -287,9 +289,9 @@ if(EXISTS "${_wits_missing_qml}")
 endif()
 _wits_qmltest_main(tst_quicktestmain_missingfile "${_wits_missing_qml}" _wits_missing_main)
 wits_add_qttest(tst_quicktestmain_missingfile
-    SOURCES "${_wits_missing_main}" tests/QuickTestSetup.h
+    SOURCES "${_wits_missing_main}" tests/QuickTestSetup.h ${WITS_TEST_NAM_SOURCES}
     LIBS ${WITS_QMLTEST_LIBS}
-    INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/tests
+    INCLUDES ${CMAKE_CURRENT_SOURCE_DIR}/tests ${CMAKE_SOURCE_DIR}/testsupport
     OFFSCREEN
     TEST_COMMAND ${CMAKE_COMMAND}
         -DEXE=$<TARGET_FILE:tst_quicktestmain_missingfile>
@@ -506,16 +508,21 @@ wits_add_qttest(tst_reportingviewmodel
 # QTEST_APPLESS_MAIN, no OFFSCREEN). Fails if any deprecated brand/accent alias
 # name reappears in *.qml CODE (comments are stripped first). ---
 wits_add_qttest(tst_notokenaliases
-    SOURCES tests/tst_notokenaliases.cpp
+    SOURCES tests/tst_notokenaliases.cpp ${CMAKE_SOURCE_DIR}/testsupport/sourcescan.h
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
     DEFINES SRC_QML_DIR="${CMAKE_CURRENT_SOURCE_DIR}/qml"
             SRC_QML_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
 
 # --- S1a transport-seam source guard (C++ QtTest). Pure file I/O over qt-app/
 # (no GUI -> QTEST_APPLESS_MAIN, no OFFSCREEN): no QNetworkAccessManager built
-# outside HttpClient/PolicyNamFactory and no SSL-error bypass anywhere in client
-# source. (The quick/main.cpp install-order guard is added in Task 7.) ---
+# outside HttpClient/PolicyNamFactory, no factory installed outside
+# PolicyNamFactory::installOn, and no SSL-error bypass anywhere in client
+# source; quickMainInstallsTransportBeforeLoad pins quick/main.cpp's install
+# order. Comment stripping comes from testsupport/sourcescan.h. ---
 wits_add_qttest(tst_transportseamguard
     SOURCES tests/tst_transportseamguard.cpp
+        ${CMAKE_SOURCE_DIR}/testsupport/sourcescan.h
+    INCLUDES ${CMAKE_SOURCE_DIR}/testsupport
     DEFINES SRC_ROOT="${CMAKE_SOURCE_DIR}")
 
 # --- S1a resource inventory (C++ QtTest, offscreen): every resource the 2.0
