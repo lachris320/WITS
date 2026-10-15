@@ -149,6 +149,8 @@ is absent from the result).
 - Creates directories with `mkdir($uploadDir, 0777, true)` and `mkdir("uploads/students/", 0777, true)`
   — **still 0777**, not 0755 (`grep -n "mkdir\|0777\|0755" upload_students_zip.php` shows both calls
   using `0777`).
+  **UPDATED 2026-10-16 — fixed in source, NOT deployed:** now `0755` for `uploads/students/` and `0700` for
+  the per-request work dir (`uploads/temp/` is no longer created).
 - Validates `school_id` with nothing more than `trim()`.
 - Returns **plain text** (`echo "✅ Upload complete!\n";` etc.), not JSON (`grep -n "json_encode" upload_students_zip.php` — no match).
 - Never deletes anything from `uploads/temp/` after processing.
@@ -157,7 +159,8 @@ is absent from the result).
 anything under `uploads/temp/`. The uploaded ZIP is moved (after `is_uploaded_file()`) into a private
 per-request dir under the system temp dir (`loams_zipimport_<random>`), under a server-chosen name —
 the client filename is never used on disk. `extractTo()` is gone: only entries whose basename is
-`[A-Za-z0-9_-]{1,50}.(jpg|jpeg|png|gif)`, not a Windows device name, at most 10 MiB (512 MiB total)
+`[A-Za-z0-9_-]{1,50}.(jpg|jpeg|png|gif)`, not a Windows device name, at most 10 MiB (512 MiB total,
+which also caps the bytes copied into `uploads/students/`), from a ZIP of at most 20,000 entries,
 and a real JPEG/PNG/GIF are unpacked (`extractPhotoEntries()` in `student_id_helper.php`). The
 per-request dir is removed by a shutdown function, so no photo survives into a later import. Second
 layer: `uploads/.htaccess` turns the PHP engine off, denies script extensions and disables directory
@@ -171,8 +174,17 @@ section 10.
   `.phar`, `.shtml`. Under `AllowOverride All` a nested `.htaccess` left by the old code overrides
   the new `uploads/.htaccess` for its subtree.
 - Recommended (owner's call): enforce it in `httpd.conf` so it does not depend on what is in the
-  tree — `<Directory "<HTDOCS>/loams_api/uploads">` with `AllowOverride None` and
-  `php_admin_flag engine off`.
+  tree — `AllowOverride None` stays outside the `IfModule` (a bare `php_admin_flag` stops Apache
+  from starting under PHP-FPM):
+
+  ```apache
+  <Directory "<HTDOCS>/loams_api/uploads">
+      AllowOverride None
+      <IfModule php_module>
+          php_admin_flag engine off
+      </IfModule>
+  </Directory>
+  ```
 - After deploying, confirm student photos still display (a partial `AllowOverride` makes Apache
   answer 500 for all of `uploads/`).
 
@@ -392,6 +404,8 @@ fetch('/loams_api/upload_students_zip.php', {
    enforces `admin_key` on **no endpoint at all**.
 6. ❌ **Insecure Permissions** - `upload_students_zip.php` still creates directories with `0777`
    (verified twice in the file), not `0755`.
+   **UPDATED 2026-10-16 — fixed in source, NOT deployed:** now `0755` for `uploads/students/` and `0700` for
+   the per-request work dir (`uploads/temp/` is no longer created).
 7. ❌ **CORS Misconfiguration** - `api.php` hardcodes `Access-Control-Allow-Origin: *` and does not
    read `config.php`'s `CORS_ALLOWED_ORIGIN`; there is nothing to configure for production today.
 
