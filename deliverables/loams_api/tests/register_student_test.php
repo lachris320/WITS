@@ -294,6 +294,12 @@ try {
     ok('DB error -> other photos in uploads/ untouched', is_file($bystander));
     @unlink($bystander);
 
+    // 7a. Re-registering an existing school_id -> {"status":"duplicate"}.
+    $r = $register(['school_id' => 'SEED-0001', 'code' => 'CARD_SEED2']);
+    ok('existing school_id -> status duplicate', ($r['json']['status'] ?? null) === 'duplicate');
+    ok('existing school_id -> seed row unchanged',
+        $root->query("SELECT name FROM students WHERE school_id='SEED-0001'")->fetch_assoc()['name'] === 'Seed Test');
+
     // 7b. "0" is a valid school_id (the pattern allows it) and a valid name —
     //     empty() used to reject both as "required".
     $r = $register(['school_id' => '0', 'code' => 'CARD_ZERO']);
@@ -332,6 +338,100 @@ try {
     ok('zip: valid row photo inside uploads/students/', is_file($uploads . '/students/S0001.jpg'));
     ok('zip: nothing escaped the docroot',        (glob($escape . '/evil_z*') ?: []) === [] && (glob($base . '/evil_z*') ?: []) === []);
     ok('zip: response leaks nothing',             $noLeak($r['raw']));
+    ok('zip: valid row photo column -> uploads/students/S0001.jpg',
+        $root->query("SELECT photo FROM students WHERE school_id='S0001'")->fetch_assoc()['photo'] === 'uploads/students/S0001.jpg');
+
+    $uploadZip = function (array $rows, ?string $zip = null) use ($HOSTPORT, $ADMIN_KEY): array {
+        $fields = ['admin_key' => $ADMIN_KEY, 'rows' => json_encode($rows)];
+        if ($zip !== null) { $fields['photos_zip'] = new CURLFile($zip, 'application/zip', 'photos.zip'); }
+        return httpPost($HOSTPORT, '/upload_students_zip.php', $fields);
+    };
+    $makeZip = function (string $path, array $entries): string {
+        $z = new ZipArchive();
+        $z->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE);
+        foreach ($entries as $n => $bytes) { $z->addFromString($n, $bytes); }
+        $z->close();
+        return $path;
+    };
+    $nameOf = function (string $sid) use ($root): ?string {
+        $s = $root->prepare('SELECT name FROM students WHERE school_id = ?');
+        $s->bind_param('s', $sid); $s->execute();
+        $row = $s->get_result()->fetch_assoc(); $s->close();
+        return $row['name'] ?? null;
+    };
+
+    // 8a. Two rows sharing a NEW id in one upload: the second insert hits the
+    //     UNIQUE key. mysqli throws on PHP 8.1+, which used to abort the loop
+    //     (HTTP 500, later rows lost). Now: counted as an error, loop continues.
+    $logBefore = strlen((string) @file_get_contents($base . '/server.log'));
+    $r = $uploadZip([
+        ['school_id' => 'ZDUP-EARLY', 'name' => 'Dup Early'],
+        ['school_id' => 'ZDUP-0001',  'name' => 'Dup First'],
+        ['school_id' => 'ZDUP-0001',  'name' => 'Dup Second'],
+        ['school_id' => 'ZDUP-LATE',  'name' => 'Dup Late'],
+    ]);
+    ok('zip dup-in-upload -> HTTP 200',               $r['code'] === 200);
+    ok('zip dup-in-upload -> status success',         ($r['json']['status'] ?? null) === 'success');
+    ok('zip dup-in-upload -> success_count 3 (early + first dup + late)', ($r['json']['success_count'] ?? null) === 3);
+    ok('zip dup-in-upload -> error_count 1 (second dup)', ($r['json']['error_count'] ?? null) === 1);
+    ok('zip dup-in-upload -> earlier + later valid rows inserted', $rowExists('ZDUP-EARLY') && $rowExists('ZDUP-LATE'));
+    ok('zip dup-in-upload -> first occurrence kept',  $nameOf('ZDUP-0001') === 'Dup First');
+    ok('zip dup-in-upload -> response leaks nothing', $noLeak($r['raw']));
+    $logNew = substr((string) @file_get_contents($base . '/server.log'), $logBefore);
+    ok('zip dup-in-upload -> detail logged server-side', stripos($logNew, 'Duplicate entry') !== false);
+
+    // 8b. A row for an id already in the DB (not in skip_ids) whose ZIP has a
+    //     matching photo: the insert fails, so the EXISTING student's photo file
+    //     must not be overwritten (the copy used to happen before the insert).
+    $keepPhoto = $uploads . '/students/PHOTO-KEEP.jpg';
+    $keepBytes = 'ORIGINAL-PHOTO-BYTES-' . bin2hex(random_bytes(4));
+    file_put_contents($keepPhoto, $keepBytes);
+    $root->query("INSERT INTO students (school_id, name, photo) VALUES ('PHOTO-KEEP','Keep Original','uploads/students/PHOTO-KEEP.jpg')");
+    $zip2 = $makeZip($fixtures . '/photos2.zip', ['PHOTO-KEEP.jpg' => $png1x1, 'ZNEW-0001.jpg' => $png1x1]);
+    $r = $uploadZip([
+        ['school_id' => 'PHOTO-KEEP', 'name' => 'Imposter'],
+        ['school_id' => 'ZNEW-0001',  'name' => 'New With Photo'],
+    ], $zip2);
+    ok('zip existing-id -> HTTP 200',                 $r['code'] === 200);
+    ok('zip existing-id -> error_count 1',            ($r['json']['error_count'] ?? null) === 1);
+    ok('zip existing-id -> success_count 1 (new row)', ($r['json']['success_count'] ?? null) === 1);
+    ok('zip existing-id -> existing photo bytes unchanged',
+        is_file($keepPhoto) && (string) file_get_contents($keepPhoto) === $keepBytes);
+    ok('zip existing-id -> existing row unchanged',   $nameOf('PHOTO-KEEP') === 'Keep Original');
+    ok('zip existing-id -> new row photo written + recorded',
+        is_file($uploads . '/students/ZNEW-0001.jpg')
+        && $root->query("SELECT photo FROM students WHERE school_id='ZNEW-0001'")->fetch_assoc()['photo'] === 'uploads/students/ZNEW-0001.jpg');
+    ok('zip existing-id -> response leaks nothing',   $noLeak($r['raw']));
+
+    // 8c. Photo copy fails after a successful insert (target name is occupied by
+    //     a directory) -> row kept, but photo is NULL, never a path to a missing file.
+    @mkdir($uploads . '/students/ZCOPY-FAIL.jpg', 0777, true);
+    $zip3 = $makeZip($fixtures . '/photos3.zip', ['ZCOPY-FAIL.jpg' => $png1x1]);
+    $r = $uploadZip([['school_id' => 'ZCOPY-FAIL', 'name' => 'Copy Fail']], $zip3);
+    ok('zip copy-fail -> HTTP 200 + success_count 1',
+        $r['code'] === 200 && ($r['json']['success_count'] ?? null) === 1);
+    $cf = $rowExists('ZCOPY-FAIL')
+        ? $root->query("SELECT photo FROM students WHERE school_id='ZCOPY-FAIL'")->fetch_assoc()['photo'] : 'missing-row';
+    ok('zip copy-fail -> row photo is NULL', $cf === null);
+
+    // 8d. Non-string row fields (JSON array/object) are read as '' instead of
+    //     throwing TypeError from trim(): a name that becomes '' is an error, any
+    //     other field just imports as ''. Scalars are cast to string.
+    $r = $uploadZip([
+        ['school_id' => 'ZTYPE-0001', 'name' => ['x']],
+        ['school_id' => 'ZTYPE-0002', 'name' => 'Obj Course', 'course' => ['a' => 1],
+         'department' => ['d'], 'gender' => ['g' => 'M'], 'status' => [1], 'year_level' => 2],
+    ]);
+    ok('zip non-string fields -> HTTP 200',            $r['code'] === 200);
+    ok('zip non-string fields -> success 1, error 1',
+        ($r['json']['success_count'] ?? null) === 1 && ($r['json']['error_count'] ?? null) === 1);
+    ok('zip non-string fields -> array name row not inserted', !$rowExists('ZTYPE-0001'));
+    $tr = $rowExists('ZTYPE-0002')
+        ? $root->query("SELECT course, department, gender, status, year_level FROM students WHERE school_id='ZTYPE-0002'")->fetch_assoc()
+        : null;
+    ok('zip non-string fields -> non-scalars stored as \'\', int year_level as "2"',
+        $tr === ['course' => '', 'department' => '', 'gender' => '', 'status' => '', 'year_level' => '2']);
+    ok('zip non-string fields -> response leaks nothing', $noLeak($r['raw']));
 
     // 9. DB connect failure (db.php names a nonexistent DB; mysqli throws during
     //    the include while display_errors=1) -> HTTP 500 + generic JSON, no detail.
