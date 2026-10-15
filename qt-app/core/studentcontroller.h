@@ -14,7 +14,15 @@ class StudentController : public QObject
 {
     Q_OBJECT
 public:
+    // Manager contract (S1 transport seam): `nam` must be non-null and must
+    // outlive this object. In LOAMS 2.0 production it is the owning ViewModel's
+    // HttpClient::manager() (a PolicyEnforcingNam); a raw QNetworkAccessManager
+    // is accepted only as a test seam (CapturingNam / SequencedNam). This class
+    // never creates a manager itself.
     explicit StudentController(QNetworkAccessManager *nam, QObject *parent = nullptr);
+
+    // The injected manager, unchanged — lets tests prove production wiring.
+    QNetworkAccessManager *networkManager() const { return m_nam; }
 
     // Pure, unit-testable statics
     static QString normalizeFilter(const QString &comboText);

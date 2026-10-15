@@ -111,6 +111,7 @@ private slots:
     void toCsv_formulaFieldWithCommaIsPrefixedAndQuoted();
     void toCsv_prefixesApostropheWhenStatusStartsWithEquals();
     void toCsv_prefixesApostropheWhenGenderStartsWithEquals();
+    void networkManagerIsTheInjectedOne();
 };
 
 void TestStudentController::normalizeFilterPlaceholdersBecomeEmpty()
@@ -790,6 +791,13 @@ void TestStudentController::departmentOp_transportError_emitsFailedWithOp()
     QCOMPARE(finishedSpy.count(), 0);
     QCOMPARE(failedSpy.takeFirst().at(0).value<StudentController::DeptOp>(),
              StudentController::DeptOp::Deactivate);
+}
+
+void TestStudentController::networkManagerIsTheInjectedOne()
+{
+    CapturingNam nam;
+    StudentController controller(&nam);
+    QCOMPARE(controller.networkManager(), static_cast<QNetworkAccessManager *>(&nam));
 }
 
 QTEST_MAIN(TestStudentController)

@@ -7,10 +7,12 @@
 #include "studentcontroller.h"
 #include "AdminSession.h"
 #include "SettingsViewModel.h"
+#include "transport/httpclient.h"
 
-DatabaseViewModel::DatabaseViewModel(QObject *parent)
+DatabaseViewModel::DatabaseViewModel(QObject *parent, HttpClient *http)
     : QObject(parent)
-    , m_nam(new QNetworkAccessManager(this))
+    , m_http(http ? http : new HttpClient(this))
+    , m_nam(m_http->manager())
     , m_controller(new StudentController(m_nam, this))
 {
     connect(m_controller, &StudentController::searchFinished, this, &DatabaseViewModel::onSearchFinished);
@@ -20,8 +22,8 @@ DatabaseViewModel::DatabaseViewModel(QObject *parent)
     connect(m_controller, &StudentController::deleteFinished, this, &DatabaseViewModel::onDeleteFinished);
     connect(m_controller, &StudentController::deleteFailed, this, &DatabaseViewModel::onDeleteFailed);
 
-    m_editNam = new QNetworkAccessManager(this);
-    m_editController = new StudentController(m_editNam, this);
+    // Same seam manager as the table controller: one client per owner.
+    m_editController = new StudentController(m_nam, this);
     connect(m_editController, &StudentController::coursesLoaded,
             this, &DatabaseViewModel::onEditCoursesLoaded);
     // canEdit is a derived bool over selection size; only re-emit when it

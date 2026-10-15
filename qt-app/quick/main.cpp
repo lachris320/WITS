@@ -5,10 +5,12 @@
 #include <QSettings>
 
 #include "AccessControlHub.h"
+#include "PolicyNamFactory.h"
 #include "apiconfigloader.h"
 #include "appsettings.h"
 #include <QSGRendererInterface>
 #include "brandtheme.h"
+#include "transport/transportpolicy.h"
 
 int main(int argc, char *argv[])
 {
@@ -19,6 +21,12 @@ int main(int argc, char *argv[])
     // into the TurnstileProvider factory, and LoginParser's same-origin photo
     // check compares against that base -- both must see the runtime value.
     ApiConfigLoader::applyFromRuntime(QCoreApplication::applicationDirPath());
+
+    // S1a transport seam (S1 spec §3): one immutable policy for every manager
+    // in the process, published before any network object exists. Passthrough
+    // keeps today's behaviour exactly; S1e replaces this line with the
+    // TransportBootstrap Phase C policy and deletes Passthrough.
+    TransportPolicy::setCurrent(TransportPolicy::makePassthrough());
 
     // Deployment-hardware fallback (proposal §19/spec §10 Risk 4): the library
     // PC may lack a working OpenGL/RHI path. "--software" or
@@ -44,11 +52,21 @@ int main(int argc, char *argv[])
         BrandTheme::setCurrent(BrandTheme::loadCachedConfig(brandingStore).palette);
     }
 
+    // QML-engine managers come from the seam too. Declared before `engine` so
+    // it outlives it (QQmlEngine does not take ownership of the factory).
+    PolicyNamFactory namFactory;
+
     AccessControlHub accessControl;      // stack-owned; outlives `engine`
     accessControl.initialize();          // reads the flag; polls only if enabled
     AccessControlHub::setInstance(&accessControl);
 
     QQmlApplicationEngine engine;
+    // Before any QML loads or any request starts. installOn() returns false
+    // (qCritical logged) when the engine cannot be used with the seam; the
+    // factory stays set and the engine is unusable, so initialization aborts
+    // here (a real return, never an assert: this must hold in Release too).
+    if (!PolicyNamFactory::installOn(engine, namFactory))
+        return -1;
     QObject::connect(
         &engine, &QQmlApplicationEngine::objectCreationFailed,
         &app, []() { QCoreApplication::exit(-1); },

@@ -5,11 +5,19 @@
 #include "ImportViewModel.h"
 #include "importdata.h"
 #include "AdminSession.h"
+#include "apiconfig.h"
+#include "capturingnam.h"
+#include "offlinehttp.h"
+#include "transport/httpclient.h"
+#include "transport/policyenforcingnam.h"
+#include "importcontroller.h"
 
 class TestImportViewModel : public QObject
 {
     Q_OBJECT
 private slots:
+    void defaultConstructionUsesTransportSeam();
+    void duplicateCheckGoesThroughInjectedClient();
     void idleToDuplicatesToUploadToResult();
     void allDuplicatesBlocksContinue();
     void validationFailureStaysIdle();
@@ -33,7 +41,8 @@ void TestImportViewModel::idleToDuplicatesToUploadToResult()
 {
     AdminSession::instance().setKey("s3cr3t-key");
     QTemporaryDir dir;
-    ImportViewModel vm;
+    OfflineHttp vmHttp;
+    ImportViewModel vm(nullptr, &vmHttp.http);
     QCOMPARE(vm.phase(), ImportViewModel::Phase::Idle);
 
     vm.setDataFile(writeCsv(dir, "in.csv",
@@ -61,7 +70,8 @@ void TestImportViewModel::allDuplicatesBlocksContinue()
 {
     AdminSession::instance().setKey("s3cr3t-key");
     QTemporaryDir dir;
-    ImportViewModel vm;
+    OfflineHttp vmHttp;
+    ImportViewModel vm(nullptr, &vmHttp.http);
     vm.setDataFile(writeCsv(dir, "in.csv",
         "School ID,Full Name\n21-1-0001,Juan\n21-1-0002,Maria\n"));
     vm.startImport();
@@ -79,7 +89,8 @@ void TestImportViewModel::validationFailureStaysIdle()
 {
     AdminSession::instance().setKey("s3cr3t-key");
     QTemporaryDir dir;
-    ImportViewModel vm;
+    OfflineHttp vmHttp;
+    ImportViewModel vm(nullptr, &vmHttp.http);
     vm.setDataFile(writeCsv(dir, "bad.csv",
         "Full Name,Course\nJuan,BSIT\n"));   // no School ID column
     vm.startImport();
@@ -91,7 +102,8 @@ void TestImportViewModel::validationFailureStaysIdle()
 void TestImportViewModel::uploadFailedAuthSetsAuthFailure()
 {
     AdminSession::instance().setKey("bad-key");
-    ImportViewModel vm;
+    OfflineHttp vmHttp;
+    ImportViewModel vm(nullptr, &vmHttp.http);
     vm.onUploadFailed(QStringLiteral(
         "Admin authentication required — re-enter via admin login."));
     QCOMPARE(vm.phase(), ImportViewModel::Phase::Failed);
@@ -106,7 +118,8 @@ void TestImportViewModel::uploadFinishedServerErrorRoutesToFailed()
     // failure, so onUploadFailed is never invoked). Must route to Failed, not
     // be displayed as a fake "0 imported" success.
     AdminSession::instance().setKey("s3cr3t-key");
-    ImportViewModel vm;
+    OfflineHttp vmHttp;
+    ImportViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy finishedOkSpy(&vm, &ImportViewModel::finishedOk);
 
     UploadResult r;
@@ -119,6 +132,35 @@ void TestImportViewModel::uploadFinishedServerErrorRoutesToFailed()
     QVERIFY(vm.errorText().contains("Invalid rows payload."));
     QCOMPARE(finishedOkSpy.count(), 0);
     QVERIFY(!vm.resultText().contains("imported", Qt::CaseInsensitive));
+}
+
+void TestImportViewModel::defaultConstructionUsesTransportSeam()
+{
+    ImportViewModel vm;
+    auto *http = vm.findChild<HttpClient *>();
+    QVERIFY(http);
+    QCOMPARE(vm.findChildren<PolicyEnforcingNam *>().size(), 1);
+    auto *controller = vm.findChild<ImportController *>();
+    QVERIFY(controller);
+    QVERIFY(qobject_cast<PolicyEnforcingNam *>(controller->networkManager()));
+    QCOMPARE(controller->networkManager(), http->manager());
+}
+
+void TestImportViewModel::duplicateCheckGoesThroughInjectedClient()
+{
+    QTemporaryDir dir;
+    CapturingNam nam;
+    HttpClient http(nullptr, &nam);
+    ImportViewModel vm(nullptr, &http);
+    QVERIFY(vm.findChildren<PolicyEnforcingNam *>().isEmpty());
+    QCOMPARE(vm.findChild<ImportController *>()->networkManager(),
+             static_cast<QNetworkAccessManager *>(&nam));
+    vm.setDataFile(writeCsv(dir, QStringLiteral("in.csv"),
+        QStringLiteral("School ID,Full Name\n21-1-0001,Test Student A\n")));
+    vm.startImport();
+    QCOMPARE(vm.phase(), ImportViewModel::Phase::CheckingDuplicates);
+    QCOMPARE(nam.lastOp, QNetworkAccessManager::PostOperation);
+    QCOMPARE(nam.lastUrl, ApiConfig::endpoint(QStringLiteral("check_duplicates.php")));
 }
 
 QTEST_MAIN(TestImportViewModel)

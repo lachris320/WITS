@@ -25,6 +25,7 @@ TurnstileProvider::TurnstileProvider(QNetworkAccessManager *nam, QUrl baseUrl,
     , m_pollIntervalMs(clampPollMs(config.value(QStringLiteral("pollIntervalMs"), 1500).toInt()))
     , m_pollTimer(new QTimer(this))
 {
+    Q_ASSERT_X(nam, "TurnstileProvider", "null QNetworkAccessManager: pass the owner's HttpClient::manager()");
     QString gate = config.value(QStringLiteral("gateId")).toString().trimmed();
     m_gateId = gate.isEmpty() ? QStringLiteral("turnstile") : gate;
     m_pollTimer->setSingleShot(true);

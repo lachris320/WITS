@@ -21,11 +21,13 @@
 #include "csvutil.h"
 #include "brandtheme.h"
 #include "reportcontroller.h"
+#include "transport/httpclient.h"
 
-SettingsViewModel::SettingsViewModel(QObject *parent)
+SettingsViewModel::SettingsViewModel(QObject *parent, HttpClient *http)
     : QObject(parent)
     , m_controller(this)
-    , m_nam(new QNetworkAccessManager(this))
+    , m_http(http ? http : new HttpClient(this))
+    , m_nam(m_http->manager())
 {
     // SettingsController reports WHY an import failed ("File not found: …",
     // "Not a valid image: …", "Could not copy to: …") and nothing was listening

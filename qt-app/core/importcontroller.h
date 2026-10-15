@@ -13,7 +13,14 @@ class ImportController : public QObject
 {
     Q_OBJECT
 public:
+    // Manager contract (S1 transport seam): `nam` must be non-null and must
+    // outlive this object. In LOAMS 2.0 production it is the owner's
+    // HttpClient::manager() (a PolicyEnforcingNam); a raw QNetworkAccessManager
+    // is accepted only as a test seam. This class never creates a manager itself.
     explicit ImportController(QNetworkAccessManager *nam, QObject *parent = nullptr);
+
+    // The injected manager, unchanged — lets tests prove production wiring.
+    QNetworkAccessManager *networkManager() const { return m_nam; }
 
     // Pure, unit-testable statics
     static QString normalizeHeader(const QString &raw);

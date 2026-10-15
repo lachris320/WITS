@@ -8,6 +8,7 @@
 #include "BarsModel.h"
 
 class QNetworkAccessManager;
+class HttpClient;
 
 // Dashboard screen's only QML-facing object (spec §6.1/§7.3). Fetches
 // dashboard_summary.php once on navigation (manual refresh available; no
@@ -27,7 +28,9 @@ class DashboardViewModel : public QObject
     Q_PROPERTY(QString errorText READ errorText NOTIFY errorTextChanged)
 
 public:
-    explicit DashboardViewModel(QObject *parent = nullptr, QNetworkAccessManager *nam = nullptr);
+    // http: injection seam for tests (HttpClient wrapping a CapturingNam).
+    // Null in production: the VM owns an HttpClient (transport seam).
+    explicit DashboardViewModel(QObject *parent = nullptr, HttpClient *http = nullptr);
 
     int statToday() const { return m_today; }
     int statWeek() const { return m_week; }
@@ -66,7 +69,8 @@ private:
     void setError(const QString &e);
     void resetPeakOnError();   // resets peakHourIndex/peakHourLabel; shared by both error paths
 
-    QNetworkAccessManager *m_nam = nullptr;
+    HttpClient *m_http = nullptr;              // injected, or an owned child
+    QNetworkAccessManager *m_nam = nullptr;    // m_http->manager(); non-owning
     BarsModel m_hourly;
     BarsModel m_department;
     int m_today = 0;

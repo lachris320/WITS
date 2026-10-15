@@ -11,6 +11,7 @@
 #include "settingsdata.h"
 
 class QNetworkAccessManager;
+class HttpClient;
 
 // The Settings screen's ViewModel (spec §4.1) — the ONLY QML-facing C++ for
 // SettingsScreen. Owns a SettingsController (QSettings persistence + logo
@@ -36,7 +37,9 @@ class SettingsViewModel : public QObject
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusChanged)
 
 public:
-    explicit SettingsViewModel(QObject *parent = nullptr);
+    // http: injection seam for tests (HttpClient wrapping a CapturingNam).
+    // Null in production: the VM owns an HttpClient (transport seam).
+    explicit SettingsViewModel(QObject *parent = nullptr, HttpClient *http = nullptr);
 
     QString schoolName() const    { return m_cur.schoolName; }
     QString schoolAddress() const { return m_cur.schoolAddress; }
@@ -190,7 +193,8 @@ private:
     static QString localPath(const QUrl &url);
 
     SettingsController m_controller;
-    QNetworkAccessManager *m_nam = nullptr;
+    HttpClient *m_http = nullptr;              // injected, or an owned child
+    QNetworkAccessManager *m_nam = nullptr;    // m_http->manager(); non-owning
     SettingsData m_cur;       // edited (live) values
     SettingsData m_saved;     // last loaded/saved baseline (dirty is m_cur != m_saved)
     QStringList m_departments;

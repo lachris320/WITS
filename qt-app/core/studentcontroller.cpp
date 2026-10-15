@@ -18,7 +18,9 @@
 StudentController::StudentController(QNetworkAccessManager *nam, QObject *parent)
     : QObject(parent)
     , m_nam(nam)
-{}
+{
+    Q_ASSERT_X(nam, "StudentController", "null QNetworkAccessManager: pass the owner's HttpClient::manager()");
+}
 
 // Reproduces the placeholder->"" normalization at adminwindow.cpp:3171-3172.
 // The union of both legacy predicate lists; no real value equals a placeholder,

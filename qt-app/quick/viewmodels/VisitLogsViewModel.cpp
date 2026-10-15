@@ -13,10 +13,12 @@
 #include "visitlogparser.h"
 #include "visitorcontroller.h"
 #include "visitordata.h"
+#include "transport/httpclient.h"
 
-VisitLogsViewModel::VisitLogsViewModel(QObject *parent, QNetworkAccessManager *nam)
+VisitLogsViewModel::VisitLogsViewModel(QObject *parent, HttpClient *http)
     : QObject(parent)
-    , m_nam(nam ? nam : new QNetworkAccessManager(this))
+    , m_http(http ? http : new HttpClient(this))
+    , m_nam(m_http->manager())
 {
     m_rangeLabel = computeRangeLabel();
 }

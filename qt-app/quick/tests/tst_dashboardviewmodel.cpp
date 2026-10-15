@@ -5,11 +5,15 @@
 #include "BarsModel.h"
 #include "AdminSession.h"
 #include "capturingnam.h"
+#include "offlinehttp.h"
+#include "transport/httpclient.h"
+#include "transport/policyenforcingnam.h"
 
 class TestDashboardViewModel : public QObject
 {
     Q_OBJECT
 private slots:
+    void defaultConstructionUsesTransportSeam();
     void formatPeakHourMapsTo12Hour();
     void applySummaryPopulatesStatsAndModels();
     void applySummaryDerivesPeak();
@@ -30,7 +34,8 @@ void TestDashboardViewModel::formatPeakHourMapsTo12Hour()
 
 void TestDashboardViewModel::applySummaryPopulatesStatsAndModels()
 {
-    DashboardViewModel vm;
+    OfflineHttp vmHttp;
+    DashboardViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy spy(&vm, &DashboardViewModel::dataChanged);
     vm.applySummary(R"({
         "status":"success","today":128,"week":812,"students":3450,
@@ -48,7 +53,8 @@ void TestDashboardViewModel::applySummaryPopulatesStatsAndModels()
 
 void TestDashboardViewModel::applySummaryDerivesPeak()
 {
-    DashboardViewModel vm;
+    OfflineHttp vmHttp;
+    DashboardViewModel vm(nullptr, &vmHttp.http);
     vm.applySummary(R"({
         "status":"success","today":1,"week":1,"students":1,
         "hourly":[{"hour":8,"count":12},{"hour":10,"count":41},{"hour":9,"count":34}]
@@ -60,7 +66,8 @@ void TestDashboardViewModel::applySummaryDerivesPeak()
 
 void TestDashboardViewModel::applyInvalidSetsErrorText()
 {
-    DashboardViewModel vm;
+    OfflineHttp vmHttp;
+    DashboardViewModel vm(nullptr, &vmHttp.http);
     vm.applySummary(R"({"status":"error"})");
     QVERIFY(!vm.errorText().isEmpty());
     QCOMPARE(vm.peakHourIndex(), -1);
@@ -75,7 +82,8 @@ void TestDashboardViewModel::applyInvalidSetsErrorText()
 // wiring, which was verified by inspection instead of a network-hitting test.
 void TestDashboardViewModel::supersededRequestSeqIsNotCurrent()
 {
-    DashboardViewModel vm;
+    OfflineHttp vmHttp;
+    DashboardViewModel vm(nullptr, &vmHttp.http);
     const quint64 first = vm.nextRequestSeq();     // e.g. first navigation to Dashboard
     QVERIFY(vm.isCurrentRequest(first));
 
@@ -88,7 +96,8 @@ void TestDashboardViewModel::refresh_postsWithAdminKeyInBody()
 {
     AdminSession::instance().setKey("test-key");
     CapturingNam nam;
-    DashboardViewModel vm(nullptr, &nam);
+    HttpClient vmClient(nullptr, &nam);
+    DashboardViewModel vm(nullptr, &vmClient);
     vm.refresh();
 
     QCOMPARE(nam.lastOp, QNetworkAccessManager::PostOperation);
@@ -104,11 +113,27 @@ void TestDashboardViewModel::refresh_guard401_setsError()
     AdminSession::instance().setKey("");
     CapturingNam nam(QByteArrayLiteral("{\"status\":\"error\"}"),
                      QNetworkReply::AuthenticationRequiredError, 401);
-    DashboardViewModel vm(nullptr, &nam);
+    HttpClient vmClient(nullptr, &nam);
+    DashboardViewModel vm(nullptr, &vmClient);
     QSignalSpy err(&vm, &DashboardViewModel::errorTextChanged);
     vm.refresh();
     QVERIFY(err.wait(1000));
     QVERIFY(!vm.errorText().isEmpty());   // 401 lands in the error state, not empty success
+}
+
+void TestDashboardViewModel::defaultConstructionUsesTransportSeam()
+{
+    // Production path (QML default construction): the VM owns an HttpClient
+    // whose manager is a PolicyEnforcingNam — never a raw QNetworkAccessManager.
+    DashboardViewModel vm;
+    QVERIFY(vm.findChild<HttpClient *>());
+    QCOMPARE(vm.findChildren<PolicyEnforcingNam *>().size(), 1);
+
+    // Injected path: the test's manager is used; nothing is created.
+    CapturingNam nam;
+    HttpClient http(nullptr, &nam);
+    DashboardViewModel injected(nullptr, &http);
+    QVERIFY(injected.findChildren<PolicyEnforcingNam *>().isEmpty());
 }
 
 QTEST_MAIN(TestDashboardViewModel)

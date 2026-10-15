@@ -14,10 +14,12 @@
 #include "AdminSession.h"
 #include "SchoolInfoUtil.h"
 #include "Initials.h"
+#include "transport/httpclient.h"
 
-KioskViewModel::KioskViewModel(QObject *parent)
+KioskViewModel::KioskViewModel(QObject *parent, HttpClient *http)
     : QObject(parent)
-    , m_nam(new QNetworkAccessManager(this))
+    , m_http(http ? http : new HttpClient(this))
+    , m_nam(m_http->manager())
     , m_clockTimer(new QTimer(this))
 {
     m_rfidClock.start();

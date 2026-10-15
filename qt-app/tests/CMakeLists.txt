@@ -11,6 +11,10 @@ set_tests_properties(tst_rfidscandetector PROPERTIES
     ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1"
 )
 
+# Widgets-only tests: they exercise frozen legacy sources (root
+# rfidkeyboardfilter.cpp / the *.ui forms), so they build only with the legacy
+# target (LOAMS_BUILD_LEGACY_WIDGETS=ON). See LEGACY-WIDGETS.md.
+if(LOAMS_BUILD_LEGACY_WIDGETS)
 qt_add_executable(tst_rfidkeyboardfilter
     tst_rfidkeyboardfilter.cpp
     ${CMAKE_SOURCE_DIR}/rfidkeyboardfilter.cpp
@@ -27,6 +31,7 @@ add_test(NAME tst_rfidkeyboardfilter COMMAND tst_rfidkeyboardfilter)
 set_tests_properties(tst_rfidkeyboardfilter PROPERTIES
     ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1;QT_QPA_PLATFORM=offscreen"
 )
+endif()
 
 qt_add_executable(tst_apiconfig
     tst_apiconfig.cpp
@@ -51,6 +56,7 @@ set_tests_properties(tst_theme PROPERTIES
     ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1;QT_QPA_PLATFORM=offscreen"
 )
 
+if(LOAMS_BUILD_LEGACY_WIDGETS)   # Widgets-only (*.ui forms); see above
 qt_add_executable(tst_responsive_ui
     tst_responsive_ui.cpp
 )
@@ -66,6 +72,7 @@ add_test(NAME tst_responsive_ui COMMAND tst_responsive_ui)
 set_tests_properties(tst_responsive_ui PROPERTIES
     ENVIRONMENT "QT_FORCE_STDERR_LOGGING=1;QT_QPA_PLATFORM=offscreen"
 )
+endif()
 
 qt_add_executable(tst_visitorcontroller
     tst_visitorcontroller.cpp
@@ -396,3 +403,52 @@ wits_add_qttest(tst_apiconfigloader
         ${CMAKE_SOURCE_DIR}/core/apiconfigloader.cpp
         ${CMAKE_SOURCE_DIR}/core/apiconfigloader.h
     INCLUDES ${CMAKE_SOURCE_DIR}/core)
+
+# --- S1a transport seam: immutable policy + atomic snapshot (Network; no offscreen) ---
+wits_add_qttest(tst_transportpolicy
+    SOURCES
+        tst_transportpolicy.cpp
+        ${CMAKE_SOURCE_DIR}/core/transport/transportpolicy.cpp
+        ${CMAKE_SOURCE_DIR}/core/transport/transportpolicy.h
+    LIBS Qt${QT_VERSION_MAJOR}::Network
+    INCLUDES ${CMAKE_SOURCE_DIR}/core)
+# S1a GATE G1: std::atomic_load / std::atomic_store on shared_ptr must compile
+# warning-free (incl. no -Wdeprecated-declarations) on this MinGW GCC. Scoped to
+# the one source that uses them (every test target in this directory that
+# compiles it inherits it); Qt's imported include dirs are -isystem, so only
+# our code is held to -Werror.
+set_source_files_properties(${CMAKE_SOURCE_DIR}/core/transport/transportpolicy.cpp
+    PROPERTIES COMPILE_OPTIONS "-Wall;-Wextra;-Werror")
+
+# --- S1a transport seam: PolicyEnforcingNam wire-level parity vs a plain
+# QNetworkAccessManager against the in-process loopback TinyHttpServer
+# (Network; no offscreen; no external network) ---
+wits_add_qttest(tst_policyenforcingnam
+    SOURCES
+        tst_policyenforcingnam.cpp
+        ${CMAKE_SOURCE_DIR}/core/transport/policyenforcingnam.cpp
+        ${CMAKE_SOURCE_DIR}/core/transport/policyenforcingnam.h
+        ${CMAKE_SOURCE_DIR}/core/transport/transportpolicy.cpp
+        ${CMAKE_SOURCE_DIR}/core/transport/transportpolicy.h
+        ${CMAKE_SOURCE_DIR}/testsupport/tinyhttpserver.cpp
+        ${CMAKE_SOURCE_DIR}/testsupport/tinyhttpserver.h
+    LIBS Qt${QT_VERSION_MAJOR}::Network
+    INCLUDES ${CMAKE_SOURCE_DIR}/core ${CMAKE_SOURCE_DIR}/testsupport)
+
+# --- S1a transport seam: HttpClient ownership / injection (Network; no offscreen) ---
+wits_add_qttest(tst_httpclient
+    SOURCES
+        tst_httpclient.cpp
+        ${CMAKE_SOURCE_DIR}/core/transport/httpclient.cpp
+        ${CMAKE_SOURCE_DIR}/core/transport/httpclient.h
+        ${CMAKE_SOURCE_DIR}/core/transport/policyenforcingnam.cpp
+        ${CMAKE_SOURCE_DIR}/core/transport/policyenforcingnam.h
+        ${CMAKE_SOURCE_DIR}/core/transport/transportpolicy.cpp
+        ${CMAKE_SOURCE_DIR}/core/transport/transportpolicy.h
+        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.cpp
+        ${CMAKE_SOURCE_DIR}/testsupport/capturingnam.h
+        ${CMAKE_SOURCE_DIR}/testsupport/sequencednam.cpp
+        ${CMAKE_SOURCE_DIR}/testsupport/sequencednam.h
+        ${CMAKE_SOURCE_DIR}/testsupport/offlinehttp.h
+    LIBS Qt${QT_VERSION_MAJOR}::Network
+    INCLUDES ${CMAKE_SOURCE_DIR}/core ${CMAKE_SOURCE_DIR}/testsupport)

@@ -9,6 +9,7 @@
 #include "accesscontrol/eventbus.h"
 #include "accesscontrol/healthmonitor.h"
 #include "accesscontrol/turnstileprovider.h"
+#include "transport/httpclient.h"
 
 using namespace AccessControl;
 
@@ -17,16 +18,16 @@ namespace { AccessControlHub *g_instance = nullptr; }
 AccessControlHub *AccessControlHub::instance() { return g_instance; }
 void AccessControlHub::setInstance(AccessControlHub *hub) { g_instance = hub; }
 
-AccessControlHub::AccessControlHub(QNetworkAccessManager *injectedNam, QObject *parent)
+AccessControlHub::AccessControlHub(QObject *parent, HttpClient *http)
     : QObject(parent)
     , m_bus(std::make_unique<EventBus>())
     , m_service(std::make_unique<AccessControlService>(m_bus.get(), &m_factory))
 {
-    if (injectedNam) {
-        m_nam = injectedNam;                 // externally owned; must outlive the hub
+    if (http) {
+        m_nam = http->manager();             // externally owned; must outlive the hub
     } else {
-        m_ownedNam = std::make_unique<QNetworkAccessManager>();
-        m_nam = m_ownedNam.get();
+        m_ownedClient = std::make_unique<HttpClient>();
+        m_nam = m_ownedClient->manager();
     }
     connect(m_bus.get(), &EventBus::eventPublished, this, &AccessControlHub::onBusEvent);
 

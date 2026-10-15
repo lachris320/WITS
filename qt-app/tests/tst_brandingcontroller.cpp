@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QByteArray>
+#include <QNetworkAccessManager>
 #include "brandingcontroller.h"
 #include "brandtheme.h"
 
@@ -13,6 +14,7 @@ private slots:
     void parseStatusError();            // {"status":"error","message":"Query failed"} -> false, errorMsg contains "Query failed"
     void parseMalformedPaletteFallsBack(); // palette:"garbage" (non-object) -> true, hasConfig, palette == fallback
     void parseManualMode();             // theme_mode:"manual" -> ThemeMode::Manual
+    void networkManagerIsTheInjectedOne();
 };
 
 void TestBrandingController::parseSuccessWithConfig()
@@ -130,6 +132,13 @@ void TestBrandingController::parseManualMode()
     QVERIFY(BrandingController::parseBrandingResponse(json, &config, &hasConfig, &errorMsg));
     QVERIFY(hasConfig);
     QVERIFY(config.mode == ThemeMode::Manual);
+}
+
+void TestBrandingController::networkManagerIsTheInjectedOne()
+{
+    QNetworkAccessManager nam;
+    BrandingController controller(&nam);
+    QCOMPARE(controller.networkManager(), &nam);
 }
 
 QTEST_GUILESS_MAIN(TestBrandingController)

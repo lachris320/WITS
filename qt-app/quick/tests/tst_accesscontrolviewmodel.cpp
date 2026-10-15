@@ -7,11 +7,15 @@
 #include "AdminSession.h"
 #include "SettingsViewModel.h"
 #include "capturingnam.h"
+#include "offlinehttp.h"
+#include "transport/httpclient.h"
+#include "transport/policyenforcingnam.h"
 
 class TestAccessControlViewModel : public QObject
 {
     Q_OBJECT
 private slots:
+    void defaultConstructionUsesTransportSeam();
     void cleanup() { AdminSession::instance().clear(); }
 
     void refresh_postsAdminKeyInBodyNotUrl();
@@ -53,7 +57,8 @@ void TestAccessControlViewModel::refresh_postsAdminKeyInBodyNotUrl()
 {
     AdminSession::instance().setKey(QStringLiteral("sp4-test-key"));
     CapturingNam nam(feedBody());
-    AccessControlViewModel vm(nullptr, &nam);
+    HttpClient vmClient(nullptr, &nam);
+    AccessControlViewModel vm(nullptr, &vmClient);
     vm.refresh();
 
     QCOMPARE(nam.lastOp, QNetworkAccessManager::PostOperation);
@@ -68,7 +73,8 @@ void TestAccessControlViewModel::refresh_postsAdminKeyInBodyNotUrl()
 void TestAccessControlViewModel::refresh_togglesLoading()
 {
     CapturingNam nam(feedBody());
-    AccessControlViewModel vm(nullptr, &nam);
+    HttpClient vmClient(nullptr, &nam);
+    AccessControlViewModel vm(nullptr, &vmClient);
     vm.refresh();
     QVERIFY(vm.loading());
     QTRY_VERIFY_WITH_TIMEOUT(!vm.loading(), 1000);
@@ -77,7 +83,8 @@ void TestAccessControlViewModel::refresh_togglesLoading()
 
 void TestAccessControlViewModel::applyRecent_fillsModelCountsAndUpdatedAt()
 {
-    AccessControlViewModel vm;
+    OfflineHttp vmHttp;
+    AccessControlViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy data(&vm, &AccessControlViewModel::dataChanged);
     vm.applyRecent(feedBody());
     QCOMPARE(data.count(), 1);
@@ -96,7 +103,8 @@ void TestAccessControlViewModel::applyRecent_fillsModelCountsAndUpdatedAt()
 
 void TestAccessControlViewModel::emptyFeed_isEmptyStateNotError()
 {
-    AccessControlViewModel vm;
+    OfflineHttp vmHttp;
+    AccessControlViewModel vm(nullptr, &vmHttp.http);
     vm.applyRecent(R"({"status":"success","entries":[],"entries_today":0,"last_entry_at":null})");
     QVERIFY(vm.emptyFeed());
     QVERIFY(!vm.initialLoadFailed());
@@ -108,7 +116,8 @@ void TestAccessControlViewModel::emptyFeed_isEmptyStateNotError()
 
 void TestAccessControlViewModel::malformedFirstLoad_isInitialFailureNotEmpty()
 {
-    AccessControlViewModel vm;
+    OfflineHttp vmHttp;
+    AccessControlViewModel vm(nullptr, &vmHttp.http);
     vm.applyRecent("not json");
     QVERIFY(vm.initialLoadFailed());
     QVERIFY(!vm.emptyFeed());
@@ -119,7 +128,8 @@ void TestAccessControlViewModel::malformedFirstLoad_isInitialFailureNotEmpty()
 
 void TestAccessControlViewModel::ordinaryFailure_keepsRowsMarksStaleFreezesUpdatedAt()
 {
-    AccessControlViewModel vm;
+    OfflineHttp vmHttp;
+    AccessControlViewModel vm(nullptr, &vmHttp.http);
     vm.applyRecent(feedBody());
     const QString firstUpdated = vm.updatedAt();
     QTest::qWait(1100);                     // a later failure must NOT restamp the clock
@@ -136,7 +146,8 @@ void TestAccessControlViewModel::ordinaryFailure_keepsRowsMarksStaleFreezesUpdat
 void TestAccessControlViewModel::refresh_transportFailureAfterSuccessIsStale()
 {
     CapturingNam nam(QByteArray(), QNetworkReply::HostNotFoundError, 0);   // no status line
-    AccessControlViewModel vm(nullptr, &nam);
+    HttpClient vmClient(nullptr, &nam);
+    AccessControlViewModel vm(nullptr, &vmClient);
     vm.applyRecent(feedBody());
     const QString firstUpdated = vm.updatedAt();
     QSignalSpy err(&vm, &AccessControlViewModel::errorTextChanged);
@@ -153,7 +164,8 @@ void TestAccessControlViewModel::refresh_http5xxAfterSuccessIsStale()
 {
     CapturingNam nam(QByteArrayLiteral("{\"status\":\"error\",\"message\":\"Internal server error\"}"),
                      QNetworkReply::InternalServerError, 500);
-    AccessControlViewModel vm(nullptr, &nam);
+    HttpClient vmClient(nullptr, &nam);
+    AccessControlViewModel vm(nullptr, &vmClient);
     vm.applyRecent(feedBody());
     QSignalSpy stale(&vm, &AccessControlViewModel::staleChanged);
     vm.refresh();
@@ -170,7 +182,8 @@ void TestAccessControlViewModel::refresh_repeatedIdenticalFailureReEmitsErrorTex
     // errorTextChanged, so refresh() must clear the error on start or the second
     // identical failure would be swallowed by setError's unchanged-string guard.
     CapturingNam nam(QByteArray(), QNetworkReply::HostNotFoundError, 0);
-    AccessControlViewModel vm(nullptr, &nam);
+    HttpClient vmClient(nullptr, &nam);
+    AccessControlViewModel vm(nullptr, &vmClient);
     QSignalSpy err(&vm, &AccessControlViewModel::errorTextChanged);
     vm.refresh();
     QTRY_COMPARE_WITH_TIMEOUT(err.count(), 1, 1000);          // "" -> message
@@ -187,7 +200,8 @@ void TestAccessControlViewModel::refresh_clearsErrorButKeepsStaleAuthAndUpdatedA
     // Starting a refresh clears ONLY the error text. Rows, stale, updatedAt and
     // authFailure are untouched until the reply lands.
     CapturingNam nam(QByteArray(), QNetworkReply::HostNotFoundError, 0);
-    AccessControlViewModel vm(nullptr, &nam);
+    HttpClient vmClient(nullptr, &nam);
+    AccessControlViewModel vm(nullptr, &vmClient);
     vm.applyRecent(feedBody());
     const QString firstUpdated = vm.updatedAt();
     vm.applyRecent("not json");                               // stale + error
@@ -204,7 +218,8 @@ void TestAccessControlViewModel::refresh_clearsErrorButKeepsStaleAuthAndUpdatedA
     QTRY_VERIFY_WITH_TIMEOUT(!vm.loading(), 1000);
 
     // authFailure survives the start of a refresh (only a later success resets it).
-    AccessControlViewModel authVm(nullptr, &nam);
+    HttpClient authVmClient(nullptr, &nam);
+    AccessControlViewModel authVm(nullptr, &authVmClient);
     authVm.applyRecent(R"({"status":"error","message":"Invalid admin key"})");
     QVERIFY(authVm.authFailure());
     authVm.refresh();
@@ -221,7 +236,8 @@ void TestAccessControlViewModel::refresh_afterFailedFirstLoad_notifiesInitialLoa
     // (dataChanged), and by the time loadingChanged fires the cleared state must
     // already be visible, or the table keeps the failure text for the whole retry.
     CapturingNam nam(QByteArray(), QNetworkReply::HostNotFoundError, 0);
-    AccessControlViewModel vm(nullptr, &nam);
+    HttpClient vmClient(nullptr, &nam);
+    AccessControlViewModel vm(nullptr, &vmClient);
     vm.refresh();
     QTRY_VERIFY_WITH_TIMEOUT(!vm.loading(), 1000);
     QVERIFY(vm.initialLoadFailed());                          // failed FIRST load
@@ -245,7 +261,8 @@ void TestAccessControlViewModel::refresh_http401_setsAuthFailureAndClearsProtect
     AdminSession::instance().setKey(QStringLiteral("sp4-test-key"));
     CapturingNam nam(QByteArrayLiteral("{\"status\":\"error\",\"message\":\"Invalid admin key\"}"),
                      QNetworkReply::AuthenticationRequiredError, 401);
-    AccessControlViewModel vm(nullptr, &nam);
+    HttpClient vmClient(nullptr, &nam);
+    AccessControlViewModel vm(nullptr, &vmClient);
     vm.applyRecent(feedBody());                 // protected rows on screen
     QSignalSpy auth(&vm, &AccessControlViewModel::authFailureChanged);
     vm.refresh();
@@ -273,7 +290,8 @@ void TestAccessControlViewModel::refresh_http401WithEmptyOrMalformedBodyIsStillA
     const QList<QByteArray> bodies{ QByteArray(), QByteArrayLiteral("<html>401</html>") };
     for (const QByteArray &body : bodies) {
         CapturingNam nam(body, QNetworkReply::AuthenticationRequiredError, 401);
-        AccessControlViewModel vm(nullptr, &nam);
+        HttpClient vmClient(nullptr, &nam);
+        AccessControlViewModel vm(nullptr, &vmClient);
         vm.applyRecent(feedBody());             // protected rows on screen
         QSignalSpy auth(&vm, &AccessControlViewModel::authFailureChanged);
         vm.refresh();
@@ -291,7 +309,8 @@ void TestAccessControlViewModel::refresh_http401WithEmptyOrMalformedBodyIsStillA
 
 void TestAccessControlViewModel::authFailure_resetByLaterSuccess()
 {
-    AccessControlViewModel vm;
+    OfflineHttp vmHttp;
+    AccessControlViewModel vm(nullptr, &vmHttp.http);
     vm.applyRecent(R"({"status":"error","message":"Invalid admin key"})");
     QVERIFY(vm.authFailure());
     vm.applyRecent(feedBody());
@@ -305,7 +324,8 @@ void TestAccessControlViewModel::authFailure_survivesOrdinaryFailureUntilLaterSu
     // A transport/parse failure says nothing new about the key: after a 401 it
     // must NOT hide the re-login prompt or flip the page to failed-initial-load.
     const QString authMsg = QStringLiteral("Admin authentication failed — re-enter via admin login.");
-    AccessControlViewModel vm;
+    OfflineHttp vmHttp;
+    AccessControlViewModel vm(nullptr, &vmHttp.http);
     vm.applyRecent(feedBody());
     vm.applyRecent(R"({"status":"error","message":"Invalid admin key"})");
     QVERIFY(vm.authFailure());
@@ -331,14 +351,16 @@ void TestAccessControlViewModel::authFailure_survivesOrdinaryFailureUntilLaterSu
 
 void TestAccessControlViewModel::authFailureText_isConstantAndMatchesAuthErrorText()
 {
-    AccessControlViewModel vm;
+    OfflineHttp vmHttp;
+    AccessControlViewModel vm(nullptr, &vmHttp.http);
     const QString authMsg = QStringLiteral("Admin authentication failed — re-enter via admin login.");
     QCOMPARE(vm.authFailureText(), authMsg);                  // available before any failure
     vm.applyRecent(R"({"status":"error","message":"Invalid admin key"})");
     QCOMPARE(vm.errorText(), vm.authFailureText());
     // errorText clears when a refresh starts; the constant does not.
     CapturingNam nam(QByteArray(), QNetworkReply::HostNotFoundError, 0);
-    AccessControlViewModel vm2(nullptr, &nam);
+    HttpClient vm2Client(nullptr, &nam);
+    AccessControlViewModel vm2(nullptr, &vm2Client);
     vm2.applyRecent(R"({"status":"error","message":"Invalid admin key"})");
     vm2.refresh();
     QVERIFY(vm2.errorText().isEmpty());
@@ -350,7 +372,8 @@ void TestAccessControlViewModel::authFailureText_isConstantAndMatchesAuthErrorTe
 
 void TestAccessControlViewModel::supersededRequestSeqIsNotCurrent()
 {
-    AccessControlViewModel vm;
+    OfflineHttp vmHttp;
+    AccessControlViewModel vm(nullptr, &vmHttp.http);
     const quint64 first = vm.nextRequestSeq();
     QVERIFY(vm.isCurrentRequest(first));
     const quint64 second = vm.nextRequestSeq();
@@ -361,7 +384,8 @@ void TestAccessControlViewModel::supersededRequestSeqIsNotCurrent()
 void TestAccessControlViewModel::refresh_supersededReplyIsDropped()
 {
     CapturingNam nam(feedBody());
-    AccessControlViewModel vm(nullptr, &nam);
+    HttpClient vmClient(nullptr, &nam);
+    AccessControlViewModel vm(nullptr, &vmClient);
     QSignalSpy data(&vm, &AccessControlViewModel::dataChanged);
     vm.refresh();                               // seq 1 — superseded before it lands
     vm.refresh();                               // seq 2 — the only one applied
@@ -369,6 +393,21 @@ void TestAccessControlViewModel::refresh_supersededReplyIsDropped()
     QTest::qWait(50);                           // both replies have finished by now
     QCOMPARE(data.count(), 1);                  // the seq-1 reply was dropped
     QVERIFY(!vm.loading());
+}
+
+void TestAccessControlViewModel::defaultConstructionUsesTransportSeam()
+{
+    // Production path (QML default construction): the VM owns an HttpClient
+    // whose manager is a PolicyEnforcingNam — never a raw QNetworkAccessManager.
+    AccessControlViewModel vm;
+    QVERIFY(vm.findChild<HttpClient *>());
+    QCOMPARE(vm.findChildren<PolicyEnforcingNam *>().size(), 1);
+
+    // Injected path: the test's manager is used; nothing is created.
+    CapturingNam nam;
+    HttpClient http(nullptr, &nam);
+    AccessControlViewModel injected(nullptr, &http);
+    QVERIFY(injected.findChildren<PolicyEnforcingNam *>().isEmpty());
 }
 
 QTEST_MAIN(TestAccessControlViewModel)

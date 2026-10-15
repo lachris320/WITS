@@ -38,7 +38,7 @@ Break feature work into independent tasks and dispatch them to subagents. Each s
 
 All feature work follows test-driven development: **red → green → refactor**, run inside a subagent.
 
-> **Note on the current state of the harness.** As of writing, the repo has no automated test target — `qt-app/CMakeLists.txt` builds only the `WITS` executable. Standing up a Qt Test target is the first prerequisite for real TDD here; until it exists, treat "add the test target" as the red step of the first feature that needs it, and don't claim TDD coverage that doesn't exist.
+> **Note on the current state of the harness.** Qt Test and Qt Quick Test targets exist: register C++ tests with `wits_add_qttest()` (`qt-app/cmake/WitsTest.cmake`) and QML QuickTests with `wits_add_qmltest()` (`qt-app/quick/CMakeLists.txt`), and run them with `ctest`. Add a test target for any new unit you test, and don't claim TDD coverage that doesn't exist.
 
 ### Test Types & tooling
 
@@ -73,7 +73,7 @@ Claude review spins up a fresh-context Claude instance to check correctness, sec
 
 When all tasks are done, the build passes, tests are green, and Claude review has approved:
 
-- Verify the build: configure + `cmake --build qt-app/build` completes with no new warnings/errors. Smoke-test the `WITS` executable for the feature you touched (this is a desktop GUI app — a clean build is necessary but not sufficient; actually run it).
+- Verify the build: configure + `cmake --build qt-app/build` completes with no new warnings/errors. Smoke-test the executable you changed for the feature you touched (`WITSQuick` for LOAMS 2.0 work; `WITS` only for legacy Widgets changes) (this is a desktop GUI app — a clean build is necessary but not sufficient; actually run it).
 - Use `superpowers:finishing-a-development-branch`.
 - Use the project-scoped `create-pr` skill to open the PR (only meaningful once a remote is configured — see the skill).
 

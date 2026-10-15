@@ -16,7 +16,9 @@ namespace AccessControl {
 AccessDecisionService::AccessDecisionService(QNetworkAccessManager *nam, QObject *parent)
     : QObject(parent)
     , m_nam(nam)
-{}
+{
+    Q_ASSERT_X(nam, "AccessDecisionService", "null QNetworkAccessManager: pass the owner's HttpClient::manager()");
+}
 
 void AccessDecisionService::setTimeoutMs(int ms) { m_timeoutMs = ms; }
 

@@ -54,6 +54,7 @@ private slots:
     void verifyTransportFailureEmitsError();
     void verifyTimeoutEmitsError();   // the required invariant
     void cancelDropsPendingDecision();
+    void networkManagerIsTheInjectedOne();
 };
 
 void TestAccessDecisionService::decodeGrantedResponse()
@@ -176,6 +177,13 @@ void TestAccessDecisionService::cancelDropsPendingDecision()
     svc.cancel();          // invalidate before the reply is delivered
     QTest::qWait(100);
     QCOMPARE(spy.count(), 0);   // the late decision was dropped, not emitted
+}
+
+void TestAccessDecisionService::networkManagerIsTheInjectedOne()
+{
+    CapturingNam nam;
+    AccessControl::AccessDecisionService service(&nam);
+    QCOMPARE(service.networkManager(), static_cast<QNetworkAccessManager *>(&nam));
 }
 
 QTEST_MAIN(TestAccessDecisionService)

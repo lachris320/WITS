@@ -3,6 +3,7 @@
 #include <QList>
 #include <QPair>
 #include <QTemporaryDir>
+#include <QNetworkAccessManager>
 #include "visitorcontroller.h"
 #include "visitordata.h"
 #include "xlsxdocument.h"
@@ -38,6 +39,7 @@ private slots:
     // exportToExcel
     void exportToExcelWritesLayout();
     void exportToExcelSchoolNameFallback();
+    void networkManagerIsTheInjectedOne();
 };
 
 void TestVisitorController::parseSuccessPayload()
@@ -256,7 +258,8 @@ void TestVisitorController::exportToExcelWritesLayout()
     filter.endDate   = QStringLiteral("2026-06-30");
     filter.search    = QStringLiteral("Juan_Santos");   // underscore exercises the legacy quirk
 
-    VisitorController controller(nullptr);   // exportToExcel never touches the manager
+    QNetworkAccessManager unusedNam;   // contract: non-null manager (this path never uses it)
+    VisitorController controller(&unusedNam);
     QVERIFY(controller.exportToExcel(records, filter,
                                      QStringLiteral("Sample University"), filePath));
 
@@ -297,7 +300,8 @@ void TestVisitorController::exportToExcelSchoolNameFallback()
                     QStringLiteral("Research"), QStringLiteral("2026-06-15"),
                     QStringLiteral("02:30 PM")});
 
-    VisitorController controller(nullptr);
+    QNetworkAccessManager unusedNam;   // contract: non-null manager (this path never uses it)
+    VisitorController controller(&unusedNam);
     QVERIFY(controller.exportToExcel(records, VisitorFilter{}, QString(), filePath));
 
     QXlsx::Document readBack(filePath);
@@ -305,6 +309,13 @@ void TestVisitorController::exportToExcelSchoolNameFallback()
     QCOMPARE(readBack.read("A1").toString(), QString("School Name"));   // empty-name fallback
     QVERIFY(readBack.read("A5").toString().isEmpty());   // All filter → no "Filter Applied:" row
     QVERIFY(readBack.read("A6").toString().isEmpty());   // no search → no "Search Keyword:" row
+}
+
+void TestVisitorController::networkManagerIsTheInjectedOne()
+{
+    QNetworkAccessManager nam;
+    VisitorController controller(&nam);
+    QCOMPARE(controller.networkManager(), &nam);
 }
 
 QTEST_MAIN(TestVisitorController)

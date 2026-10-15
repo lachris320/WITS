@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QSignalSpy>
+#include <QUrl>
 #include <QUrlQuery>
 #include "sequencednam.h"
 #include "accesscontrol/turnstileprovider.h"
@@ -11,6 +12,7 @@ class TestTurnstileProvider : public QObject
 {
     Q_OBJECT
 private slots:
+    void networkManagerIsTheInjectedOne();
     void initTestCase() { registerMetaTypes(); }
     void clampPollMs_rules();
     void blankGateIdFallsBack();
@@ -453,6 +455,14 @@ void TestTurnstileProvider::noPolledFromReplyCompletingAfterStop()
     p.stop();                           // generation bump, then the reply completes (abort)
     QTest::qWait(100);                  // let the late finished() run
     QCOMPARE(polled.count(), 0);        // the generation guard dropped it before any emit
+}
+
+void TestTurnstileProvider::networkManagerIsTheInjectedOne()
+{
+    SequencedNam nam;
+    AccessControl::TurnstileProvider provider(&nam, QUrl(QStringLiteral("http://localhost/loams_api/")),
+                                              QVariantMap{});
+    QCOMPARE(provider.networkManager(), static_cast<QNetworkAccessManager *>(&nam));
 }
 
 QTEST_MAIN(TestTurnstileProvider)

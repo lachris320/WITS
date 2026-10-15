@@ -54,6 +54,9 @@ add_library(witscore STATIC
     accesscontrol/accesscontrolservice.h accesscontrol/accesscontrolservice.cpp
     accesscontrol/turnstileprovider.h accesscontrol/turnstileprovider.cpp
     accesscontrol/contactage.h accesscontrol/contactage.cpp
+    transport/transportpolicy.h transport/transportpolicy.cpp
+    transport/policyenforcingnam.h transport/policyenforcingnam.cpp
+    transport/httpclient.h transport/httpclient.cpp
 )
 
 # AUTOMOC required (7 Q_OBJECT classes: the five *Controller + BrandingController
@@ -63,6 +66,12 @@ set_target_properties(witscore PROPERTIES
     AUTOMOC ON
     AUTOUIC OFF
 )
+
+# S1a GATE G1 (production copy): the transport policy's atomic shared_ptr
+# snapshot compiles warning-free in witscore too. Source-scoped so the rest of
+# witscore keeps its current warning level.
+set_source_files_properties(transport/transportpolicy.cpp PROPERTIES
+    COMPILE_OPTIONS "-Wall;-Wextra;-Werror")
 
 target_link_libraries(witscore PUBLIC
     witsappsettings

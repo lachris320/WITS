@@ -9,11 +9,19 @@
 #include <QFileInfo>
 #include "xlsxdocument.h"
 #include "ReportingViewModel.h"
+#include "apiconfig.h"
+#include "capturingnam.h"
+#include "offlinehttp.h"
+#include "transport/httpclient.h"
+#include "transport/policyenforcingnam.h"
+#include "reportcontroller.h"
 
 class TestReportingViewModel : public QObject
 {
     Q_OBJECT
 private slots:
+    void defaultConstructionUsesTransportSeam();
+    void bootstrapGoesThroughInjectedClient();
     void buildFiltersDaySendsStringTypeAndRange();
     void buildFiltersMonthSendsRange();
     void buildFiltersSemesterSendsComponentsNotRange();
@@ -197,7 +205,8 @@ void TestReportingViewModel::deriveTilesEmptyIsZeroAndDash()
 
 void TestReportingViewModel::canGenerateWithoutDepartmentWhenDurationValid()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.setDurationType(0);
     QVERIFY(!vm.canGenerate());     // no duration value yet
     vm.setDay("2026-08-14");
@@ -206,7 +215,8 @@ void TestReportingViewModel::canGenerateWithoutDepartmentWhenDurationValid()
 
 void TestReportingViewModel::canGenerateDayRequiresValidDate()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.setDepartment("CE");              // NOTE: in this task setDepartment only stores + fires network; see Task 5
     vm.setDurationType(0);
     QVERIFY(!vm.canGenerate());          // no day yet
@@ -218,7 +228,8 @@ void TestReportingViewModel::canGenerateDayRequiresValidDate()
 
 void TestReportingViewModel::canGenerateMonthRequiresMonthAndYear()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.setDepartment("CE");
     vm.setDurationType(1);
     vm.setMonth(2);
@@ -231,7 +242,8 @@ void TestReportingViewModel::canGenerateMonthRequiresMonthAndYear()
 
 void TestReportingViewModel::canGenerateSemesterRequiresSemesterAndYear()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.setDepartment("CE");
     vm.setDurationType(2);
     vm.setSemester("First Semester");
@@ -242,7 +254,8 @@ void TestReportingViewModel::canGenerateSemesterRequiresSemesterAndYear()
 
 void TestReportingViewModel::canGenerateCustomRequiresOrderedRange()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.setDepartment("CE");
     vm.setDurationType(3);
     vm.setCustomStart("2026-03-31");
@@ -254,7 +267,8 @@ void TestReportingViewModel::canGenerateCustomRequiresOrderedRange()
 
 void TestReportingViewModel::settersEmitAndUpdateCanGenerate()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy canGenSpy(&vm, &ReportingViewModel::canGenerateChanged);
     QSignalSpy durSpy(&vm, &ReportingViewModel::durationTypeChanged);
     vm.setDurationType(3);
@@ -268,7 +282,8 @@ void TestReportingViewModel::settersEmitAndUpdateCanGenerate()
 
 void TestReportingViewModel::onDepartmentsLoadedPopulates()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy spy(&vm, &ReportingViewModel::departmentsChanged);
     vm.onDepartmentsLoaded({ "CE", "IT" });
     QCOMPARE(vm.departments(), QStringList({ "CE", "IT" }));
@@ -277,7 +292,8 @@ void TestReportingViewModel::onDepartmentsLoadedPopulates()
 
 void TestReportingViewModel::onYearsLoadedPopulates()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy spy(&vm, &ReportingViewModel::yearsChanged);
     vm.onYearsLoaded({ "2026", "2025" });
     QCOMPARE(vm.years(), QStringList({ "2026", "2025" }));
@@ -286,7 +302,8 @@ void TestReportingViewModel::onYearsLoadedPopulates()
 
 void TestReportingViewModel::onCoursesLoadedPopulates()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy spy(&vm, &ReportingViewModel::coursesChanged);
     vm.onCoursesLoaded({ "BSCE", "BSEE" });
     QCOMPARE(vm.courses(), QStringList({ "BSCE", "BSEE" }));
@@ -299,18 +316,22 @@ void TestReportingViewModel::onCoursesLoadedFiltersServerAllEntry()
     // list already carries its own "All" entry; LCascadingSelect prepends a
     // second "All" of its own. onCoursesLoaded must strip the server's entry
     // (case-insensitive, trimmed) so only the cascade's "All" remains.
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.onCoursesLoaded({ "All", "BSCE", "BSEE" });
     QCOMPARE(vm.courses(), QStringList({ "BSCE", "BSEE" }));
 
-    ReportingViewModel vm2;
+    OfflineHttp vm2Http;
+
+    ReportingViewModel vm2(nullptr, &vm2Http.http);
     vm2.onCoursesLoaded({ "all courses", "BSIT" });
     QCOMPARE(vm2.courses(), QStringList({ "BSIT" }));
 }
 
 void TestReportingViewModel::setDepartmentClearsCourse()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.onCoursesLoaded({ "BSCE" });
     vm.setCourse("BSCE");
     QCOMPARE(vm.course(), QStringLiteral("BSCE"));
@@ -320,7 +341,8 @@ void TestReportingViewModel::setDepartmentClearsCourse()
 
 void TestReportingViewModel::onReportDataReadyPopulatesPreview()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy resultSpy(&vm, &ReportingViewModel::resultChanged);
     const QJsonArray data = QJsonDocument::fromJson(R"([
         {"name":"A","course":"BSCE","year_level":"1","visits":"10"},
@@ -340,7 +362,8 @@ void TestReportingViewModel::onReportDataReadyPopulatesPreview()
 
 void TestReportingViewModel::onReportDataReadyEmptyIsSuccessNotError()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.onReportDataReady(QJsonArray());
     QVERIFY(vm.hasResult());
     QCOMPARE(vm.rows()->count(), 0);
@@ -351,7 +374,8 @@ void TestReportingViewModel::onReportDataReadyEmptyIsSuccessNotError()
 
 void TestReportingViewModel::analytics_populatedFromResult()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     QJsonArray rows{
         QJsonObject{{"school_id","1"},{"name","Ana"},{"course","BSIT"},
                     {"department","CCS"},{"year_level","1"},{"visits",5}},
@@ -372,7 +396,8 @@ void TestReportingViewModel::analytics_populatedFromResult()
 
 void TestReportingViewModel::onReportErrorSetsErrorClearsLoading()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.onReportError("Department is required", false);
     QCOMPARE(vm.errorText(), QStringLiteral("Department is required"));
     QVERIFY(!vm.loading());
@@ -380,7 +405,8 @@ void TestReportingViewModel::onReportErrorSetsErrorClearsLoading()
 
 void TestReportingViewModel::generateWhileLoadingIsNoop()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.setDepartment("CE");
     vm.setDurationType(0);
     vm.setDay("2026-08-14");
@@ -399,7 +425,8 @@ void TestReportingViewModel::generateWhileLoadingIsNoop()
 
 void TestReportingViewModel::generateReportWithoutDepartmentShowsValidationMessage()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.generateReport();            // no duration -> validation (department not required)
     QCOMPARE(vm.errorText(), QStringLiteral("Complete the selected duration before generating a report."));
     QVERIFY(!vm.loading());
@@ -407,7 +434,8 @@ void TestReportingViewModel::generateReportWithoutDepartmentShowsValidationMessa
 
 void TestReportingViewModel::generateReportWithIncompleteDurationShowsValidationMessage()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.setDepartment("CE");
     vm.setDurationType(0);        // Day mode, no day set
     vm.generateReport();
@@ -417,7 +445,8 @@ void TestReportingViewModel::generateReportWithIncompleteDurationShowsValidation
 
 void TestReportingViewModel::filtersCompleteTracksDurationOnly()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     QVERIFY(!vm.filtersComplete());     // no duration
     vm.setDurationType(0);
     QVERIFY(!vm.filtersComplete());     // no day yet
@@ -427,7 +456,8 @@ void TestReportingViewModel::filtersCompleteTracksDurationOnly()
 
 void TestReportingViewModel::validationMessageClearsWhenFiltersComplete()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.generateReport();                 // no duration -> validation message
     QCOMPARE(vm.errorText(), QStringLiteral("Complete the selected duration before generating a report."));
     vm.setDurationType(0);
@@ -438,7 +468,8 @@ void TestReportingViewModel::validationMessageClearsWhenFiltersComplete()
 
 void TestReportingViewModel::realFetchErrorNotAutoClearedByFilterChange()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.setDepartment("CE");
     vm.setDurationType(0);
     vm.setDay("2026-08-14");
@@ -528,7 +559,8 @@ void TestReportingViewModel::buildExportFiltersMonthSchoolYear()
 
 void TestReportingViewModel::canExportTruthTable()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     QVERIFY(!vm.canExport());                       // no result yet
     const QJsonArray data = QJsonDocument::fromJson(
         R"([{"name":"Ana","course":"BSIT","visits":"5"}])").array();
@@ -540,7 +572,8 @@ void TestReportingViewModel::canExportTruthTable()
 
 void TestReportingViewModel::paletteAndChartTypeSettersEmit()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     QCOMPARE(vm.palette(), QStringLiteral("Default"));
     QCOMPARE(vm.chartType(), QStringLiteral("Bar"));
     QSignalSpy pSpy(&vm, &ReportingViewModel::paletteChanged);
@@ -557,7 +590,8 @@ void TestReportingViewModel::paletteAndChartTypeSettersEmit()
 
 void TestReportingViewModel::applyResultStoresNormalizedExportRows()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     const QJsonArray data = QJsonDocument::fromJson(
         R"([{"name":"Ana","course":"BSIT","visits":"5"}])").array();
     vm.onReportDataReady(data);
@@ -566,7 +600,8 @@ void TestReportingViewModel::applyResultStoresNormalizedExportRows()
 
 void TestReportingViewModel::failedRefetchDisablesExportAndClearsRows()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.onReportDataReady(QJsonDocument::fromJson(
         R"([{"name":"Ana","course":"BSIT","visits":"5"}])").array());
     QVERIFY(vm.canExport());                 // a clean result
@@ -584,7 +619,8 @@ void TestReportingViewModel::failedRefetchDisablesExportAndClearsRows()
 
 void TestReportingViewModel::exportPdfWritesFile()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.onReportDataReady(QJsonDocument::fromJson(
         R"([{"school_id":"1","name":"Ana","gender":"F","status":"Regular",
              "course":"BSIT","department":"IT","year_level":"3","visits":"5"}])").array());
@@ -601,7 +637,8 @@ void TestReportingViewModel::exportPdfWritesFile()
 
 void TestReportingViewModel::exportExcelWritesReadableCell()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.setIncludeRosterInExport(true);   // roster is opt-in (spec §9); this test reads a roster cell
     vm.onReportDataReady(QJsonDocument::fromJson(
         R"([{"school_id":"1","name":"Ana","gender":"F","status":"Regular",
@@ -623,7 +660,8 @@ void TestReportingViewModel::exportExcelWritesReadableCell()
 
 void TestReportingViewModel::exportPdfEmptyRowsShowsNoDataError()
 {
-    ReportingViewModel vm;   // never generated -> m_exportRows empty
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);   // never generated -> m_exportRows empty
     QTemporaryDir dir;
     vm.exportPdf(QUrl::fromLocalFile(dir.filePath("x.pdf")));
     QVERIFY(vm.exportError().contains(QStringLiteral("No data")));
@@ -632,7 +670,8 @@ void TestReportingViewModel::exportPdfEmptyRowsShowsNoDataError()
 
 void TestReportingViewModel::exportPdfInvalidUrlShowsError()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.onReportDataReady(QJsonDocument::fromJson(
         R"([{"name":"Ana","course":"BSIT","visits":"5"}])").array());
     vm.exportPdf(QUrl("https://example.com/x.pdf"));   // non-file URL -> empty local path
@@ -642,7 +681,8 @@ void TestReportingViewModel::exportPdfInvalidUrlShowsError()
 
 void TestReportingViewModel::exportWhileExportingIsNoop()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.onReportDataReady(QJsonDocument::fromJson(
         R"([{"name":"Ana","course":"BSIT","visits":"5"}])").array());
     QTemporaryDir dir;
@@ -656,19 +696,22 @@ void TestReportingViewModel::exportWhileExportingIsNoop()
 
 void TestReportingViewModel::printReportEmptyRowsShowsNoDataError()
 {
-    ReportingViewModel vm;   // no rows -> must not open a dialog
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);   // no rows -> must not open a dialog
     vm.printReport();
     QVERIFY(vm.exportError().contains(QStringLiteral("No data")));
     QVERIFY(!vm.exporting());
 }
 
 void TestReportingViewModel::includeRosterInExport_defaultsFalse() {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     QCOMPARE(vm.includeRosterInExport(), false);   // spec §9: default OFF
 }
 
 void TestReportingViewModel::setIncludeRosterInExport_togglesAndSignals() {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy spy(&vm, &ReportingViewModel::includeRosterInExportChanged);
     vm.setIncludeRosterInExport(true);
     QCOMPARE(vm.includeRosterInExport(), true);
@@ -681,7 +724,8 @@ void TestReportingViewModel::setIncludeRosterInExport_togglesAndSignals() {
 }
 
 void TestReportingViewModel::timeSection_propertyDefaults() {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     QVERIFY(vm.timeError().isEmpty());
     QVERIFY(!vm.timeLoading());
     QVERIFY(!vm.hasTimeData());
@@ -696,7 +740,8 @@ void TestReportingViewModel::timeSection_propertyDefaults() {
 }
 
 void TestReportingViewModel::generate_operationFinalizesOnlyWhenBothSettle() {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.setDurationType(0);
     vm.setDay("2026-08-14");
     QVERIFY(vm.canGenerate());
@@ -709,7 +754,8 @@ void TestReportingViewModel::generate_operationFinalizesOnlyWhenBothSettle() {
 }
 
 void TestReportingViewModel::generate_operationFinalizesRegardlessOfSettleOrder() {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.setDurationType(0);
     vm.setDay("2026-08-14");
     vm.generateReport();
@@ -720,7 +766,8 @@ void TestReportingViewModel::generate_operationFinalizesRegardlessOfSettleOrder(
 }
 
 void TestReportingViewModel::generate_rowsLoadingClearsAtRowsSettleIndependently() {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.setDurationType(0);
     vm.setDay("2026-08-14");
     vm.generateReport();
@@ -734,7 +781,8 @@ void TestReportingViewModel::generate_rowsLoadingClearsAtRowsSettleIndependently
 }
 
 void TestReportingViewModel::outcome_rowsSuccessTimeError_reportRendersTimeErrorLocalized() {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.setDurationType(0);
     vm.setDay("2026-08-14");
     vm.generateReport();
@@ -749,7 +797,8 @@ void TestReportingViewModel::outcome_rowsSuccessTimeError_reportRendersTimeError
 }
 
 void TestReportingViewModel::outcome_rowsErrorTimeSuccess_primaryErrorFires() {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.setDurationType(0);
     vm.setDay("2026-08-14");
     vm.generateReport();
@@ -762,7 +811,8 @@ void TestReportingViewModel::outcome_rowsErrorTimeSuccess_primaryErrorFires() {
 }
 
 void TestReportingViewModel::canExport_unaffectedByTimeOutcome() {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.setDurationType(0);
     vm.setDay("2026-08-14");
     vm.generateReport();
@@ -774,7 +824,8 @@ void TestReportingViewModel::canExport_unaffectedByTimeOutcome() {
 }
 
 void TestReportingViewModel::resetAtGenerate_clearsStaleTimeState() {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.setDurationType(0);
     vm.setDay("2026-08-14");
     vm.generateReport();
@@ -790,7 +841,8 @@ void TestReportingViewModel::resetAtGenerate_clearsStaleTimeState() {
 }
 
 void TestReportingViewModel::timeModels_windowedEveryHourLabeled() {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.setDurationType(0);
     vm.setDay("2026-08-14");
     vm.generateReport();
@@ -820,7 +872,8 @@ void TestReportingViewModel::timeModels_windowedEveryHourLabeled() {
 }
 
 void TestReportingViewModel::captions_formattedForKnownPeaks() {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.setDurationType(0);
     vm.setDay("2026-08-14");
     vm.generateReport();
@@ -832,7 +885,8 @@ void TestReportingViewModel::captions_formattedForKnownPeaks() {
 }
 
 void TestReportingViewModel::hasTimeData_falseOnAllZeroShowsEmptyState() {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.setDurationType(0);
     vm.setDay("2026-08-14");
     vm.generateReport();
@@ -846,7 +900,8 @@ void TestReportingViewModel::hasTimeData_falseOnAllZeroShowsEmptyState() {
 }
 
 void TestReportingViewModel::buildTimeExport_dataState_populatesLabelsCountsPeaks() {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.onTimeAnalyticsReady(denseHours(), denseWeek());   // peak hour 14, peak day Monday
     const ReportTimeExport te = vm.buildTimeExport();
     QCOMPARE(te.state, TimeAnalyticsExportState::Data);
@@ -876,7 +931,8 @@ void TestReportingViewModel::buildTimeExport_dataState_populatesLabelsCountsPeak
 }
 
 void TestReportingViewModel::buildTimeExport_emptyState_listsEmpty() {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.onTimeAnalyticsReady(zeros(24), zeros(7));   // all-zero, no error
     const ReportTimeExport te = vm.buildTimeExport();
     QCOMPARE(te.state, TimeAnalyticsExportState::Empty);
@@ -889,7 +945,8 @@ void TestReportingViewModel::buildTimeExport_emptyState_listsEmpty() {
 }
 
 void TestReportingViewModel::buildTimeExport_errorState_winsOverData() {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.onTimeAnalyticsReady(denseHours(), denseWeek());   // hasData == true
     vm.onTimeAnalyticsError(QStringLiteral("network down"));   // error set AFTER data
     const ReportTimeExport te = vm.buildTimeExport();
@@ -901,7 +958,8 @@ void TestReportingViewModel::buildTimeExport_errorState_winsOverData() {
 }
 
 void TestReportingViewModel::buildTimeExport_defensiveWrongLength_degradesToEmpty() {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.onTimeAnalyticsReady(zeros(10), zeros(7));   // hourly wrong length -> compute bails
     const ReportTimeExport te = vm.buildTimeExport();
     QCOMPARE(te.state, TimeAnalyticsExportState::Empty);   // degrade, no OOB
@@ -915,7 +973,8 @@ void TestReportingViewModel::windowedCaption_followsInWindowPeakNotOverall() {
     QList<int> byHour = zeros(24);
     byHour[6] = 30;    // taller, pre-open -> ignored by the window
     byHour[10] = 9;    // in-window peak -> "10-11 AM"
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.onTimeAnalyticsReady(byHour, denseWeek());
     QCOMPARE(vm.busiestHourLabel(), QStringLiteral("10–11 AM"));
     QCOMPARE(vm.buildTimeExport().busiestHourLabel, QStringLiteral("10–11 AM"));
@@ -927,7 +986,8 @@ void TestReportingViewModel::allOutOfHours_hourCaptionEmptyWeekdayStillShown() {
     // caption is suppressed, but hasData/weekday data remain (decision 5).
     QList<int> byHour = zeros(24);
     byHour[2] = 6;     // pre-open staff login, out of window
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     vm.onTimeAnalyticsReady(byHour, denseWeek());
     QVERIFY(vm.busiestHourLabel().isEmpty());                       // screen caption gone
     QVERIFY(vm.buildTimeExport().busiestHourLabel.isEmpty());       // export caption gone
@@ -938,13 +998,15 @@ void TestReportingViewModel::allOutOfHours_hourCaptionEmptyWeekdayStillShown() {
 
 void TestReportingViewModel::orientation_defaultsToPortrait()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     QCOMPARE(vm.orientation(), QStringLiteral("Portrait"));
 }
 
 void TestReportingViewModel::setOrientation_validValueEmitsAndUpdates()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy spy(&vm, &ReportingViewModel::orientationChanged);
     vm.setOrientation("Landscape");
     QCOMPARE(vm.orientation(), QStringLiteral("Landscape"));
@@ -953,7 +1015,8 @@ void TestReportingViewModel::setOrientation_validValueEmitsAndUpdates()
 
 void TestReportingViewModel::setOrientation_blankRejectedNoSignal()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy spy(&vm, &ReportingViewModel::orientationChanged);
     vm.setOrientation("");
     QCOMPARE(vm.orientation(), QStringLiteral("Portrait"));   // unchanged
@@ -962,7 +1025,8 @@ void TestReportingViewModel::setOrientation_blankRejectedNoSignal()
 
 void TestReportingViewModel::setOrientation_garbageRejectedNoSignal()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy spy(&vm, &ReportingViewModel::orientationChanged);
     vm.setOrientation("Diagonal");
     QCOMPARE(vm.orientation(), QStringLiteral("Portrait"));   // unchanged
@@ -971,7 +1035,8 @@ void TestReportingViewModel::setOrientation_garbageRejectedNoSignal()
 
 void TestReportingViewModel::setOrientation_sameValueNoSignal()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     QSignalSpy spy(&vm, &ReportingViewModel::orientationChanged);
     vm.setOrientation("Portrait");   // same as the default -> v == m_orientation half of the guard
     QCOMPARE(vm.orientation(), QStringLiteral("Portrait"));   // unchanged
@@ -980,7 +1045,8 @@ void TestReportingViewModel::setOrientation_sameValueNoSignal()
 
 void TestReportingViewModel::orientations_containsPortraitAndLandscape()
 {
-    ReportingViewModel vm;
+    OfflineHttp vmHttp;
+    ReportingViewModel vm(nullptr, &vmHttp.http);
     QCOMPARE(vm.orientations(), QStringList({ QStringLiteral("Portrait"), QStringLiteral("Landscape") }));
 }
 
@@ -994,6 +1060,31 @@ void TestReportingViewModel::pageOrientation_mapsBlankAndGarbageToPortrait()
 {
     QCOMPARE(ReportingViewModel::pageOrientation(""), QPageLayout::Portrait);
     QCOMPARE(ReportingViewModel::pageOrientation("garbage"), QPageLayout::Portrait);
+}
+
+void TestReportingViewModel::defaultConstructionUsesTransportSeam()
+{
+    ReportingViewModel vm;
+    auto *http = vm.findChild<HttpClient *>();
+    QVERIFY(http);
+    QCOMPARE(vm.findChildren<PolicyEnforcingNam *>().size(), 1);
+    auto *controller = vm.findChild<ReportController *>();
+    QVERIFY(controller);
+    QVERIFY(qobject_cast<PolicyEnforcingNam *>(controller->networkManager()));
+    QCOMPARE(controller->networkManager(), http->manager());
+}
+
+void TestReportingViewModel::bootstrapGoesThroughInjectedClient()
+{
+    CapturingNam nam;
+    HttpClient http(nullptr, &nam);
+    ReportingViewModel vm(nullptr, &http);
+    QVERIFY(vm.findChildren<PolicyEnforcingNam *>().isEmpty());
+    QCOMPARE(vm.findChild<ReportController *>()->networkManager(),
+             static_cast<QNetworkAccessManager *>(&nam));
+    vm.loadDepartments();                               // departments, then years
+    QCOMPARE(nam.lastOp, QNetworkAccessManager::GetOperation);
+    QCOMPARE(nam.lastUrl, ApiConfig::endpoint(QStringLiteral("get_years.php")));
 }
 
 QTEST_MAIN(TestReportingViewModel)
