@@ -151,6 +151,17 @@ is absent from the result).
 - Returns **plain text** (`echo "✅ Upload complete!\n";` etc.), not JSON (`grep -n "json_encode" upload_students_zip.php` — no match).
 - Never deletes anything from `uploads/temp/` after processing.
 
+**UPDATED 2026-10-16 — ZIP handling fixed in source (NOT deployed):** the endpoint no longer writes
+anything under `uploads/temp/`. The uploaded ZIP is moved (after `is_uploaded_file()`) into a private
+per-request dir under the system temp dir (`loams_zipimport_<random>`), under a server-chosen name —
+the client filename is never used on disk. `extractTo()` is gone: only entries whose basename is
+`[A-Za-z0-9_-]{1,50}.(jpg|jpeg|png|gif)`, not a Windows device name, at most 10 MiB (512 MiB total)
+and a real JPEG/PNG/GIF are unpacked (`extractPhotoEntries()` in `student_id_helper.php`). The
+per-request dir is removed by a shutdown function, so no photo survives into a later import. Second
+layer: `uploads/.htaccess` turns the PHP engine off, denies script extensions and disables directory
+listing — deploy it **together with** the endpoint; any stale `uploads/temp/` on a deployed server
+should be deleted by hand. Covered by `tests/register_student_test.php` section 10.
+
 This endpoint writes to disk and to the database from unauthenticated, unvalidated input. It is a
 larger exposure than the three endpoints below, not a smaller one.
 

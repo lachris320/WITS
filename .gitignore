@@ -90,4 +90,8 @@ deliverables/loams_api/hash_admin.php
 
 # Backend runtime upload storage (logos + pasted images written by the app).
 # Local-only artifacts, may contain an institution logo or PII screenshots.
-uploads/
+# The CONTENTS are ignored (not the directory itself), so the hardening
+# .htaccess below can be re-included — git cannot re-include a file inside an
+# excluded directory.
+**/uploads/*
+!deliverables/loams_api/uploads/.htaccess

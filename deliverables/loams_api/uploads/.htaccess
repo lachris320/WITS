@@ -1,0 +1,33 @@
+# Defence in depth for loams_api/uploads/ (Apache 2.4 / XAMPP).
+#
+# Everything under uploads/ is data written by the API (student photos,
+# branding images). Nothing here may ever run as code, and the directory must
+# not be listable (student photos are PII). Deploy this file TOGETHER with the
+# upload_students_zip.php fix that stopped unpacking ZIP uploads into the
+# docroot: this file is the second layer, not a substitute for that fix.
+# Requires AllowOverride to permit Options/FileInfo/AuthConfig (XAMPP's
+# htdocs default is AllowOverride All).
+
+# Turn the PHP engine off for this tree. php_flag is only valid with mod_php
+# (it is a 500 error under PHP-FPM/FastCGI), hence the IfModule wrappers.
+<IfModule php_module>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php.c>
+    php_flag engine off
+</IfModule>
+<IfModule mod_php7.c>
+    php_flag engine off
+</IfModule>
+
+# Drop any script handler/type mapping inherited from the server config.
+RemoveHandler .php .phtml .phar
+RemoveType .php .phtml .phar
+
+# Refuse to serve script-like files at all (403), whatever handler applies.
+<FilesMatch "\.(ph(p[0-9]?|tml|ar|ps)|cgi|pl|py|sh|shtml)$">
+    Require all denied
+</FilesMatch>
+
+# No directory listings, no CGI execution.
+Options -Indexes -ExecCGI
