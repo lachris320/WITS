@@ -23,6 +23,8 @@
 >   validation the document claims (no MIME check, no size limits, extracts a ZIP's contents
 >   unfiltered, still creates directories `0777`). This one writes arbitrary uploaded files to disk
 >   with zero validation — arguably the most severe of the four, not a minor omission.
+>   **UPDATED 2026-10-16 — fixed in source, NOT deployed; see §5:** now gated by `requireAdminAuth()`,
+>   and the ZIP is no longer extracted unfiltered into the docroot.
 >
 > ~~Repo-wide, `requireAdminAuth()` … has **exactly one real caller**: `save_branding.php:6`.~~
 > **UPDATED 2026-07-20:** repo-wide, `requireAdminAuth()` (defined in `auth_helper.php:11`) now has
@@ -159,11 +161,31 @@ the client filename is never used on disk. `extractTo()` is gone: only entries w
 and a real JPEG/PNG/GIF are unpacked (`extractPhotoEntries()` in `student_id_helper.php`). The
 per-request dir is removed by a shutdown function, so no photo survives into a later import. Second
 layer: `uploads/.htaccess` turns the PHP engine off, denies script extensions and disables directory
-listing — deploy it **together with** the endpoint; any stale `uploads/temp/` on a deployed server
-should be deleted by hand. Covered by `tests/register_student_test.php` section 10.
+listing — deploy it **together with** the endpoint. Covered by `tests/register_student_test.php`
+section 10.
+
+**Deploy checklist (owner):**
+- **Delete** the stale `uploads/temp/` on every deployed server **before or with** the deploy — the
+  old `extractTo()` may have left anything there.
+- Check the **whole** `uploads/` tree for non-image files — especially nested `.htaccess`, `.php*`,
+  `.phar`, `.shtml`. Under `AllowOverride All` a nested `.htaccess` left by the old code overrides
+  the new `uploads/.htaccess` for its subtree.
+- Recommended (owner's call): enforce it in `httpd.conf` so it does not depend on what is in the
+  tree — `<Directory "<HTDOCS>/loams_api/uploads">` with `AllowOverride None` and
+  `php_admin_flag engine off`.
+- After deploying, confirm student photos still display (a partial `AllowOverride` makes Apache
+  answer 500 for all of `uploads/`).
+
+**Accepted photo names in the ZIP:** the entry's basename must be
+`[A-Za-z0-9_-]{1,50}.(jpg|jpeg|png|gif)` (e.g. `2023-00123.jpg`); nested folders are fine. Names
+with spaces, extra dots, parentheses or a stem over 50 chars are skipped — the server log records
+how many (`ZIP photos: N written, M skipped (name not allowed), …`). A photo is matched to a row
+when the school_id is a whole token of the filename **stem** (the extension never matches).
 
 This endpoint writes to disk and to the database from unauthenticated, unvalidated input. It is a
 larger exposure than the three endpoints below, not a smaller one.
+**UPDATED 2026-10-16:** stale — the repo copy now calls `requireAdminAuth($conn)` before reading
+any input, and validates rows and ZIP entries as described above (not deployed).
 
 **Impact:** None currently — the frontend does not need `admin_key` because the server never checks
 for one. If a fix is scoped later, the frontend contract in "Frontend Changes Required" below would
@@ -355,6 +377,7 @@ fetch('/loams_api/upload_students_zip.php', {
    `ini_set('display_errors', 1)`, so PHP errors still display to the client.
 2. ❌ **File Upload Attacks** - `upload_students_zip.php` has no MIME check, no size limits, and
    extracts every file in a ZIP unfiltered. Not fixed.
+   **UPDATED 2026-10-16 — fixed in source, NOT deployed; see §5.**
 3. ❌ **Directory Traversal** - only `basename()` on the upload filename (weak, undocumented as
    partial); no allow-list or path canonicalization anywhere.
 4. ❌ **SQL Injection** - `utf8mb4`/`set_charset` appears **nowhere** in the codebase
