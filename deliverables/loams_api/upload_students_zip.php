@@ -2,6 +2,10 @@
 error_reporting(E_ALL);
 ini_set('display_errors', 0);
 ini_set('log_errors', 1);
+// Installed BEFORE db.php: a DB connect failure throws during the include (with
+// display_errors back on) — log it, send HTTP 500 + generic JSON, leak nothing.
+require_once __DIR__ . "/json_error_guard.php";
+installJsonErrorGuard("upload_students_zip");
 header("Content-Type: application/json");
 include "db.php";
 include "auth_helper.php";

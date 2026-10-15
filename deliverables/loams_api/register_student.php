@@ -2,6 +2,10 @@
 error_reporting(E_ALL);
 ini_set('display_errors', 0);
 ini_set('log_errors', 1);
+// Installed BEFORE db.php: a DB connect failure throws during the include (with
+// display_errors back on) — log it, send HTTP 500 + generic JSON, leak nothing.
+require_once __DIR__ . "/json_error_guard.php";
+installJsonErrorGuard("register_student");
 header("Content-Type: application/json");
 include "db.php";
 include "auth_helper.php";
@@ -28,8 +32,9 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
     $status     = $postStr('status');
     $visits     = isset($_POST['visits']) ? intval($_POST['visits']) : 0;
 
-    // ✅ Require school_id and name
-    if (empty($school_id) || empty($name)) {
+    // ✅ Require school_id and name. Explicit '' checks, not empty(): "0" is a
+    // valid id/name. A non-string school_id falls through to the format check.
+    if ($school_id === '' || $name === '') {
         echo json_encode(["status" => "error", "message" => "School ID and Name are required."]);
         exit;
     }
@@ -110,17 +115,25 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         }
         $fileExtension = $imageTypeExt[$imageInfo[2]];
 
-        // ✅ Generate unique filename to prevent overwriting
-        $uniqueFilename = $school_id . '_' . time() . '.' . $fileExtension;
+        // ✅ Collision-resistant name (<id>_<ts>_<random>.<ext>) so two concurrent
+        // requests never share a target file.
+        $uniqueFilename = buildPhotoFilename($school_id, $fileExtension);
         // ✅ Defence in depth: the target must be a direct child of uploads/
-        $targetFile = safeChildPath($uploadDir, $uniqueFilename);
+        $targetFile = $uniqueFilename === null ? null : safeChildPath($uploadDir, $uniqueFilename);
         if ($targetFile === null) {
             error_log("register_student: refused photo target outside uploads dir");
             echo json_encode(["status" => "error", "message" => "Failed to upload photo."]);
             exit;
         }
+        // ✅ Never overwrite (and later possibly unlink) a file this request did not create.
+        if (file_exists($targetFile)) {
+            error_log("register_student: photo target already exists, refusing to overwrite");
+            echo json_encode(["status" => "error", "message" => "Failed to upload photo."]);
+            exit;
+        }
 
-        // ✅ Move uploaded file
+        // ✅ Move uploaded file. $photoPath is set ONLY once this request's own
+        // move succeeded, so the orphan cleanup below can only remove that file.
         if (move_uploaded_file($tmpName, $targetFile)) {
             $photoPath = $targetFile;
         } else {

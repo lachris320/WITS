@@ -38,3 +38,18 @@ function safeChildPath($dir, $filename): ?string
     if (realpath(dirname($candidate)) !== $dirReal) return null;
     return $candidate;
 }
+
+/**
+ * Collision-resistant stored-photo filename: "<school_id>_<unix ts>_<16 hex>.<ext>".
+ * The school_id prefix is kept (humans and id-prefixed matching rely on it);
+ * 64 random bits make two requests in the same second practically never pick
+ * the same name, so one request's cleanup cannot delete another's photo.
+ * Returns null (fail closed) for an invalid school_id or an extension other
+ * than jpg / png / gif.
+ */
+function buildPhotoFilename($schoolId, $ext): ?string
+{
+    if (!isValidSchoolId($schoolId)) return null;
+    if (!in_array($ext, ['jpg', 'png', 'gif'], true)) return null;
+    return $schoolId . '_' . time() . '_' . bin2hex(random_bytes(8)) . '.' . $ext;
+}
