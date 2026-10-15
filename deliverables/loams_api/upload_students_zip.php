@@ -15,21 +15,6 @@ require_once __DIR__ . "/student_id_helper.php";
 ini_set('display_errors', 0);
 requireAdminAuth($conn);   // 401 before any DB read, ZIP extract, or insert
 
-// Match a ZIP photo to a student by school_id as a WHOLE TOKEN: the id must be
-// bounded by string start/end or a non-alphanumeric char, so "2023-1" does NOT
-// match a "2023-12..." filename (the old glob("*id*") substring match did).
-// Scans a sorted list so a genuine multi-match is deterministic (first wins).
-function matchPhotoForId($photoDir, $schoolId) {
-    $files = glob($photoDir . "*.*");
-    if (!$files) return null;
-    sort($files); // deterministic order
-    $pattern = '/(^|[^A-Za-z0-9])' . preg_quote($schoolId, '/') . '([^A-Za-z0-9]|$)/';
-    foreach ($files as $f) {
-        if (preg_match($pattern, basename($f)) === 1) return $f;
-    }
-    return null;
-}
-
 // Read a row field as a trimmed string. JSON arrays/objects (non-scalars) read
 // as '' instead of making trim() throw TypeError mid-loop; scalars are cast.
 function rowString($row, $key) {
@@ -58,22 +43,92 @@ if (!empty($_POST['skip_ids'])) {
     }
 }
 
-// === 3. Optional photos ZIP — extracted ONCE, before the row loop (core ext-zip) ===
-$uploadDir = "uploads/temp/";
-if (!is_dir($uploadDir)) mkdir($uploadDir, 0755, true);
-$photoDir = $uploadDir . "photos/";
+// === 3. Optional photos ZIP — unpacked ONCE, before the row loop (core ext-zip) ===
+// Nothing from the ZIP ever lands in the web docroot: the upload is moved into
+// a private per-request dir under the system temp dir, under a SERVER-chosen
+// name (the client filename is never used on disk), and only allow-listed
+// image entries are unpacked from it (extractPhotoEntries — no extractTo()).
+// The whole dir is removed at shutdown, so early exits and fatals clean up
+// too, and a later import can never match a photo left over from this one.
+// Every failure here is non-fatal: the import proceeds with photo = NULL, and
+// is logged (generic text, codes and counts only — never client data) so an
+// admin asking "why no photos?" can find the reason.
+$photoFiles = [];      // unpacked photos, listed ONCE (sorted) for matchPhotoForId()
 $zipExtracted = false;
 
-if (!empty($_FILES['photos_zip']['tmp_name'])) {
-    $zipPath = $uploadDir . basename($_FILES['photos_zip']['name']);
-    move_uploaded_file($_FILES['photos_zip']['tmp_name'], $zipPath);
-    $zip = new ZipArchive;
-    if ($zip->open($zipPath) === TRUE) {
-        $zip->extractTo($photoDir);
-        $zip->close();
-        $zipExtracted = true;
+$zipUpload = isset($_FILES['photos_zip']) && is_array($_FILES['photos_zip']) ? $_FILES['photos_zip'] : null;
+$zipErr = $zipUpload !== null ? ($zipUpload['error'] ?? UPLOAD_ERR_NO_FILE) : UPLOAD_ERR_NO_FILE;
+if ($zipErr !== UPLOAD_ERR_OK && $zipErr !== UPLOAD_ERR_NO_FILE) {
+    error_log("upload_students_zip: photos ZIP upload error code " . (is_int($zipErr) ? $zipErr : -1)
+        . "; importing without photos");
+}
+if ($zipErr === UPLOAD_ERR_OK
+        && is_string($zipUpload['tmp_name'] ?? null)
+        && is_uploaded_file($zipUpload['tmp_name'])) {
+    $workDir = createZipImportTempDir();
+    if ($workDir === null) {
+        error_log("upload_students_zip: could not create temp dir; importing without photos");
+    } else {
+        // Fail closed if the system temp dir resolves into the API tree (it is
+        // served by the web server): nothing from the ZIP may land there.
+        $workReal = realpath($workDir);
+        $apiReal  = realpath(__DIR__);
+        if ($workReal === false || $apiReal === false || isPathInside($workReal, $apiReal)) {
+            error_log("upload_students_zip: temp dir is inside the API tree (or unresolvable); importing without photos");
+            removeDirTree($workDir);
+            $workDir = null;
+        }
     }
-    // A failed ZIP open is non-fatal: import proceeds with photo = NULL.
+    if ($workDir !== null) {
+        $zip = new ZipArchive;
+        $zipOpen = false;
+        // Registered after installJsonErrorGuard()'s handler, so on a fatal the
+        // JSON error is sent first, then this runs. A fatal mid-extraction skips
+        // the finally below, and Windows cannot delete upload.zip while the
+        // archive is still open — so close it here first if needed.
+        register_shutdown_function(function () use (&$zip, &$zipOpen, $workDir) {
+            if ($zipOpen) {
+                $zipOpen = false;
+                try { @$zip->close(); } catch (Throwable $e) { /* already closed / invalid */ }
+            }
+            removeDirTree($workDir);
+        });
+        $zipPath = $workDir . DIRECTORY_SEPARATOR . "upload.zip";
+        if (!move_uploaded_file($zipUpload['tmp_name'], $zipPath)) {
+            error_log("upload_students_zip: move_uploaded_file failed; importing without photos");
+        } else {
+            $openRc = $zip->open($zipPath);
+            if ($openRc !== TRUE) {
+                error_log("upload_students_zip: ZIP open failed (code " . (int) $openRc . "); importing without photos");
+            } else {
+                $zipOpen = true;
+                $extractDir = $workDir . DIRECTORY_SEPARATOR . "photos";
+                try {
+                    if (@mkdir($extractDir, 0700)) {
+                        $zipStats = null;
+                        // Positional, not a named arg: the API must still parse on PHP 7.4.
+                        extractPhotoEntries($zip, $extractDir, ZIP_PHOTO_MAX_ENTRY_BYTES,
+                            ZIP_PHOTO_MAX_TOTAL_BYTES, ZIP_PHOTO_MAX_ENTRIES, $zipStats);
+                        if ($zipStats['too_many_entries']) {
+                            error_log("upload_students_zip: ZIP has more than " . ZIP_PHOTO_MAX_ENTRIES
+                                . " entries; no photos unpacked");
+                        }
+                        error_log("upload_students_zip: ZIP photos: {$zipStats['written']} written, "
+                            . "{$zipStats['skipped_name']} skipped (name not allowed), "
+                            . "{$zipStats['skipped_other']} skipped (duplicate/oversize/not an image)"
+                            . ($zipStats['total_cap_hit'] ? ", total size cap reached" : ""));
+                        $photoFiles = listPhotoFiles($extractDir);
+                        $zipExtracted = true;
+                    } else {
+                        error_log("upload_students_zip: could not create photo dir; importing without photos");
+                    }
+                } finally {
+                    $zipOpen = false;
+                    $zip->close();   // release the handle so the shutdown cleanup can delete it
+                }
+            }
+        }
+    }
 }
 
 if (!is_dir("uploads/students/")) mkdir("uploads/students/", 0755, true);
@@ -82,13 +137,16 @@ if (!is_dir("uploads/students/")) mkdir("uploads/students/", 0755, true);
 $success_count = 0;
 $skipped_count = 0;
 $error_count   = 0;
+$copiedBytes      = 0;       // photo bytes copied into uploads/students/ so far
+$copyBudgetLogged = false;   // log the exhausted budget once, not per row
 
 $stmt = $conn->prepare("INSERT INTO students
     (school_id, name, course, department, year_level, gender, status, photo)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
 
-// Used only when a row inserted fine but its photo copy then failed.
-$clearPhotoStmt = $conn->prepare("UPDATE students SET photo = NULL WHERE school_id = ?");
+// Used only when a row inserted fine but its photo copy then failed; keyed by
+// the new row's primary key so it can only ever touch the row just inserted.
+$clearPhotoStmt = $conn->prepare("UPDATE students SET photo = NULL WHERE id = ?");
 
 if (!$stmt || !$clearPhotoStmt) {
     echo json_encode(["status" => "error", "message" => "Import failed to initialize."]);
@@ -127,12 +185,26 @@ foreach ($rows as $row) {
     // insert succeeds, so a failed row (e.g. a duplicate school_id) can never
     // overwrite an existing student's photo.
     $match = null;
+    $matchSize = 0;
     $photoPath = null;
     if ($zipExtracted) {
-        $match = matchPhotoForId($photoDir, $school_id);
+        $match = matchPhotoForId($photoFiles, $school_id);
         if ($match !== null) {
-            // Defence in depth: must be a direct child of uploads/students/.
-            $photoPath = safeChildPath("uploads/students/", $school_id . ".jpg");
+            // One photo can match several rows and is copied once per row, so
+            // the bytes copied into the docroot share the extraction cap. Over
+            // budget: the row is still imported, just with photo = NULL.
+            $size = @filesize($match);
+            $matchSize = ($size === false) ? -1 : $size;
+            if (!photoCopyFits($matchSize, $copiedBytes, ZIP_PHOTO_MAX_TOTAL_BYTES)) {
+                if (!$copyBudgetLogged) {
+                    error_log("upload_students_zip: photo copy budget exhausted; remaining matched rows get no photo");
+                    $copyBudgetLogged = true;
+                }
+                $match = null;
+            } else {
+                // Defence in depth: must be a direct child of uploads/students/.
+                $photoPath = safeChildPath("uploads/students/", $school_id . ".jpg");
+            }
         }
     }
 
@@ -154,16 +226,21 @@ foreach ($rows as $row) {
         continue;
     }
     $success_count++;
+    $newId = (int) $stmt->insert_id;
 
     // Row is in: now write its photo. If the copy fails, clear the photo column
     // so the row never points at a missing file.
-    if ($photoPath !== null && !copy($match, $photoPath)) {
-        error_log("upload_students_zip: photo copy failed; clearing photo for inserted row");
-        try {
-            $clearPhotoStmt->bind_param("s", $school_id);
-            $clearPhotoStmt->execute();
-        } catch (mysqli_sql_exception $e) {
-            error_log("upload_students_zip: clearing photo failed: " . $e->getMessage());
+    if ($photoPath !== null) {
+        if (copy($match, $photoPath)) {
+            $copiedBytes += $matchSize;
+        } else {
+            error_log("upload_students_zip: photo copy failed; clearing photo for inserted row");
+            try {
+                $clearPhotoStmt->bind_param("i", $newId);
+                $clearPhotoStmt->execute();
+            } catch (mysqli_sql_exception $e) {
+                error_log("upload_students_zip: clearing photo failed: " . $e->getMessage());
+            }
         }
     }
 }

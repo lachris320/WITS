@@ -3,7 +3,8 @@
  * Student-registration path-traversal harness — unit + integration.
  *
  * Pure unit tests cover the shared school_id validator / upload-containment /
- * photo-filename helpers (student_id_helper.php). The HTTP block drives the REAL
+ * photo-filename / ZIP-photo-extraction helpers (student_id_helper.php) and the
+ * presence of uploads/.htaccess. The HTTP block drives the REAL
  * register_student.php and upload_students_zip.php over `php -S` against a
  * THROWAWAY database (unique name) on an EPHEMERAL port with a runtime-generated
  * admin secret. Synthetic data only; never touches wits_app, and never writes
@@ -69,9 +70,203 @@ try {
     ok('safeChildPath rejects ".."',                 $c($unitDir . '/up/', '..') === null);
     ok('safeChildPath rejects empty',                $c($unitDir . '/up/', '') === null);
     ok('safeChildPath rejects missing dir',          $c($unitDir . '/nope/', 'a.png') === null);
+    // Windows reserved device names: the stem (before the first '.', trailing
+    // spaces/dots trimmed) must not be CON/PRN/AUX/NUL/COMn/LPTn/CONIN$/CONOUT$.
+    $reserved = ['CON.jpg', 'nul.png', 'Com1.jpg', 'LPT9.gif', 'CON', 'aux.tar.gz', 'PRN.jpg',
+                 'COM0.png', 'CONIN$.jpg', 'conout$.png', "COM\u{00B9}.jpg", "lpt\u{00B3}.png",
+                 'CON .jpg', 'NUL..png'];
+    foreach ($reserved as $rn) {
+        ok("safeChildPath rejects reserved device name '$rn'", $c($unitDir . '/up/', $rn) === null);
+    }
+    foreach (['CONSOLE.jpg', 'COM10.jpg', 'NUL_1.png', 'S0001.jpg', 'AUXILIARY.png', 'xCON.jpg'] as $okName) {
+        ok("safeChildPath still accepts '$okName'", $c($unitDir . '/up/', $okName) === $unitDir . '/up/' . $okName);
+    }
 } finally {
     @rmdir($unitDir . '/up'); @rmdir($unitDir);
 }
+
+// ---- Pure unit tests: ZIP photo extraction + per-request temp dir -----------
+$png1x1 = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==');
+$gif1x1 = base64_decode('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7');
+$hasExtract = function_exists('extractPhotoEntries');
+ok('helper defines extractPhotoEntries()', $hasExtract);
+$hasTmp = function_exists('createZipImportTempDir') && function_exists('removeDirTree');
+ok('helper defines createZipImportTempDir() + removeDirTree()', $hasTmp);
+$unitZipDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'loams_reg_zip_' . getmypid() . '_' . bin2hex(random_bytes(3));
+try {
+    @mkdir($unitZipDir . '/out', 0777, true);
+    $uz = new ZipArchive();
+    $uz->open($unitZipDir . '/u.zip', ZipArchive::CREATE | ZipArchive::OVERWRITE);
+    foreach ([
+        'S1.png'          => $png1x1,            // accepted
+        'dir/S2.gif'      => $gif1x1,            // nested: accepted by basename
+        'other/S1.png'    => $gif1x1,            // duplicate basename: first wins
+        's1.PNG'          => $gif1x1,            // case-insensitive duplicate: skipped
+        'shell.php'       => '<?php echo 1;',    // not allow-listed
+        'S3.php.jpg'      => $png1x1,            // dot in stem: not allow-listed
+        '.htaccess'       => 'x',
+        'S4.jpg'          => 'not an image',     // allow-listed name, fails getimagesize
+        'S5.png'          => $png1x1 . str_repeat("\0", 200),   // over the per-entry cap below
+        'CON.jpg'         => $png1x1,            // reserved device name
+        'emptydir/'       => '',
+    ] as $n => $bytes) {
+        if (substr($n, -1) === '/') { $uz->addEmptyDir(rtrim($n, '/')); } else { $uz->addFromString($n, $bytes); }
+    }
+    $uz->close();
+    $uz = new ZipArchive();
+    $uz->open($unitZipDir . '/u.zip');
+    // Args 5-6 = $maxEntries, &$stats (passed positionally: an older helper
+    // without them just ignores extra args, so the asserts fail instead of crashing).
+    $st = null;
+    $n = $hasExtract ? extractPhotoEntries($uz, $unitZipDir . '/out', 150, 1024 * 1024, 20000, $st) : -1;
+    $uz->close();
+    $outFiles = filesIn($unitZipDir . '/out');
+    ok('extractPhotoEntries returns 2 (S1.png + S2.gif)', $n === 2);
+    ok('extractPhotoEntries stats: written 2, 4 name-skips (shell.php, S3.php.jpg, .htaccess, CON.jpg), 4 other skips',
+        is_array($st) && ($st['written'] ?? null) === 2 && ($st['skipped_name'] ?? null) === 4
+        && ($st['skipped_other'] ?? null) === 4 && ($st['too_many_entries'] ?? null) === false);
+    ok('extractPhotoEntries writes only allow-listed images', $outFiles === ['S1.png', 'S2.gif']);
+    ok('extractPhotoEntries: first duplicate basename wins',
+        is_file($unitZipDir . '/out/S1.png') && file_get_contents($unitZipDir . '/out/S1.png') === $png1x1);
+    ok('extractPhotoEntries: no subdirectories created', glob($unitZipDir . '/out/*', GLOB_ONLYDIR) === []);
+
+    // Total cap: budget for one 1x1 PNG only -> extraction stops after the first.
+    @mkdir($unitZipDir . '/out2', 0777, true);
+    $uz = new ZipArchive();
+    $uz->open($unitZipDir . '/u.zip');
+    $n2 = $hasExtract ? extractPhotoEntries($uz, $unitZipDir . '/out2', 150, strlen($png1x1) + 10) : -1;
+    $uz->close();
+    ok('extractPhotoEntries stops at the total-bytes cap', $n2 === 1 && filesIn($unitZipDir . '/out2') === ['S1.png']);
+    ok('extractPhotoEntries: missing dest dir -> 0, nothing written',
+        $hasExtract && (function () use ($unitZipDir) {
+            $z = new ZipArchive(); $z->open($unitZipDir . '/u.zip');
+            $r = extractPhotoEntries($z, $unitZipDir . '/nope'); $z->close();
+            return $r === 0 && !file_exists($unitZipDir . '/nope');
+        })());
+
+    // Entry-count cap: more entries than $maxEntries -> extract nothing at all.
+    @mkdir($unitZipDir . '/out3', 0777, true);
+    $uz = new ZipArchive();
+    $uz->open($unitZipDir . '/u.zip');
+    $st3 = null;
+    $n3 = $hasExtract ? extractPhotoEntries($uz, $unitZipDir . '/out3', 150, 1024 * 1024, 5, $st3) : -1;
+    $uz->close();
+    ok('extractPhotoEntries: too many entries -> 0, nothing written',
+        $n3 === 0 && filesIn($unitZipDir . '/out3') === []);
+    ok('extractPhotoEntries: too many entries flagged in stats', is_array($st3) && ($st3['too_many_entries'] ?? null) === true);
+
+    // Photo listing (taken once per import) + stem-only whole-token matcher.
+    @mkdir($unitZipDir . '/list/c.gif', 0777, true);         // a DIRECTORY with an image-like name
+    file_put_contents($unitZipDir . '/list/b.png', 'x');
+    file_put_contents($unitZipDir . '/list/a.jpg', 'x');
+    $hasList = function_exists('listPhotoFiles');
+    ok('helper defines listPhotoFiles()', $hasList);
+    $sep = DIRECTORY_SEPARATOR;
+    ok('listPhotoFiles: sorted regular files only, full paths',
+        $hasList && listPhotoFiles($unitZipDir . '/list') === [$unitZipDir . "/list{$sep}a.jpg", $unitZipDir . "/list{$sep}b.png"]);
+    ok('listPhotoFiles: missing dir -> []', $hasList && listPhotoFiles($unitZipDir . '/nope') === []);
+    $hasMatch = function_exists('matchPhotoForId');
+    ok('helper defines matchPhotoForId()', $hasMatch);
+    $m = function (array $files, string $id) use ($hasMatch): ?string {
+        return $hasMatch ? matchPhotoForId($files, $id) : 'x-missing';
+    };
+    ok('matchPhotoForId: id "png" does not match by extension', $m(['/d/ZOTHER-0001.png'], 'png') === null);
+    ok('matchPhotoForId: id "jpg" does not match by extension', $m(['/d/A.jpg', '/d/B.jpeg'], 'jpg') === null);
+    ok('matchPhotoForId: exact stem matches',                   $m(['/d/ZOTHER-0001.png'], 'ZOTHER-0001') === '/d/ZOTHER-0001.png');
+    ok('matchPhotoForId: whole token inside the stem matches',  $m(['/d/x_2023-1.jpg'], '2023-1') === '/d/x_2023-1.jpg');
+    ok('matchPhotoForId: prefix of a longer token does not',    $m(['/d/2023-12.jpg'], '2023-1') === null);
+    ok('matchPhotoForId: first match in list order wins',       $m(['/d/A_S1.png', '/d/S1.png'], 'S1') === '/d/A_S1.png');
+    ok('matchPhotoForId: empty list -> null',                   $m([], 'S1') === null);
+
+    // Per-request temp dir: under sys_get_temp_dir(), recognisable prefix, removable.
+    $td = $hasTmp ? createZipImportTempDir() : null;
+    ok('createZipImportTempDir -> loams_zipimport_<hex> under the system temp dir',
+        is_string($td) && is_dir($td) && realpath(dirname($td)) === realpath(sys_get_temp_dir())
+        && preg_match('/^loams_zipimport_[0-9a-f]{16,}$/D', basename($td)) === 1);
+    if (is_string($td) && is_dir($td)) {
+        @mkdir($td . '/photos/deep', 0777, true);
+        file_put_contents($td . '/upload.zip', 'x');
+        file_put_contents($td . '/photos/deep/a.png', 'x');
+        removeDirTree($td);
+        ok('removeDirTree removes the temp dir recursively', !file_exists($td));
+    } else {
+        ok('removeDirTree removes the temp dir recursively', false);
+    }
+} finally {
+    rrmdir($unitZipDir);
+}
+
+// ---- Pure unit tests: ZIP photo byte caps + copy budget ---------------------
+// One extracted photo can whole-token-match many rows (e.g. "A_B_C.jpg" matches
+// A, B, C), and each match is copied into uploads/students/ — so the bytes COPIED
+// are capped by the same constant as the bytes extracted. A legitimate import
+// (each photo used once) copies <= extracted and never hits it.
+ok('helper defines ZIP_PHOTO_MAX_ENTRY_BYTES = 10 MiB',
+    defined('ZIP_PHOTO_MAX_ENTRY_BYTES') && constant('ZIP_PHOTO_MAX_ENTRY_BYTES') === 10 * 1024 * 1024);
+ok('helper defines ZIP_PHOTO_MAX_TOTAL_BYTES = 512 MiB',
+    defined('ZIP_PHOTO_MAX_TOTAL_BYTES') && constant('ZIP_PHOTO_MAX_TOTAL_BYTES') === 512 * 1024 * 1024);
+$defaultConsts = [];
+if ($hasExtract) {
+    foreach ((new ReflectionFunction('extractPhotoEntries'))->getParameters() as $prm) {
+        if ($prm->isDefaultValueAvailable() && $prm->isDefaultValueConstant()) {
+            $defaultConsts[$prm->getName()] = $prm->getDefaultValueConstantName();
+        }
+    }
+}
+ok('helper defines ZIP_PHOTO_MAX_ENTRIES = 20000',
+    defined('ZIP_PHOTO_MAX_ENTRIES') && constant('ZIP_PHOTO_MAX_ENTRIES') === 20000);
+ok('extractPhotoEntries caps default to the shared constants',
+    array_values($defaultConsts) === ['ZIP_PHOTO_MAX_ENTRY_BYTES', 'ZIP_PHOTO_MAX_TOTAL_BYTES', 'ZIP_PHOTO_MAX_ENTRIES']);
+
+// ---- Pure unit tests: isPathInside (temp dir must not be in the API tree) ---
+$hasInside = function_exists('isPathInside');
+ok('helper defines isPathInside()', $hasInside);
+$in = function (string $p, string $r, ?bool $ci = null) use ($hasInside): ?bool {
+    return $hasInside ? isPathInside($p, $r, $ci) : null;
+};
+ok('isPathInside: child is inside',                   $in('/a/api/tmp/x', '/a/api') === true);
+ok('isPathInside: equal path is inside',              $in('/a/api', '/a/api') === true && $in('/a/api/', '/a/api') === true);
+ok('isPathInside: sibling with shared prefix is not', $in('/a/api2/x', '/a/api') === false);
+ok('isPathInside: unrelated path is not',             $in('/tmp/loams_zipimport_1', '/a/api') === false);
+ok('isPathInside: parent is not inside its child',    $in('/a', '/a/api') === false);
+ok('isPathInside: mixed separators normalised',       $in('C:\\x\\api\\t', 'C:/x/api') === true);
+ok('isPathInside: case-insensitive when asked',       $in('C:/X/API/t', 'c:/x/api', true) === true);
+ok('isPathInside: case-sensitive when asked',         $in('C:/X/API/t', 'c:/x/api', false) === false);
+ok('isPathInside: empty root -> false',               $in('/a', '') === false);
+$hasFits = function_exists('photoCopyFits');
+ok('helper defines photoCopyFits()', $hasFits);
+$fits = function (int $size, int $copied, int $budget) use ($hasFits): ?bool {
+    return $hasFits ? photoCopyFits($size, $copied, $budget) : null;
+};
+ok('photoCopyFits: fits well under budget',           $fits(10, 0, 100) === true);
+ok('photoCopyFits: exactly fills the budget',         $fits(40, 60, 100) === true);
+ok('photoCopyFits: one byte over the budget',         $fits(41, 60, 100) === false);
+ok('photoCopyFits: budget already exhausted',         $fits(1, 100, 100) === false);
+ok('photoCopyFits: zero-byte file at the exact limit', $fits(0, 100, 100) === true);
+ok('photoCopyFits: negative size (filesize failed) never fits', $fits(-1, 0, 100) === false);
+ok('photoCopyFits: no int overflow near PHP_INT_MAX', $fits(PHP_INT_MAX, 10, 100) === false);
+ok('photoCopyFits: the real 512 MiB budget',
+    $hasFits && defined('ZIP_PHOTO_MAX_TOTAL_BYTES')
+    && photoCopyFits(10 * 1024 * 1024, constant('ZIP_PHOTO_MAX_TOTAL_BYTES') - 10 * 1024 * 1024, constant('ZIP_PHOTO_MAX_TOTAL_BYTES'))
+    && !photoCopyFits(10 * 1024 * 1024, constant('ZIP_PHOTO_MAX_TOTAL_BYTES') - 10 * 1024 * 1024 + 1, constant('ZIP_PHOTO_MAX_TOTAL_BYTES')));
+// Wiring: the endpoint has no runtime override of the budget — it must use the
+// shared constant through photoCopyFits(). STATIC check: the 512 MiB budget path
+// is not driven end to end (it would need 512 MiB of copies).
+$zipSrc = (string) @file_get_contents($apiDir . '/upload_students_zip.php');
+ok('upload_students_zip.php budgets copies via photoCopyFits(..., ZIP_PHOTO_MAX_TOTAL_BYTES)',
+    preg_match('/photoCopyFits\([^;]*ZIP_PHOTO_MAX_TOTAL_BYTES\s*\)/', $zipSrc) === 1);
+
+// ---- Repo file: uploads/.htaccess (defence in depth) ------------------------
+// STATIC content check only: php -S ignores .htaccess, so its effect is not
+// exercised here (verify against a real Apache when it changes).
+$htaccess = $apiDir . '/uploads/.htaccess';
+$htText = is_file($htaccess) ? (string) file_get_contents($htaccess) : '';
+ok('uploads/.htaccess exists in the repo',            $htText !== '');
+ok('uploads/.htaccess denies script files',           strpos($htText, 'Require all denied') !== false);
+ok('uploads/.htaccess turns the PHP engine off',      stripos($htText, 'engine off') !== false);
+ok('uploads/.htaccess script deny is case-insensitive', strpos($htText, '<FilesMatch "(?i)') !== false);
+ok('uploads/.htaccess disables Indexes, ExecCGI and Includes',
+    preg_match('/^\s*Options\s+-Indexes\s+-ExecCGI\s+-Includes\s*$/m', $htText) === 1);
 
 // ---- Pure unit tests: buildPhotoFilename ------------------------------------
 $hasBuild = function_exists('buildPhotoFilename');
@@ -127,10 +322,30 @@ function filesIn(string $dir): array {
     sort($out);
     return $out;
 }
+// Every file under $dir, recursively, as '/'-separated paths relative to $dir.
+function filesUnder(string $dir): array {
+    if (!is_dir($dir)) { return []; }
+    $out = [];
+    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS));
+    foreach ($it as $f) {
+        if ($f->isFile()) { $out[] = str_replace('\\', '/', substr($f->getPathname(), strlen($dir) + 1)); }
+    }
+    sort($out);
+    return $out;
+}
+function httpGet(string $hostport, string $path): array {
+    $ch = curl_init('http://' . $hostport . $path);
+    curl_setopt_array($ch, [CURLOPT_RETURNTRANSFER => true, CURLOPT_TIMEOUT => 10]);
+    $body = curl_exec($ch);
+    $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    return ['code' => (int) $code, 'raw' => (string) $body];
+}
 // Start `php -S` on $hostport serving $docroot; returns the process resource.
-function startServer(string $hostport, string $docroot, string $log) {
+// $iniArgs are extra CLI args placed before -S (e.g. ['-d', 'sys_temp_dir=...']).
+function startServer(string $hostport, string $docroot, string $log, array $iniArgs = []) {
     $descr = [0 => ['pipe','r'], 1 => ['file', $log, 'a'], 2 => ['file', $log, 'a']];
-    $proc = proc_open([PHP_BINARY, '-S', $hostport, '-t', $docroot], $descr, $pipes);
+    $proc = proc_open(array_merge([PHP_BINARY], $iniArgs, ['-S', $hostport, '-t', $docroot]), $descr, $pipes);
     if (!is_resource($proc)) { throw new RuntimeException('proc_open failed'); }
     for ($i = 0; $i < 50; $i++) {
         $cs = @stream_socket_client('tcp://' . $hostport, $en, $es, 0.1);
@@ -194,8 +409,7 @@ try {
     file_put_contents($docroot . '/db.php', sprintf($dbPhp, $TEST_DB));
     file_put_contents($downRoot . '/db.php', sprintf($dbPhp, $MISSING_DB));
 
-    // Synthetic upload fixtures (outside the docroot).
-    $png1x1 = base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==');
+    // Synthetic upload fixtures (outside the docroot). $png1x1 is defined above.
     $fixtures = $base . '/fixtures';
     @mkdir($fixtures, 0777, true);
     file_put_contents($fixtures . '/ok.png', $png1x1);
@@ -341,9 +555,12 @@ try {
     ok('zip: valid row photo column -> uploads/students/S0001.jpg',
         $root->query("SELECT photo FROM students WHERE school_id='S0001'")->fetch_assoc()['photo'] === 'uploads/students/S0001.jpg');
 
-    $uploadZip = function (array $rows, ?string $zip = null) use ($HOSTPORT, $ADMIN_KEY): array {
+    // $clientName is the filename the client claims for the ZIP part (attacker-chosen).
+    $uploadZip = function (array $rows, ?string $zip = null, string $clientName = 'photos.zip', string $skipIds = '')
+            use ($HOSTPORT, $ADMIN_KEY): array {
         $fields = ['admin_key' => $ADMIN_KEY, 'rows' => json_encode($rows)];
-        if ($zip !== null) { $fields['photos_zip'] = new CURLFile($zip, 'application/zip', 'photos.zip'); }
+        if ($zip !== null) { $fields['photos_zip'] = new CURLFile($zip, 'application/zip', $clientName); }
+        if ($skipIds !== '') { $fields['skip_ids'] = $skipIds; }
         return httpPost($HOSTPORT, '/upload_students_zip.php', $fields);
     };
     $makeZip = function (string $path, array $entries): string {
@@ -456,6 +673,189 @@ try {
     }
     $downLog = (string) @file_get_contents($base . '/server_down.log');
     ok('DB down -> cause still logged server-side', stripos($downLog, 'mysqli_sql_exception') !== false);
+
+    // 10. ZIP import must never put attacker-controlled files inside the docroot
+    //     (admin-only RCE): the client filename is ignored, only allow-listed
+    //     image entries are unpacked, into a per-request temp dir OUTSIDE the
+    //     docroot that is removed when the request ends.
+    $photoOf = function (string $sid) use ($root) {
+        $s = $root->prepare('SELECT photo FROM students WHERE school_id = ?');
+        $s->bind_param('s', $sid); $s->execute();
+        $row = $s->get_result()->fetch_assoc(); $s->close();
+        return $row === null ? 'missing-row' : $row['photo'];
+    };
+    $tmpImports = function (): array {
+        $g = glob(sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'loams_zipimport_*') ?: [];
+        sort($g);
+        return $g;
+    };
+    $RCE_SRC    = "<?php echo 'RCE-'.(6*7); ?>";
+    $RCE_MARKER = 'RCE-42';
+    $treeBefore = filesUnder($escape);
+    $tmpBefore  = $tmpImports();
+
+    // 10a. "ZIP" that is really PHP source, uploaded as x.php (ZipArchive::open fails).
+    file_put_contents($fixtures . '/rce_src.bin', $RCE_SRC);
+    $r = $uploadZip([['school_id' => 'ZXPHP-0001', 'name' => 'Raw Php Upload']], $fixtures . '/rce_src.bin', 'x.php');
+    ok('zip as x.php (raw PHP) -> status success',     ($r['json']['status'] ?? null) === 'success');
+    ok('zip as x.php (raw PHP) -> row inserted, photo NULL', $photoOf('ZXPHP-0001') === null);
+    ok('zip as x.php (raw PHP) -> no x.php anywhere under the server tree',
+        array_filter(filesUnder($escape), fn($p) => strcasecmp(basename($p), 'x.php') === 0) === []);
+    $g = httpGet($HOSTPORT, '/uploads/temp/x.php');
+    ok('zip as x.php (raw PHP) -> GET /uploads/temp/x.php does not execute it', strpos($g['raw'], $RCE_MARKER) === false);
+
+    // 10b. Valid ZIP (with a STORED, i.e. uncompressed, PHP payload entry so the
+    //      archive bytes are also runnable PHP) uploaded as x.php -> processed as a
+    //      ZIP, its photo is used, but nothing named x.php is ever written.
+    $polyPath = $fixtures . '/poly.zip';
+    $pz = new ZipArchive();
+    $pz->open($polyPath, ZipArchive::CREATE | ZipArchive::OVERWRITE);
+    $pz->addFromString('note.txt', $RCE_SRC);
+    $pz->setCompressionName('note.txt', ZipArchive::CM_STORE);
+    $pz->addFromString('ZXPHP-0002.jpg', $png1x1);
+    $pz->close();
+    $r = $uploadZip([['school_id' => 'ZXPHP-0002', 'name' => 'Polyglot Upload']], $polyPath, 'x.php');
+    ok('zip as x.php (polyglot) -> status success',    ($r['json']['status'] ?? null) === 'success');
+    ok('zip as x.php (polyglot) -> photo still extracted + recorded',
+        $photoOf('ZXPHP-0002') === 'uploads/students/ZXPHP-0002.jpg' && is_file($uploads . '/students/ZXPHP-0002.jpg'));
+    ok('zip as x.php (polyglot) -> no x.php anywhere under the server tree',
+        array_filter(filesUnder($escape), fn($p) => strcasecmp(basename($p), 'x.php') === 0) === []);
+    $g = httpGet($HOSTPORT, '/uploads/temp/x.php');
+    ok('zip as x.php (polyglot) -> GET /uploads/temp/x.php does not execute it', strpos($g['raw'], $RCE_MARKER) === false);
+
+    // 10c. Hostile entries: only allow-listed image basenames are unpacked.
+    $hostile = $makeZip($fixtures . '/hostile.zip', [
+        'ZRCE-0001.jpg'     => $png1x1,                                   // ok
+        'shell.php'         => $RCE_SRC,                                  // script
+        'ZRCE-0002.php.jpg' => $png1x1,                                   // double extension
+        '.htaccess'         => "SetHandler application/x-httpd-php\n",    // config override
+        'sub/ZRCE-0003.png' => $png1x1,                                   // nested: basename is safe
+        '../ZRCE-0004.jpg'  => $png1x1,                                   // traversal: basename is safe
+        'ZRCE-0005.jpg'     => "not an image <?php echo 1; ?>\n",         // fails getimagesize
+    ]);
+    $r = $uploadZip([
+        ['school_id' => 'ZRCE-0001', 'name' => 'Rce One'],   ['school_id' => 'ZRCE-0002', 'name' => 'Rce Two'],
+        ['school_id' => 'ZRCE-0003', 'name' => 'Rce Three'], ['school_id' => 'ZRCE-0004', 'name' => 'Rce Four'],
+        ['school_id' => 'ZRCE-0005', 'name' => 'Rce Five'],
+    ], $hostile);
+    ok('zip hostile entries -> status success, 5 rows', ($r['json']['status'] ?? null) === 'success'
+        && ($r['json']['success_count'] ?? null) === 5);
+    ok('zip hostile entries -> plain image entry used',   $photoOf('ZRCE-0001') === 'uploads/students/ZRCE-0001.jpg'
+        && is_file($uploads . '/students/ZRCE-0001.jpg'));
+    ok('zip hostile entries -> double-extension entry ignored (photo NULL)', $photoOf('ZRCE-0002') === null);
+    ok('zip hostile entries -> nested entry used by basename', $photoOf('ZRCE-0003') === 'uploads/students/ZRCE-0003.jpg'
+        && is_file($uploads . '/students/ZRCE-0003.jpg'));
+    ok('zip hostile entries -> "../" entry used by basename, nothing escaped',
+        $photoOf('ZRCE-0004') === 'uploads/students/ZRCE-0004.jpg'
+        && (glob($escape . '/ZRCE*') ?: []) === [] && (glob($base . '/ZRCE*') ?: []) === []);
+    ok('zip hostile entries -> non-image .jpg ignored (photo NULL)', $photoOf('ZRCE-0005') === null
+        && !is_file($uploads . '/students/ZRCE-0005.jpg'));
+    $g = httpGet($HOSTPORT, '/uploads/temp/photos/shell.php');
+    ok('zip hostile entries -> GET /uploads/temp/photos/shell.php does not execute it', strpos($g['raw'], $RCE_MARKER) === false);
+
+    // 10d. Oversize entry: valid PNG header + > 10 MiB padding (compresses to a
+    //      few KiB, so the upload itself is small) -> row imported, photo NULL.
+    $big = $makeZip($fixtures . '/big.zip', ['ZBIG-0001.jpg' => $png1x1 . str_repeat("\0", 10 * 1024 * 1024 + 1)]);
+    $r = $uploadZip([['school_id' => 'ZBIG-0001', 'name' => 'Big Photo']], $big);
+    ok('zip oversize entry -> row imported',            ($r['json']['success_count'] ?? null) === 1);
+    ok('zip oversize entry -> photo NULL, no file',     $photoOf('ZBIG-0001') === null
+        && !is_file($uploads . '/students/ZBIG-0001.jpg'));
+
+    // 10e. Stale photo: import #1's photo (row skipped) must not be picked up by
+    //      import #2, whose own ZIP has no photo for that id.
+    $st1 = $makeZip($fixtures . '/stale1.zip', ['ZSTALE-0001.jpg' => $png1x1]);
+    $r = $uploadZip([['school_id' => 'ZSTALE-0001', 'name' => 'Stale Skipped']], $st1, 'photos.zip', 'ZSTALE-0001');
+    ok('zip stale #1 -> row skipped', ($r['json']['skipped_count'] ?? null) === 1 && !$rowExists('ZSTALE-0001'));
+    $st2 = $makeZip($fixtures . '/stale2.zip', ['ZSTALE-OTHER.jpg' => $png1x1]);
+    $r = $uploadZip([['school_id' => 'ZSTALE-0001', 'name' => 'Stale Imported']], $st2);
+    ok('zip stale #2 -> row inserted with photo NULL', ($r['json']['success_count'] ?? null) === 1
+        && $photoOf('ZSTALE-0001') === null);
+    ok('zip stale #2 -> no photo file from the earlier upload', !is_file($uploads . '/students/ZSTALE-0001.jpg'));
+
+    // 10f. Windows reserved device name: "CON" is a valid school_id, but its photo
+    //      must never be written as CON.jpg (a device, not a file, on Windows).
+    $con = $makeZip($fixtures . '/con.zip', ['CON.jpg' => $png1x1]);
+    $r = $uploadZip([['school_id' => 'CON', 'name' => 'Reserved Name']], $con);
+    ok('zip reserved name -> row inserted',             ($r['json']['success_count'] ?? null) === 1 && $rowExists('CON'));
+    ok('zip reserved name -> photo NULL',               $photoOf('CON') === null);
+    ok('zip reserved name -> no CON* file in uploads/students',
+        array_filter(scandir($uploads . '/students') ?: [], fn($f) => preg_match('/^con(\.|$)/i', $f) === 1) === []);
+
+    // 10f2. One photo shared by several rows (whole-token match on each id):
+    //       under the normal copy budget every row still gets its own copy.
+    $amp = $makeZip($fixtures . '/amp.zip', ['ZAMP-A_ZAMP-B_ZAMP-C.jpg' => $png1x1]);
+    $r = $uploadZip([
+        ['school_id' => 'ZAMP-A', 'name' => 'Amp A'], ['school_id' => 'ZAMP-B', 'name' => 'Amp B'],
+        ['school_id' => 'ZAMP-C', 'name' => 'Amp C'],
+    ], $amp);
+    ok('zip shared photo -> 3 rows imported', ($r['json']['success_count'] ?? null) === 3);
+    $ampOk = true;
+    foreach (['ZAMP-A', 'ZAMP-B', 'ZAMP-C'] as $sid) {
+        $ampOk = $ampOk && $photoOf($sid) === "uploads/students/$sid.jpg"
+            && is_file($uploads . "/students/$sid.jpg")
+            && file_get_contents($uploads . "/students/$sid.jpg") === $png1x1;
+    }
+    ok('zip shared photo -> each matching row gets its own copy', $ampOk);
+
+    // 10h. Matching is on the filename STEM: a valid school_id that equals an
+    //      image extension ("png") must not match every "*.png" photo.
+    $ext = $makeZip($fixtures . '/ext.zip', ['ZOTHER-0001.png' => $png1x1]);
+    $r = $uploadZip([
+        ['school_id' => 'png', 'name' => 'Ext Id'], ['school_id' => 'ZOTHER-0001', 'name' => 'Ext Other'],
+    ], $ext);
+    ok('zip id "png" -> both rows imported',         ($r['json']['success_count'] ?? null) === 2);
+    ok('zip id "png" -> no photo (extension is not a token)', $photoOf('png') === null
+        && !is_file($uploads . '/students/png.jpg'));
+    ok('zip id "png" -> ZOTHER-0001 still gets its photo',
+        $photoOf('ZOTHER-0001') === 'uploads/students/ZOTHER-0001.jpg' && is_file($uploads . '/students/ZOTHER-0001.jpg'));
+
+    // 10i. Fail closed if the per-request temp dir would land inside the API tree:
+    //      a second server on the same docroot whose sys_temp_dir is IN the docroot.
+    $inTmp = $docroot . '/tmpin';
+    @mkdir($inTmp, 0777, true);
+    $IN_HOSTPORT = '127.0.0.1:' . freePort();
+    $procs[] = startServer($IN_HOSTPORT, $docroot, $base . '/server_in.log', ['-d', 'sys_temp_dir=' . $inTmp]);
+    $inZip = $makeZip($fixtures . '/in.zip', ['ZIN-0001.jpg' => $png1x1]);
+    $r = httpPost($IN_HOSTPORT, '/upload_students_zip.php', [
+        'admin_key'  => $ADMIN_KEY,
+        'rows'       => json_encode([['school_id' => 'ZIN-0001', 'name' => 'Temp Inside']]),
+        'photos_zip' => new CURLFile($inZip, 'application/zip', 'photos.zip'),
+    ]);
+    ok('zip temp-dir-in-API-tree -> row imported',   ($r['json']['success_count'] ?? null) === 1);
+    ok('zip temp-dir-in-API-tree -> photo NULL (fail closed)', $photoOf('ZIN-0001') === null
+        && !is_file($uploads . '/students/ZIN-0001.jpg'));
+    ok('zip temp-dir-in-API-tree -> nothing left in the in-tree temp dir',
+        (glob($inTmp . '/loams_zipimport_*') ?: []) === []);
+    $inLog = (string) @file_get_contents($base . '/server_in.log');
+    ok('zip temp-dir-in-API-tree -> logged server-side', stripos($inLog, 'inside the API tree') !== false);
+    @rmdir($inTmp);
+
+    // 10j. Diagnostics: a ZIP that fails to open and skipped entry names are logged
+    //      (generic text + counts/codes, no client data).
+    $logBefore = strlen((string) @file_get_contents($base . '/server.log'));
+    $uploadZip([['school_id' => 'ZDIAG-0001', 'name' => 'Diag One']], $fixtures . '/rce_src.bin');
+    $uploadZip([['school_id' => 'ZDIAG-0002', 'name' => 'Diag Two']],
+        $makeZip($fixtures . '/diag.zip', ['my photo (1).jpg' => $png1x1, 'ZDIAG-0002.jpg' => $png1x1]));
+    $logNew = substr((string) @file_get_contents($base . '/server.log'), $logBefore);
+    ok('zip diagnostics -> ZIP open failure logged with its code', preg_match('/ZIP open failed \(code \d+\)/', $logNew) === 1);
+    ok('zip diagnostics -> summary logs 1 written, 1 name-skip', preg_match('/1 written, 1 skipped \(name not allowed\)/', $logNew) === 1);
+    ok('zip diagnostics -> no client filename in the log', strpos($logNew, 'my photo (1)') === false);
+
+    // 10g. Global: no script/config file and nothing outside uploads/students/
+    //      appeared anywhere in the server tree; no uploads/temp; no temp leftovers.
+    $newFiles = array_values(array_diff(filesUnder($escape), $treeBefore));
+    $badNew   = array_values(array_filter($newFiles, fn($p) => preg_match('#^www/uploads/students/[^/]+\.jpg$#D', $p) !== 1));
+    ok('zip imports -> only uploads/students/*.jpg created' . ($badNew ? ' (found: ' . implode(', ', $badNew) . ')' : ''),
+        $badNew === []);
+    ok('zip imports -> no .php/.phtml/.htaccess created',
+        array_filter($newFiles, fn($p) => preg_match('/(\.php|\.phtml|\.htaccess)$/i', $p) === 1) === []);
+    ok('zip imports -> no uploads/temp directory under the docroot', !file_exists($uploads . '/temp'));
+    // Diffing against the section-start snapshot ignores pre-existing dirs. A dir
+    // created concurrently by ANOTHER process during section 10 would still be
+    // counted (no PID or other owner marker to tell them apart).
+    $leftover = array_values(array_diff($tmpImports(), $tmpBefore));
+    ok('zip imports -> no per-request temp dir left behind' . ($leftover ? ' (' . count($leftover) . ' left)' : ''),
+        $leftover === []);
 } catch (Throwable $e) {
     $fatal = get_class($e) . ': ' . $e->getMessage();
 } finally {
