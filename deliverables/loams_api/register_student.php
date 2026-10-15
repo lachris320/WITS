@@ -90,7 +90,7 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         (code, school_id, name, course, year_level, department, gender, status, visits, photo, time_date)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     ");
-    $stmt->bind_param("sssssssiss", 
+    $stmt->bind_param("ssssssssis", 
         $code, $school_id, $name, $course, $year_level, $department, $gender, $status, $visits, $photoPath
     );
     
