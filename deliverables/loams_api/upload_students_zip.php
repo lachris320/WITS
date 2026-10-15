@@ -106,7 +106,9 @@ if ($zipErr === UPLOAD_ERR_OK
                 try {
                     if (@mkdir($extractDir, 0700)) {
                         $zipStats = null;
-                        extractPhotoEntries($zip, $extractDir, stats: $zipStats);
+                        // Positional, not a named arg: the API must still parse on PHP 7.4.
+                        extractPhotoEntries($zip, $extractDir, ZIP_PHOTO_MAX_ENTRY_BYTES,
+                            ZIP_PHOTO_MAX_TOTAL_BYTES, ZIP_PHOTO_MAX_ENTRIES, $zipStats);
                         if ($zipStats['too_many_entries']) {
                             error_log("upload_students_zip: ZIP has more than " . ZIP_PHOTO_MAX_ENTRIES
                                 . " entries; no photos unpacked");

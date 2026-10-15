@@ -693,7 +693,6 @@ try {
     $RCE_MARKER = 'RCE-42';
     $treeBefore = filesUnder($escape);
     $tmpBefore  = $tmpImports();
-    $tmpSince   = time() - 1;   // only dirs created during this section can fail the leftover check
 
     // 10a. "ZIP" that is really PHP source, uploaded as x.php (ZipArchive::open fails).
     file_put_contents($fixtures . '/rce_src.bin', $RCE_SRC);
@@ -851,10 +850,10 @@ try {
     ok('zip imports -> no .php/.phtml/.htaccess created',
         array_filter($newFiles, fn($p) => preg_match('/(\.php|\.phtml|\.htaccess)$/i', $p) === 1) === []);
     ok('zip imports -> no uploads/temp directory under the docroot', !file_exists($uploads . '/temp'));
-    // Only dirs that are new since the snapshot AND created during this section
-    // count, so an unrelated, older loams_zipimport_* dir can't flake the check.
-    $leftover = array_values(array_filter(array_diff($tmpImports(), $tmpBefore),
-        fn($d) => (int) @filemtime($d) >= $tmpSince));
+    // Diffing against the section-start snapshot ignores pre-existing dirs. A dir
+    // created concurrently by ANOTHER process during section 10 would still be
+    // counted (no PID or other owner marker to tell them apart).
+    $leftover = array_values(array_diff($tmpImports(), $tmpBefore));
     ok('zip imports -> no per-request temp dir left behind' . ($leftover ? ' (' . count($leftover) . ' left)' : ''),
         $leftover === []);
 } catch (Throwable $e) {
