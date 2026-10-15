@@ -2,9 +2,17 @@
 error_reporting(E_ALL);
 ini_set('display_errors', 0);
 ini_set('log_errors', 1);
+// Installed BEFORE db.php: a DB connect failure throws during the include (with
+// display_errors back on) — log it, send HTTP 500 + generic JSON, leak nothing.
+require_once __DIR__ . "/json_error_guard.php";
+installJsonErrorGuard("upload_students_zip");
 header("Content-Type: application/json");
 include "db.php";
 include "auth_helper.php";
+require_once __DIR__ . "/student_id_helper.php";
+// db.php re-enables display_errors; turn it back off so no warning/exception
+// text can reach the JSON response.
+ini_set('display_errors', 0);
 requireAdminAuth($conn);   // 401 before any DB read, ZIP extract, or insert
 
 // Match a ZIP photo to a student by school_id as a WHOLE TOKEN: the id must be
@@ -20,6 +28,12 @@ function matchPhotoForId($photoDir, $schoolId) {
         if (preg_match($pattern, basename($f)) === 1) return $f;
     }
     return null;
+}
+
+// Read a row field as a trimmed string. JSON arrays/objects (non-scalars) read
+// as '' instead of making trim() throw TypeError mid-loop; scalars are cast.
+function rowString($row, $key) {
+    return (isset($row[$key]) && is_scalar($row[$key])) ? trim((string) $row[$key]) : '';
 }
 
 if ($_SERVER["REQUEST_METHOD"] !== "POST") {
@@ -46,7 +60,7 @@ if (!empty($_POST['skip_ids'])) {
 
 // === 3. Optional photos ZIP — extracted ONCE, before the row loop (core ext-zip) ===
 $uploadDir = "uploads/temp/";
-if (!is_dir($uploadDir)) mkdir($uploadDir, 0777, true);
+if (!is_dir($uploadDir)) mkdir($uploadDir, 0755, true);
 $photoDir = $uploadDir . "photos/";
 $zipExtracted = false;
 
@@ -62,7 +76,7 @@ if (!empty($_FILES['photos_zip']['tmp_name'])) {
     // A failed ZIP open is non-fatal: import proceeds with photo = NULL.
 }
 
-if (!is_dir("uploads/students/")) mkdir("uploads/students/", 0777, true);
+if (!is_dir("uploads/students/")) mkdir("uploads/students/", 0755, true);
 
 // === 4. Per-row insert ===
 $success_count = 0;
@@ -73,22 +87,32 @@ $stmt = $conn->prepare("INSERT INTO students
     (school_id, name, course, department, year_level, gender, status, photo)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
 
-if (!$stmt) {
+// Used only when a row inserted fine but its photo copy then failed.
+$clearPhotoStmt = $conn->prepare("UPDATE students SET photo = NULL WHERE school_id = ?");
+
+if (!$stmt || !$clearPhotoStmt) {
     echo json_encode(["status" => "error", "message" => "Import failed to initialize."]);
     exit;
 }
 
 foreach ($rows as $row) {
-    $school_id  = isset($row['school_id'])  ? trim($row['school_id'])  : '';
-    $name       = isset($row['name'])       ? trim($row['name'])       : '';
-    $course     = isset($row['course'])     ? trim($row['course'])     : '';
-    $department = isset($row['department'])  ? trim($row['department']) : '';
-    $year_level = isset($row['year_level'])  ? trim($row['year_level']) : '';
-    $gender     = isset($row['gender'])      ? trim($row['gender'])     : '';
-    $status     = isset($row['status'])      ? trim($row['status'])     : '';
+    // Every field is read as a string: a non-scalar (JSON array/object) reads
+    // as '' — so a non-scalar school_id or name is counted as an error below.
+    $school_id  = rowString($row, 'school_id');
+    $name       = rowString($row, 'name');
+    $course     = rowString($row, 'course');
+    $department = rowString($row, 'department');
+    $year_level = rowString($row, 'year_level');
+    $gender     = rowString($row, 'gender');
+    $status     = rowString($row, 'status');
 
     // Server-side re-validate: school_id + name required (the data guarantee).
     if ($school_id === '' || $name === '') {
+        $error_count++;
+        continue;
+    }
+    // school_id is embedded in a photo path — allow only [A-Za-z0-9_-]{1,50}.
+    if (!isValidSchoolId($school_id)) {
         $error_count++;
         continue;
     }
@@ -99,14 +123,16 @@ foreach ($rows as $row) {
     }
 
     // Photo comes ONLY from a whole-token ZIP match (never from a file column).
+    // Only the target path is resolved here; the file is written AFTER the
+    // insert succeeds, so a failed row (e.g. a duplicate school_id) can never
+    // overwrite an existing student's photo.
+    $match = null;
     $photoPath = null;
     if ($zipExtracted) {
         $match = matchPhotoForId($photoDir, $school_id);
         if ($match !== null) {
-            $targetPhoto = "uploads/students/" . $school_id . ".jpg";
-            if (copy($match, $targetPhoto)) {
-                $photoPath = $targetPhoto;
-            }
+            // Defence in depth: must be a direct child of uploads/students/.
+            $photoPath = safeChildPath("uploads/students/", $school_id . ".jpg");
         }
     }
 
@@ -114,14 +140,36 @@ foreach ($rows as $row) {
         $school_id, $name, $course, $department,
         $year_level, $gender, $status, $photoPath);
 
-    if ($stmt->execute()) {
-        $success_count++;
-    } else {
+    // PHP 8.1+ mysqli throws on a failed execute (e.g. a duplicate school_id
+    // within this upload, or one already in the DB but not in skip_ids). Count
+    // the row as an error and keep going instead of aborting the whole import.
+    try {
+        $inserted = $stmt->execute();
+    } catch (mysqli_sql_exception $e) {
+        error_log("upload_students_zip: row insert failed: " . $e->getMessage());
+        $inserted = false;
+    }
+    if (!$inserted) {
         $error_count++;
+        continue;
+    }
+    $success_count++;
+
+    // Row is in: now write its photo. If the copy fails, clear the photo column
+    // so the row never points at a missing file.
+    if ($photoPath !== null && !copy($match, $photoPath)) {
+        error_log("upload_students_zip: photo copy failed; clearing photo for inserted row");
+        try {
+            $clearPhotoStmt->bind_param("s", $school_id);
+            $clearPhotoStmt->execute();
+        } catch (mysqli_sql_exception $e) {
+            error_log("upload_students_zip: clearing photo failed: " . $e->getMessage());
+        }
     }
 }
 
 $stmt->close();
+$clearPhotoStmt->close();
 
 echo json_encode([
     "status"        => "success",
