@@ -110,6 +110,8 @@ if (!is_dir("uploads/students/")) mkdir("uploads/students/", 0755, true);
 $success_count = 0;
 $skipped_count = 0;
 $error_count   = 0;
+$copiedBytes      = 0;       // photo bytes copied into uploads/students/ so far
+$copyBudgetLogged = false;   // log the exhausted budget once, not per row
 
 $stmt = $conn->prepare("INSERT INTO students
     (school_id, name, course, department, year_level, gender, status, photo)
@@ -156,12 +158,26 @@ foreach ($rows as $row) {
     // insert succeeds, so a failed row (e.g. a duplicate school_id) can never
     // overwrite an existing student's photo.
     $match = null;
+    $matchSize = 0;
     $photoPath = null;
     if ($zipExtracted) {
         $match = matchPhotoForId($photoDir, $school_id);
         if ($match !== null) {
-            // Defence in depth: must be a direct child of uploads/students/.
-            $photoPath = safeChildPath("uploads/students/", $school_id . ".jpg");
+            // One photo can match several rows and is copied once per row, so
+            // the bytes copied into the docroot share the extraction cap. Over
+            // budget: the row is still imported, just with photo = NULL.
+            $size = @filesize($match);
+            $matchSize = ($size === false) ? -1 : $size;
+            if (!photoCopyFits($matchSize, $copiedBytes, ZIP_PHOTO_MAX_TOTAL_BYTES)) {
+                if (!$copyBudgetLogged) {
+                    error_log("upload_students_zip: photo copy budget exhausted; remaining matched rows get no photo");
+                    $copyBudgetLogged = true;
+                }
+                $match = null;
+            } else {
+                // Defence in depth: must be a direct child of uploads/students/.
+                $photoPath = safeChildPath("uploads/students/", $school_id . ".jpg");
+            }
         }
     }
 
@@ -187,13 +203,17 @@ foreach ($rows as $row) {
 
     // Row is in: now write its photo. If the copy fails, clear the photo column
     // so the row never points at a missing file.
-    if ($photoPath !== null && !copy($match, $photoPath)) {
-        error_log("upload_students_zip: photo copy failed; clearing photo for inserted row");
-        try {
-            $clearPhotoStmt->bind_param("i", $newId);
-            $clearPhotoStmt->execute();
-        } catch (mysqli_sql_exception $e) {
-            error_log("upload_students_zip: clearing photo failed: " . $e->getMessage());
+    if ($photoPath !== null) {
+        if (copy($match, $photoPath)) {
+            $copiedBytes += $matchSize;
+        } else {
+            error_log("upload_students_zip: photo copy failed; clearing photo for inserted row");
+            try {
+                $clearPhotoStmt->bind_param("i", $newId);
+                $clearPhotoStmt->execute();
+            } catch (mysqli_sql_exception $e) {
+                error_log("upload_students_zip: clearing photo failed: " . $e->getMessage());
+            }
         }
     }
 }

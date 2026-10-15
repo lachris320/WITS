@@ -156,6 +156,47 @@ try {
     rrmdir($unitZipDir);
 }
 
+// ---- Pure unit tests: ZIP photo byte caps + copy budget ---------------------
+// One extracted photo can whole-token-match many rows (e.g. "A_B_C.jpg" matches
+// A, B, C), and each match is copied into uploads/students/ — so the bytes COPIED
+// are capped by the same constant as the bytes extracted. A legitimate import
+// (each photo used once) copies <= extracted and never hits it.
+ok('helper defines ZIP_PHOTO_MAX_ENTRY_BYTES = 10 MiB',
+    defined('ZIP_PHOTO_MAX_ENTRY_BYTES') && constant('ZIP_PHOTO_MAX_ENTRY_BYTES') === 10 * 1024 * 1024);
+ok('helper defines ZIP_PHOTO_MAX_TOTAL_BYTES = 512 MiB',
+    defined('ZIP_PHOTO_MAX_TOTAL_BYTES') && constant('ZIP_PHOTO_MAX_TOTAL_BYTES') === 512 * 1024 * 1024);
+$defaultConsts = [];
+if ($hasExtract) {
+    foreach ((new ReflectionFunction('extractPhotoEntries'))->getParameters() as $prm) {
+        if ($prm->isDefaultValueAvailable() && $prm->isDefaultValueConstant()) {
+            $defaultConsts[$prm->getName()] = $prm->getDefaultValueConstantName();
+        }
+    }
+}
+ok('extractPhotoEntries caps default to the shared constants',
+    array_values($defaultConsts) === ['ZIP_PHOTO_MAX_ENTRY_BYTES', 'ZIP_PHOTO_MAX_TOTAL_BYTES']);
+$hasFits = function_exists('photoCopyFits');
+ok('helper defines photoCopyFits()', $hasFits);
+$fits = function (int $size, int $copied, int $budget) use ($hasFits): ?bool {
+    return $hasFits ? photoCopyFits($size, $copied, $budget) : null;
+};
+ok('photoCopyFits: fits well under budget',           $fits(10, 0, 100) === true);
+ok('photoCopyFits: exactly fills the budget',         $fits(40, 60, 100) === true);
+ok('photoCopyFits: one byte over the budget',         $fits(41, 60, 100) === false);
+ok('photoCopyFits: budget already exhausted',         $fits(1, 100, 100) === false);
+ok('photoCopyFits: zero-byte file at the exact limit', $fits(0, 100, 100) === true);
+ok('photoCopyFits: negative size (filesize failed) never fits', $fits(-1, 0, 100) === false);
+ok('photoCopyFits: no int overflow near PHP_INT_MAX', $fits(PHP_INT_MAX, 10, 100) === false);
+ok('photoCopyFits: the real 512 MiB budget',
+    $hasFits && defined('ZIP_PHOTO_MAX_TOTAL_BYTES')
+    && photoCopyFits(10 * 1024 * 1024, constant('ZIP_PHOTO_MAX_TOTAL_BYTES') - 10 * 1024 * 1024, constant('ZIP_PHOTO_MAX_TOTAL_BYTES'))
+    && !photoCopyFits(10 * 1024 * 1024, constant('ZIP_PHOTO_MAX_TOTAL_BYTES') - 10 * 1024 * 1024 + 1, constant('ZIP_PHOTO_MAX_TOTAL_BYTES')));
+// Wiring: the endpoint has no runtime override of the budget — it must use the
+// shared constant through photoCopyFits().
+$zipSrc = (string) @file_get_contents($apiDir . '/upload_students_zip.php');
+ok('upload_students_zip.php budgets copies via photoCopyFits(..., ZIP_PHOTO_MAX_TOTAL_BYTES)',
+    preg_match('/photoCopyFits\([^;]*ZIP_PHOTO_MAX_TOTAL_BYTES\s*\)/', $zipSrc) === 1);
+
 // ---- Repo file: uploads/.htaccess (defence in depth) ------------------------
 $htaccess = $apiDir . '/uploads/.htaccess';
 $htText = is_file($htaccess) ? (string) file_get_contents($htaccess) : '';
@@ -674,6 +715,22 @@ try {
     ok('zip reserved name -> photo NULL',               $photoOf('CON') === null);
     ok('zip reserved name -> no CON* file in uploads/students',
         array_filter(scandir($uploads . '/students') ?: [], fn($f) => preg_match('/^con(\.|$)/i', $f) === 1) === []);
+
+    // 10f2. One photo shared by several rows (whole-token match on each id):
+    //       under the normal copy budget every row still gets its own copy.
+    $amp = $makeZip($fixtures . '/amp.zip', ['ZAMP-A_ZAMP-B_ZAMP-C.jpg' => $png1x1]);
+    $r = $uploadZip([
+        ['school_id' => 'ZAMP-A', 'name' => 'Amp A'], ['school_id' => 'ZAMP-B', 'name' => 'Amp B'],
+        ['school_id' => 'ZAMP-C', 'name' => 'Amp C'],
+    ], $amp);
+    ok('zip shared photo -> 3 rows imported', ($r['json']['success_count'] ?? null) === 3);
+    $ampOk = true;
+    foreach (['ZAMP-A', 'ZAMP-B', 'ZAMP-C'] as $sid) {
+        $ampOk = $ampOk && $photoOf($sid) === "uploads/students/$sid.jpg"
+            && is_file($uploads . "/students/$sid.jpg")
+            && file_get_contents($uploads . "/students/$sid.jpg") === $png1x1;
+    }
+    ok('zip shared photo -> each matching row gets its own copy', $ampOk);
 
     // 10g. Global: no script/config file and nothing outside uploads/students/
     //      appeared anywhere in the server tree; no uploads/temp; no temp leftovers.

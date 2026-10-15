@@ -1,8 +1,18 @@
 <?php
 /**
- * Student-id / upload-path / ZIP-photo helpers. Functions only — no side effects on
- * include, so endpoints and tests can require_once it freely.
+ * Student-id / upload-path / ZIP-photo helpers. Functions and compile-time
+ * constants only — no side effects on include, so endpoints and tests can
+ * require_once it freely.
  */
+
+/** Largest single photo unpacked from an import ZIP (bytes actually read). */
+const ZIP_PHOTO_MAX_ENTRY_BYTES = 10485760;      // 10 MiB
+/**
+ * Per-request cap on photo bytes: both the bytes decompressed from the ZIP
+ * (extractPhotoEntries) and the bytes copied into uploads/students/ (one
+ * extracted photo can match several rows — see photoCopyFits()).
+ */
+const ZIP_PHOTO_MAX_TOTAL_BYTES = 536870912;     // 512 MiB
 
 /**
  * True iff $id is a well-formed school_id: 1-50 chars (the students.school_id
@@ -126,7 +136,8 @@ function removeDirTree(string $dir): void
  * photos written; 0 if $destDir is not an existing directory.
  */
 function extractPhotoEntries(ZipArchive $zip, string $destDir,
-                             int $maxEntryBytes = 10485760, int $maxTotalBytes = 536870912): int
+                             int $maxEntryBytes = ZIP_PHOTO_MAX_ENTRY_BYTES,
+                             int $maxTotalBytes = ZIP_PHOTO_MAX_TOTAL_BYTES): int
 {
     $dest = rtrim($destDir, '/\\');
     if ($dest === '' || !is_dir($dest)) return 0;
@@ -171,4 +182,18 @@ function extractPhotoEntries(ZipArchive $zip, string $destDir,
         $count++;
     }
     return $count;
+}
+
+/**
+ * True iff copying a $size-byte photo keeps the bytes copied in this request
+ * within $budget (ZIP_PHOTO_MAX_TOTAL_BYTES in the endpoint). One extracted
+ * photo can whole-token-match many rows ("A_B_C.jpg" matches A, B and C) and is
+ * copied once per row, so without this a single compressible image could be
+ * amplified into gigabytes under uploads/students/. A legitimate import copies
+ * each photo at most once, i.e. no more than was extracted, so it never hits
+ * the cap. A negative $size (filesize() failed) never fits. Overflow-safe.
+ */
+function photoCopyFits(int $size, int $copiedSoFar, int $budget): bool
+{
+    return $size >= 0 && $size <= $budget - $copiedSoFar;
 }
