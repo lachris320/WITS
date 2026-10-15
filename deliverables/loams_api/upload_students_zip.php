@@ -5,6 +5,10 @@ ini_set('log_errors', 1);
 header("Content-Type: application/json");
 include "db.php";
 include "auth_helper.php";
+require_once __DIR__ . "/student_id_helper.php";
+// db.php re-enables display_errors; turn it back off so no warning/exception
+// text can reach the JSON response.
+ini_set('display_errors', 0);
 requireAdminAuth($conn);   // 401 before any DB read, ZIP extract, or insert
 
 // Match a ZIP photo to a student by school_id as a WHOLE TOKEN: the id must be
@@ -79,7 +83,8 @@ if (!$stmt) {
 }
 
 foreach ($rows as $row) {
-    $school_id  = isset($row['school_id'])  ? trim($row['school_id'])  : '';
+    // Non-scalar school_id (JSON array/object) reads as '' -> counted as an error.
+    $school_id  = (isset($row['school_id']) && is_scalar($row['school_id'])) ? trim((string) $row['school_id']) : '';
     $name       = isset($row['name'])       ? trim($row['name'])       : '';
     $course     = isset($row['course'])     ? trim($row['course'])     : '';
     $department = isset($row['department'])  ? trim($row['department']) : '';
@@ -89,6 +94,11 @@ foreach ($rows as $row) {
 
     // Server-side re-validate: school_id + name required (the data guarantee).
     if ($school_id === '' || $name === '') {
+        $error_count++;
+        continue;
+    }
+    // school_id is embedded in a photo path — allow only [A-Za-z0-9_-]{1,50}.
+    if (!isValidSchoolId($school_id)) {
         $error_count++;
         continue;
     }
@@ -103,8 +113,9 @@ foreach ($rows as $row) {
     if ($zipExtracted) {
         $match = matchPhotoForId($photoDir, $school_id);
         if ($match !== null) {
-            $targetPhoto = "uploads/students/" . $school_id . ".jpg";
-            if (copy($match, $targetPhoto)) {
+            // Defence in depth: must be a direct child of uploads/students/.
+            $targetPhoto = safeChildPath("uploads/students/", $school_id . ".jpg");
+            if ($targetPhoto !== null && copy($match, $targetPhoto)) {
                 $photoPath = $targetPhoto;
             }
         }
