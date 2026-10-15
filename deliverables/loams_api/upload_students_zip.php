@@ -15,21 +15,6 @@ require_once __DIR__ . "/student_id_helper.php";
 ini_set('display_errors', 0);
 requireAdminAuth($conn);   // 401 before any DB read, ZIP extract, or insert
 
-// Match a ZIP photo to a student by school_id as a WHOLE TOKEN: the id must be
-// bounded by string start/end or a non-alphanumeric char, so "2023-1" does NOT
-// match a "2023-12..." filename (the old glob("*id*") substring match did).
-// Scans a sorted list so a genuine multi-match is deterministic (first wins).
-function matchPhotoForId($photoDir, $schoolId) {
-    $files = glob($photoDir . "*.*");
-    if (!$files) return null;
-    sort($files); // deterministic order
-    $pattern = '/(^|[^A-Za-z0-9])' . preg_quote($schoolId, '/') . '([^A-Za-z0-9]|$)/';
-    foreach ($files as $f) {
-        if (preg_match($pattern, basename($f)) === 1) return $f;
-    }
-    return null;
-}
-
 // Read a row field as a trimmed string. JSON arrays/objects (non-scalars) read
 // as '' instead of making trim() throw TypeError mid-loop; scalars are cast.
 function rowString($row, $key) {
@@ -65,38 +50,78 @@ if (!empty($_POST['skip_ids'])) {
 // image entries are unpacked from it (extractPhotoEntries — no extractTo()).
 // The whole dir is removed at shutdown, so early exits and fatals clean up
 // too, and a later import can never match a photo left over from this one.
-// Every failure here is non-fatal: the import proceeds with photo = NULL.
-$photoDir = "";
+// Every failure here is non-fatal: the import proceeds with photo = NULL, and
+// is logged (generic text, codes and counts only — never client data) so an
+// admin asking "why no photos?" can find the reason.
+$photoFiles = [];      // unpacked photos, listed ONCE (sorted) for matchPhotoForId()
 $zipExtracted = false;
 
 $zipUpload = isset($_FILES['photos_zip']) && is_array($_FILES['photos_zip']) ? $_FILES['photos_zip'] : null;
-if ($zipUpload !== null
-        && ($zipUpload['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK
+$zipErr = $zipUpload !== null ? ($zipUpload['error'] ?? UPLOAD_ERR_NO_FILE) : UPLOAD_ERR_NO_FILE;
+if ($zipErr !== UPLOAD_ERR_OK && $zipErr !== UPLOAD_ERR_NO_FILE) {
+    error_log("upload_students_zip: photos ZIP upload error code " . (is_int($zipErr) ? $zipErr : -1)
+        . "; importing without photos");
+}
+if ($zipErr === UPLOAD_ERR_OK
         && is_string($zipUpload['tmp_name'] ?? null)
         && is_uploaded_file($zipUpload['tmp_name'])) {
     $workDir = createZipImportTempDir();
     if ($workDir === null) {
         error_log("upload_students_zip: could not create temp dir; importing without photos");
     } else {
+        // Fail closed if the system temp dir resolves into the API tree (it is
+        // served by the web server): nothing from the ZIP may land there.
+        $workReal = realpath($workDir);
+        $apiReal  = realpath(__DIR__);
+        if ($workReal === false || $apiReal === false || isPathInside($workReal, $apiReal)) {
+            error_log("upload_students_zip: temp dir is inside the API tree (or unresolvable); importing without photos");
+            removeDirTree($workDir);
+            $workDir = null;
+        }
+    }
+    if ($workDir !== null) {
+        $zip = new ZipArchive;
+        $zipOpen = false;
         // Registered after installJsonErrorGuard()'s handler, so on a fatal the
-        // JSON error is sent first, then this cleanup runs.
-        register_shutdown_function('removeDirTree', $workDir);
+        // JSON error is sent first, then this runs. A fatal mid-extraction skips
+        // the finally below, and Windows cannot delete upload.zip while the
+        // archive is still open — so close it here first if needed.
+        register_shutdown_function(function () use (&$zip, &$zipOpen, $workDir) {
+            if ($zipOpen) {
+                $zipOpen = false;
+                try { @$zip->close(); } catch (Throwable $e) { /* already closed / invalid */ }
+            }
+            removeDirTree($workDir);
+        });
         $zipPath = $workDir . DIRECTORY_SEPARATOR . "upload.zip";
         if (!move_uploaded_file($zipUpload['tmp_name'], $zipPath)) {
             error_log("upload_students_zip: move_uploaded_file failed; importing without photos");
         } else {
-            $zip = new ZipArchive;
-            if ($zip->open($zipPath) === TRUE) {
+            $openRc = $zip->open($zipPath);
+            if ($openRc !== TRUE) {
+                error_log("upload_students_zip: ZIP open failed (code " . (int) $openRc . "); importing without photos");
+            } else {
+                $zipOpen = true;
                 $extractDir = $workDir . DIRECTORY_SEPARATOR . "photos";
                 try {
                     if (@mkdir($extractDir, 0700)) {
-                        extractPhotoEntries($zip, $extractDir);
-                        $photoDir = $extractDir . DIRECTORY_SEPARATOR;
+                        $zipStats = null;
+                        extractPhotoEntries($zip, $extractDir, stats: $zipStats);
+                        if ($zipStats['too_many_entries']) {
+                            error_log("upload_students_zip: ZIP has more than " . ZIP_PHOTO_MAX_ENTRIES
+                                . " entries; no photos unpacked");
+                        }
+                        error_log("upload_students_zip: ZIP photos: {$zipStats['written']} written, "
+                            . "{$zipStats['skipped_name']} skipped (name not allowed), "
+                            . "{$zipStats['skipped_other']} skipped (duplicate/oversize/not an image)"
+                            . ($zipStats['total_cap_hit'] ? ", total size cap reached" : ""));
+                        $photoFiles = listPhotoFiles($extractDir);
                         $zipExtracted = true;
                     } else {
                         error_log("upload_students_zip: could not create photo dir; importing without photos");
                     }
                 } finally {
+                    $zipOpen = false;
                     $zip->close();   // release the handle so the shutdown cleanup can delete it
                 }
             }
@@ -161,7 +186,7 @@ foreach ($rows as $row) {
     $matchSize = 0;
     $photoPath = null;
     if ($zipExtracted) {
-        $match = matchPhotoForId($photoDir, $school_id);
+        $match = matchPhotoForId($photoFiles, $school_id);
         if ($match !== null) {
             // One photo can match several rows and is copied once per row, so
             // the bytes copied into the docroot share the extraction cap. Over

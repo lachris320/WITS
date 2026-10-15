@@ -13,6 +13,8 @@ const ZIP_PHOTO_MAX_ENTRY_BYTES = 10485760;      // 10 MiB
  * extracted photo can match several rows — see photoCopyFits()).
  */
 const ZIP_PHOTO_MAX_TOTAL_BYTES = 536870912;     // 512 MiB
+/** Most entries an import ZIP may have; more and no photo is unpacked at all. */
+const ZIP_PHOTO_MAX_ENTRIES = 20000;
 
 /**
  * True iff $id is a well-formed school_id: 1-50 chars (the students.school_id
@@ -125,63 +127,140 @@ function removeDirTree(string $dir): void
  * Unpack the photo entries of an opened ZIP into $destDir (flat), WITHOUT
  * extractTo(). Only an entry whose basename (text after the last '/' or '\')
  * matches [A-Za-z0-9_-]{1,50}.(jpg|jpeg|png|gif) and is not a Windows reserved
- * device name is considered; directories, scripts, dotfiles and everything
- * else are skipped silently. Per entry at most $maxEntryBytes are read (the
- * header's declared size is not trusted; a larger entry is skipped), and the
- * bytes decompressed across all entries are capped at $maxTotalBytes
- * (extraction stops there). The content must be a real JPEG/PNG/GIF
- * (getimagesizefromstring) before it is written; a basename already written
- * in this call (case-insensitive) is skipped, so the first one in index order
- * wins. Files are created with 'x' (never overwrite). Returns the number of
- * photos written; 0 if $destDir is not an existing directory.
+ * device name is considered; directories are ignored and every other name
+ * (scripts, dotfiles, spaces, extra dots, ...) is skipped and counted. If the
+ * archive has more than $maxEntries entries nothing is unpacked at all. Per
+ * entry at most $maxEntryBytes are read (the header's declared size is not
+ * trusted; a larger entry is skipped), and the bytes decompressed across all
+ * entries are capped at $maxTotalBytes (extraction stops there). The content
+ * must be a real JPEG/PNG/GIF (getimagesizefromstring) before it is written; a
+ * basename already written in this call (case-insensitive) is skipped, so the
+ * first one in index order wins. Files are created with 'x' (never overwrite).
+ *
+ * Returns the number of photos written; 0 if $destDir is not an existing
+ * directory. $stats (out) receives counts for diagnostics — no entry names:
+ *   written, skipped_name (failed the allow-list / reserved name),
+ *   skipped_other (duplicate, unreadable, oversize, empty, not an image,
+ *   write failure), too_many_entries (bool), total_cap_hit (bool).
  */
 function extractPhotoEntries(ZipArchive $zip, string $destDir,
                              int $maxEntryBytes = ZIP_PHOTO_MAX_ENTRY_BYTES,
-                             int $maxTotalBytes = ZIP_PHOTO_MAX_TOTAL_BYTES): int
+                             int $maxTotalBytes = ZIP_PHOTO_MAX_TOTAL_BYTES,
+                             int $maxEntries = ZIP_PHOTO_MAX_ENTRIES,
+                             ?array &$stats = null): int
 {
+    $stats = ['written' => 0, 'skipped_name' => 0, 'skipped_other' => 0,
+              'too_many_entries' => false, 'total_cap_hit' => false];
     $dest = rtrim($destDir, '/\\');
     if ($dest === '' || !is_dir($dest)) return 0;
+    $entries = $zip->numFiles;
+    if ($entries > $maxEntries) {
+        $stats['too_many_entries'] = true;
+        return 0;
+    }
 
     $taken = [];   // lower-cased basenames written so far (NTFS is case-insensitive)
     $total = 0;    // bytes decompressed so far, accepted or not
-    $count = 0;
-    $entries = $zip->numFiles;
     for ($i = 0; $i < $entries; $i++) {
         $name = $zip->getNameIndex($i);
-        if (!is_string($name)) continue;
+        if (!is_string($name)) { $stats['skipped_other']++; continue; }
         $base = preg_replace('#^.*[/\\\\]#s', '', $name);
-        if (!is_string($base) || preg_match('/^[A-Za-z0-9_-]{1,50}\.(jpe?g|png|gif)$/iD', $base) !== 1) continue;
-        if (isWindowsReservedName($base)) continue;
+        if ($base === '') continue;                  // directory entry
+        if (!is_string($base) || preg_match('/^[A-Za-z0-9_-]{1,50}\.(jpe?g|png|gif)$/iD', $base) !== 1
+                || isWindowsReservedName($base)) {
+            $stats['skipped_name']++;
+            continue;
+        }
         $key = strtolower($base);
-        if (isset($taken[$key])) continue;
+        if (isset($taken[$key])) { $stats['skipped_other']++; continue; }
 
         $budget = $maxTotalBytes - $total;
-        if ($budget <= 0) break;
+        if ($budget <= 0) { $stats['total_cap_hit'] = true; break; }
         // Read one byte past the applicable cap so an oversize entry is detected
         // from the bytes actually decompressed.
         $bytes = $zip->getFromIndex($i, min($maxEntryBytes, $budget) + 1);
-        if (!is_string($bytes)) continue;            // corrupt / unreadable entry
+        if (!is_string($bytes)) { $stats['skipped_other']++; continue; }   // corrupt / unreadable
         $len = strlen($bytes);
         $total += $len;
-        if ($len > $budget) break;                   // total cap reached: stop
-        if ($len > $maxEntryBytes || $len === 0) continue;   // oversize / empty: skip
+        if ($len > $budget) { $stats['total_cap_hit'] = true; break; }     // total cap reached: stop
+        if ($len > $maxEntryBytes || $len === 0) { $stats['skipped_other']++; continue; }   // oversize / empty
 
         $info = @getimagesizefromstring($bytes);
-        if (!is_array($info) || !in_array($info[2], [IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_GIF], true)) continue;
+        if (!is_array($info) || !in_array($info[2], [IMAGETYPE_JPEG, IMAGETYPE_PNG, IMAGETYPE_GIF], true)) {
+            $stats['skipped_other']++;
+            continue;
+        }
 
         $path = $dest . DIRECTORY_SEPARATOR . $base;
         $fh = @fopen($path, 'xb');
-        if ($fh === false) continue;
+        if ($fh === false) { $stats['skipped_other']++; continue; }
         $written = fwrite($fh, $bytes);
         fclose($fh);
         if ($written !== $len) {
             @unlink($path);
+            $stats['skipped_other']++;
             continue;
         }
         $taken[$key] = true;
-        $count++;
+        $stats['written']++;
     }
-    return $count;
+    return $stats['written'];
+}
+
+/**
+ * Every regular file directly in $dir, as full paths ("<dir><sep><name>"),
+ * sorted — the photo list an import matches against, taken ONCE per import
+ * (scandir, not glob(), so metacharacters in the path cannot matter).
+ * Subdirectories and dot entries are skipped; a missing dir gives [].
+ */
+function listPhotoFiles(string $dir): array
+{
+    $names = @scandir($dir);
+    if ($names === false) return [];
+    $base = rtrim($dir, '/\\') . DIRECTORY_SEPARATOR;
+    $out = [];
+    foreach ($names as $n) {
+        if ($n === '.' || $n === '..' || !is_file($base . $n)) continue;
+        $out[] = $base . $n;
+    }
+    sort($out, SORT_STRING);
+    return $out;
+}
+
+/**
+ * First file in $photoFiles (listPhotoFiles() order) whose filename STEM
+ * contains $schoolId as a WHOLE TOKEN: bounded by the stem's start/end or a
+ * non-alphanumeric char. So "2023-1" does not match "2023-12.jpg", and an id
+ * that happens to equal an extension ("png") does not match "X.png". null if
+ * nothing matches.
+ */
+function matchPhotoForId(array $photoFiles, string $schoolId): ?string
+{
+    $pattern = '/(^|[^A-Za-z0-9])' . preg_quote($schoolId, '/') . '([^A-Za-z0-9]|$)/';
+    foreach ($photoFiles as $f) {
+        if (preg_match($pattern, pathinfo($f, PATHINFO_FILENAME)) === 1) return $f;
+    }
+    return null;
+}
+
+/**
+ * True iff $path is $root or lies under it. Pure string check on already
+ * resolved paths (callers pass realpath() results): '\' is treated as '/',
+ * trailing separators are ignored, and "/a/api2" is NOT inside "/a/api".
+ * Case-insensitive by default on Windows. An empty $root is never a parent.
+ */
+function isPathInside(string $path, string $root, ?bool $caseInsensitive = null): bool
+{
+    if ($root === '') return false;
+    $ci = $caseInsensitive ?? (PHP_OS_FAMILY === 'Windows');
+    $p = rtrim(str_replace('\\', '/', $path), '/');
+    $r = rtrim(str_replace('\\', '/', $root), '/');
+    if ($ci) {
+        $p = strtolower($p);
+        $r = strtolower($r);
+    }
+    if ($r === '') return true;      // root was "/" (or "\")
+    return $p === $r || strncmp($p, $r . '/', strlen($r) + 1) === 0;
 }
 
 /**
